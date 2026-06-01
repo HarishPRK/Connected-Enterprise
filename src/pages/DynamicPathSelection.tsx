@@ -74,6 +74,24 @@ function displayTunnelName(ifname: string): string {
   return `vti${m[2]}-${kind}`;
 }
 
+/** Turn a raw device hostname (`rdk-bpi4-gateway`) into a friendly title
+ *  (`RDK BPI4 Gateway`). Tokens that look like acronyms or model codes — three
+ *  letters or fewer, or containing a digit — are upper-cased; the rest are
+ *  title-cased. Display-only; the raw hostname is still shown as sub-text. */
+function displayGatewayName(raw: string): string {
+  const name = (raw || "").trim();
+  if (!name) return "";
+  return name
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((tok) =>
+      /\d/.test(tok) || tok.length <= 3
+        ? tok.toUpperCase()
+        : tok.charAt(0).toUpperCase() + tok.slice(1).toLowerCase(),
+    )
+    .join(" ");
+}
+
 function meanBy<T>(arr: T[], key: (t: T) => number): number {
   if (arr.length === 0) return 0;
   return arr.reduce((sum, t) => sum + key(t), 0) / arr.length;
@@ -1474,16 +1492,20 @@ function GatewayBlock({
           <Cpu size={14} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="ipsec-gw-name">{m.gateway.name || "unknown"}</div>
+          <div className="ipsec-gw-name">
+            {displayGatewayName(m.gateway.name) || "Unknown gateway"}
+          </div>
           <div className="ipsec-gw-sub mono">
-            {m.gateway.mac && <span>{m.gateway.mac}</span>}
-            {m.gateway.prim_wan_ip && (
-              <span> · primary {m.gateway.prim_wan_ip}</span>
-            )}
-            {m.gateway.sec_wan_ip &&
-              m.gateway.sec_wan_ip.toLowerCase() !== "none" && (
-                <span> · secondary {m.gateway.sec_wan_ip}</span>
-              )}
+            {[
+              m.gateway.name,
+              m.gateway.mac,
+              m.gateway.prim_wan_ip && `primary ${m.gateway.prim_wan_ip}`,
+              m.gateway.sec_wan_ip &&
+                m.gateway.sec_wan_ip.toLowerCase() !== "none" &&
+                `secondary ${m.gateway.sec_wan_ip}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </div>
         </div>
         <div className="ipsec-gw-meta">
@@ -2375,7 +2397,7 @@ function IpsecFlowSvg({
           tint={accentPurple}
           status={anyReachable ? "ok" : "warn"}
           c={c}
-          label={m.gateway.name || "gateway"}
+          label={displayGatewayName(m.gateway.name) || "gateway"}
           sub={`${m.gateway.mac || "—"} · ${m.gateway.prim_wan_ip || "—"}`}
           illustration={
             <GatewayIllustration
