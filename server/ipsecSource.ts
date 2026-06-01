@@ -76,7 +76,14 @@ class IpsecSource extends EventEmitter {
 
   /** Returns true if the SDK is wired up + AWS creds appear present. */
   hasCredentials(): boolean {
-    return !!(process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE);
+    return !!(
+      process.env.AWS_ACCESS_KEY_ID ||
+      process.env.AWS_PROFILE ||
+      // EC2 instance role / ECS task role: creds come from IMDS (not env vars),
+      // so newDefault() resolves them at connect time. Opt in explicitly.
+      process.env.AWS_USE_INSTANCE_ROLE === '1' ||
+      process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
+    );
   }
 
   async start(): Promise<void> {
@@ -85,7 +92,7 @@ class IpsecSource extends EventEmitter {
 
     if (!this.hasCredentials()) {
       // eslint-disable-next-line no-console
-      console.warn('[ipsec] No AWS credentials in env (AWS_ACCESS_KEY_ID / AWS_PROFILE) — skipping IoT subscription. The dashboard will return an empty snapshot.');
+      console.warn('[ipsec] No AWS credentials (set AWS_ACCESS_KEY_ID / AWS_PROFILE, or AWS_USE_INSTANCE_ROLE=1 on EC2) — skipping IoT subscription. The dashboard will return an empty snapshot.');
       this.lastError = 'no-aws-credentials';
       return;
     }
