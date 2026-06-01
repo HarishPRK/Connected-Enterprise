@@ -1,0 +1,549 @@
+/* ════════════════════════════════════════════════════════════════════════════
+ * Design tokens · portable theme extracted from Connected Enterprise
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ * Drop this file into any web project to inherit the same visual language:
+ *   1. Save as `design-tokens.css` in your project.
+ *   2. Import it once at app bootstrap (CRA/Vite: `import './design-tokens.css'`
+ *      in your entry file, or `<link rel="stylesheet" href="/design-tokens.css">`
+ *      in plain HTML).
+ *   3. Set `<html data-theme="dark">` or `<html data-theme="light">`. Default
+ *      is light; toggling the attribute switches every variable atomically.
+ *
+ * What's included
+ *   • Light + dark palettes (surfaces, text, accents, status)
+ *   • Body ambient-gradient background
+ *   • Typography (Space Grotesk + JetBrains Mono)
+ *   • Buttons (default / .primary / .danger)
+ *   • Badges (.badge, .badge.ok|warn|err) with pop animation
+ *   • Status dots (.dot.ok|warn|err) with pulsing glow
+ *   • Inputs, selects, tables, scrollbars, selection
+ *   • Cards (.card, .card-head, .card-title, .card-sub) with hover lift
+ *   • 12-col grid (.grid, .col-3..12)
+ *   • KPI strip (.kpi-strip, .kpi-card, .kpi-value, .kpi-icon, .kpi-label)
+ *   • .gradient-text utility, .mono utility
+ *   • Page-enter animation (.page-transition) for route changes
+ *
+ * Authoring conventions
+ *   • Color uses the `rgb(R G B / α)` syntax so any token can be alpha-blended
+ *     inline: `background: rgba(var(--accent-rgb) / 0.12);`
+ *   • Border radius: 10px on form controls, 14-16px on cards, 999px on pills
+ *   • Easing: cubic-bezier(0.22, 1.4, 0.36, 1) (slight overshoot) for hover
+ *             cubic-bezier(0.16, 1, 0.3, 1) (easeOutExpo) for enter
+ *   • Two surface layers: --panel (cards) → --panel-2 (insets inside cards)
+ *
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ───── LIGHT (default) ────────────────────────────────────────────────── */
+:root, [data-theme="light"] {
+  /* Surfaces */
+  --bg:           #fafbff;
+  --bg-grad-1:    #f3f5fc;
+  --bg-grad-2:    #fafbff;
+  --panel:        #ffffff;
+  --panel-solid:  #ffffff;
+  --panel-2:      #f8fafc;
+
+  /* Strokes */
+  --border:        rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.16);
+
+  /* Text */
+  --text:        #0f172a;
+  --text-dim:    #475569;
+  --text-muted:  #94a3b8;
+
+  /* Accents — deeper hues that read on white */
+  --accent-rgb:   6 214 160;
+  --accent-2-rgb: 236 72 153;
+  --accent-3-rgb: 147 51 234;
+  --accent:   rgb(var(--accent-rgb));
+  --accent-2: rgb(var(--accent-2-rgb));
+  --accent-3: rgb(var(--accent-3-rgb));
+  --grad-accent:      linear-gradient(135deg, #06d6a0 0%, #9333ea 50%, #ec4899 100%);
+  --grad-accent-soft: linear-gradient(135deg, rgba(6,214,160,0.12), rgba(236,72,153,0.10));
+
+  /* Status */
+  --ok-rgb:   16 185 129;
+  --warn-rgb: 245 158 11;
+  --err-rgb:  239 68 68;
+  --ok:   rgb(var(--ok-rgb));
+  --warn: rgb(var(--warn-rgb));
+  --err:  rgb(var(--err-rgb));
+
+  /* Shadow & glow */
+  --shadow-sm:   0 1px 2px rgba(15,23,42,0.04);
+  --shadow:      0 1px 3px rgba(15,23,42,0.05), 0 8px 24px rgba(15,23,42,0.06);
+  --glow-accent: 0 6px 20px rgba(6,214,160,0.30);
+  --glow-pink:   0 6px 20px rgba(236,72,153,0.25);
+
+  /* Body ambient gradient blobs */
+  --body-glow-1: rgba(6,214,160,0.08);
+  --body-glow-2: rgba(236,72,153,0.06);
+  --body-glow-3: rgba(147,51,234,0.05);
+
+  /* Per-mode surface tweaks */
+  --card-blur:      saturate(0%) blur(0);
+  --card-highlight: linear-gradient(180deg, rgba(255,255,255,0) 0%, transparent 30%);
+
+  --row-hover:    rgba(6,214,160,0.06);
+  --selection-bg: rgba(6,214,160,0.22);
+  --kbd-bg:       rgba(15,23,42,0.05);
+
+  color-scheme: light;
+}
+
+/* ───── DARK ───────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg:           #0c0d1c;
+  --bg-grad-1:    #161330;
+  --bg-grad-2:    #0a0a18;
+  --panel:        rgba(38, 36, 70, 0.58);
+  --panel-solid:  #25223f;
+  --panel-2:      rgba(54, 50, 92, 0.78);
+
+  --border:        rgba(200, 195, 230, 0.10);
+  --border-strong: rgba(200, 195, 230, 0.22);
+
+  --text:        #f3f1ff;
+  --text-dim:    #c4bee0;
+  --text-muted:  #8a83b0;
+
+  --accent-rgb:   124 255 212;
+  --accent-2-rgb: 255 123 214;
+  --accent-3-rgb: 192 132 252;
+  --accent:   rgb(var(--accent-rgb));
+  --accent-2: rgb(var(--accent-2-rgb));
+  --accent-3: rgb(var(--accent-3-rgb));
+  --grad-accent:      linear-gradient(135deg, #7cffd4 0%, #c084fc 50%, #ff7bd6 100%);
+  --grad-accent-soft: linear-gradient(135deg, rgba(124,255,212,0.18), rgba(255,123,214,0.18));
+
+  --ok-rgb:   74 222 128;
+  --warn-rgb: 251 191 36;
+  --err-rgb:  255 85 119;
+  --ok:   rgb(var(--ok-rgb));
+  --warn: rgb(var(--warn-rgb));
+  --err:  rgb(var(--err-rgb));
+
+  --shadow-sm:   0 1px 2px rgba(0,0,0,0.25);
+  --shadow:      0 10px 30px rgba(5, 4, 16, 0.5), 0 1px 0 rgba(255,255,255,0.04) inset;
+  --glow-accent: 0 0 0 1px rgba(124,255,212,0.45), 0 0 28px rgba(124,255,212,0.32);
+  --glow-pink:   0 0 0 1px rgba(255,123,214,0.45), 0 0 24px rgba(255,123,214,0.30);
+
+  --body-glow-1: rgba(124,255,212,0.18);
+  --body-glow-2: rgba(255,123,214,0.14);
+  --body-glow-3: rgba(192,132,252,0.13);
+
+  --card-blur:      saturate(140%) blur(14px);
+  --card-highlight: linear-gradient(180deg, rgba(255,255,255,0.06), transparent 30%);
+
+  --row-hover:    rgba(124,255,212,0.06);
+  --selection-bg: rgba(124,255,212,0.30);
+  --kbd-bg:       rgba(255,255,255,0.05);
+
+  color-scheme: dark;
+}
+
+/* ───── Base layout & typography ───────────────────────────────────────── */
+
+html {
+  font-family: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Optional: proportionally scale every pixel value on large monitors. Remove
+   this block if your app already handles responsive scaling another way. */
+@media (min-width: 1280px) { html { zoom: 1.04; } }
+@media (min-width: 1600px) { html { zoom: 1.10; } }
+@media (min-width: 1920px) { html { zoom: 1.18; } }
+@media (min-width: 2400px) { html { zoom: 1.30; } }
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 600px at 0% -10%,  var(--body-glow-1), transparent 60%),
+    radial-gradient(900px  500px at 100% 110%, var(--body-glow-2), transparent 55%),
+    radial-gradient(700px  400px at 80% -20%,  var(--body-glow-3), transparent 60%),
+    linear-gradient(180deg, var(--bg-grad-1), var(--bg-grad-2));
+  background-attachment: fixed;
+  color: var(--text);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { filter: brightness(1.1); }
+
+code, .mono {
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  font-size: 13px;
+}
+
+/* ───── Buttons ────────────────────────────────────────────────────────── */
+
+button {
+  font: inherit;
+  font-weight: 500;
+  color: var(--text);
+  background: rgba(var(--accent-rgb) / 0);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.16s cubic-bezier(0.22, 1.4, 0.36, 1),
+    box-shadow 0.22s ease,
+    color 0.2s ease;
+}
+button:hover {
+  background: rgba(var(--accent-rgb) / 0.10);
+  border-color: var(--border-strong);
+  transform: translate3d(0, -1px, 0);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+button:active {
+  transform: translate3d(0, 1px, 0) scale(0.97);
+  transition-duration: 0.06s;
+}
+button.primary {
+  background: var(--grad-accent);
+  border-color: transparent;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: var(--glow-accent);
+}
+[data-theme="dark"] button.primary { color: #0a0a18; }
+button.primary:hover { filter: brightness(1.10); }
+button.danger {
+  background: linear-gradient(135deg, var(--err), var(--accent-2));
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 6px 20px rgba(var(--err-rgb) / 0.35);
+}
+button.danger:hover { filter: brightness(1.08); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ───── Inputs & selects ───────────────────────────────────────────────── */
+
+input, select {
+  background: rgba(var(--accent-rgb) / 0);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font: inherit;
+  transition:
+    border-color 0.22s ease,
+    box-shadow 0.28s cubic-bezier(0.22, 1.4, 0.36, 1),
+    transform 0.18s cubic-bezier(0.22, 1.4, 0.36, 1);
+}
+input:hover, select:hover { border-color: var(--border-strong); }
+[data-theme="light"] input, [data-theme="light"] select { background: #ffffff; color-scheme: light; }
+[data-theme="dark"]  input, [data-theme="dark"]  select { background: rgba(255,255,255,0.04); color-scheme: dark; }
+select option { background: var(--panel-solid); color: var(--text); }
+[data-theme="dark"] select option { background: #1a1530; color: #f3f1ff; }
+input::placeholder { color: var(--text-muted); }
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb) / 0.20);
+}
+
+/* ───── Badges ─────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(var(--accent-rgb) / 0);
+  color: var(--text-dim);
+  white-space: nowrap;
+  animation: badge-pop 0.36s cubic-bezier(0.22, 1.4, 0.36, 1) both;
+}
+.badge.ok   { color: var(--ok);   border-color: rgba(var(--ok-rgb)   / 0.45); background: rgba(var(--ok-rgb)   / 0.10); }
+.badge.warn { color: var(--warn); border-color: rgba(var(--warn-rgb) / 0.45); background: rgba(var(--warn-rgb) / 0.10); }
+.badge.err  { color: var(--err);  border-color: rgba(var(--err-rgb)  / 0.45); background: rgba(var(--err-rgb)  / 0.10); }
+
+@keyframes badge-pop {
+  from { transform: scale(0.82); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+/* ───── Status dots ────────────────────────────────────────────────────── */
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok   { background: var(--ok);   box-shadow: 0 0 12px rgba(var(--ok-rgb)   / 0.85); animation: pulse-ok   2.4s ease-in-out infinite; }
+.dot.warn { background: var(--warn); box-shadow: 0 0 12px rgba(var(--warn-rgb) / 0.85); animation: pulse-warn 1.8s ease-in-out infinite; }
+.dot.err  { background: var(--err);  box-shadow: 0 0 12px rgba(var(--err-rgb)  / 0.95); animation: pulse-err  1.4s ease-in-out infinite; }
+.dot.off  { background: var(--text-muted); }
+
+@keyframes pulse-ok {
+  0%, 100% { box-shadow: 0 0 8px  rgba(var(--ok-rgb) / 0.55); transform: scale(1); }
+  50%      { box-shadow: 0 0 16px rgba(var(--ok-rgb) / 0.95); transform: scale(1.12); }
+}
+@keyframes pulse-warn {
+  0%, 100% { box-shadow: 0 0 10px rgba(var(--warn-rgb) / 0.6); transform: scale(1); }
+  50%      { box-shadow: 0 0 22px rgba(var(--warn-rgb) / 1);   transform: scale(1.18); }
+}
+@keyframes pulse-err {
+  0%, 100% { box-shadow: 0 0 12px rgba(var(--err-rgb) / 0.6); transform: scale(1); }
+  50%      { box-shadow: 0 0 22px rgba(var(--err-rgb) / 1);   transform: scale(1.22); }
+}
+
+/* ───── Tables ─────────────────────────────────────────────────────────── */
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+th {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: rgba(var(--accent-rgb) / 0.02);
+}
+[data-theme="light"] th { background: #f8fafc; }
+tr:last-child td { border-bottom: none; }
+tbody tr { transition: background 0.15s; }
+tbody tr:hover td { background: var(--row-hover); }
+
+/* ───── Scrollbars & selection ─────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb) / 0.20); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb) / 0.36); }
+
+::selection { background: var(--selection-bg); color: var(--text); }
+
+/* ───── Cards ──────────────────────────────────────────────────────────── */
+
+.card {
+  position: relative;
+  background: var(--panel);
+  backdrop-filter: var(--card-blur);
+  -webkit-backdrop-filter: var(--card-blur);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  transition:
+    border-color 0.22s ease,
+    transform 0.28s cubic-bezier(0.22, 1.4, 0.36, 1),
+    box-shadow 0.3s ease;
+  transform: translate3d(0, 0, 0);
+}
+.card::before {
+  content: '';
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: var(--card-highlight);
+  opacity: 0.85;
+  transition: opacity 0.25s ease;
+}
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow:
+    var(--shadow),
+    0 12px 32px rgba(0, 0, 0, 0.18),
+    0 0 36px rgba(var(--accent-rgb) / 0.16);
+  transform: translate3d(0, -4px, 0) scale(1.006);
+}
+.card:hover::before { opacity: 1; }
+.card > * { position: relative; z-index: 1; }
+
+.card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  position: relative; z-index: 1;
+}
+.card-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  text-transform: uppercase; letter-spacing: 0.1em;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.card-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
+
+/* ───── 12-col grid ────────────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: clamp(12px, 1vw, 22px);
+}
+.col-3  { grid-column: span 3; }
+.col-4  { grid-column: span 4; }
+.col-5  { grid-column: span 5; }
+.col-6  { grid-column: span 6; }
+.col-7  { grid-column: span 7; }
+.col-8  { grid-column: span 8; }
+.col-12 { grid-column: span 12; }
+.grid > [class*="col-"] { display: flex; }
+.grid > [class*="col-"] > .card { flex: 1; }
+
+/* ───── KPI strip ──────────────────────────────────────────────────────── */
+
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: clamp(12px, 0.9vw, 20px);
+  margin-bottom: clamp(14px, 1.1vw, 22px);
+}
+@media (max-width: 1280px) { .kpi-strip { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 760px)  { .kpi-strip { grid-template-columns: repeat(2, 1fr); } }
+
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--panel);
+  backdrop-filter: var(--card-blur);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  position: relative;
+  overflow: hidden;
+  min-height: 120px;
+  box-shadow: var(--shadow);
+  transition:
+    border-color 0.2s ease,
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.2s ease;
+  transform: translateZ(0);
+}
+.kpi-card:hover {
+  border-color: var(--border-strong);
+  transform: translate3d(0, -2px, 0);
+  box-shadow: var(--shadow), 0 0 28px rgba(var(--accent-rgb) / 0.12);
+}
+.kpi-card::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: var(--card-highlight);
+}
+.kpi-top  { display: flex; align-items: center; gap: 10px; }
+.kpi-icon {
+  width: 30px; height: 30px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+.kpi-label {
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.kpi-mid {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: auto;
+}
+.kpi-value {
+  font-size: 26px; font-weight: 600; color: var(--text);
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ───── Utilities ──────────────────────────────────────────────────────── */
+
+.gradient-text {
+  background: var(--grad-accent);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  font-weight: 600;
+}
+
+/* ───── Page-enter animation ───────────────────────────────────────────── */
+/* Wrap your route content in <div class="page-transition">…</div> to get a
+   gentle lift-in plus per-child stagger on .kpi-strip and .grid children. */
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.985); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0)    scale(1); }
+}
+@keyframes child-enter {
+  from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.98); filter: blur(2px); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0)    scale(1);    filter: blur(0); }
+}
+.page-transition {
+  animation: page-enter 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+  transform: translateZ(0);
+}
+.page-transition .kpi-strip > *,
+.page-transition > .grid > * {
+  animation: child-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform, filter;
+}
+.page-transition .kpi-strip > *:nth-child(1) { animation-delay: 0.04s; }
+.page-transition .kpi-strip > *:nth-child(2) { animation-delay: 0.09s; }
+.page-transition .kpi-strip > *:nth-child(3) { animation-delay: 0.14s; }
+.page-transition .kpi-strip > *:nth-child(4) { animation-delay: 0.19s; }
+.page-transition .kpi-strip > *:nth-child(5) { animation-delay: 0.24s; }
+.page-transition > .grid > *:nth-child(1) { animation-delay: 0.08s; }
+.page-transition > .grid > *:nth-child(2) { animation-delay: 0.12s; }
+.page-transition > .grid > *:nth-child(3) { animation-delay: 0.16s; }
+.page-transition > .grid > *:nth-child(4) { animation-delay: 0.20s; }
+.page-transition > .grid > *:nth-child(5) { animation-delay: 0.24s; }
+.page-transition > .grid > *:nth-child(6) { animation-delay: 0.28s; }
+.page-transition > .grid > *:nth-child(7) { animation-delay: 0.32s; }
+.page-transition > .grid > *:nth-child(8) { animation-delay: 0.36s; }
+.page-transition > .grid > *:nth-child(n+9) { animation-delay: 0.40s; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * Quick reference — common patterns
+ * ════════════════════════════════════════════════════════════════════════════
+ *
+ *  <button>Default</button>
+ *  <button class="primary">Primary</button>
+ *  <button class="danger">Destructive</button>
+ *
+ *  <span class="badge">Neutral</span>
+ *  <span class="badge ok"><span class="dot ok"></span>Healthy</span>
+ *  <span class="badge warn">Degraded</span>
+ *  <span class="badge err">Offline</span>
+ *
+ *  <div class="kpi-strip">
+ *    <div class="kpi-card">
+ *      <div class="kpi-top">
+ *        <div class="kpi-icon" style="color: var(--accent); background:
+ *             linear-gradient(135deg, rgba(var(--accent-rgb)/0.2), transparent)">
+ *          <svg>…</svg>
+ *        </div>
+ *        <div class="kpi-label">Tunnels up</div>
+ *      </div>
+ *      <div class="kpi-mid">
+ *        <div class="kpi-value">4 / 4</div>
+ *      </div>
+ *    </div>
+ *  </div>
+ *
+ *  <div class="grid">
+ *    <div class="col-6"><div class="card">…</div></div>
+ *    <div class="col-6"><div class="card">…</div></div>
+ *  </div>
+ *
+ *  Theme toggle (vanilla JS):
+ *    document.documentElement.setAttribute('data-theme',
+ *      document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+ *
+ * ════════════════════════════════════════════════════════════════════════════ */

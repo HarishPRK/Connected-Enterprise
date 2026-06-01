@@ -1,0 +1,696 @@
+import { config as loadDotenv } from 'dotenv';
+// `override: true` — the project's .env is the source of truth. Without this,
+// dotenv won't replace pre-set shell vars (incl. an *empty* AWS_ACCESS_KEY_ID
+// left behind by `aws configure`, or a stale AWS_BEARER_TOKEN_BEDROCK from a
+// previous shell session). Both have bitten us in dev.
+loadDotenv({ override: true });
+import express from 'express';
+import cors from 'cors';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { makeLLM } from './llm.js';
+import { runAgent } from './agent.js';
+import { runChat, type ChatMessage } from './chat.js';
+import { ipsecSource } from './ipsecSource.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '256kb' }));
+
+const llm = makeLLM();
+
+app.get('/api/health', (_req, res) => {
+  res.json({
+    ok: true,
+    provider: llm.provider,
+    keyConfigured: !!llm.client,
+    authMode: llm.authMode ?? null,
+    model: llm.model,
+    reason: llm.reason ?? null,
+  });
+});
+
+app.post('/api/agent/run', async (req, res) => {
+  const incident = req.body?.incident;
+  // eslint-disable-next-line no-console
+  console.log(`[agent-run] incoming · incident=${incident?.id} title="${incident?.title}"`);
+
+  if (!llm.client) {
+    // eslint-disable-next-line no-console
+    console.log(`[agent-run] 503 — LLM not configured (${llm.provider}): ${llm.reason}`);
+    res.status(503).json({
+      error: `LLM not configured (${llm.provider}): ${llm.reason ?? 'unknown'}. Check your .env and restart the server.`,
+    });
+    return;
+  }
+
+  if (!incident?.id || !incident?.title) {
+    res.status(400).json({ error: 'Body must include { incident: { id, title, branchId, severity, agentName? } }' });
+    return;
+  }
+
+  // SSE setup
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  // Critical for SSE: disable Nagle's algorithm so each small res.write() is
+  // flushed to the wire immediately. Without this Node buffers small writes
+  // and the client only sees the response when the buffer fills (often never
+  // for short SSE streams).
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+
+  // Use res.writable (true while the response stream is still open) instead of
+  // req.on('close') — in Express 5 / modern Node the request 'close' event
+  // fires as soon as the request body is fully consumed, NOT when the client
+  // disconnects, so it's the wrong signal for an SSE response.
+  const emit = (event: string, data: Record<string, unknown>) => {
+    if (!res.writable || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`, 'utf8');
+  };
+
+  // Heartbeat so corp proxies don't time us out
+  const hb = setInterval(() => {
+    if (res.writable && !res.writableEnded) res.write(': hb\n\n');
+  }, 15_000);
+  res.on('close', () => clearInterval(hb));
+
+  try {
+    await runAgent(llm.client, llm.model, {
+      incident,
+      emit: (e, d) => {
+        emit(e, d);
+        // eslint-disable-next-line no-console
+        if (e === 'error') console.error('[agent-run] emit error:', d);
+      },
+    });
+    // eslint-disable-next-line no-console
+    console.log(`[agent-run] done · incident=${incident.id}`);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[agent-run] uncaught:', err);
+    emit('error', { message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    clearInterval(hb);
+    if (!res.writableEnded) res.end();
+  }
+});
+
+/** POST /api/gateway/path — flips the gateway's active WAN path by publishing
+ *  to AWS IoT Core, where the `com.rdk.pathcontrol` Greengrass component on the
+ *  gateway picks it up and calls its local `:8090/api/path`. We can't reach the
+ *  gateway's NAT'd LAN over HTTP from the cloud, so MQTT is the transport.
+ *
+ *  Body: `{ mode: 'auto'|'fiber'|'5g', source?: 'rdk'|'prpl' }`
+ *  `source` selects the topic family — Plano gateways listen on `rdk/...`,
+ *  McKinney on `prpl/...`. Defaults to `rdk` for backwards-compat. */
+app.post('/api/gateway/path', async (req, res) => {
+  const mode = req.body?.mode;
+  const source = req.body?.source ?? 'rdk';
+  if (mode !== 'auto' && mode !== 'fiber' && mode !== '5g') {
+    res.status(400).json({ error: `mode must be one of: auto, fiber, 5g (got ${JSON.stringify(mode)})` });
+    return;
+  }
+  if (source !== 'rdk' && source !== 'prpl') {
+    res.status(400).json({ error: `source must be one of: rdk, prpl (got ${JSON.stringify(source)})` });
+    return;
+  }
+
+  const result = await ipsecSource.sendPathCommand(source, mode);
+  if (result.ok) {
+    res.json({ ok: true, mode, source, httpStatus: result.httpStatus });
+  } else if (result.timedOut) {
+    // Command was published but no ack arrived — the gateway component may be
+    // offline. 202 = accepted-but-not-confirmed so the UI can soften the toast.
+    res.status(202).json({ ok: false, mode, source, pending: true, error: result.error });
+  } else {
+    res.status(502).json({ ok: false, mode, source, error: result.error ?? 'path command failed' });
+  }
+});
+
+/** POST /api/ipsec/insight — Bedrock Claude reads the current IPsec snapshot
+ *  and streams a network-ops analysis back as SSE `chunk` events. */
+app.post('/api/ipsec/insight', async (_req, res) => {
+  if (!llm.client) {
+    res.status(503).json({
+      error: `LLM not configured (${llm.provider}): ${llm.reason ?? 'unknown'}.`,
+    });
+    return;
+  }
+
+  const snap = ipsecSource.getSnapshot();
+  const gateways = Object.values(snap.gateways);
+  if (gateways.length === 0) {
+    res.status(409).json({ error: 'No IPsec payload received yet — try again once the gateway is streaming.' });
+    return;
+  }
+
+  // SSE setup (same shape as /api/ask)
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+  const emit = (event: string, data: Record<string, unknown>) => {
+    if (!res.writable || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`, 'utf8');
+  };
+  const hb = setInterval(() => {
+    if (res.writable && !res.writableEnded) res.write(': hb\n\n');
+  }, 15_000);
+  res.on('close', () => clearInterval(hb));
+
+  const SYSTEM = `Senior network-ops engineer reading live SD-WAN gateway telemetry.
+
+Style — be ruthlessly brief:
+- Exactly 3 bullets, max 20 words each.
+- No preamble, no closing sentence, no headers.
+- Use **bold** for key terms and \`code\` for interface names like \`vti-cell1\`.
+- Interpret, don't restate. If healthy, say so in 1 bullet.
+
+Priority: active path health → underlay availability → concerning signs (latency >150ms, loss >3%, unreachable tunnels).`;
+
+  const userMessage = `Latest IPsec gateway telemetry (decoded from the protobuf \
+on \`rdk/ipsec/metrics\`). Server received it ${Math.round((Date.now() - snap.receivedAt) / 1000)} s ago.
+
+\`\`\`json
+${JSON.stringify(snap, null, 2)}
+\`\`\`
+
+Analyze the current state.`;
+
+  try {
+    const response = await llm.client.messages.create({
+      model: llm.model,
+      max_tokens: 260,
+      system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: userMessage }] }],
+    });
+    for (const block of response.content) {
+      if (block.type === 'text' && block.text.trim()) {
+        emit('chunk', { text: block.text });
+      }
+    }
+    emit('done', { usage: response.usage });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    emit('error', { message: msg });
+  } finally {
+    clearInterval(hb);
+    if (!res.writableEnded) res.end();
+  }
+});
+
+/** POST /api/insight — generic Bedrock-Claude analysis for any page.
+ *  Body: `{ topic: 'it-devices' | 'ot-devices' | 'connectivity' | 'fleet' | 'app-routing',
+ *           data:  <any JSON the page wants analysed> }`
+ *  The server picks a topic-appropriate system prompt and streams the response. */
+// Style rules common to every topic. Kept in one place so all insight cards
+// produce the same crisp output: max 3 bullets, ≤ 20 words each, no preamble,
+// no closing sentence, no headers.
+const INSIGHT_STYLE = `Style — be ruthlessly brief:
+- Exactly 3 bullets, max 20 words each. No more, no less.
+- No preamble ("Based on the data…"), no closing sentence, no headers.
+- Use **bold** for key terms and \`code\` for IDs / IPs / interface names.
+- Don't restate the JSON. Interpret it. If everything is fine, say so in 1 bullet.`;
+
+const INSIGHT_PROMPTS: Record<string, string> = {
+  'it-devices': `Senior IT-ops engineer reading an enterprise branch's endpoint inventory.
+Focus: offline/degraded endpoints, connection-mix anomalies, security risks.
+${INSIGHT_STYLE}`,
+
+  'ot-devices': `Senior OT/IoT engineer reading industrial sensor inventory for a branch.
+Focus: safety-critical sensors offline (flag as HIGH), coverage gaps, VLAN issues.
+${INSIGHT_STYLE}`,
+
+  'connectivity': `Senior network engineer reading branch WAN health.
+Focus: branches at risk, active WAN choice, throughput anomalies.
+${INSIGHT_STYLE}`,
+
+  'fleet': `Network-ops manager writing a 3-line CIO-level readout.
+Focus: bottom-line health %, biggest fleet risk, capacity trend.
+${INSIGHT_STYLE}`,
+
+  'app-routing': `Network architect reading app-aware-routing policies and per-app traffic.
+Focus: critical apps off intended path, surprising splits, optimisation wins.
+${INSIGHT_STYLE}`,
+};
+
+app.post('/api/insight', async (req, res) => {
+  if (!llm.client) {
+    res.status(503).json({ error: `LLM not configured (${llm.provider}): ${llm.reason ?? 'unknown'}.` });
+    return;
+  }
+
+  const topic = req.body?.topic;
+  const data  = req.body?.data;
+  if (typeof topic !== 'string' || !INSIGHT_PROMPTS[topic]) {
+    res.status(400).json({
+      error: `Body must include { topic, data }. Topic must be one of: ${Object.keys(INSIGHT_PROMPTS).join(', ')}`,
+    });
+    return;
+  }
+  if (data == null) {
+    res.status(400).json({ error: 'Body must include { data }.' });
+    return;
+  }
+
+  // SSE setup (mirrors /api/ask, /api/ipsec/insight)
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+  const emit = (event: string, payload: Record<string, unknown>) => {
+    if (!res.writable || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`, 'utf8');
+  };
+  const hb = setInterval(() => {
+    if (res.writable && !res.writableEnded) res.write(': hb\n\n');
+  }, 15_000);
+  res.on('close', () => clearInterval(hb));
+
+  // Keep the JSON we send to the model small — truncate if huge.
+  const dataJson = JSON.stringify(data, null, 2);
+  const trimmed = dataJson.length > 16_000
+    ? dataJson.slice(0, 16_000) + '\n\n…[truncated for brevity]'
+    : dataJson;
+
+  const SYSTEM    = INSIGHT_PROMPTS[topic];
+  const userBlock = `Here is the latest ${topic.replace('-', ' ')} data from this page:\n\n\`\`\`json\n${trimmed}\n\`\`\`\n\nAnalyse the current state.`;
+
+  try {
+    const response = await llm.client.messages.create({
+      model: llm.model,
+      max_tokens: 260,
+      system:   [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: userBlock }] }],
+    });
+    for (const block of response.content) {
+      if (block.type === 'text' && block.text.trim()) {
+        emit('chunk', { text: block.text });
+      }
+    }
+    emit('done', { usage: response.usage, topic });
+  } catch (err) {
+    emit('error', { message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    clearInterval(hb);
+    if (!res.writableEnded) res.end();
+  }
+});
+
+app.post('/api/ask', async (req, res) => {
+  // eslint-disable-next-line no-console
+  console.log(`[ask] incoming · ${(req.body?.messages ?? []).length} messages`);
+
+  if (!llm.client) {
+    res.status(503).json({
+      error: `LLM not configured (${llm.provider}): ${llm.reason ?? 'unknown'}.`,
+    });
+    return;
+  }
+
+  const messages = req.body?.messages as ChatMessage[] | undefined;
+  if (!Array.isArray(messages) || messages.length === 0) {
+    res.status(400).json({ error: 'Body must include { messages: [{role, content}, ...] }' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+
+  const emit = (event: string, data: Record<string, unknown>) => {
+    if (!res.writable || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`, 'utf8');
+  };
+
+  const hb = setInterval(() => {
+    if (res.writable && !res.writableEnded) res.write(': hb\n\n');
+  }, 15_000);
+  res.on('close', () => clearInterval(hb));
+
+  try {
+    await runChat(llm.client, llm.model, { messages, emit });
+    // eslint-disable-next-line no-console
+    console.log('[ask] done');
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[ask] uncaught:', err);
+    emit('error', { message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    clearInterval(hb);
+    if (!res.writableEnded) res.end();
+  }
+});
+
+/* ─────────── Agentic AI proxy ───────────
+ * Browser → /api/agentic/* (same-origin, no CORS) → this Express server
+ * → upstream LangGraph service at AGENTIC_UPSTREAM. Streams pass through
+ * untouched so SSE works end-to-end. */
+
+const AGENTIC_UPSTREAM       = process.env.AGENTIC_UPSTREAM       ?? 'http://192.168.10.160:5006';
+// Smart-home / device-control LangGraph agent — listens on :5005 on the same
+// box as the network agent. Used by the "Agentic AI" page's last 3 quick
+// prompts (camera + ambience scenarios).
+const AGENTIC_SMART_UPSTREAM = process.env.AGENTIC_SMART_UPSTREAM ?? 'http://192.168.10.160:5005';
+
+/** Real upstream-health check. Replaces the bogus `mode: no-cors` ping the
+ *  browser was doing — that one resolved on any TCP-reachable host. */
+app.get('/api/agentic/health', async (_req, res) => {
+  try {
+    const upstream = await fetch(AGENTIC_UPSTREAM, { method: 'HEAD' });
+    res.json({ ok: upstream.status < 500, upstream: AGENTIC_UPSTREAM, status: upstream.status });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      upstream: AGENTIC_UPSTREAM,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/** POST /api/agentic/chat → forwards JSON body verbatim, returns JSON. */
+app.post('/api/agentic/chat', async (req, res) => {
+  try {
+    const upstream = await fetch(`${AGENTIC_UPSTREAM}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body ?? {}),
+    });
+    const text = await upstream.text();
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.setHeader('Content-Type', ct);
+    res.status(upstream.status).send(text);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[agentic-chat] upstream error:', err);
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/** Generic SSE pass-through. Streams bytes from upstream to the client, lets
+ *  the client abort cleanly via req 'close'. */
+async function proxyAgenticSSE(upstreamUrl: string, req: express.Request, res: express.Response) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+
+  const ctrl = new AbortController();
+  const onClose = () => ctrl.abort();
+  req.on('close', onClose);
+
+  try {
+    const upstream = await fetch(upstreamUrl, { signal: ctrl.signal });
+    if (!upstream.ok || !upstream.body) {
+      if (res.writable && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'error', message: `upstream ${upstream.status}` })}\n\n`);
+      }
+      return;
+    }
+
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder();
+    while (!ctrl.signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      if (res.writable && !res.writableEnded) res.write(chunk);
+    }
+  } catch (err) {
+    if ((err as { name?: string }).name !== 'AbortError') {
+      // eslint-disable-next-line no-console
+      console.error('[agentic-sse] upstream error:', err);
+      if (res.writable && !res.writableEnded) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.write(`data: ${JSON.stringify({ type: 'error', message: msg })}\n\n`);
+      }
+    }
+  } finally {
+    req.off('close', onClose);
+    if (!res.writableEnded) res.end();
+  }
+}
+
+app.get('/api/agentic/thoughts/:id', (req, res) => {
+  void proxyAgenticSSE(
+    `${AGENTIC_UPSTREAM}/thoughts/${encodeURIComponent(req.params.id)}`,
+    req, res,
+  );
+});
+
+app.get('/api/agentic/response/:id', (req, res) => {
+  void proxyAgenticSSE(
+    `${AGENTIC_UPSTREAM}/response/${encodeURIComponent(req.params.id)}`,
+    req, res,
+  );
+});
+
+/* ─────────── Smart-home agentic proxy (parallel routes → :5005) ───────────
+ * The "Agentic AI" page sends the last 3 quick prompts (camera + ambience)
+ * to this set instead of the network agent above. Same shapes, different
+ * upstream — selected client-side by the upstream='smart' flag. */
+
+app.get('/api/agentic-smart/health', async (_req, res) => {
+  try {
+    const upstream = await fetch(AGENTIC_SMART_UPSTREAM, { method: 'HEAD' });
+    res.json({ ok: upstream.status < 500, upstream: AGENTIC_SMART_UPSTREAM, status: upstream.status });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      upstream: AGENTIC_SMART_UPSTREAM,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+app.post('/api/agentic-smart/chat', async (req, res) => {
+  try {
+    const upstream = await fetch(`${AGENTIC_SMART_UPSTREAM}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body ?? {}),
+    });
+    const text = await upstream.text();
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.setHeader('Content-Type', ct);
+    res.status(upstream.status).send(text);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[agentic-smart-chat] upstream error:', err);
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.get('/api/agentic-smart/thoughts/:id', (req, res) => {
+  void proxyAgenticSSE(
+    `${AGENTIC_SMART_UPSTREAM}/thoughts/${encodeURIComponent(req.params.id)}`,
+    req, res,
+  );
+});
+
+app.get('/api/agentic-smart/response/:id', (req, res) => {
+  void proxyAgenticSSE(
+    `${AGENTIC_SMART_UPSTREAM}/response/${encodeURIComponent(req.params.id)}`,
+    req, res,
+  );
+});
+
+/* ─────────── IPsec metrics (AWS IoT Core → memory cache → SSE) ─────────── */
+
+// Kick off the MQTT subscription as soon as the server boots. Idempotent.
+void ipsecSource.start();
+
+/** Snapshot of the latest decoded payload for every gateway we've seen. */
+app.get('/api/ipsec/snapshot', (_req, res) => {
+  res.json(ipsecSource.getSnapshot());
+});
+
+/** Server-Sent Events stream — pushes every fresh update + a heartbeat. */
+app.get('/api/ipsec/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+
+  const emit = (event: string, data: Record<string, unknown>) => {
+    if (!res.writable || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Send the current cache up-front so clients hydrate immediately.
+  emit('snapshot', ipsecSource.getSnapshot());
+
+  const offUpdate = ipsecSource.onUpdate((u) => emit('update', u as unknown as Record<string, unknown>));
+  const offStatus = ipsecSource.onStatus((s) => emit('status', s as unknown as Record<string, unknown>));
+
+  const hb = setInterval(() => {
+    if (res.writable && !res.writableEnded) res.write(': hb\n\n');
+  }, 15_000);
+
+  req.on('close', () => {
+    offUpdate();
+    offStatus();
+    clearInterval(hb);
+    if (!res.writableEnded) res.end();
+  });
+});
+
+/* ─────────── Video analytics proxy ───────────
+ * MJPEG streams from inference nodes on a private LAN. Browser hits
+ * `/api/video/<id>` same-origin; Express pipes the multipart byte stream
+ * straight through. Upstreams resolved (in order):
+ *   1. VIDEO_UPSTREAM_<ID_UPPER_SNAKE>   — full URL override per stream
+ *   2. VIDEO_BASE_NVIDIA / VIDEO_BASE_HAILO   — group base URL, suffixed by path
+ *   3. The hardcoded defaults below (private LAN IPs).
+ *
+ * On EC2 with Tailscale: set VIDEO_BASE_NVIDIA / VIDEO_BASE_HAILO to the
+ * tailnet IPs of the inference nodes — no code change needed.
+ */
+
+const VIDEO_DEFAULT_BASES = {
+  nvidia: 'http://192.168.10.100:5000',
+  hailo:  'http://192.168.10.160:5000',
+} as const;
+
+const VIDEO_STREAM_PATHS: Record<string, { base: keyof typeof VIDEO_DEFAULT_BASES; path: string }> = {
+  'nv-nanoowl':  { base: 'nvidia', path: '/nanoowl_feed' },
+  'nv-violence': { base: 'nvidia', path: '/violence_feed' },
+  'nv-fall':     { base: 'nvidia', path: '/fall_feed' },
+  'nv-ppe':      { base: 'nvidia', path: '/ppe_feed' },
+  'nv-table':    { base: 'nvidia', path: '/table_feed' },
+  'nv-weapon':   { base: 'nvidia', path: '/weapon_feed' },
+  'nv-parking':  { base: 'nvidia', path: '/parking_feed' },
+  'ha-anpd':     { base: 'hailo',  path: '/anpd_feed' },
+  'ha-intruder': { base: 'hailo',  path: '/intruder_feed' },
+  'ha-hairnet':  { base: 'hailo',  path: '/hairnetmonitor_feed' },
+  'ha-fire':     { base: 'hailo',  path: '/firedetection_feed' },
+  'ha-crowd':    { base: 'hailo',  path: '/crowd_feed' },
+  'ha-drive':    { base: 'hailo',  path: '/drive_thru_monitor_stream' },
+};
+
+function getVideoUpstream(id: string): string | null {
+  const envKey = `VIDEO_UPSTREAM_${id.replace(/-/g, '_').toUpperCase()}`;
+  const direct = process.env[envKey];
+  if (direct) return direct;
+  const def = VIDEO_STREAM_PATHS[id];
+  if (!def) return null;
+  const baseKey = `VIDEO_BASE_${def.base.toUpperCase()}`;
+  const base = process.env[baseKey] ?? VIDEO_DEFAULT_BASES[def.base];
+  return `${base.replace(/\/+$/, '')}${def.path}`;
+}
+
+/** List of configured streams + their resolved upstreams. Handy for debugging. */
+app.get('/api/video', (_req, res) => {
+  res.json(
+    Object.keys(VIDEO_STREAM_PATHS).map((id) => ({
+      id,
+      upstream: getVideoUpstream(id),
+    })),
+  );
+});
+
+app.get('/api/video/:id', async (req, res) => {
+  const upstream = getVideoUpstream(req.params.id);
+  if (!upstream) {
+    res.status(404).json({ error: `Unknown stream id: ${req.params.id}` });
+    return;
+  }
+
+  const ctrl = new AbortController();
+  const onClose = () => ctrl.abort();
+  req.on('close', onClose);
+
+  try {
+    const r = await fetch(upstream, { signal: ctrl.signal });
+    if (!r.ok || !r.body) {
+      if (!res.headersSent) res.status(502).json({ error: `upstream ${r.status}` });
+      return;
+    }
+
+    // MJPEG = multipart/x-mixed-replace. Pass content-type and boundary verbatim.
+    const ct = r.headers.get('content-type');
+    if (ct) res.setHeader('Content-Type', ct);
+    res.setHeader('Cache-Control', 'no-cache, no-transform, no-store');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // bypass nginx buffering if fronted
+    res.flushHeaders?.();
+    res.socket?.setNoDelay(true);
+    res.socket?.setKeepAlive(true);
+
+    const reader = r.body.getReader();
+    while (!ctrl.signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!res.writable || res.writableEnded) break;
+      res.write(value);
+    }
+  } catch (err) {
+    if ((err as { name?: string }).name !== 'AbortError') {
+      // eslint-disable-next-line no-console
+      console.error(`[video-proxy:${req.params.id}] upstream error:`, err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  } finally {
+    req.off('close', onClose);
+    if (!res.writableEnded) res.end();
+  }
+});
+
+/* ─────────── Static frontend (production) ───────────
+ * In production we run a single Node process that serves both `/api/*` and
+ * the Vite-built static SPA from `dist/`. In dev, Vite serves the SPA on
+ * port 5173 and proxies API calls here — so we just skip the static block
+ * when `dist/` doesn't exist. */
+const distDir = path.resolve(__dirname, '..', 'dist');
+const indexHtml = path.join(distDir, 'index.html');
+const hasBuild = existsSync(indexHtml);
+
+if (hasBuild) {
+  // Long cache for hashed assets; SPA shell stays uncached so deploys roll out.
+  app.use('/assets', express.static(path.join(distDir, 'assets'), {
+    maxAge: '30d',
+    immutable: true,
+  }));
+  app.use(express.static(distDir, { index: false, maxAge: '1h' }));
+
+  // SPA fallback — every non-API GET serves index.html so React Router routes
+  // (e.g. /security, /naas, /incidents) deep-link correctly.
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(indexHtml);
+  });
+}
+
+const PORT = Number(process.env.PORT ?? process.env.AGENT_SERVER_PORT ?? 3001);
+app.listen(PORT, () => {
+  // eslint-disable-next-line no-console
+  console.log(`[ce-server] listening on http://0.0.0.0:${PORT} · static=${hasBuild ? 'yes (dist/)' : 'no (dev mode)'}`);
+  // eslint-disable-next-line no-console
+  console.log(`[ce-server] provider=${llm.provider} authMode=${llm.authMode ?? 'none'} model=${llm.model} ${llm.client ? '✓' : `(NOT CONFIGURED: ${llm.reason})`}`);
+});

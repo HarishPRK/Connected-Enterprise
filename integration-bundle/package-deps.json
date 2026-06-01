@@ -1,0 +1,37 @@
+{
+  "_comment": "Run from the TARGET project root. These are the exact versions this source project uses — bump as you like, but the integration was tested against these.",
+
+  "_install": [
+    "npm install react@^19.2.5 react-dom@^19.2.5 react-router-dom@^7.14.2 recharts@^3.8.1 lucide-react@^1.9.0",
+    "npm install express@^5.2.1 cors@^2.8.6 dotenv@^17.4.2 aws-iot-device-sdk-v2@^1.26.0",
+    "npm install @anthropic-ai/bedrock-sdk@^0.29.1 @anthropic-ai/sdk@^0.95.0",
+    "npm install -D tsx@^4.21.0 concurrently@^9.2.1 @types/express @types/cors"
+  ],
+
+  "dependencies": {
+    "react":                       "^19.2.5",
+    "react-dom":                   "^19.2.5",
+    "react-router-dom":            "^7.14.2",
+    "recharts":                    "^3.8.1",
+    "lucide-react":                "^1.9.0",
+    "express":                     "^5.2.1",
+    "cors":                        "^2.8.6",
+    "dotenv":                      "^17.4.2",
+    "aws-iot-device-sdk-v2":       "^1.26.0",
+    "@anthropic-ai/bedrock-sdk":   "^0.29.1",
+    "@anthropic-ai/sdk":           "^0.95.0"
+  },
+
+  "devDependencies": {
+    "tsx":          "^4.21.0",
+    "concurrently": "^9.2.1"
+  },
+
+  "scripts_suggestion": {
+    "dev":      "vite",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:full": "concurrently -k -n vite,server -c cyan,magenta \"npm:dev\" \"npm:dev:server\"",
+    "build":    "tsc -b && vite build",
+    "preview":  "vite preview"
+  }
+}

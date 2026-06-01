@@ -1,0 +1,53 @@
+{
+  "RecipeFormatVersion": "2020-01-25",
+  "ComponentName": "com.rdk.pathcontrol",
+  "ComponentVersion": "1.0.2",
+  "ComponentType": "aws.greengrass.generic",
+  "ComponentDescription": "Listens on an AWS IoT Core topic for SD-WAN path-control commands (fiber / 5g / auto) and applies them to the gateway's local path-selection API at http://127.0.0.1:8090/api/path. Uses Greengrass IPC (reuses Nucleus's connection — no device certs, no extra MQTT connection). Long-running.",
+  "ComponentPublisher": "Connected Enterprise",
+  "ComponentConfiguration": {
+    "DefaultConfiguration": {
+      "topicPrefix": "rdk",
+      "localApiUrl": "http://127.0.0.1:8090/api/path",
+      "accessControl": {
+        "aws.greengrass.ipc.mqttproxy": {
+          "com.rdk.pathcontrol:mqttproxy:1": {
+            "policyDescription": "Allow the path-control component to receive commands and publish results over IoT Core via Nucleus.",
+            "operations": [
+              "aws.greengrass#SubscribeToIoTCore",
+              "aws.greengrass#PublishToIoTCore"
+            ],
+            "resources": [
+              "rdk/path/control",
+              "rdk/path/control/result",
+              "prpl/path/control",
+              "prpl/path/control/result"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "Manifests": [
+    {
+      "Platform": {
+        "os": "linux"
+      },
+      "Lifecycle": {
+        "Install": {
+          "RequiresPrivilege": false,
+          "Script": "#!/bin/bash\nset -e\necho '[pathctl] install: writing project files'\n\ncat > package.json << 'EOF'\n{\n  \"name\": \"rdk-path-control\",\n  \"version\": \"1.0.2\",\n  \"description\": \"RDK SD-WAN path control over IoT Core (IPC)\",\n  \"main\": \"index.js\",\n  \"license\": \"ISC\"\n}\nEOF\n\ncat > index.js << 'EOF'\nconst axios = require('axios');\nconst sdk = require('aws-iot-device-sdk-v2');\nconst ipc = sdk.greengrasscoreipc;\n\n// Greengrass IPC expects qos as a STRING enum: '0' = at-most-once,\n// '1' = at-least-once. Passing the numeric mqtt.QoS throws\n// \"Property 'qos' of type 'SubscribeToIoTCoreRequest' must be a string value\".\nconst QOS = '1';\n\n// Topic prefix + local API are injected by the Run lifecycle as env vars so\n// the same artifact serves both gateway families (rdk for Plano, prpl for\n// McKinney) by only changing the deployment-time component configuration.\nconst PREFIX        = process.env.PATHCTL_TOPIC_PREFIX || 'rdk';\nconst LOCAL_API     = process.env.PATHCTL_LOCAL_API   || 'http://127.0.0.1:8090/api/path';\nconst CONTROL_TOPIC = PREFIX + '/path/control';\nconst RESULT_TOPIC  = PREFIX + '/path/control/result';\nconst VALID_MODES   = ['auto', 'fiber', '5g'];\n\nasync function main() {\n  const client = ipc.createClient();\n  await client.connect();\n  console.log('[pathctl] IPC connected; control=' + CONTROL_TOPIC + ' result=' + RESULT_TOPIC);\n\n  const publishResult = async (body) => {\n    const payload = Buffer.from(JSON.stringify(Object.assign({}, body, { ts: Date.now() })));\n    try {\n      await client.publishToIoTCore({ topicName: RESULT_TOPIC, qos: QOS, payload: payload });\n      console.log('[pathctl] result published:', JSON.stringify(body));\n    } catch (e) {\n      console.error('[pathctl] publish failed:', e && e.message);\n    }\n  };\n\n  const handler = {\n    onStreamEvent: async (event) => {\n      const raw = Buffer.from(event.message.payload).toString('utf-8');\n      console.log('[pathctl] command received:', raw);\n      let mode, id;\n      try { const p = JSON.parse(raw); mode = p.mode; id = p.id; }\n      catch { await publishResult({ ok: false, error: 'invalid JSON payload' }); return; }\n      if (!VALID_MODES.includes(mode)) {\n        await publishResult({ id: id, ok: false, error: 'mode must be one of auto|fiber|5g', got: mode });\n        return;\n      }\n      try {\n        const res = await axios.post(LOCAL_API, { mode: mode }, { timeout: 5000, headers: { 'Content-Type': 'application/json' } });\n        await publishResult({ id: id, ok: true, mode: mode, httpStatus: res.status });\n      } catch (e) {\n        const status = e && e.response ? e.response.status : null;\n        await publishResult({ id: id, ok: false, mode: mode, httpStatus: status, error: e && e.message });\n      }\n    },\n    onStreamError: (e) => { console.error('[pathctl] stream error:', e && e.message); return false; },\n    onStreamClosed: () => { console.log('[pathctl] stream closed'); },\n  };\n\n  await client.subscribeToIoTCore({ topicName: CONTROL_TOPIC, qos: QOS }, handler);\n  console.log('[pathctl] subscribed; waiting for commands');\n\n  // Keep the event loop alive for the lifetime of the component.\n  setInterval(() => {}, 1 << 30);\n}\n\nmain().catch((e) => { console.error('[pathctl] fatal:', e); process.exit(1); });\nEOF\n\necho '[pathctl] install: npm install'\nnpm install axios aws-iot-device-sdk-v2 --cache /tmp/npm-cache --omit=dev\necho '[pathctl] install: done'\n"
+        },
+        "Run": {
+          "RequiresPrivilege": false,
+          "Setenv": {
+            "PATHCTL_TOPIC_PREFIX": "{configuration:/topicPrefix}",
+            "PATHCTL_LOCAL_API": "{configuration:/localApiUrl}"
+          },
+          "Script": "node index.js"
+        }
+      },
+      "Artifacts": []
+    }
+  ]
+}

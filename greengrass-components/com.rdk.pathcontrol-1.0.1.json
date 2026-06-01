@@ -1,0 +1,44 @@
+{
+  "RecipeFormatVersion": "2020-01-25",
+  "ComponentName": "com.rdk.pathcontrol",
+  "ComponentVersion": "1.0.1",
+  "ComponentType": "aws.greengrass.generic",
+  "ComponentDescription": "Listens on an AWS IoT Core topic for SD-WAN path-control commands (fiber / 5g / auto) and applies them to the gateway's local path-selection API at http://127.0.0.1:8090/api/path. Pure-JS (mqtt + axios, no native modules); connects to IoT Core directly using the device certs Nucleus already has on disk. Long-running.",
+  "ComponentPublisher": "Connected Enterprise",
+  "ComponentConfiguration": {
+    "DefaultConfiguration": {
+      "topicPrefix": "rdk",
+      "localApiUrl": "http://127.0.0.1:8090/api/path",
+      "iotEndpoint": "alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com",
+      "certPath": "/greengrass/v2/thingCert.crt",
+      "keyPath": "/greengrass/v2/privKey.key",
+      "caPath": "/greengrass/v2/rootCA.pem"
+    }
+  },
+  "Manifests": [
+    {
+      "Platform": {
+        "os": "linux"
+      },
+      "Lifecycle": {
+        "Install": {
+          "RequiresPrivilege": true,
+          "Script": "#!/bin/bash\nset -e\necho '[pathctl] install: writing project files'\n\ncat > package.json << 'EOF'\n{\n  \"name\": \"rdk-path-control\",\n  \"version\": \"1.0.1\",\n  \"description\": \"RDK SD-WAN path control over IoT Core (plain mqtt)\",\n  \"main\": \"index.js\",\n  \"license\": \"ISC\"\n}\nEOF\n\ncat > index.js << 'EOF'\nconst fs = require('fs');\nconst axios = require('axios');\nconst mqtt = require('mqtt');\n\n// Config injected by the Run lifecycle as env vars (see Setenv). Defaults are\n// the standard Greengrass v2 cert paths + the account IoT endpoint.\nconst PREFIX    = process.env.PATHCTL_TOPIC_PREFIX || 'rdk';\nconst LOCAL_API = process.env.PATHCTL_LOCAL_API   || 'http://127.0.0.1:8090/api/path';\nconst ENDPOINT  = process.env.PATHCTL_IOT_ENDPOINT || 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';\nconst CERT_PATH = process.env.PATHCTL_CERT || '/greengrass/v2/thingCert.crt';\nconst KEY_PATH  = process.env.PATHCTL_KEY  || '/greengrass/v2/privKey.key';\nconst CA_PATH   = process.env.PATHCTL_CA   || '/greengrass/v2/rootCA.pem';\nconst CONTROL_TOPIC = PREFIX + '/path/control';\nconst RESULT_TOPIC  = PREFIX + '/path/control/result';\nconst VALID_MODES   = ['auto', 'fiber', '5g'];\n\nlet cert, key, ca;\ntry {\n  cert = fs.readFileSync(CERT_PATH);\n  key  = fs.readFileSync(KEY_PATH);\n  ca   = fs.readFileSync(CA_PATH);\n} catch (e) {\n  console.error('[pathctl] FATAL: cannot read device certs:', e && e.message);\n  console.error('[pathctl] check certPath/keyPath/caPath in component config; current:', CERT_PATH, KEY_PATH, CA_PATH);\n  process.exit(1);\n}\n\nconst client = mqtt.connect({\n  host: ENDPOINT,\n  port: 8883,\n  protocol: 'mqtts',\n  clientId: 'pathctl-' + PREFIX + '-' + Math.random().toString(36).slice(2, 10),\n  cert: cert,\n  key: key,\n  ca: ca,\n  reconnectPeriod: 3000,\n  keepalive: 30,\n  rejectUnauthorized: true,\n});\n\nfunction publishResult(body) {\n  const payload = JSON.stringify(Object.assign({}, body, { ts: Date.now() }));\n  client.publish(RESULT_TOPIC, payload, { qos: 1 });\n  console.log('[pathctl] result:', payload);\n}\n\nclient.on('connect', () => {\n  console.log('[pathctl] connected to ' + ENDPOINT + '; control=' + CONTROL_TOPIC + ' result=' + RESULT_TOPIC);\n  client.subscribe(CONTROL_TOPIC, { qos: 1 }, (err) => {\n    if (err) console.error('[pathctl] subscribe failed:', err.message);\n    else console.log('[pathctl] subscribed; waiting for commands');\n  });\n});\nclient.on('error', (e) => console.error('[pathctl] mqtt error:', e && e.message));\nclient.on('reconnect', () => console.log('[pathctl] reconnecting...'));\nclient.on('close', () => console.log('[pathctl] connection closed'));\n\nclient.on('message', async (topic, payload) => {\n  const raw = payload.toString('utf-8');\n  console.log('[pathctl] command received on ' + topic + ': ' + raw);\n  let mode, id;\n  try { const p = JSON.parse(raw); mode = p.mode; id = p.id; }\n  catch { publishResult({ ok: false, error: 'invalid JSON payload' }); return; }\n  if (!VALID_MODES.includes(mode)) {\n    publishResult({ id: id, ok: false, error: 'mode must be one of auto|fiber|5g', got: mode });\n    return;\n  }\n  try {\n    const res = await axios.post(LOCAL_API, { mode: mode }, { timeout: 5000, headers: { 'Content-Type': 'application/json' } });\n    publishResult({ id: id, ok: true, mode: mode, httpStatus: res.status });\n  } catch (e) {\n    const status = e && e.response ? e.response.status : null;\n    publishResult({ id: id, ok: false, mode: mode, httpStatus: status, error: e && e.message });\n  }\n});\n\n// Keep the event loop alive for the lifetime of the component.\nsetInterval(() => {}, 1 << 30);\nEOF\n\necho '[pathctl] install: npm install (pure JS deps)'\nnpm install mqtt axios --cache /tmp/npm-cache --omit=dev\necho '[pathctl] install: done'\n"
+        },
+        "Run": {
+          "RequiresPrivilege": true,
+          "Setenv": {
+            "PATHCTL_TOPIC_PREFIX": "{configuration:/topicPrefix}",
+            "PATHCTL_LOCAL_API": "{configuration:/localApiUrl}",
+            "PATHCTL_IOT_ENDPOINT": "{configuration:/iotEndpoint}",
+            "PATHCTL_CERT": "{configuration:/certPath}",
+            "PATHCTL_KEY": "{configuration:/keyPath}",
+            "PATHCTL_CA": "{configuration:/caPath}"
+          },
+          "Script": "node index.js"
+        }
+      },
+      "Artifacts": []
+    }
+  ]
+}

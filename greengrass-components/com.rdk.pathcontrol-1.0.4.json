@@ -1,0 +1,38 @@
+{
+  "RecipeFormatVersion": "2020-01-25",
+  "ComponentName": "com.rdk.pathcontrol",
+  "ComponentVersion": "1.0.4",
+  "ComponentType": "aws.greengrass.generic",
+  "ComponentDescription": "Listens on the LOCAL MQTT broker for SD-WAN path-control commands (fiber / 5g / auto) and applies them to the gateway's local path-selection API at http://127.0.0.1:8090/api/path. Plain mqtt to the same local broker the clientdevices.mqtt.Bridge relays (cloud<->gateway handled by the bridge, like rdk/ipsec/metrics). Deps pinned for the gateway's Node 10 runtime (mqtt@4, axios@0.27). No certs, no IPC. Long-running.",
+  "ComponentPublisher": "Connected Enterprise",
+  "ComponentConfiguration": {
+    "DefaultConfiguration": {
+      "topicPrefix": "rdk",
+      "localApiUrl": "http://127.0.0.1:8090/api/path",
+      "localBrokerUri": "tcp://192.168.10.1:1883"
+    }
+  },
+  "Manifests": [
+    {
+      "Platform": {
+        "os": "linux"
+      },
+      "Lifecycle": {
+        "Install": {
+          "RequiresPrivilege": false,
+          "Script": "#!/bin/bash\nset -e\necho '[pathctl] install: writing project files'\n\ncat > package.json << 'EOF'\n{\n  \"name\": \"rdk-path-control\",\n  \"version\": \"1.0.4\",\n  \"description\": \"RDK SD-WAN path control via local broker + bridge\",\n  \"main\": \"index.js\",\n  \"license\": \"ISC\"\n}\nEOF\n\ncat > index.js << 'EOF'\nconst axios = require('axios');\nconst mqtt = require('mqtt');\n\n// Config injected by the Run lifecycle as env vars (see Setenv). The broker is\n// the SAME local broker the clientdevices.mqtt.Bridge relays to/from IoT Core,\n// so commands + acks ride the bridge exactly like rdk/ipsec/metrics does.\nconst PREFIX    = process.env.PATHCTL_TOPIC_PREFIX || 'rdk';\nconst LOCAL_API = process.env.PATHCTL_LOCAL_API   || 'http://127.0.0.1:8090/api/path';\nconst BROKER    = process.env.PATHCTL_BROKER_URI  || 'tcp://192.168.10.1:1883';\nconst CONTROL_TOPIC = PREFIX + '/path/control';\nconst RESULT_TOPIC  = PREFIX + '/path/control/result';\nconst VALID_MODES   = ['auto', 'fiber', '5g'];\n\nconsole.log('[pathctl] connecting to local broker ' + BROKER);\nconst client = mqtt.connect(BROKER, {\n  clientId: 'pathctl-' + PREFIX + '-' + Math.random().toString(36).slice(2, 10),\n  reconnectPeriod: 3000,\n  keepalive: 30,\n});\n\nfunction publishResult(body) {\n  const payload = JSON.stringify(Object.assign({}, body, { ts: Date.now() }));\n  client.publish(RESULT_TOPIC, payload, { qos: 1 });\n  console.log('[pathctl] result:', payload);\n}\n\nclient.on('connect', function () {\n  console.log('[pathctl] connected to ' + BROKER + '; control=' + CONTROL_TOPIC + ' result=' + RESULT_TOPIC);\n  client.subscribe(CONTROL_TOPIC, { qos: 1 }, function (err) {\n    if (err) console.error('[pathctl] subscribe failed:', err.message);\n    else console.log('[pathctl] subscribed; waiting for commands');\n  });\n});\nclient.on('error', function (e) { console.error('[pathctl] mqtt error:', e && e.message); });\nclient.on('reconnect', function () { console.log('[pathctl] reconnecting...'); });\nclient.on('close', function () { console.log('[pathctl] connection closed'); });\n\nclient.on('message', function (topic, payload) {\n  var raw = payload.toString('utf-8');\n  console.log('[pathctl] command received on ' + topic + ': ' + raw);\n  var mode, id;\n  try { var p = JSON.parse(raw); mode = p.mode; id = p.id; }\n  catch (e) { publishResult({ ok: false, error: 'invalid JSON payload' }); return; }\n  if (VALID_MODES.indexOf(mode) === -1) {\n    publishResult({ id: id, ok: false, error: 'mode must be one of auto|fiber|5g', got: mode });\n    return;\n  }\n  axios.post(LOCAL_API, { mode: mode }, { timeout: 5000, headers: { 'Content-Type': 'application/json' } })\n    .then(function (res) { publishResult({ id: id, ok: true, mode: mode, httpStatus: res.status }); })\n    .catch(function (e) {\n      var status = e && e.response ? e.response.status : null;\n      publishResult({ id: id, ok: false, mode: mode, httpStatus: status, error: e && e.message });\n    });\n});\n\n// Keep the event loop alive for the lifetime of the component.\nsetInterval(function () {}, 1 << 30);\nEOF\n\necho '[pathctl] install: npm install (Node-10-safe pins)'\nnpm install mqtt@4.3.7 axios@0.27.2 --cache /tmp/npm-cache --omit=dev\necho '[pathctl] install: done'\n"
+        },
+        "Run": {
+          "RequiresPrivilege": false,
+          "Setenv": {
+            "PATHCTL_TOPIC_PREFIX": "{configuration:/topicPrefix}",
+            "PATHCTL_LOCAL_API": "{configuration:/localApiUrl}",
+            "PATHCTL_BROKER_URI": "{configuration:/localBrokerUri}"
+          },
+          "Script": "node index.js"
+        }
+      },
+      "Artifacts": []
+    }
+  ]
+}
