@@ -261,8 +261,15 @@ class IpsecSource extends EventEmitter {
 
   /** Publish a path-control command to `<prefix>/path/control` and wait for the
    *  gateway's ack on the result topic (correlated by id). Resolves with the
-   *  ack, or `{ ok:false, timedOut:true }` if no ack arrives in time. */
-  async sendPathCommand(prefix: string, mode: 'auto' | 'fiber' | '5g', timeoutMs = 6000): Promise<PathCommandResult> {
+   *  ack, or `{ ok:false, timedOut:true }` if no ack arrives in time.
+   *  Optional `tunnel` pins the request to a specific tunnel ifname (e.g.
+   *  `vti-fiber1`) — the gateway component can honour it if it knows how. */
+  async sendPathCommand(
+    prefix: string,
+    mode: 'auto' | 'fiber' | '5g',
+    timeoutMs = 6000,
+    tunnel?: string,
+  ): Promise<PathCommandResult> {
     if (!this.connection || !this.connected) {
       return { ok: false, error: 'MQTT not connected — cannot reach the gateway' };
     }
@@ -279,14 +286,17 @@ class IpsecSource extends EventEmitter {
       }, timeoutMs);
     });
 
+    const payload: Record<string, unknown> = { id, mode };
+    if (tunnel) payload.tunnel = tunnel;
+
     try {
       await this.connection.publish(
         topic,
-        JSON.stringify({ id, mode }),
+        JSON.stringify(payload),
         mqtt.QoS.AtLeastOnce,
       );
       // eslint-disable-next-line no-console
-      console.log(`[pathctl] published {id:${id}, mode:${mode}} to "${topic}"`);
+      console.log(`[pathctl] published ${JSON.stringify(payload)} to "${topic}"`);
     } catch (err) {
       this.pendingPathCmds.delete(id);
       return { ok: false, mode, error: err instanceof Error ? err.message : String(err) };

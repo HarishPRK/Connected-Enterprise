@@ -114,6 +114,11 @@ app.post('/api/agent/run', async (req, res) => {
 app.post('/api/gateway/path', async (req, res) => {
   const mode = req.body?.mode;
   const source = req.body?.source ?? 'rdk';
+  // Optional tunnel pin (e.g. "vti-fiber1") — UI sends this when the user
+  // picks Tunnel 1 / Tunnel 2 from the Force-Fiber / Force-5G modal.
+  const tunnel = typeof req.body?.tunnel === 'string' && req.body.tunnel.trim()
+    ? req.body.tunnel.trim()
+    : undefined;
   if (mode !== 'auto' && mode !== 'fiber' && mode !== '5g') {
     res.status(400).json({ error: `mode must be one of: auto, fiber, 5g (got ${JSON.stringify(mode)})` });
     return;
@@ -123,15 +128,15 @@ app.post('/api/gateway/path', async (req, res) => {
     return;
   }
 
-  const result = await ipsecSource.sendPathCommand(source, mode);
+  const result = await ipsecSource.sendPathCommand(source, mode, 6000, tunnel);
   if (result.ok) {
-    res.json({ ok: true, mode, source, httpStatus: result.httpStatus });
+    res.json({ ok: true, mode, source, tunnel, httpStatus: result.httpStatus });
   } else if (result.timedOut) {
     // Command was published but no ack arrived — the gateway component may be
     // offline. 202 = accepted-but-not-confirmed so the UI can soften the toast.
-    res.status(202).json({ ok: false, mode, source, pending: true, error: result.error });
+    res.status(202).json({ ok: false, mode, source, tunnel, pending: true, error: result.error });
   } else {
-    res.status(502).json({ ok: false, mode, source, error: result.error ?? 'path command failed' });
+    res.status(502).json({ ok: false, mode, source, tunnel, error: result.error ?? 'path command failed' });
   }
 });
 
