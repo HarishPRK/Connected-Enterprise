@@ -62,18 +62,6 @@ function inferUnderlay(ifname: string): Underlay {
   return "fiber";
 }
 
-/** Human-facing tunnel name. The gateway reports ifnames like `vti-fiber1` /
- *  `vti-cell2`; we present them as `vti1-fiber` / `vti2-cellular` (index moves
- *  to the front, `cell` → `cellular`). Display-only — matching logic still uses
- *  the raw ifname. Unrecognised names are returned unchanged. */
-function displayTunnelName(ifname: string): string {
-  const raw = (ifname || "").trim();
-  const m = /^vti-?(fiber|cellular|cell|5g|lte|wwan)(\d+)$/i.exec(raw);
-  if (!m) return raw;
-  const kind = m[1].toLowerCase() === "cell" ? "cellular" : m[1].toLowerCase();
-  return `vti${m[2]}-${kind}`;
-}
-
 /** Turn a raw device hostname (`rdk-bpi4-gateway`) into a friendly title
  *  (`RDK BPI4 Gateway`). Tokens that look like acronyms or model codes — three
  *  letters or fewer, or containing a digit — are upper-cased; the rest are
@@ -483,7 +471,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                   return (
                     <tr key={t.ifname}>
                       <td className="mono" style={{ color: "var(--text)" }}>
-                        {displayTunnelName(t.ifname)}
+                        {t.ifname}
                       </td>
                       <td>
                         <span className="badge">
@@ -1518,7 +1506,7 @@ function GatewayBlock({
           <div className="ipsec-gw-meta-kv">
             <span>PREFERRED</span>
             <strong style={{ color: c.accent3 }}>
-              {displayTunnelName(effectiveActiveTunnel) || "—"}
+              {effectiveActiveTunnel || "—"}
             </strong>
           </div>
           <div className="ipsec-gw-meta-kv">
@@ -2316,7 +2304,7 @@ function IpsecFlowSvg({
                 fontFamily="JetBrains Mono, ui-monospace, monospace"
                 letterSpacing="0.04em"
               >
-                {displayTunnelName(t.ifname) || "—"}
+                {t.ifname || "—"}
               </text>
               {/* Top-right: state metric (latency · loss) */}
               <text
@@ -2442,7 +2430,7 @@ function IpsecFlowSvg({
               fill={activeTunnelObj.reachable ? c.ok : c.warn}
               fontFamily="JetBrains Mono, ui-monospace, monospace"
             >
-              {displayTunnelName(activeTunnelObj.ifname).toUpperCase()}
+              {activeTunnelObj.ifname.toUpperCase()}
             </text>
           </g>
         )}
@@ -3220,7 +3208,7 @@ function TunnelRow({
           className="mono"
           style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}
         >
-          {displayTunnelName(t.ifname)}
+          {t.ifname}
         </span>
         {carrying && (
           <span
