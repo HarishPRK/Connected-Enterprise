@@ -53,7 +53,7 @@ export function ApplicationAwareRoutingPage() {
   return (
     <>
       <PageHeader
-        title="Application Aware Routing"
+        title="Application Traffic Routing"
         subtitle="Identify each application, then steer it to the WAN path that meets its SLA class"
         right={
           <div className="toolbar">

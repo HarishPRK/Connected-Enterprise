@@ -215,7 +215,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   return (
     <>
       <PageHeader
-        title="Dynamic Path Selection"
+        title="Dynamic Failover"
         subtitle="Real-time SLA-driven failover between Fiber and 5G — sub-second decisions per flow"
         right={
           <div className="toolbar">
