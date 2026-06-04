@@ -27,12 +27,26 @@ import {
   CircleDot,
   Sparkles,
   Loader2,
+  Laptop,
+  Monitor,
+  Printer,
+  CreditCard,
+  Server,
+  PhoneCall,
+  Flame,
+  AlertTriangle,
+  DoorClosed,
+  Smartphone,
+  Tablet,
+  Plug,
+  HelpCircle,
 } from "lucide-react";
 import { pathThresholds, BRANCH_TO_IPSEC_SOURCE } from "../data/mock";
 import type { IpsecGatewayState, IpsecTunnelMetric } from "../types";
 import { useThemeColors } from "../ui/Theme";
 import type { ThemeColors } from "../ui/Theme";
 import { useIpsecMetrics } from "../ui/useIpsecMetrics";
+import { useDevices, type DeviceView } from "../ui/useDevices";
 import { runIpsecInsightSSE } from "../ui/agentClient";
 import { RichText } from "../ui/markdown";
 import { useToast } from "../ui/Toast";
@@ -61,6 +75,29 @@ function inferUnderlay(ifname: string): Underlay {
   )
     return "5g";
   return "fiber";
+}
+
+/** Order tunnels for the WAN list as fiber/cell pairs: fiber1, cell1, fiber2,
+ *  cell2, … Each underlay is sorted by the numeric part of its ifname so e.g.
+ *  vti1-fiber, vti2-fiber and vti3-cell, vti4-cell interleave predictably.
+ *  Any tunnel that's neither fiber nor cell is appended at the end. */
+function orderTunnelsFiberCell(
+  tunnels: IpsecTunnelMetric[],
+): IpsecTunnelMetric[] {
+  const numOf = (s: string) => {
+    const match = (s || "").match(/\d+/);
+    return match ? parseInt(match[0], 10) : 0;
+  };
+  const byNum = (a: IpsecTunnelMetric, b: IpsecTunnelMetric) =>
+    numOf(a.ifname) - numOf(b.ifname);
+  const fiber = tunnels.filter((t) => inferUnderlay(t.ifname) === "fiber").sort(byNum);
+  const cell = tunnels.filter((t) => inferUnderlay(t.ifname) === "5g").sort(byNum);
+  const out: IpsecTunnelMetric[] = [];
+  for (let i = 0; i < Math.max(fiber.length, cell.length); i++) {
+    if (fiber[i]) out.push(fiber[i]);
+    if (cell[i]) out.push(cell[i]);
+  }
+  return out;
 }
 
 /** Turn a raw device hostname (`rdk-bpi4-gateway`) into a friendly title
@@ -1647,7 +1684,7 @@ function GatewayBlock({
             No tunnels reported.
           </div>
         ) : (
-          m.tunnels.map((t) => (
+          orderTunnelsFiberCell(m.tunnels).map((t) => (
             <TunnelRow
               key={t.ifname}
               t={t}
@@ -1772,8 +1809,8 @@ function GatewayBlock({
  * WAN at the bottom. Each tunnel coloured by state; the device-reported
  * `active_tunnel` value (matched by ifname) gets a pulsing border. */
 /* ───── IPsec topology — physically-accurate horizontal flow ─────
- * Gateway (origin) → Fiber & 5G underlays → IPsec tunnels (2 per underlay) →
- * WAN egress (erouter0 → GCP) → HQ peers + Internet (destinations).
+ * IT/OT devices → Gateway → Fiber & 5G underlays → IPsec tunnels (2 per
+ * underlay) → WAN egress (erouter0 → GCP) → Internet (destination).
  * Mirrors the visual idiom of the Overview page's `Topology` widget. */
 function IpsecFlowSvg({
   m,
@@ -1787,16 +1824,24 @@ function IpsecFlowSvg({
   wanMbps?: number | null;
   wanPps?: number | null;
 }) {
-  const W = 1520;
+  const W = 1820;
   const H = 480;
 
-  // Column positions — left-to-right physical flow.
-  // Centered: ~130 px margin on each side of the 1520-wide canvas.
-  const COL_GW = { x: 130, w: 180 };
-  const COL_UNDERLAY = { x: 360, w: 160 };
-  const COL_MANIFOLD = { x: 570, w: 320 };
-  const COL_WAN = { x: 940, w: 200 };
-  const COL_DEST = { x: 1190, w: 200 };
+  // Live IT/OT device inventory (same feed as the Devices page). Show up to 3
+  // per domain as the on-prem endpoints originating traffic into the gateway.
+  const { devices: allDevices } = useDevices();
+  const itDevices = allDevices.filter((d) => d.domain === "IT").slice(0, 3);
+  const otDevices = allDevices.filter((d) => d.domain === "OT").slice(0, 3);
+
+  // Column positions — left-to-right physical flow. The IT/OT endpoints sit at
+  // the far left and feed the gateway; everything downstream is shifted right to
+  // make room (the gateway used to be the leftmost origin).
+  const COL_DEVICES = { x: 48, w: 190 };
+  const COL_GW = { x: 430, w: 180 };
+  const COL_UNDERLAY = { x: 660, w: 160 };
+  const COL_MANIFOLD = { x: 870, w: 320 };
+  const COL_WAN = { x: 1240, w: 200 };
+  const COL_DEST = { x: 1490, w: 200 };
 
   const GW_H = 120;
   const UNDERLAY_H = 100;
@@ -1807,17 +1852,15 @@ function IpsecFlowSvg({
 
   const FIBER_Y = 100; // top of fiber underlay box
   const CELL_Y = H - UNDERLAY_H - 100; // top of 5G underlay box
-  // 3 destinations stacked: HQ peers (top), AWS Cloud (centre), Internet (bottom)
-  const HQ_Y = 78;
-  const AWS_Y = ROW_CENTER - DEST_H / 2; // perfectly aligned with GCP egress
-  const INT_Y = H - DEST_H - 78;
+  // Single destination (Internet) — centred on the GCP egress row.
+  const INT_Y = ROW_CENTER - DEST_H / 2;
 
   const FIBER_COLOR = "#5ac8ff"; // sky blue (Overview's fiber)
   const CELL_COLOR = "#ffa07c"; // peach (Overview's 5G)
-  const HQ_COLOR = "#7c8cff"; // indigo
-  const AWS_COLOR = "#ff9f43"; // orange (AWS brand)
   const INT_COLOR = "#a5f3fc"; // cyan
   const GCP_COLOR = "#9aa7ff"; // soft blue-violet (GCP-ish)
+  const IT_COLOR = "#34d399"; // emerald — IT endpoint links
+  const OT_COLOR = "#ec4899"; // pink — OT endpoint links
   const accentPurple = c.accent3 ?? "#c084fc";
 
   const fiberTunnels = m.tunnels.filter(
@@ -1860,6 +1903,7 @@ function IpsecFlowSvg({
   };
 
   // Anchor points
+  const gwLeft = { x: COL_GW.x, y: ROW_CENTER };
   const gwRight = { x: COL_GW.x + COL_GW.w, y: ROW_CENTER };
   const fiberLeft = { x: COL_UNDERLAY.x, y: FIBER_Y + UNDERLAY_H / 2 };
   const fiberRight = {
@@ -1873,8 +1917,6 @@ function IpsecFlowSvg({
   };
   const wanLeft = { x: COL_WAN.x, y: ROW_CENTER };
   const wanRight = { x: COL_WAN.x + COL_WAN.w, y: ROW_CENTER };
-  const hqLeft = { x: COL_DEST.x, y: HQ_Y + DEST_H / 2 };
-  const awsLeft = { x: COL_DEST.x, y: AWS_Y + DEST_H / 2 };
   const intLeft = { x: COL_DEST.x, y: INT_Y + DEST_H / 2 };
 
   const fiberReachable = fiberTunnels.some((t) => t.reachable);
@@ -1970,6 +2012,7 @@ function IpsecFlowSvg({
 
         {/* Tier labels */}
         {[
+          { x: COL_DEVICES.x + COL_DEVICES.w / 2, label: "IT / OT DEVICES" },
           { x: COL_GW.x + COL_GW.w / 2, label: "EDGE GATEWAY" },
           { x: COL_UNDERLAY.x + COL_UNDERLAY.w / 2, label: "WAN UNDERLAYS" },
           { x: COL_MANIFOLD.x + COL_MANIFOLD.w / 2, label: "IPSEC TUNNELS" },
@@ -1989,6 +2032,19 @@ function IpsecFlowSvg({
             {t.label}
           </text>
         ))}
+
+        {/* ─── IT/OT endpoints → gateway (on-prem device origins) ─── */}
+        <DeviceColumn
+          x={COL_DEVICES.x}
+          w={COL_DEVICES.w}
+          it={itDevices}
+          ot={otDevices}
+          gwLeft={gwLeft}
+          c={c}
+          beziD={beziD}
+          itColor={IT_COLOR}
+          otColor={OT_COLOR}
+        />
 
         {/* ─── Gateway → underlays (particle only on the active underlay) ─── */}
         <NodeConnector
@@ -2182,30 +2238,8 @@ function IpsecFlowSvg({
           );
         })}
 
-        {/* ─── GCP transit → destinations.
-             HQ peers : IPsec-carried branch traffic (flows when an active
-                        tunnel is up).
-             AWS Cloud: analytics / cross-cloud traffic via HA-VPN or
-                        Partner-Interconnect (flows whenever WAN is up).
-             Internet : public egress via Cloud NAT (flows whenever WAN is up). */}
-        <NodeConnector
-          a={wanRight}
-          b={hqLeft}
-          state={!!activeTunnelObj?.reachable && m.wan.link_up ? "ok" : "warn"}
-          c={c}
-          beziD={beziD}
-          accent={HQ_COLOR}
-          flowing={!!activeTunnelObj?.reachable && m.wan.link_up}
-        />
-        <NodeConnector
-          a={wanRight}
-          b={awsLeft}
-          state={m.wan.link_up ? "ok" : "err"}
-          c={c}
-          beziD={beziD}
-          accent={AWS_COLOR}
-          flowing={m.wan.link_up}
-        />
+        {/* ─── GCP transit → Internet (public egress via Cloud NAT, flows
+             whenever WAN is up). */}
         <NodeConnector
           a={wanRight}
           b={intLeft}
@@ -2611,31 +2645,7 @@ function IpsecFlowSvg({
           }
         />
 
-        {/* ─── Destinations (3 stacked): HQ peers · AWS Cloud · Internet ─── */}
-        <SysNodeBox
-          x={COL_DEST.x}
-          y={HQ_Y}
-          w={COL_DEST.w}
-          h={DEST_H}
-          tint={HQ_COLOR}
-          status={anyReachable ? "ok" : "warn"}
-          c={c}
-          label="HQ peers"
-          sub={`${m.tunnels.length}× VPN endpoints`}
-          illustration={<HqIllustration tint={HQ_COLOR} />}
-        />
-        <SysNodeBox
-          x={COL_DEST.x}
-          y={AWS_Y}
-          w={COL_DEST.w}
-          h={DEST_H}
-          tint={AWS_COLOR}
-          status={m.wan.link_up ? "ok" : "warn"}
-          c={c}
-          label="AWS Cloud"
-          sub="analytics · us-east-1"
-          illustration={<AwsIllustration tint={AWS_COLOR} />}
-        />
+        {/* ─── Destination: Internet (public egress) ─── */}
         <SysNodeBox
           x={COL_DEST.x}
           y={INT_Y}
@@ -2650,6 +2660,193 @@ function IpsecFlowSvg({
         />
       </svg>
     </div>
+  );
+}
+
+/* ─── IT/OT device column — on-prem endpoints feeding the gateway ───
+ * Renders two dashed group boxes (IT on top, OT below), each listing up to 3
+ * live devices from the same feed as the Devices page, with a Bézier connector
+ * from every device into the gateway's left edge. Connector colour follows the
+ * device's health (green/amber/red), matching the rest of the flow. */
+const DEVICE_KIND_ICON: Record<DeviceView["kind"], typeof Laptop> = {
+  laptop: Laptop,
+  desktop: Monitor,
+  printer: Printer,
+  payment: CreditCard,
+  server: Server,
+  confphone: PhoneCall,
+  fire_sensor: Flame,
+  smoke_sensor: AlertTriangle,
+  door_lock: DoorClosed,
+  phone: Smartphone,
+  tablet: Tablet,
+  matter: Cpu,
+  shelly: Plug,
+  generic: HelpCircle,
+};
+
+function DeviceColumn({
+  x,
+  w,
+  it,
+  ot,
+  gwLeft,
+  c,
+  beziD,
+  itColor,
+  otColor,
+}: {
+  x: number;
+  w: number;
+  it: DeviceView[];
+  ot: DeviceView[];
+  gwLeft: { x: number; y: number };
+  c: ThemeColors;
+  beziD: (a: { x: number; y: number }, b: { x: number; y: number }) => string;
+  itColor: string;
+  otColor: string;
+}) {
+  const HEADER_H = 24;
+  const ROW_H = 26;
+  const ROW_GAP = 7;
+  const PAD = 9;
+  const groupH = (n: number) =>
+    HEADER_H + PAD + Math.max(n, 1) * ROW_H + (Math.max(n, 1) - 1) * ROW_GAP + PAD;
+
+  const itY = 78;
+  const itH = groupH(it.length);
+  const otY = itY + itH + 24;
+  const otH = groupH(ot.length);
+
+  const rowTop = (groupY: number, idx: number) =>
+    groupY + HEADER_H + PAD + idx * (ROW_H + ROW_GAP);
+
+  const stateOf = (s: DeviceView["status"]): "ok" | "warn" | "err" =>
+    s === "ok" ? "ok" : s === "warn" ? "warn" : "err";
+  const dotColor = (s: DeviceView["status"]) =>
+    s === "ok" ? c.ok : s === "warn" ? c.warn : s === "err" ? c.err : c.textMuted;
+
+  const renderGroup = (
+    devices: DeviceView[],
+    groupY: number,
+    groupH2: number,
+    title: string,
+    subtitle: string,
+    accent: string,
+  ) => (
+    <g>
+      {/* group box */}
+      <rect
+        x={x}
+        y={groupY}
+        width={w}
+        height={groupH2}
+        rx={14}
+        fill="rgba(255,255,255,0.02)"
+        stroke={`${accent}44`}
+        strokeDasharray="6 6"
+        strokeWidth={1.2}
+      />
+      {/* header: domain chip + count */}
+      <rect x={x + PAD} y={groupY + 6} width={26} height={16} rx={4} fill={accent} opacity={0.9} />
+      <text
+        x={x + PAD + 13}
+        y={groupY + 18}
+        textAnchor="middle"
+        fontSize={10}
+        fontWeight={800}
+        fill="#0b1020"
+        letterSpacing="0.04em"
+      >
+        {title}
+      </text>
+      <text x={x + PAD + 34} y={groupY + 18} fontSize={10} fill={c.textMuted}>
+        {subtitle}
+      </text>
+      {/* device rows */}
+      {devices.length === 0 ? (
+        <text
+          x={x + w / 2}
+          y={groupY + HEADER_H + PAD + ROW_H / 2 + 4}
+          textAnchor="middle"
+          fontSize={10}
+          fill={c.textMuted}
+        >
+          no devices
+        </text>
+      ) : (
+        devices.map((d, i) => {
+          const top = rowTop(groupY, i);
+          const Icon = DEVICE_KIND_ICON[d.kind] ?? HelpCircle;
+          const highlight = d.status !== "ok";
+          const border = highlight ? dotColor(d.status) : "rgba(255,255,255,0.10)";
+          const name = d.name.length > 16 ? `${d.name.slice(0, 15)}…` : d.name;
+          return (
+            <g key={d.id}>
+              <rect
+                x={x + PAD}
+                y={top}
+                width={w - PAD * 2}
+                height={ROW_H}
+                rx={7}
+                fill="rgba(255,255,255,0.03)"
+                stroke={border}
+                strokeWidth={highlight ? 1.5 : 1}
+              />
+              <Icon
+                x={x + PAD + 8}
+                y={top + (ROW_H - 13) / 2}
+                width={13}
+                height={13}
+                color={c.textDim}
+              />
+              <text
+                x={x + PAD + 28}
+                y={top + ROW_H / 2 + 3.5}
+                fontSize={11}
+                fontWeight={600}
+                fill={c.text}
+              >
+                {name}
+              </text>
+              <circle cx={x + w - PAD - 10} cy={top + ROW_H / 2} r={3.5} fill={dotColor(d.status)} />
+            </g>
+          );
+        })
+      )}
+    </g>
+  );
+
+  return (
+    <g>
+      {/* connectors first so the group boxes paint over the tails */}
+      {it.map((d, i) => (
+        <NodeConnector
+          key={`itc-${d.id}`}
+          a={{ x: x + w - PAD, y: rowTop(itY, i) + ROW_H / 2 }}
+          b={gwLeft}
+          state={stateOf(d.status)}
+          c={c}
+          beziD={beziD}
+          accent={itColor}
+          flowing={d.status === "ok"}
+        />
+      ))}
+      {ot.map((d, i) => (
+        <NodeConnector
+          key={`otc-${d.id}`}
+          a={{ x: x + w - PAD, y: rowTop(otY, i) + ROW_H / 2 }}
+          b={gwLeft}
+          state={stateOf(d.status)}
+          c={c}
+          beziD={beziD}
+          accent={otColor}
+          flowing={d.status === "ok"}
+        />
+      ))}
+      {renderGroup(it, itY, itH, "IT", `${it.length} endpoint${it.length === 1 ? "" : "s"}`, itColor)}
+      {renderGroup(ot, otY, otH, "OT", `${ot.length} sensor${ot.length === 1 ? "" : "s"} / locks`, otColor)}
+    </g>
   );
 }
 
@@ -2892,28 +3089,6 @@ function NodeConnector({
 }
 
 /* ─── Inline illustrations (Overview-style, centered around 0,0) ─── */
-function HqIllustration({ tint }: { tint: string }) {
-  // Cloud + peer dots, centred around y=0 (range y ∈ [-10, +10]).
-  return (
-    <g>
-      {/* cloud silhouette */}
-      <path
-        d="M -22 2 C -22 -8, -10 -12, -4 -8 C 0 -14, 10 -14, 14 -8 C 22 -10, 28 -2, 24 4 C 26 8, 20 12, 14 12 L -14 12 C -24 12, -28 6, -22 2 Z"
-        fill={tint}
-        fillOpacity={0.14}
-        stroke={tint}
-        strokeWidth={1.3}
-      />
-      {/* peer dots inside */}
-      <circle cx={-8} cy={0} r={1.8} fill={tint} />
-      <circle cx={0} cy={-1} r={1.8} fill={tint} />
-      <circle cx={8} cy={0} r={1.8} fill={tint} />
-      <circle cx={-4} cy={6} r={1.4} fill={tint} opacity={0.7} />
-      <circle cx={4} cy={6} r={1.4} fill={tint} opacity={0.7} />
-    </g>
-  );
-}
-
 function GatewayIllustration({
   tint,
   okColor,
@@ -3087,55 +3262,6 @@ function GcpIllustration({ tint: _tint }: { tint: string }) {
         d="M18.085 21.57A18.11 18.11 0 0 0 0 39.654c0 5.873 2.813 11.095 7.166 14.403l8.064-8.064a6.96 6.96 0 0 1-4.099-6.339c0-3.837 3.124-6.954 6.954-6.954 2.82 0 5.244 1.7 6.34 4.1l8.064-8.064c-3.307-4.353-8.53-7.166-14.403-7.166z"
         fill="#fbbc05"
       />
-    </g>
-  );
-}
-
-function AwsIllustration({ tint }: { tint: string }) {
-  // AWS-style cloud + service cubes, centred around y=0 (range y ∈ [-9, +9]).
-  return (
-    <g>
-      <path
-        d="M -22 3
-           C -22 -7, -10 -11, -4 -7
-           C 0 -13, 10 -13, 14 -7
-           C 22 -9, 28 -1, 22 5
-           C 24 9, 18 9, 12 9
-           L -12 9
-           C -24 9, -28 7, -22 3 Z"
-        fill={tint}
-        fillOpacity={0.16}
-        stroke={tint}
-        strokeWidth={1.4}
-      />
-      <rect
-        x={-9}
-        y={-2}
-        width={5}
-        height={5}
-        rx={0.6}
-        fill={tint}
-        opacity={0.85}
-      />
-      <rect
-        x={-2}
-        y={-2}
-        width={5}
-        height={5}
-        rx={0.6}
-        fill={tint}
-        opacity={0.85}
-      />
-      <rect
-        x={5}
-        y={-2}
-        width={5}
-        height={5}
-        rx={0.6}
-        fill={tint}
-        opacity={0.85}
-      />
-      <circle cx={0} cy={7} r={1.4} fill="#ffffff" opacity={0.85} />
     </g>
   );
 }
