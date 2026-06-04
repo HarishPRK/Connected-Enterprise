@@ -221,6 +221,11 @@ const ICON_FOR_KIND: Record<Device['kind'], React.ComponentType<{ size?: number 
   fire_sensor:  Flame,
   smoke_sensor: AlertTriangle,
   door_lock:    DoorClosed,
+  phone:        PhoneCall,
+  tablet:       Laptop,
+  matter:       AlertTriangle,
+  shelly:       CreditCard,
+  generic:      Laptop,
 };
 const ICON_FOR_CONN: Record<Device['conn'], React.ComponentType<{ size?: number }>> = {
   wired: Cable,
@@ -232,6 +237,7 @@ const KIND_LABEL: Record<Device['kind'], string> = {
   laptop: 'Laptop', desktop: 'Desktop', printer: 'Printer', payment: 'Payment',
   server: 'Server', confphone: 'Conf phone',
   fire_sensor: 'Fire sensor', smoke_sensor: 'Smoke sensor', door_lock: 'Door lock',
+  phone: 'Phone', tablet: 'Tablet', matter: 'Matter', shelly: 'Shelly', generic: 'Device',
 };
 
 const STATUS_TINT: Record<Status, { fg: string; bg: string; label: string }> = {

@@ -50,7 +50,9 @@ export interface Device {
   name: string;
   kind:
     | 'laptop' | 'desktop' | 'printer' | 'payment' | 'server' | 'confphone'
-    | 'fire_sensor' | 'smoke_sensor' | 'door_lock';
+    | 'fire_sensor' | 'smoke_sensor' | 'door_lock'
+    // Live-discovery kinds (Phase 1) — devices the gateway reports off the LAN.
+    | 'phone' | 'tablet' | 'matter' | 'shelly' | 'generic';
   domain: 'IT' | 'OT';
   ip: string;
   mac: string;

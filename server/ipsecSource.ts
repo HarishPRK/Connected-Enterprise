@@ -51,6 +51,14 @@ const PATH_PREFIXES: string[] = (process.env.IOT_PATH_PREFIXES ?? 'rdk,prpl')
 const pathControlTopic = (prefix: string) => `${prefix}/path/control`;
 const pathResultTopic  = (prefix: string) => `${prefix}/path/control/result`;
 
+// Device discovery (Phase 1): the gateway runs a `com.rdk.devicediscovery`
+// component that enumerates its LAN clients and publishes a JSON inventory on
+// `<prefix>/devices/inventory`. We subscribe and forward the raw payload to
+// deviceSource via the `inventory` event — parsing/classification lives there.
+const INVENTORY_TOPICS: string[] = (
+  process.env.IOT_DEVICE_TOPICS ?? 'rdk/devices/inventory,prpl/devices/inventory'
+).split(',').map((s) => s.trim()).filter(Boolean);
+
 export interface PathCommandResult {
   ok: boolean;
   mode?: string;
@@ -63,6 +71,8 @@ export interface PathCommandResult {
 interface IpsecSourceEvents {
   update: (snapshot: { gatewayKey: string; state: IpsecGatewayState }) => void;
   status: (status: { connected: boolean; reason?: string }) => void;
+  /** Raw device-inventory payload from a gateway, tagged with its source. */
+  inventory: (msg: { source: 'rdk' | 'prpl' | 'other'; payload: unknown }) => void;
 }
 
 class IpsecSource extends EventEmitter {
@@ -167,6 +177,16 @@ class IpsecSource extends EventEmitter {
           (t, payload) => this.handlePathResult(t, payload),
         );
       }
+
+      // Subscribe to the device-inventory topics. The parsed payload is fanned
+      // out via the `inventory` event; deviceSource consumes it.
+      for (const topic of INVENTORY_TOPICS) {
+        await this.connection.subscribe(
+          topic,
+          mqtt.QoS.AtLeastOnce,
+          (t, payload) => this.handleInventory(t, payload),
+        );
+      }
     } catch (err) {
       this.connected = false;
       this.lastError = err instanceof Error ? err.message : String(err);
@@ -259,6 +279,20 @@ class IpsecSource extends EventEmitter {
     }
   }
 
+  /** Inventory-topic handler — decodes the JSON device list and forwards it.
+   *  Parsing/classification is deviceSource's job; we just deliver the payload
+   *  tagged with the gateway source. */
+  private handleInventory(topic: string, payload: ArrayBuffer): void {
+    try {
+      const text = new TextDecoder().decode(new Uint8Array(payload));
+      const parsed = JSON.parse(text) as unknown;
+      this.emit('inventory', { source: topicToSource(topic), payload: parsed });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[devices] failed to parse inventory on "${topic}":`, err);
+    }
+  }
+
   /** Publish a path-control command to `<prefix>/path/control` and wait for the
    *  gateway's ack on the result topic (correlated by id). Resolves with the
    *  ack, or `{ ok:false, timedOut:true }` if no ack arrives in time.
@@ -329,6 +363,11 @@ class IpsecSource extends EventEmitter {
   onStatus(listener: IpsecSourceEvents['status']): () => void {
     this.on('status', listener);
     return () => this.off('status', listener);
+  }
+
+  onInventory(listener: IpsecSourceEvents['inventory']): () => void {
+    this.on('inventory', listener);
+    return () => this.off('inventory', listener);
   }
 }
 

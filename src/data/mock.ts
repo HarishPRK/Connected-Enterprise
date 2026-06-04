@@ -647,6 +647,7 @@ function synthesizeDevice(branchId: string, index: number): Device {
   const KIND_LABEL: Record<Device['kind'], string> = {
     laptop: 'Lap', desktop: 'Desk', printer: 'Prn', payment: 'POS', server: 'Srv',
     confphone: 'Conf', fire_sensor: 'Fire', smoke_sensor: 'Smoke', door_lock: 'DL',
+    phone: 'Phone', tablet: 'Tab', matter: 'Mtr', shelly: 'Shly', generic: 'Dev',
   };
   const branchSlug = branchId.replace('b-', '').toUpperCase().slice(0, 3);
   const hex = (n: number) => ((n >>> 0) & 0xff).toString(16).padStart(2, '0').toUpperCase();

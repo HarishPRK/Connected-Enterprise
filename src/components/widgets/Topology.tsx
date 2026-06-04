@@ -206,6 +206,11 @@ const ICON_FOR_KIND: Record<Device['kind'], React.ComponentType<{ size?: number 
   fire_sensor: Flame,
   smoke_sensor: AlertTriangle,
   door_lock: DoorClosed,
+  phone: PhoneCall,
+  tablet: Laptop,
+  matter: AlertTriangle,
+  shelly: CreditCard,
+  generic: Laptop,
 };
 
 interface PinLayout {

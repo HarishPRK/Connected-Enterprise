@@ -46,6 +46,7 @@ const kindLabel: Record<Device['kind'], string> = {
   laptop: 'Laptop', desktop: 'Desktop', printer: 'Printer', payment: 'Payment',
   server: 'Server', confphone: 'ConfPhone',
   fire_sensor: 'Fire sensor', smoke_sensor: 'Smoke sensor', door_lock: 'Door lock',
+  phone: 'Phone', tablet: 'Tablet', matter: 'Matter', shelly: 'Shelly', generic: 'Device',
 };
 
 /* ─────────── main component ─────────── */

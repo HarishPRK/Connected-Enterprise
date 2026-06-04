@@ -13,6 +13,7 @@ import { makeLLM } from './llm.js';
 import { runAgent } from './agent.js';
 import { runChat, type ChatMessage } from './chat.js';
 import { ipsecSource } from './ipsecSource.js';
+import { deviceSource } from './deviceSource.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -562,6 +563,73 @@ app.get('/api/ipsec/stream', (req, res) => {
     clearInterval(hb);
     if (!res.writableEnded) res.end();
   });
+});
+
+/* ─────────── Device inventory (IT/OT) ───────────
+ * Phase 0: served from the static seed in deviceSource.ts so the Devices page
+ * runs off the API + SSE with no gateway changes. IT/OT is an editable,
+ * persisted attribute (auto-seed + operator override). Phase 1 swaps the seed
+ * for live `rdk/devices/inventory` MQTT data behind the same endpoints. */
+
+/** Snapshot of the current device inventory (effective IT/OT applied). */
+app.get('/api/devices/snapshot', (_req, res) => {
+  res.json(deviceSource.getSnapshot());
+});
+
+/** SSE stream — hydrates with the current snapshot, then pushes one on every
+ *  reclassify. Mirrors /api/ipsec/stream. */
+app.get('/api/devices/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+
+  const emit = (event: string, data: Record<string, unknown>) => {
+    if (!res.writable || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  emit('snapshot', deviceSource.getSnapshot() as unknown as Record<string, unknown>);
+
+  const offUpdate = deviceSource.onUpdate((snap) =>
+    emit('snapshot', snap as unknown as Record<string, unknown>),
+  );
+
+  const hb = setInterval(() => {
+    if (res.writable && !res.writableEnded) res.write(': hb\n\n');
+  }, 15_000);
+
+  req.on('close', () => {
+    offUpdate();
+    clearInterval(hb);
+    if (!res.writableEnded) res.end();
+  });
+});
+
+/** POST /api/devices/classify — move a device between IT and OT. Body:
+ *  `{ mac: string, domain: 'IT'|'OT' }`. Reclassifying to the device's own auto
+ *  domain clears the override. Persists, then the SSE stream pushes the new
+ *  snapshot to every connected client. */
+app.post('/api/devices/classify', (req, res) => {
+  const mac = typeof req.body?.mac === 'string' ? req.body.mac.trim() : '';
+  const domain = req.body?.domain;
+  if (!mac) {
+    res.status(400).json({ error: 'mac is required' });
+    return;
+  }
+  if (domain !== 'IT' && domain !== 'OT') {
+    res.status(400).json({ error: `domain must be 'IT' or 'OT' (got ${JSON.stringify(domain)})` });
+    return;
+  }
+  const ok = deviceSource.classify(mac, domain);
+  if (!ok) {
+    res.status(404).json({ error: `no device with mac ${mac}` });
+    return;
+  }
+  res.json({ ok: true, mac, domain });
 });
 
 /* ─────────── Video analytics proxy ───────────

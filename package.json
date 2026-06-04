@@ -9,6 +9,7 @@
     "dev:full": "concurrently -n web,agent -c cyan,magenta \"npm:dev\" \"npm:dev:server\"",
     "build": "tsc -b && vite build",
     "start": "tsx server/index.ts",
+    "sim:devices": "tsx scripts/sim-device-inventory.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },
