@@ -115,8 +115,9 @@ app.post('/api/agent/run', async (req, res) => {
 app.post('/api/gateway/path', async (req, res) => {
   const mode = req.body?.mode;
   const source = req.body?.source ?? 'rdk';
-  // Optional tunnel pin (e.g. "vti-fiber1") — UI sends this when the user
-  // picks Tunnel 1 / Tunnel 2 from the Force-Fiber / Force-5G modal.
+  // Optional tunnel pin (e.g. "vti-fiber1"), kept for backwards-compat. The UI
+  // no longer sends it — Force-Fiber / Force-5G publish the mode alone and the
+  // Greengrass component picks the tunnel within the chosen underlay.
   const tunnel = typeof req.body?.tunnel === 'string' && req.body.tunnel.trim()
     ? req.body.tunnel.trim()
     : undefined;

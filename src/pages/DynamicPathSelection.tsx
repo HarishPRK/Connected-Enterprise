@@ -50,7 +50,6 @@ import { useDevices, type DeviceView } from "../ui/useDevices";
 import { runIpsecInsightSSE } from "../ui/agentClient";
 import { RichText } from "../ui/markdown";
 import { useToast } from "../ui/Toast";
-import { Modal } from "../ui/Modal";
 
 type Metric = "latency" | "jitter" | "loss";
 
@@ -1325,9 +1324,6 @@ function GatewayBlock({
   const m = g.metrics;
   const [forceMode, setForceMode] = useState<ForceMode>("auto");
   const [pathBusy, setPathBusy] = useState(false);
-  // When non-null, show the tunnel-picker modal for the requested underlay.
-  // The user must pick Tunnel 1 / Tunnel 2 before the command is sent.
-  const [tunnelPicker, setTunnelPicker] = useState<"fiber" | "5g" | null>(null);
   const { push } = useToast();
 
   // The gateway's topic family — drives which IoT Core topic the command is
@@ -1341,37 +1337,30 @@ function GatewayBlock({
         ? "Forced to Fiber"
         : "Forced to 5G";
 
-  /** Click handler for the Auto / Force-Fiber / Force-5G buttons. Auto fires
-   *  immediately; Force-Fiber / Force-5G open the tunnel-picker modal first so
-   *  the user picks Tunnel 1 or Tunnel 2 within that underlay. Optimistically
-   *  flips the UI to the requested mode, publishes the command over IoT Core,
-   *  and reverts the UI on hard failure. A "pending" ack (component offline)
-   *  keeps the flip but flags it as unconfirmed. */
-  const applyPathMode = async (next: ForceMode, tunnelIfname?: string) => {
+  /** Click handler for the Auto / Force-Fiber / Force-5G buttons. Each fires
+   *  immediately — Force-Fiber / Force-5G publish the corresponding path-control
+   *  command to the gateway's Greengrass component over IoT Core (the component
+   *  applies it locally, no per-tunnel pick needed). Optimistically flips the UI
+   *  to the requested mode and reverts on hard failure; a "pending" ack
+   *  (component offline) keeps the flip but flags it as unconfirmed. */
+  const applyPathMode = async (next: ForceMode) => {
     if (pathBusy) return;
-    // For Auto, no tunnel pick is needed. For Fiber/5G, open the picker
-    // unless a tunnel was already supplied (i.e. called from the modal).
-    if ((next === "fiber" || next === "5g") && !tunnelIfname) {
-      setTunnelPicker(next);
-      return;
-    }
     const previous = forceMode;
     setForceMode(next);
     setPathBusy(true);
     try {
-      const { pending } = await postGatewayPathMode(next, source, tunnelIfname);
-      const tunnelSuffix = tunnelIfname ? ` · ${tunnelIfname}` : "";
+      const { pending } = await postGatewayPathMode(next, source);
       push(
         pending
           ? {
               kind: "info",
-              title: `${modeTitle(next)}${tunnelSuffix} — command sent`,
+              title: `${modeTitle(next)} — command sent`,
               detail:
                 "Published to the gateway, but no ack received yet. It may apply once the gateway reconnects.",
             }
           : {
               kind: "success",
-              title: `${modeTitle(next)}${tunnelSuffix}`,
+              title: modeTitle(next),
               detail: "Gateway confirmed the mode change.",
             },
       );
@@ -1386,12 +1375,6 @@ function GatewayBlock({
       setPathBusy(false);
     }
   };
-
-  // Tunnels in the underlay the user is picking from (Fiber or 5G). The
-  // picker modal reads this to show Tunnel 1 / Tunnel 2 with their ifnames.
-  const pickerTunnels = tunnelPicker
-    ? m.tunnels.filter((t) => inferUnderlay(t.ifname) === tunnelPicker)
-    : [];
 
   // Compute live WAN throughput + packet rate from successive payloads so the
   // diagram can show a numerical badge along the active path.
@@ -1619,112 +1602,6 @@ function GatewayBlock({
           ))
         )}
       </div>
-
-      {/* Tunnel picker — opens when the user clicks Force Fiber / Force 5G.
-          Shows the two tunnels in the chosen underlay; picking one fires the
-          gateway command with that tunnel ifname. */}
-      <Modal
-        open={tunnelPicker != null}
-        onClose={() => setTunnelPicker(null)}
-        title={
-          tunnelPicker === "fiber"
-            ? "Select tunnel — Fiber"
-            : tunnelPicker === "5g"
-              ? "Select tunnel — 5G"
-              : ""
-        }
-        width={460}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            padding: "4px 0 6px",
-          }}
-        >
-          <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-            Pick which tunnel the gateway should pin to in this underlay.
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 10,
-              marginTop: 4,
-            }}
-          >
-            {pickerTunnels.map((t, i) => {
-              const ok = t.present && t.reachable;
-              const accent = ok ? c.ok : c.warn;
-              return (
-                <button
-                  key={t.ifname || `slot-${i}`}
-                  onClick={() => {
-                    const target = tunnelPicker;
-                    setTunnelPicker(null);
-                    if (target) void applyPathMode(target, t.ifname);
-                  }}
-                  disabled={!t.present}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-start",
-                    gap: 6,
-                    padding: "12px 14px",
-                    borderRadius: 10,
-                    border: `1px solid ${accent}55`,
-                    background: `${accent}10`,
-                    textAlign: "left",
-                    cursor: t.present ? "pointer" : "not-allowed",
-                    opacity: t.present ? 1 : 0.55,
-                  }}
-                  title={t.ifname}
-                >
-                  <span
-                    style={{ fontSize: 13, fontWeight: 800, color: accent }}
-                  >
-                    Tunnel {i + 1}
-                  </span>
-                  <span
-                    className="mono"
-                    style={{ fontSize: 11, color: "var(--text)" }}
-                  >
-                    {t.ifname || "—"}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 10.5,
-                      color: "var(--text-muted)",
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {!t.present
-                      ? "absent"
-                      : t.reachable
-                        ? `reachable · ${t.latency_ms.toFixed(0)} ms`
-                        : "unreachable"}
-                  </span>
-                </button>
-              );
-            })}
-            {pickerTunnels.length === 0 && (
-              <div
-                style={{
-                  gridColumn: "1 / -1",
-                  fontSize: 12,
-                  color: "var(--text-muted)",
-                  fontStyle: "italic",
-                  padding: 12,
-                }}
-              >
-                No tunnels reported in this underlay.
-              </div>
-            )}
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
