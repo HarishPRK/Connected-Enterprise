@@ -320,8 +320,12 @@ class IpsecSource extends EventEmitter {
       }, timeoutMs);
     });
 
+    // The gateway's com.rdk.pathcontrol component only understands `{ id, mode }`.
+    // The UI lets the user pick a tunnel (for the optimistic flip + toast), but
+    // we intentionally do NOT put `tunnel` on the wire so the published command
+    // matches exactly what the component expects. Re-add it here once the
+    // gateway gains a tunnel-pinning endpoint.
     const payload: Record<string, unknown> = { id, mode };
-    if (tunnel) payload.tunnel = tunnel;
 
     try {
       await this.connection.publish(
