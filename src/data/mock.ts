@@ -111,10 +111,11 @@ export const pathFlips: PathFlipEvent[] = [
 ];
 
 export const pathThresholds: PathThreshold[] = [
-  { metric: 'latency', warn: 80,  fail: 150, unit: 'ms' },
-  { metric: 'jitter',  warn: 30,  fail: 60,  unit: 'ms' },
-  { metric: 'loss',    warn: 1,   fail: 3,   unit: '%'  },
-  { metric: 'mos',     warn: 3.6, fail: 3.0, unit: ''   },
+  // Fiber holds the tighter bound; 5G is given more headroom on latency/jitter.
+  { metric: 'latency', fiber: { warn: 80,  fail: 150 }, fiveg: { warn: 120, fail: 200 }, unit: 'ms' },
+  { metric: 'jitter',  fiber: { warn: 30,  fail: 60  }, fiveg: { warn: 40,  fail: 80  }, unit: 'ms' },
+  { metric: 'loss',    fiber: { warn: 1,   fail: 3   }, fiveg: { warn: 1.5, fail: 5   }, unit: '%'  },
+  { metric: 'mos',     fiber: { warn: 3.6, fail: 3.0 }, fiveg: { warn: 3.4, fail: 2.8 }, unit: ''   },
 ];
 
 // SLA history — 24 points × 2 paths × 3 metrics

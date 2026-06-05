@@ -77,27 +77,17 @@ function inferUnderlay(ifname: string): Underlay {
   return "fiber";
 }
 
-/** Order tunnels for the WAN list as fiber/cell pairs: fiber1, cell1, fiber2,
- *  cell2, … Each underlay is sorted by the numeric part of its ifname so e.g.
- *  vti1-fiber, vti2-fiber and vti3-cell, vti4-cell interleave predictably.
- *  Any tunnel that's neither fiber nor cell is appended at the end. */
-function orderTunnelsFiberCell(
+/** Order tunnels by the numeric part of their ifname, ascending — so the WAN
+ *  list and probe table read vti1, vti2, vti3, vti4 regardless of the order
+ *  the gateway happens to report them in. Non-numeric names sort to the front. */
+function orderTunnelsByName(
   tunnels: IpsecTunnelMetric[],
 ): IpsecTunnelMetric[] {
   const numOf = (s: string) => {
     const match = (s || "").match(/\d+/);
     return match ? parseInt(match[0], 10) : 0;
   };
-  const byNum = (a: IpsecTunnelMetric, b: IpsecTunnelMetric) =>
-    numOf(a.ifname) - numOf(b.ifname);
-  const fiber = tunnels.filter((t) => inferUnderlay(t.ifname) === "fiber").sort(byNum);
-  const cell = tunnels.filter((t) => inferUnderlay(t.ifname) === "5g").sort(byNum);
-  const out: IpsecTunnelMetric[] = [];
-  for (let i = 0; i < Math.max(fiber.length, cell.length); i++) {
-    if (fiber[i]) out.push(fiber[i]);
-    if (cell[i]) out.push(cell[i]);
-  }
-  return out;
+  return [...tunnels].sort((a, b) => numOf(a.ifname) - numOf(b.ifname));
 }
 
 /** Turn a raw device hostname (`rdk-bpi4-gateway`) into a friendly title
@@ -250,7 +240,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   const cellMos = latest?.fiveg_mos ?? 0;
 
   return (
-    <>
+    <div className="failover-page" style={{ display: "contents" }}>
       <PageHeader
         title="Dynamic Failover"
         subtitle="Real-time SLA-driven failover between Fiber and 5G — sub-second decisions per flow"
@@ -474,176 +464,111 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           </Card>
         </div>
 
-        {/* Active probes — one row per IPsec tunnel reported by the gateway.
-            RTT, success% and state are computed from the latest payload. */}
-        <div className="col-7">
-          <Card
-            title={
-              <span>
-                <Zap size={13} /> Active probes
-              </span>
-            }
-            sub={
-              liveState
-                ? `${liveState.metrics.tunnels.length} IPsec tunnels feeding the SLA engine`
-                : "Awaiting first IPsec payload…"
-            }
-          >
-            <table>
-              <thead>
-                <tr>
-                  <th>Target</th>
-                  <th>Type</th>
-                  <th>Interval</th>
-                  <th>RTT</th>
-                  <th>Success</th>
-                  <th>State</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(liveState?.metrics.tunnels ?? []).map((t) => {
-                  const successPct = t.reachable
-                    ? Math.max(0, Math.min(100, 100 - t.loss_percent))
-                    : 0;
-                  const underlay = inferUnderlay(t.ifname);
-                  return (
-                    <tr key={t.ifname}>
-                      <td className="mono" style={{ color: "var(--text)" }}>
-                        {t.ifname}
-                      </td>
-                      <td>
-                        <span className="badge">
-                          IPSEC · {underlay.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="mono" style={{ color: "var(--text-dim)" }}>
-                        10s
-                      </td>
-                      <td className="mono">
-                        {t.reachable ? `${t.latency_ms.toFixed(1)} ms` : "—"}
-                      </td>
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                          }}
-                        >
-                          <div className="progress" style={{ width: 80 }}>
-                            <span style={{ width: `${successPct}%` }} />
-                          </div>
-                          <span
-                            className="mono"
-                            style={{ fontSize: 11, color: "var(--text-dim)" }}
-                          >
-                            {successPct.toFixed(1)}%
-                          </span>
-                        </div>
-                      </td>
-                      <td>
-                        <span
-                          className={`badge ${t.reachable ? "ok" : t.present ? "warn" : ""}`}
-                        >
-                          {t.reachable
-                            ? "Up"
-                            : t.present
-                              ? "Unreachable"
-                              : "Absent"}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!liveState && (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      style={{
-                        color: "var(--text-muted)",
-                        fontSize: 12.5,
-                        padding: "14px 0",
-                      }}
-                    >
-                      Waiting for first payload on{" "}
-                      <span className="mono">rdk/ipsec/metrics</span>…
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </Card>
-        </div>
-
-        {/* Thresholds editor */}
-        <div className="col-5">
+        {/* Thresholds editor — full-width now that the Active probes card has
+            been folded into the per-tunnel rows above (Interval + Success). */}
+        <div className="col-12">
           <Card
             title={
               <span>
                 <Gauge size={13} /> SLA thresholds
               </span>
             }
-            sub="Used by the path selector to decide warn / fail"
+            sub="Separate Fiber & 5G bounds — used by the path selector to decide warn / fail"
           >
-            {pathThresholds.map((t) => (
-              <div
-                key={t.metric}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr",
-                  gap: 10,
-                  alignItems: "center",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    color: "var(--text-dim)",
-                    textTransform: "capitalize",
-                  }}
-                >
-                  {t.metric}
+            {/* Compact metric blocks — laid out across the row so the inputs
+                stay small instead of stretching the full card width. */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+                gap: "14px 24px",
+              }}
+            >
+              {pathThresholds.map((t) => (
+                <div key={t.metric}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "var(--text-dim)",
+                      textTransform: "capitalize",
+                      marginBottom: 6,
+                    }}
+                  >
+                    {t.metric}
+                  </div>
+                  {/* per-block Warn / Fail headers */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "44px 1fr 1fr",
+                      gap: 8,
+                      marginBottom: 4,
+                    }}
+                  >
+                    <span />
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: "var(--warn)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      Warn
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: "var(--err)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      Fail
+                    </span>
+                  </div>
+                  {[
+                    { name: "Fiber", color: c.accent, vals: t.fiber },
+                    { name: "5G", color: c.accent2, vals: t.fiveg },
+                  ].map(({ name, color, vals }) => (
+                    <div
+                      key={name}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "44px 1fr 1fr",
+                        gap: 8,
+                        alignItems: "center",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color,
+                          letterSpacing: "0.04em",
+                        }}
+                      >
+                        {name}
+                      </span>
+                      <input
+                        defaultValue={`${vals.warn}${t.unit}`}
+                        className="mono"
+                        style={{ padding: "6px 8px", width: "100%", minWidth: 0 }}
+                      />
+                      <input
+                        defaultValue={`${vals.fail}${t.unit}`}
+                        className="mono"
+                        style={{ padding: "6px 8px", width: "100%", minWidth: 0 }}
+                      />
+                    </div>
+                  ))}
                 </div>
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: "var(--warn)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                    }}
-                  >
-                    Warn
-                  </span>
-                  <input
-                    defaultValue={`${t.warn}${t.unit}`}
-                    className="mono"
-                    style={{ padding: "6px 8px" }}
-                  />
-                </label>
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: "var(--err)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                    }}
-                  >
-                    Fail
-                  </span>
-                  <input
-                    defaultValue={`${t.fail}${t.unit}`}
-                    className="mono"
-                    style={{ padding: "6px 8px" }}
-                  />
-                </label>
-              </div>
-            ))}
+              ))}
+            </div>
             <div
               style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}
             >
@@ -655,7 +580,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           </Card>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -1684,7 +1609,7 @@ function GatewayBlock({
             No tunnels reported.
           </div>
         ) : (
-          orderTunnelsFiberCell(m.tunnels).map((t) => (
+          orderTunnelsByName(m.tunnels).map((t) => (
             <TunnelRow
               key={t.ifname}
               t={t}
@@ -2026,7 +1951,7 @@ function IpsecFlowSvg({
             textAnchor="middle"
             fontSize={9.5}
             fontWeight={700}
-            fill={c.textMuted}
+            fill={c.textDim}
             letterSpacing="0.14em"
           >
             {t.label}
@@ -2298,7 +2223,7 @@ function IpsecFlowSvg({
           x={COL_MANIFOLD.x + 70}
           y={FIBER_BAND_Y - 1}
           fontSize={10}
-          fill={c.textMuted}
+          fill={c.textDim}
         >
           {fiberTunnels.filter((t) => t.reachable).length}/{fiberTunnels.length}{" "}
           reachable
@@ -2327,7 +2252,7 @@ function IpsecFlowSvg({
           x={COL_MANIFOLD.x + 70}
           y={CELL_BAND_Y - 1}
           fontSize={10}
-          fill={c.textMuted}
+          fill={c.textDim}
         >
           {cellTunnels.filter((t) => t.reachable).length}/{cellTunnels.length}{" "}
           reachable
@@ -2460,7 +2385,7 @@ function IpsecFlowSvg({
                 x={PILL_X + 36}
                 y={py + PILL_H / 2 + 12}
                 fontSize={9.5}
-                fill={c.textMuted}
+                fill={c.textDim}
                 fontFamily="JetBrains Mono, ui-monospace, monospace"
                 letterSpacing="0.04em"
               >
@@ -2576,7 +2501,7 @@ function IpsecFlowSvg({
               y={4}
               fontSize={9}
               fontWeight={700}
-              fill={c.textMuted}
+              fill={c.textDim}
               letterSpacing="0.10em"
             >
               → ACTIVE
@@ -2760,7 +2685,7 @@ function DeviceColumn({
       >
         {title}
       </text>
-      <text x={x + PAD + 34} y={groupY + 18} fontSize={10} fill={c.textMuted}>
+      <text x={x + PAD + 34} y={groupY + 18} fontSize={10} fill={c.textDim}>
         {subtitle}
       </text>
       {/* device rows */}
@@ -2770,7 +2695,7 @@ function DeviceColumn({
           y={groupY + HEADER_H + PAD + ROW_H / 2 + 4}
           textAnchor="middle"
           fontSize={10}
-          fill={c.textMuted}
+          fill={c.textDim}
         >
           no devices
         </text>
@@ -2948,7 +2873,7 @@ function SysNodeBox({
         y={subY}
         textAnchor="middle"
         fontSize={10}
-        fill={c.textMuted}
+        fill={c.textDim}
       >
         {sub}
       </text>
@@ -3483,6 +3408,7 @@ function TunnelRow({
         </span>
       </div>
       <div className="ipsec-tunnel-metrics">
+        <Metric label="Interval" value="10s" accent={c.textDim} />
         <Metric
           label="Latency"
           value={t.reachable ? `${t.latency_ms.toFixed(1)} ms` : "—"}
@@ -3491,6 +3417,15 @@ function TunnelRow({
         <Metric
           label="Loss"
           value={t.reachable ? `${t.loss_percent.toFixed(2)} %` : "—"}
+          accent={stateColor}
+        />
+        <Metric
+          label="Success"
+          value={
+            t.reachable
+              ? `${Math.max(0, Math.min(100, 100 - t.loss_percent)).toFixed(1)}%`
+              : "—"
+          }
           accent={stateColor}
         />
         <Metric label="RX" value={fmtBytes(t.rx_bytes)} accent={c.textDim} />

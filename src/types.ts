@@ -164,8 +164,10 @@ export interface PathFlipEvent {
 
 export interface PathThreshold {
   metric: 'latency' | 'jitter' | 'loss' | 'mos';
-  warn: number;
-  fail: number;
+  /** Per-underlay warn/fail bounds — Fiber and 5G are tuned independently
+   *  since cellular tolerates higher latency/jitter than fixed-line fiber. */
+  fiber: { warn: number; fail: number };
+  fiveg: { warn: number; fail: number };
   unit: string;
 }
 

@@ -91,6 +91,19 @@
   }
 }
 
+/* ───── Dynamic Failover page ─────
+   The page wraps its content in a display:contents <div.failover-page> so it
+   can lift secondary ("muted") text for legibility without affecting other
+   pages. Point it straight at --text (the bright white the card titles use)
+   so sub-text reads at full contrast; theme-aware via the token. */
+.failover-page { --text-muted: var(--text); }
+/* display:contents drops the wrapper box but breaks the `.page-transition >
+   .grid` direct-child match, so re-apply the card entry animation here. */
+.page-transition > .failover-page > .grid > * {
+  animation: child-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform, filter;
+}
+
 /* ───── Top bar ───── */
 .topbar {
   grid-area: topbar;
@@ -1129,7 +1142,7 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
 }
 .ipsec-tunnel-metrics {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 10px;
 }
 .ipsec-metric {
