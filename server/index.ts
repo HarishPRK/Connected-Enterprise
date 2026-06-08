@@ -121,8 +121,9 @@ app.post('/api/gateway/path', async (req, res) => {
   const tunnel = typeof req.body?.tunnel === 'string' && req.body.tunnel.trim()
     ? req.body.tunnel.trim()
     : undefined;
-  if (mode !== 'auto' && mode !== 'fiber' && mode !== '5g') {
-    res.status(400).json({ error: `mode must be one of: auto, fiber, 5g (got ${JSON.stringify(mode)})` });
+  const VALID_MODES = ['auto', 'fiber', '5g', 'tunnel1', 'tunnel2', 'tunnel3', 'tunnel4'];
+  if (!VALID_MODES.includes(mode)) {
+    res.status(400).json({ error: `mode must be one of: ${VALID_MODES.join(', ')} (got ${JSON.stringify(mode)})` });
     return;
   }
   if (source !== 'rdk' && source !== 'prpl') {

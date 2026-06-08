@@ -50,6 +50,7 @@ import { useDevices, type DeviceView } from "../ui/useDevices";
 import { runIpsecInsightSSE } from "../ui/agentClient";
 import { RichText } from "../ui/markdown";
 import { useToast } from "../ui/Toast";
+import { Modal } from "../ui/Modal";
 
 type Metric = "latency" | "jitter" | "loss";
 
@@ -1280,7 +1281,37 @@ function LiveIpsecCard({
   );
 }
 
+/** UI highlight state for the three path-override buttons. */
 type ForceMode = "auto" | "fiber" | "5g";
+
+/** The exact `mode` strings the gateway's local path API (`/api/path`) accepts.
+ *  `auto` lets the device decide; `tunnel1`/`tunnel2` pin the two Fiber tunnels,
+ *  `tunnel3`/`tunnel4` pin the two 5G tunnels. (`fiber`/`5g` remain valid on the
+ *  API for backwards-compat, but the UI now always pins a specific tunnel.) */
+type PathCommand =
+  | "auto"
+  | "fiber"
+  | "5g"
+  | "tunnel1"
+  | "tunnel2"
+  | "tunnel3"
+  | "tunnel4";
+
+/** Tunnel options shown in the Force-Fiber / Force-5G picker, each with the
+ *  exact `mode` it publishes: Fiber → tunnel1/tunnel2, 5G → tunnel3/tunnel4. */
+const TUNNEL_OPTIONS: Record<
+  "fiber" | "5g",
+  { command: PathCommand; label: string }[]
+> = {
+  fiber: [
+    { command: "tunnel1", label: "Tunnel 1" },
+    { command: "tunnel2", label: "Tunnel 2" },
+  ],
+  "5g": [
+    { command: "tunnel3", label: "Tunnel 3" },
+    { command: "tunnel4", label: "Tunnel 4" },
+  ],
+};
 
 /** Calls the gateway's path-control endpoint via the same-origin proxy
  *  (`server/index.ts → /api/gateway/path`). The server publishes the command
@@ -1288,14 +1319,13 @@ type ForceMode = "auto" | "fiber" | "5g";
  *  Greengrass component applies it locally and acks. Returns whether the
  *  gateway confirmed (ok) or the command was sent but not yet acked (pending). */
 async function postGatewayPathMode(
-  mode: ForceMode,
+  mode: PathCommand,
   source: "rdk" | "prpl",
-  tunnel?: string,
 ): Promise<{ pending: boolean }> {
   const res = await fetch("/api/gateway/path", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, source, tunnel }),
+    body: JSON.stringify({ mode, source }),
   });
   // 202 = published but no ack yet (component may be offline). Treat as a soft
   // success so the UI keeps the optimistic flip but flags it as unconfirmed.
@@ -1324,43 +1354,53 @@ function GatewayBlock({
   const m = g.metrics;
   const [forceMode, setForceMode] = useState<ForceMode>("auto");
   const [pathBusy, setPathBusy] = useState(false);
+  // When non-null, the Force-Fiber / Force-5G tunnel picker modal is open for
+  // that underlay (fiber → Tunnel 1/2, 5g → Tunnel 3/4).
+  const [tunnelPicker, setTunnelPicker] = useState<"fiber" | "5g" | null>(null);
   const { push } = useToast();
 
   // The gateway's topic family — drives which IoT Core topic the command is
   // published to. Falls back to 'rdk' for the captured-sample / unknown case.
   const source: "rdk" | "prpl" = g.source === "prpl" ? "prpl" : "rdk";
 
-  const modeTitle = (m: ForceMode) =>
-    m === "auto"
+  const commandTitle = (cmd: PathCommand) =>
+    cmd === "auto"
       ? "Auto path-selection"
-      : m === "fiber"
-        ? "Forced to Fiber"
-        : "Forced to 5G";
+      : cmd === "tunnel1"
+        ? "Forced to Fiber · Tunnel 1"
+        : cmd === "tunnel2"
+          ? "Forced to Fiber · Tunnel 2"
+          : cmd === "tunnel3"
+            ? "Forced to 5G · Tunnel 3"
+            : cmd === "tunnel4"
+              ? "Forced to 5G · Tunnel 4"
+              : cmd === "fiber"
+                ? "Forced to Fiber"
+                : "Forced to 5G";
 
-  /** Click handler for the Auto / Force-Fiber / Force-5G buttons. Each fires
-   *  immediately — Force-Fiber / Force-5G publish the corresponding path-control
-   *  command to the gateway's Greengrass component over IoT Core (the component
-   *  applies it locally, no per-tunnel pick needed). Optimistically flips the UI
-   *  to the requested mode and reverts on hard failure; a "pending" ack
-   *  (component offline) keeps the flip but flags it as unconfirmed. */
-  const applyPathMode = async (next: ForceMode) => {
+  /** Publishes a path-control command to the gateway's Greengrass component over
+   *  IoT Core. `highlight` is the button to light up (auto / fiber / 5g); `command`
+   *  is the exact `mode` published (auto, or tunnel1–tunnel4). Optimistically flips
+   *  the UI and reverts on hard failure; a "pending" ack (component offline) keeps
+   *  the flip but flags it as unconfirmed. */
+  const applyPathMode = async (highlight: ForceMode, command: PathCommand) => {
     if (pathBusy) return;
     const previous = forceMode;
-    setForceMode(next);
+    setForceMode(highlight);
     setPathBusy(true);
     try {
-      const { pending } = await postGatewayPathMode(next, source);
+      const { pending } = await postGatewayPathMode(command, source);
       push(
         pending
           ? {
               kind: "info",
-              title: `${modeTitle(next)} — command sent`,
+              title: `${commandTitle(command)} — command sent`,
               detail:
                 "Published to the gateway, but no ack received yet. It may apply once the gateway reconnects.",
             }
           : {
               kind: "success",
-              title: modeTitle(next),
+              title: commandTitle(command),
               detail: "Gateway confirmed the mode change.",
             },
       );
@@ -1525,7 +1565,11 @@ function GatewayBlock({
           ).map((b) => (
             <button
               key={b.id}
-              onClick={() => applyPathMode(b.id as ForceMode)}
+              onClick={() =>
+                b.id === "auto"
+                  ? applyPathMode("auto", "auto")
+                  : setTunnelPicker(b.id as "fiber" | "5g")
+              }
               disabled={pathBusy}
               style={
                 b.id === forceMode
@@ -1602,6 +1646,114 @@ function GatewayBlock({
           ))
         )}
       </div>
+
+      {/* Tunnel picker — opens from Force Fiber / Force 5G. Each option
+          publishes its exact mode (tunnel1/tunnel2 for Fiber, tunnel3/tunnel4
+          for 5G), regardless of the tunnel's current health. */}
+      <Modal
+        open={tunnelPicker != null}
+        onClose={() => setTunnelPicker(null)}
+        title={
+          tunnelPicker === "fiber"
+            ? "Select tunnel — Fiber"
+            : tunnelPicker === "5g"
+              ? "Select tunnel — 5G"
+              : ""
+        }
+        width={460}
+      >
+        {tunnelPicker && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              padding: "4px 0 6px",
+            }}
+          >
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+              Pin the gateway to a specific{" "}
+              {tunnelPicker === "fiber" ? "Fiber" : "5G"} tunnel.
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 10,
+                marginTop: 4,
+              }}
+            >
+              {TUNNEL_OPTIONS[tunnelPicker].map((opt, i) => {
+                // Match the i-th live tunnel in this underlay (sorted by name)
+                // so the button can surface its current state — but the command
+                // is fixed (tunnelN) and fires even when the tunnel is down.
+                const live = orderTunnelsByName(
+                  m.tunnels.filter(
+                    (t) => inferUnderlay(t.ifname) === tunnelPicker,
+                  ),
+                )[i];
+                const present = !!live?.present;
+                const reachable = !!live?.reachable;
+                const accent = reachable
+                  ? c.ok
+                  : present
+                    ? c.warn
+                    : c.textMuted;
+                return (
+                  <button
+                    key={opt.command}
+                    onClick={() => {
+                      const highlight: ForceMode =
+                        tunnelPicker === "fiber" ? "fiber" : "5g";
+                      setTunnelPicker(null);
+                      void applyPathMode(highlight, opt.command);
+                    }}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      gap: 6,
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      border: `1px solid ${accent}55`,
+                      background: `${accent}10`,
+                      textAlign: "left",
+                      cursor: "pointer",
+                    }}
+                    title={opt.command}
+                  >
+                    <span
+                      style={{ fontSize: 13, fontWeight: 800, color: accent }}
+                    >
+                      {opt.label}
+                    </span>
+                    <span
+                      className="mono"
+                      style={{ fontSize: 11, color: "var(--text)" }}
+                    >
+                      {live?.ifname || "—"}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: "var(--text-muted)",
+                        letterSpacing: "0.06em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {!present
+                        ? "absent"
+                        : reachable
+                          ? `reachable · ${live.latency_ms.toFixed(0)} ms`
+                          : "unreachable"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

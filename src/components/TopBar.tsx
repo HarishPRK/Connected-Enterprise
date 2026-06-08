@@ -32,7 +32,7 @@ export function TopBar({
           <img src="/capgemini.jpg" alt="Capgemini" />
         </span>
         <span>
-          Connected Enterprise
+          Connected Factory
           <small>Cloud operations</small>
         </span>
       </div>

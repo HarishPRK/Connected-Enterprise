@@ -300,7 +300,7 @@ class IpsecSource extends EventEmitter {
    *  `vti-fiber1`) — the gateway component can honour it if it knows how. */
   async sendPathCommand(
     prefix: string,
-    mode: 'auto' | 'fiber' | '5g',
+    mode: 'auto' | 'fiber' | '5g' | 'tunnel1' | 'tunnel2' | 'tunnel3' | 'tunnel4',
     timeoutMs = 6000,
     tunnel?: string,
   ): Promise<PathCommandResult> {
