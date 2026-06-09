@@ -1357,6 +1357,10 @@ function GatewayBlock({
   // When non-null, the Force-Fiber / Force-5G tunnel picker modal is open for
   // that underlay (fiber → Tunnel 1/2, 5g → Tunnel 3/4).
   const [tunnelPicker, setTunnelPicker] = useState<"fiber" | "5g" | null>(null);
+  // The specific tunnel ifname the user pinned via the picker — so the diagram
+  // and rows highlight that exact tunnel, not just the first reachable one in
+  // the underlay. Null in auto mode (the device decides).
+  const [forcedTunnel, setForcedTunnel] = useState<string | null>(null);
   const { push } = useToast();
 
   // The gateway's topic family — drives which IoT Core topic the command is
@@ -1383,10 +1387,16 @@ function GatewayBlock({
    *  is the exact `mode` published (auto, or tunnel1–tunnel4). Optimistically flips
    *  the UI and reverts on hard failure; a "pending" ack (component offline) keeps
    *  the flip but flags it as unconfirmed. */
-  const applyPathMode = async (highlight: ForceMode, command: PathCommand) => {
+  const applyPathMode = async (
+    highlight: ForceMode,
+    command: PathCommand,
+    tunnelIfname?: string,
+  ) => {
     if (pathBusy) return;
     const previous = forceMode;
+    const previousTunnel = forcedTunnel;
     setForceMode(highlight);
+    setForcedTunnel(highlight === "auto" ? null : (tunnelIfname ?? null));
     setPathBusy(true);
     try {
       const { pending } = await postGatewayPathMode(command, source);
@@ -1406,6 +1416,7 @@ function GatewayBlock({
       );
     } catch (err) {
       setForceMode(previous);
+      setForcedTunnel(previousTunnel);
       push({
         kind: "error",
         title: "Path-change failed",
@@ -1453,12 +1464,15 @@ function GatewayBlock({
   ]);
 
   // Resolve the "effective" active tunnel: in auto mode, the device decides;
-  // in force-fiber / force-5g mode, the UI overrides to the first reachable
-  // tunnel in the selected underlay so the diagram + tunnel rows highlight
-  // that path instead. (UI-only override — device behaviour unchanged.)
+  // in force mode the UI overrides to the exact tunnel the user pinned via the
+  // picker (so the diagram + rows highlight *that* tunnel — e.g. Tunnel 4, not
+  // just the first reachable one in the underlay). Falls back to the first
+  // reachable tunnel in the forced underlay if no specific pin is set.
+  // (UI-only override — device behaviour unchanged.)
   const deviceActive = (m.active_tunnel ?? "").trim();
   const effectiveActiveTunnel = (() => {
     if (forceMode === "auto") return deviceActive;
+    if (forcedTunnel) return forcedTunnel;
     const pool = m.tunnels.filter(
       (t) =>
         inferUnderlay(t.ifname) === (forceMode === "fiber" ? "fiber" : "5g"),
@@ -1705,8 +1719,9 @@ function GatewayBlock({
                     onClick={() => {
                       const highlight: ForceMode =
                         tunnelPicker === "fiber" ? "fiber" : "5g";
+                      const ifname = live?.ifname;
                       setTunnelPicker(null);
-                      void applyPathMode(highlight, opt.command);
+                      void applyPathMode(highlight, opt.command, ifname);
                     }}
                     style={{
                       display: "flex",
@@ -1817,10 +1832,15 @@ function IpsecFlowSvg({
   const OT_COLOR = "#ec4899"; // pink — OT endpoint links
   const accentPurple = c.accent3 ?? "#c084fc";
 
-  const fiberTunnels = m.tunnels.filter(
-    (t) => inferUnderlay(t.ifname) === "fiber",
+  // Sort within each underlay by name so the pill numbering is stable —
+  // Tunnel 1/2 = vti1/vti2 (fiber), Tunnel 3/4 = vti3/vti4 (5G) — matching the
+  // tunnel rows and the Force-Fiber/5G picker regardless of payload order.
+  const fiberTunnels = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "fiber"),
   );
-  const cellTunnels = m.tunnels.filter((t) => inferUnderlay(t.ifname) === "5g");
+  const cellTunnels = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "5g"),
+  );
 
   const tunnelColor = (t: IpsecTunnelMetric) => {
     if (!t.present) return c.textMuted;
@@ -2300,7 +2320,8 @@ function IpsecFlowSvg({
             t,
             py: cellPillY(i),
             underlay: CELL_COLOR,
-            label: `Tunnel ${i + 1}`,
+            // 5G tunnels continue the numbering after Fiber's two: Tunnel 3 / 4.
+            label: `Tunnel ${i + 3}`,
           })),
         ].map(({ t, py, underlay, label }, idx) => {
           const col = tunnelColor(t);
