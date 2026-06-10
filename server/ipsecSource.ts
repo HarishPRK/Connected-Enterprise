@@ -59,6 +59,31 @@ const INVENTORY_TOPICS: string[] = (
   process.env.IOT_DEVICE_TOPICS ?? 'rdk/devices/inventory,prpl/devices/inventory'
 ).split(',').map((s) => s.trim()).filter(Boolean);
 
+// Matter device list: the Plano gateway's `com.rdk.matter.devicelist` component
+// publishes the Matter hub's GET_DEVICES_LIST reply VERBATIM on
+// `rdk/matter/devices/list` every 30s. We forward it through the same
+// `inventory` event under a distinct `<prefix>:matter` source tag so it never
+// clobbers a full LAN inventory from `<prefix>/devices/inventory`; deviceSource
+// recognizes the hub shape and treats it as a partial (OT-only) inventory.
+const MATTER_TOPICS: string[] = (
+  process.env.IOT_MATTER_TOPICS ?? 'rdk/matter/devices/list'
+).split(',').map((s) => s.trim()).filter(Boolean);
+
+// Matter device control: the Plano gateway's `com.rdk.matter.devicecontrol`
+// component (v2+) subscribes to the control topic via the gateway's local
+// broker + clientdevices.mqtt.Bridge (same transport as com.rdk.pathcontrol),
+// forwards the command to the Matter hub CGI with axios, and acks on the
+// result topic.
+const MATTER_CONTROL_TOPIC = process.env.IOT_MATTER_CONTROL_TOPIC ?? 'rdk/matter/device/control';
+const MATTER_RESULT_TOPIC = process.env.IOT_MATTER_RESULT_TOPIC ?? 'rdk/matter/device/control/result';
+// CGI branch the component posts to. The Plano hub firmware's CONTROL_DEVICE
+// branch is broken (its parser needs jq, which the matter_bundle image doesn't
+// ship), so we ride the UPDATE_DEVICE branch — it forwards the POST body
+// verbatim to the same Matter backend, which dispatches on the JSON's own
+// `cmd` field. Set IOT_MATTER_QUERY_CMD=CONTROL_DEVICE once the firmware is
+// fixed.
+const MATTER_QUERY_CMD = process.env.IOT_MATTER_QUERY_CMD ?? 'UPDATE_DEVICE';
+
 export interface PathCommandResult {
   ok: boolean;
   mode?: string;
@@ -68,11 +93,22 @@ export interface PathCommandResult {
   timedOut?: boolean;
 }
 
+export interface MatterCommandResult {
+  ok: boolean;
+  requestId?: string;
+  /** The Matter hub CGI's reply, relayed verbatim by the gateway component. */
+  hubResponse?: unknown;
+  error?: string;
+  /** True when we published but never heard an ack within the timeout. */
+  timedOut?: boolean;
+}
+
 interface IpsecSourceEvents {
   update: (snapshot: { gatewayKey: string; state: IpsecGatewayState }) => void;
   status: (status: { connected: boolean; reason?: string }) => void;
-  /** Raw device-inventory payload from a gateway, tagged with its source. */
-  inventory: (msg: { source: 'rdk' | 'prpl' | 'other'; payload: unknown }) => void;
+  /** Raw device-inventory payload from a gateway, tagged with its source
+   *  (`rdk` / `prpl` / `other`, or `<prefix>:matter` for Matter hub lists). */
+  inventory: (msg: { source: string; payload: unknown }) => void;
 }
 
 class IpsecSource extends EventEmitter {
@@ -83,6 +119,8 @@ class IpsecSource extends EventEmitter {
   private lastError?: string;
   /** In-flight path-control commands keyed by correlation id. */
   private pendingPathCmds = new Map<string, (r: PathCommandResult) => void>();
+  /** In-flight Matter control commands keyed by requestId. */
+  private pendingMatterCmds = new Map<string, (r: MatterCommandResult) => void>();
 
   /** Returns true if the SDK is wired up + AWS creds appear present. */
   hasCredentials(): boolean {
@@ -187,6 +225,23 @@ class IpsecSource extends EventEmitter {
           (t, payload) => this.handleInventory(t, payload),
         );
       }
+
+      // Subscribe to the Matter device-list topics under their own source tag.
+      for (const topic of MATTER_TOPICS) {
+        await this.connection.subscribe(
+          topic,
+          mqtt.QoS.AtLeastOnce,
+          (t, payload) => this.handleInventory(t, payload, `${topicToSource(t)}:matter`),
+        );
+      }
+
+      // Subscribe to the Matter control result topic so sendMatterCommand can
+      // correlate the gateway component's acks back to in-flight commands.
+      await this.connection.subscribe(
+        MATTER_RESULT_TOPIC,
+        mqtt.QoS.AtLeastOnce,
+        (t, payload) => this.handleMatterResult(t, payload),
+      );
     } catch (err) {
       this.connected = false;
       this.lastError = err instanceof Error ? err.message : String(err);
@@ -279,14 +334,33 @@ class IpsecSource extends EventEmitter {
     }
   }
 
+  /** Matter result-topic handler — matches the gateway component's ack
+   *  (`{ requestId, success, hubResponse }`) back to its pending command. */
+  private handleMatterResult(topic: string, payload: ArrayBuffer): void {
+    try {
+      const text = new TextDecoder().decode(new Uint8Array(payload));
+      const msg = JSON.parse(text) as { requestId?: string; success?: boolean; hubResponse?: unknown };
+      // eslint-disable-next-line no-console
+      console.log(`[matterctl] result on "${topic}":`, text);
+      if (msg.requestId && this.pendingMatterCmds.has(msg.requestId)) {
+        const resolve = this.pendingMatterCmds.get(msg.requestId)!;
+        this.pendingMatterCmds.delete(msg.requestId);
+        resolve({ ok: !!msg.success, requestId: msg.requestId, hubResponse: msg.hubResponse });
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[matterctl] failed to parse result on "${topic}":`, err);
+    }
+  }
+
   /** Inventory-topic handler — decodes the JSON device list and forwards it.
    *  Parsing/classification is deviceSource's job; we just deliver the payload
    *  tagged with the gateway source. */
-  private handleInventory(topic: string, payload: ArrayBuffer): void {
+  private handleInventory(topic: string, payload: ArrayBuffer, sourceTag?: string): void {
     try {
       const text = new TextDecoder().decode(new Uint8Array(payload));
       const parsed = JSON.parse(text) as unknown;
-      this.emit('inventory', { source: topicToSource(topic), payload: parsed });
+      this.emit('inventory', { source: sourceTag ?? topicToSource(topic), payload: parsed });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(`[devices] failed to parse inventory on "${topic}":`, err);
@@ -338,6 +412,60 @@ class IpsecSource extends EventEmitter {
     } catch (err) {
       this.pendingPathCmds.delete(id);
       return { ok: false, mode, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    return ackPromise;
+  }
+
+  /**
+   * Send a Matter OnOff command by publishing to the control topic and
+   * waiting for the gateway component's ack on the result topic (correlated
+   * by requestId). Everything except `requestId` passes through to the hub
+   * CGI verbatim. Hub grammar: clusterId 6 = OnOff, commandId 0 = Off,
+   * 1 = On.
+   */
+  async sendMatterCommand(
+    nodeId: number,
+    action: 'On' | 'Off',
+    endpointId = 1,
+    timeoutMs = 20_000,
+  ): Promise<MatterCommandResult> {
+    if (!this.connection || !this.connected) {
+      return { ok: false, error: 'MQTT not connected — cannot reach the gateway' };
+    }
+    const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const ackPromise = new Promise<MatterCommandResult>((resolve) => {
+      this.pendingMatterCmds.set(requestId, resolve);
+      setTimeout(() => {
+        if (this.pendingMatterCmds.has(requestId)) {
+          this.pendingMatterCmds.delete(requestId);
+          resolve({ ok: false, timedOut: true, requestId, error: 'No ack from gateway within timeout' });
+        }
+      }, timeoutMs);
+    });
+
+    const command = {
+      requestId,
+      queryCmd: MATTER_QUERY_CMD,
+      cmd: 'CONTROL_DEVICE',
+      nodeId,
+      clusterId: 6,
+      commandId: action === 'On' ? 1 : 0,
+      endpointId,
+    };
+
+    try {
+      await this.connection.publish(
+        MATTER_CONTROL_TOPIC,
+        JSON.stringify(command),
+        mqtt.QoS.AtLeastOnce,
+      );
+      // eslint-disable-next-line no-console
+      console.log(`[matterctl] published ${JSON.stringify(command)} to "${MATTER_CONTROL_TOPIC}"`);
+    } catch (err) {
+      this.pendingMatterCmds.delete(requestId);
+      return { ok: false, requestId, error: err instanceof Error ? err.message : String(err) };
     }
 
     return ackPromise;

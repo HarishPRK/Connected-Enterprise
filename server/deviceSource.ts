@@ -7,6 +7,10 @@
  *      inventory on `<prefix>/devices/inventory`; ipsecSource forwards it here
  *      via its `inventory` event. Once ANY inventory has been received, the live
  *      list is authoritative (it also reflects departures/offline state).
+ *      The Plano gateway's `com.rdk.matter.devicelist` component additionally
+ *      publishes the Matter hub's device list on `rdk/matter/devices/list`
+ *      (source tag `rdk:matter`) — a PARTIAL inventory covering only the OT
+ *      side; the seed's IT devices stay until a full inventory arrives.
  *   2. SEED — until the first live inventory arrives (e.g. dev with no gateway),
  *      a static seed list keeps the page populated.
  *
@@ -82,6 +86,75 @@ interface InventoryPayload {
   gateway?: string;
   ts?: number;
   devices: RawDevice[];
+}
+
+/** One entry of the Matter hub CGI's GET_DEVICES_LIST reply, published
+ *  verbatim by `com.rdk.matter.devicelist` on `<prefix>/matter/devices/list`. */
+interface MatterHubDevice {
+  deviceName?: string;
+  nodeId?: number | string;
+  radioType?: number;
+  onboardingTime?: number;   // epoch seconds
+  endPoints?: unknown[];
+}
+
+/**
+ * Deterministic locally-administered MAC for a Matter node (0x0E = local
+ * unicast, 4D = "M"). The hub reports nodeIds, not MACs, and the whole
+ * override/dedup machinery is MAC-keyed — a stable synthetic MAC lets Matter
+ * devices flow through it unchanged. Matter nodeIds are u64, so the four id
+ * octets come from an FNV-1a hash of the full decimal string rather than a
+ * truncation (which would collide ids sharing low bits).
+ */
+function matterMac(nodeId: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < nodeId.length; i++) {
+    h ^= nodeId.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  const hex = h.toString(16).padStart(8, '0').toUpperCase();
+  return `0E:4D:${hex.slice(0, 2)}:${hex.slice(2, 4)}:${hex.slice(4, 6)}:${hex.slice(6, 8)}`;
+}
+
+/**
+ * Recognize a Matter hub device list (`{ result, mc_response: { Devices } }`,
+ * with `mc_response` sometimes double-encoded as a JSON string) and convert it
+ * to the inventory contract. Returns null when the payload isn't a Matter list.
+ */
+function fromMatterList(payload: unknown): InventoryPayload | null {
+  if (payload == null || typeof payload !== 'object') return null;
+  let mc = (payload as { mc_response?: unknown }).mc_response;
+  if (typeof mc === 'string') {
+    try { mc = JSON.parse(mc); } catch { return null; }
+  }
+  const list = (mc as { Devices?: unknown } | undefined)?.Devices;
+  if (!Array.isArray(list)) return null;
+  const nowSec = Date.now() / 1000;
+  const devices: RawDevice[] = [];
+  for (const entry of list as MatterHubDevice[]) {
+    // Accept only a positive-integer nodeId (number or decimal string) —
+    // Number() coercion would turn null/''/[] into a phantom node 0.
+    const raw = entry?.nodeId;
+    const nodeId =
+      typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? String(raw)
+      : typeof raw === 'string' && /^[0-9]+$/.test(raw) && !/^0+$/.test(raw) ? raw
+      : null;
+    if (!nodeId) continue;
+    const onboarded = Number(entry.onboardingTime);
+    devices.push({
+      id: `matter-${nodeId}`,
+      mac: matterMac(nodeId),
+      name: entry.deviceName || `matter-${nodeId}`,
+      kind: 'matter',
+      services: ['_matter._tcp'],
+      conn: 'wifi',
+      online: true,
+      connectedForHours: Number.isFinite(onboarded) && onboarded > 0
+        ? Math.max(0, (nowSec - onboarded) / 3600)
+        : 0,
+    });
+  }
+  return { devices };
 }
 
 /** Where operator overrides are persisted. Kept out of git (see .gitignore).
@@ -188,6 +261,10 @@ class DeviceSource extends EventEmitter {
   private overrides = new Map<string, Domain>();
   /** Latest live devices per gateway source. Empty until inventory arrives. */
   private liveBySource = new Map<string, RawDevice[]>();
+  /** Sources whose inventory is PARTIAL (Matter hub lists cover only the OT
+   *  side of the LAN). While ALL live sources are partial, the seed's IT
+   *  devices stay on the page; a full inventory replaces the seed entirely. */
+  private partialSources = new Set<string>();
   /** True once ANY live inventory has been ingested (even an empty list). */
   private receivedInventory = false;
   private lastInventoryAt?: number;
@@ -224,14 +301,20 @@ class DeviceSource extends EventEmitter {
     }
   }
 
-  /** Ingest a raw inventory payload from a gateway source, then emit an update. */
+  /** Ingest a raw inventory payload from a gateway source, then emit an update.
+   *  Accepts both the inventory contract and the Matter hub's list shape. */
   private ingest(source: string, payload: unknown): void {
-    const devices = (payload as InventoryPayload | undefined)?.devices;
+    const matter = fromMatterList(payload);
+    const devices = (matter ?? (payload as InventoryPayload | undefined))?.devices;
     if (!Array.isArray(devices)) {
       // eslint-disable-next-line no-console
       console.warn(`[devices] inventory from "${source}" had no devices[] — ignoring`);
       return;
     }
+    // Mark partial-ness only for payloads that actually ingest — a malformed
+    // hub reply must not un-mark a source whose last good list is still live.
+    if (matter) this.partialSources.add(source);
+    else this.partialSources.delete(source);
     const valid = devices.filter((d) => d && typeof d.mac === 'string' && d.mac.trim());
     this.liveBySource.set(source, valid);
     this.receivedInventory = true;
@@ -248,6 +331,14 @@ class DeviceSource extends EventEmitter {
       return SEED.map((d) => ({ device: d, autoDomain: d.domain }));
     }
     const byMac = new Map<string, { device: Device; autoDomain: Domain }>();
+    // While the only live data is partial (Matter lists are OT-only), keep the
+    // seed's IT side so the IT page stays populated until real LAN discovery.
+    const onlyPartial = [...this.liveBySource.keys()].every((k) => this.partialSources.has(k));
+    if (onlyPartial) {
+      for (const d of SEED) {
+        if (d.domain === 'IT') byMac.set(d.mac, { device: d, autoDomain: d.domain });
+      }
+    }
     for (const list of this.liveBySource.values()) {
       for (const raw of list) {
         const mapped = toDevice(raw);

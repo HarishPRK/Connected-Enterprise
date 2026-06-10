@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "start": "tsx server/index.ts",
     "sim:devices": "tsx scripts/sim-device-inventory.ts",
+    "sim:matter": "tsx scripts/sim-matter-list.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },

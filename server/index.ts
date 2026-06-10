@@ -634,6 +634,48 @@ app.post('/api/devices/classify', (req, res) => {
   res.json({ ok: true, mac, domain });
 });
 
+/** POST /api/devices/matter/control — drive a Matter device (OnOff cluster)
+ *  through the gateway's `com.rdk.matter.devicecontrol` component. We write the
+ *  RDKMatterControl shadow over MQTT; the component forwards the command to the
+ *  Matter hub on the gateway LAN and acks on `rdk/matter/device/control/result`.
+ *  Body: `{ nodeId: number, action: 'On'|'Off', endpointId?: number }`. */
+app.post('/api/devices/matter/control', async (req, res) => {
+  const nodeId = Number(req.body?.nodeId);
+  const action = req.body?.action;
+  const endpointId = Number.isInteger(req.body?.endpointId) ? (req.body.endpointId as number) : 1;
+  if (!Number.isInteger(nodeId) || nodeId <= 0) {
+    res.status(400).json({ error: `nodeId must be a positive integer (got ${JSON.stringify(req.body?.nodeId)})` });
+    return;
+  }
+  if (action !== 'On' && action !== 'Off') {
+    res.status(400).json({ error: `action must be one of: On, Off (got ${JSON.stringify(action)})` });
+    return;
+  }
+
+  const result = await ipsecSource.sendMatterCommand(nodeId, action, endpointId);
+  // The component's `success` only means "the hub replied with valid JSON" —
+  // the hub signals its own rejection inside the reply (`result: "false"`).
+  const hub = result.hubResponse as { result?: string; reason?: string } | undefined;
+  const hubRejected = typeof hub === 'object' && hub != null && hub.result === 'false';
+  if (result.ok && !hubRejected) {
+    res.json({ ok: true, nodeId, action, hubResponse: result.hubResponse });
+  } else if (result.timedOut) {
+    // Command was written to the shadow but no ack arrived — the gateway
+    // component may be offline. 202 = accepted-but-not-confirmed.
+    res.status(202).json({ ok: false, nodeId, action, pending: true, error: result.error });
+  } else {
+    res.status(502).json({
+      ok: false,
+      nodeId,
+      action,
+      error: hubRejected
+        ? `Matter hub rejected the command: ${hub?.reason ?? 'unknown reason'}`
+        : (result.error ?? 'matter command failed'),
+      hubResponse: result.hubResponse,
+    });
+  }
+});
+
 /* ─────────── Video analytics proxy ───────────
  * MJPEG streams from inference nodes on a private LAN. Browser hits
  * `/api/video/<id>` same-origin; Express pipes the multipart byte stream

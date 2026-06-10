@@ -4,11 +4,11 @@ import { Card } from '../components/Card';
 import { StatusBadge } from '../components/StatusBadge';
 import { devices as mockDevices, getDeviceHealth } from '../data/mock';
 import type { Device } from '../types';
-import { useDevices, classifyDevice, type DeviceView } from '../ui/useDevices';
+import { useDevices, classifyDevice, controlMatterDevice, type DeviceView } from '../ui/useDevices';
 import {
   Laptop, Monitor, Printer, CreditCard, Server, PhoneCall,
   Flame, Wind, DoorClosed, Lock, Search, Download, Plus, ArrowLeftRight,
-  Smartphone, Tablet, Cpu, Plug, HelpCircle,
+  Smartphone, Tablet, Cpu, Plug, HelpCircle, Power,
 } from 'lucide-react';
 import { DeviceDrawer } from '../ui/DeviceDrawer';
 import { Modal } from '../ui/Modal';
@@ -35,6 +35,7 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
   const [selected, setSelected] = useState<Device | null>(null);
   const [unlockTarget, setUnlockTarget] = useState<Device | null>(null);
   const [reason, setReason] = useState('');
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const { push } = useToast();
   const { devices: liveDevices, loaded, source, connected } = useDevices();
 
@@ -110,6 +111,32 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
         title: 'Reclassify failed',
         detail: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  // Drive a Matter device's OnOff cluster through the gateway. Live devices
+  // carry their Matter nodeId in the id (`matter-<nodeId>`); the round trip
+  // (shadow poll on the gateway + hub call) takes a few seconds, so the
+  // buttons show a busy state until the ack lands.
+  async function handleMatterControl(e: React.MouseEvent, d: DeviceView, action: 'On' | 'Off') {
+    e.stopPropagation();
+    const nodeId = Number(d.id.replace(/^matter-/, ''));
+    if (!Number.isInteger(nodeId) || nodeId <= 0) {
+      push({ kind: 'error', title: 'No Matter nodeId', detail: `${d.name} has no live nodeId — is the gateway feed up?` });
+      return;
+    }
+    setTogglingId(`${d.id}:${action}`);
+    try {
+      await controlMatterDevice(nodeId, action);
+      push({ kind: 'success', title: `${d.name} turned ${action.toLowerCase()}`, detail: 'The gateway confirmed the command.' });
+    } catch (err) {
+      push({
+        kind: 'error',
+        title: `${action} failed for ${d.name}`,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setTogglingId(null);
     }
   }
 
@@ -259,6 +286,17 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
                           Unlock
                         </button>
                       )}
+                      {d.kind === 'matter' && (['On', 'Off'] as const).map((action) => (
+                        <button
+                          key={action}
+                          title={`Turn ${action.toLowerCase()} via the gateway's Matter hub`}
+                          disabled={togglingId != null && togglingId.startsWith(`${d.id}:`)}
+                          onClick={(e) => handleMatterControl(e, d, action)}
+                        >
+                          <Power size={12} />
+                          {togglingId === `${d.id}:${action}` ? `${action}…` : action}
+                        </button>
+                      ))}
                     </div>
                   </td>
                 </tr>

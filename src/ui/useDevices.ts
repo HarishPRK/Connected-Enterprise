@@ -66,6 +66,29 @@ export async function classifyDevice(mac: string, domain: Domain): Promise<void>
   }
 }
 
+export type MatterAction = 'On' | 'Off';
+
+/** Drive a Matter device's OnOff cluster via the gateway. Resolves once the
+ *  gateway acks (the round trip rides a shadow poll + the hub call, so this
+ *  can take several seconds). Throws with the server's error message on
+ *  failure or timeout. */
+export async function controlMatterDevice(nodeId: number, action: MatterAction): Promise<void> {
+  const res = await fetch('/api/devices/matter/control', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nodeId, action }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = (await res.json())?.error ?? '';
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail || `matter control failed (${res.status})`);
+  }
+}
+
 export function useDevices(): UseDevicesResult {
   const [devices, setDevices] = useState<DeviceView[]>([]);
   const [loaded, setLoaded] = useState(false);
