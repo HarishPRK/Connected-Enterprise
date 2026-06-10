@@ -84,6 +84,33 @@ const MATTER_RESULT_TOPIC = process.env.IOT_MATTER_RESULT_TOPIC ?? 'rdk/matter/d
 // fixed.
 const MATTER_QUERY_CMD = process.env.IOT_MATTER_QUERY_CMD ?? 'UPDATE_DEVICE';
 
+// Shelly Gen2+ devices connected DIRECTLY to IoT Core over MQTT (no gateway in
+// the path). Each device publishes RPC notifications on `<id>/events/rpc` and
+// a retained online flag on `<id>/online`; commands go to `<id>/rpc` with a
+// `src` reply prefix the device answers on (`<src>/rpc`). The fleet is
+// env-driven — add ids with IOT_SHELLY_DEVICES (comma-separated).
+const SHELLY_DEVICE_IDS: string[] = (
+  process.env.IOT_SHELLY_DEVICES ?? 'shellyplus1pm-cc7b5c844c18'
+).split(',').map((s) => s.trim()).filter(Boolean);
+const SHELLY_REPLY_SRC = process.env.IOT_SHELLY_REPLY_SRC ?? 'rdk/shelly/ce-server';
+
+/** Shelly ids embed the device MAC as their 12-hex-char suffix
+ *  (shellyplus1pm-cc7b5c844c18 → CC:7B:5C:84:4C:18); fall back to a
+ *  deterministic locally-administered MAC for non-conforming ids. */
+function shellyMac(id: string): string {
+  const suffix = id.slice(id.lastIndexOf('-') + 1);
+  if (/^[0-9a-fA-F]{12}$/.test(suffix)) {
+    return suffix.toUpperCase().replace(/(..)(?=.)/g, '$1:');
+  }
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  const hex = h.toString(16).padStart(8, '0').toUpperCase();
+  return `0E:53:${hex.slice(0, 2)}:${hex.slice(2, 4)}:${hex.slice(4, 6)}:${hex.slice(6, 8)}`;
+}
+
 export interface PathCommandResult {
   ok: boolean;
   mode?: string;
@@ -100,6 +127,16 @@ export interface MatterCommandResult {
   hubResponse?: unknown;
   error?: string;
   /** True when we published but never heard an ack within the timeout. */
+  timedOut?: boolean;
+}
+
+export interface ShellyCommandResult {
+  ok: boolean;
+  requestId?: number;
+  /** The device's RPC `result` (or `error`) payload. */
+  response?: unknown;
+  error?: string;
+  /** True when we published but never heard the device's reply in time. */
   timedOut?: boolean;
 }
 
@@ -121,6 +158,11 @@ class IpsecSource extends EventEmitter {
   private pendingPathCmds = new Map<string, (r: PathCommandResult) => void>();
   /** In-flight Matter control commands keyed by requestId. */
   private pendingMatterCmds = new Map<string, (r: MatterCommandResult) => void>();
+  /** In-flight Shelly RPCs keyed by their numeric rpc id. */
+  private pendingShellyCmds = new Map<number, (r: ShellyCommandResult) => void>();
+  private shellyCmdSeq = 1;
+  /** Last known state per Shelly device id (fed into the device inventory). */
+  private shellyStates = new Map<string, { online: boolean; output?: boolean; firstSeenAt: number }>();
 
   /** Returns true if the SDK is wired up + AWS creds appear present. */
   hasCredentials(): boolean {
@@ -242,6 +284,28 @@ class IpsecSource extends EventEmitter {
         mqtt.QoS.AtLeastOnce,
         (t, payload) => this.handleMatterResult(t, payload),
       );
+
+      // Shelly fleet: status notifications + retained online flag per device,
+      // plus the single RPC reply topic shared by all of them.
+      for (const id of SHELLY_DEVICE_IDS) {
+        await this.connection.subscribe(
+          `${id}/events/rpc`,
+          mqtt.QoS.AtLeastOnce,
+          (t, payload) => this.handleShellyEvent(id, payload),
+        );
+        await this.connection.subscribe(
+          `${id}/online`,
+          mqtt.QoS.AtLeastOnce,
+          (t, payload) => this.handleShellyOnline(id, payload),
+        );
+      }
+      if (SHELLY_DEVICE_IDS.length > 0) {
+        await this.connection.subscribe(
+          `${SHELLY_REPLY_SRC}/rpc`,
+          mqtt.QoS.AtLeastOnce,
+          (t, payload) => this.handleShellyReply(t, payload),
+        );
+      }
     } catch (err) {
       this.connected = false;
       this.lastError = err instanceof Error ? err.message : String(err);
@@ -350,6 +414,81 @@ class IpsecSource extends EventEmitter {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(`[matterctl] failed to parse result on "${topic}":`, err);
+    }
+  }
+
+  private shellyState(id: string): { online: boolean; output?: boolean; firstSeenAt: number } {
+    let st = this.shellyStates.get(id);
+    if (!st) {
+      st = { online: true, firstSeenAt: Date.now() };
+      this.shellyStates.set(id, st);
+    }
+    return st;
+  }
+
+  /** Forward the current Shelly fleet to deviceSource as a partial (OT-only)
+   *  inventory, same contract as the Matter list. */
+  private emitShellyInventory(): void {
+    const now = Date.now();
+    const devices = [...this.shellyStates.entries()].map(([id, st]) => ({
+      id,
+      mac: shellyMac(id),
+      name: id,
+      kind: 'shelly',
+      services: ['_shelly._tcp'],
+      conn: 'wifi',
+      online: st.online,
+      connectedForHours: (now - st.firstSeenAt) / 3_600_000,
+    }));
+    this.emit('inventory', { source: 'rdk:shelly', payload: { partial: true, devices } });
+  }
+
+  /** Retained `<id>/online` flag — payload is the string "true"/"false". */
+  private handleShellyOnline(id: string, payload: ArrayBuffer): void {
+    const text = new TextDecoder().decode(new Uint8Array(payload)).trim();
+    this.shellyState(id).online = text !== 'false';
+    this.emitShellyInventory();
+  }
+
+  /** `<id>/events/rpc` notification — track relay state when present. */
+  private handleShellyEvent(id: string, payload: ArrayBuffer): void {
+    try {
+      const text = new TextDecoder().decode(new Uint8Array(payload));
+      const msg = JSON.parse(text) as { params?: Record<string, unknown> };
+      const st = this.shellyState(id);
+      st.online = true;
+      const sw = msg.params?.['switch:0'] as { output?: boolean } | undefined;
+      if (sw && typeof sw.output === 'boolean') st.output = sw.output;
+      this.emitShellyInventory();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[shelly] failed to parse event from "${id}":`, err);
+    }
+  }
+
+  /** RPC reply on `<SHELLY_REPLY_SRC>/rpc` — correlated by numeric rpc id. */
+  private handleShellyReply(topic: string, payload: ArrayBuffer): void {
+    try {
+      const text = new TextDecoder().decode(new Uint8Array(payload));
+      const msg = JSON.parse(text) as {
+        id?: number;
+        result?: unknown;
+        error?: { code?: number; message?: string };
+      };
+      // eslint-disable-next-line no-console
+      console.log(`[shelly] reply on "${topic}":`, text);
+      if (typeof msg.id === 'number' && this.pendingShellyCmds.has(msg.id)) {
+        const resolve = this.pendingShellyCmds.get(msg.id)!;
+        this.pendingShellyCmds.delete(msg.id);
+        if (msg.error) {
+          resolve({ ok: false, requestId: msg.id, error: msg.error.message ?? `rpc error ${msg.error.code}`, response: msg.error });
+        } else {
+          resolve({ ok: true, requestId: msg.id, response: msg.result });
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[shelly] failed to parse reply on "${topic}":`, err);
     }
   }
 
@@ -469,6 +608,50 @@ class IpsecSource extends EventEmitter {
     }
 
     return ackPromise;
+  }
+
+  /**
+   * Drive a Shelly relay over its direct-to-IoT-Core MQTT RPC channel:
+   * publish Switch.Set to `<deviceId>/rpc`, await the device's reply on
+   * `<SHELLY_REPLY_SRC>/rpc` (correlated by numeric rpc id).
+   */
+  async sendShellyCommand(
+    deviceId: string,
+    action: 'On' | 'Off',
+    timeoutMs = 10_000,
+  ): Promise<ShellyCommandResult> {
+    if (!this.connection || !this.connected) {
+      return { ok: false, error: 'MQTT not connected — cannot reach the device' };
+    }
+    const requestId = this.shellyCmdSeq++;
+
+    const ackPromise = new Promise<ShellyCommandResult>((resolve) => {
+      this.pendingShellyCmds.set(requestId, resolve);
+      setTimeout(() => {
+        if (this.pendingShellyCmds.has(requestId)) {
+          this.pendingShellyCmds.delete(requestId);
+          resolve({ ok: false, timedOut: true, requestId, error: 'No reply from the device within timeout' });
+        }
+      }, timeoutMs);
+    });
+
+    const rpc = { id: requestId, src: SHELLY_REPLY_SRC, method: 'Switch.Set', params: { id: 0, on: action === 'On' } };
+
+    try {
+      await this.connection.publish(`${deviceId}/rpc`, JSON.stringify(rpc), mqtt.QoS.AtLeastOnce);
+      // eslint-disable-next-line no-console
+      console.log(`[shelly] published ${JSON.stringify(rpc)} to "${deviceId}/rpc"`);
+    } catch (err) {
+      this.pendingShellyCmds.delete(requestId);
+      return { ok: false, requestId, error: err instanceof Error ? err.message : String(err) };
+    }
+
+    const res = await ackPromise;
+    if (res.ok) {
+      this.shellyState(deviceId).output = action === 'On';
+      this.emitShellyInventory();
+    }
+    return res;
   }
 
   getSnapshot() {

@@ -676,6 +676,31 @@ app.post('/api/devices/matter/control', async (req, res) => {
   }
 });
 
+/** POST /api/devices/shelly/control — drive a Shelly relay (Switch.Set) over
+ *  its direct MQTT connection to IoT Core; the device replies on our RPC
+ *  reply topic. Body: `{ deviceId: string, action: 'On'|'Off' }`. */
+app.post('/api/devices/shelly/control', async (req, res) => {
+  const deviceId = typeof req.body?.deviceId === 'string' ? req.body.deviceId.trim() : '';
+  const action = req.body?.action;
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(deviceId)) {
+    res.status(400).json({ error: `deviceId must be a topic-safe Shelly id (got ${JSON.stringify(req.body?.deviceId)})` });
+    return;
+  }
+  if (action !== 'On' && action !== 'Off') {
+    res.status(400).json({ error: `action must be one of: On, Off (got ${JSON.stringify(action)})` });
+    return;
+  }
+
+  const result = await ipsecSource.sendShellyCommand(deviceId, action);
+  if (result.ok) {
+    res.json({ ok: true, deviceId, action, response: result.response });
+  } else if (result.timedOut) {
+    res.status(202).json({ ok: false, deviceId, action, pending: true, error: result.error });
+  } else {
+    res.status(502).json({ ok: false, deviceId, action, error: result.error ?? 'shelly command failed' });
+  }
+});
+
 /* ─────────── Video analytics proxy ───────────
  * MJPEG streams from inference nodes on a private LAN. Browser hits
  * `/api/video/<id>` same-origin; Express pipes the multipart byte stream

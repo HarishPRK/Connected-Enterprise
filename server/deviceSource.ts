@@ -86,6 +86,9 @@ interface InventoryPayload {
   gateway?: string;
   ts?: number;
   devices: RawDevice[];
+  /** True when this list covers only part of the LAN (e.g. the Shelly fleet) —
+   *  the seed's IT side is kept while every live source is partial. */
+  partial?: boolean;
 }
 
 /** One entry of the Matter hub CGI's GET_DEVICES_LIST reply, published
@@ -313,7 +316,7 @@ class DeviceSource extends EventEmitter {
     }
     // Mark partial-ness only for payloads that actually ingest — a malformed
     // hub reply must not un-mark a source whose last good list is still live.
-    if (matter) this.partialSources.add(source);
+    if (matter || (payload as InventoryPayload).partial === true) this.partialSources.add(source);
     else this.partialSources.delete(source);
     const valid = devices.filter((d) => d && typeof d.mac === 'string' && d.mac.trim());
     this.liveBySource.set(source, valid);

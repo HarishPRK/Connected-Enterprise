@@ -89,6 +89,25 @@ export async function controlMatterDevice(nodeId: number, action: MatterAction):
   }
 }
 
+/** Drive a Shelly relay (Switch.Set). The device talks MQTT to IoT Core
+ *  directly, so this resolves on the device's own RPC reply. */
+export async function controlShellyDevice(deviceId: string, action: MatterAction): Promise<void> {
+  const res = await fetch('/api/devices/shelly/control', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId, action }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = (await res.json())?.error ?? '';
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail || `shelly control failed (${res.status})`);
+  }
+}
+
 export function useDevices(): UseDevicesResult {
   const [devices, setDevices] = useState<DeviceView[]>([]);
   const [loaded, setLoaded] = useState(false);

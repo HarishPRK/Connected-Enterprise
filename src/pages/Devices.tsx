@@ -4,7 +4,7 @@ import { Card } from '../components/Card';
 import { StatusBadge } from '../components/StatusBadge';
 import { devices as mockDevices, getDeviceHealth } from '../data/mock';
 import type { Device } from '../types';
-import { useDevices, classifyDevice, controlMatterDevice, type DeviceView } from '../ui/useDevices';
+import { useDevices, classifyDevice, controlMatterDevice, controlShellyDevice, type DeviceView } from '../ui/useDevices';
 import {
   Laptop, Monitor, Printer, CreditCard, Server, PhoneCall,
   Flame, Wind, DoorClosed, Lock, Search, Download, Plus, ArrowLeftRight,
@@ -114,21 +114,25 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
     }
   }
 
-  // Drive a Matter device's OnOff cluster through the gateway. Live devices
-  // carry their Matter nodeId in the id (`matter-<nodeId>`); the round trip
-  // (shadow poll on the gateway + hub call) takes a few seconds, so the
-  // buttons show a busy state until the ack lands.
-  async function handleMatterControl(e: React.MouseEvent, d: DeviceView, action: 'On' | 'Off') {
+  // Drive a switchable OT device. Matter devices go through the gateway's hub
+  // (nodeId encoded in the id as `matter-<nodeId>`); Shelly devices talk MQTT
+  // to IoT Core directly (their id IS the MQTT device id). Either way the
+  // round trip takes a few seconds, so the buttons show a busy state.
+  async function handleSwitchControl(e: React.MouseEvent, d: DeviceView, action: 'On' | 'Off') {
     e.stopPropagation();
-    const nodeId = Number(d.id.replace(/^matter-/, ''));
-    if (!Number.isInteger(nodeId) || nodeId <= 0) {
-      push({ kind: 'error', title: 'No Matter nodeId', detail: `${d.name} has no live nodeId — is the gateway feed up?` });
-      return;
-    }
     setTogglingId(`${d.id}:${action}`);
     try {
-      await controlMatterDevice(nodeId, action);
-      push({ kind: 'success', title: `${d.name} turned ${action.toLowerCase()}`, detail: 'The gateway confirmed the command.' });
+      if (d.kind === 'shelly') {
+        await controlShellyDevice(d.id, action);
+        push({ kind: 'success', title: `${d.name} turned ${action.toLowerCase()}`, detail: 'The device confirmed the command.' });
+      } else {
+        const nodeId = Number(d.id.replace(/^matter-/, ''));
+        if (!Number.isInteger(nodeId) || nodeId <= 0) {
+          throw new Error(`${d.name} has no live nodeId — is the gateway feed up?`);
+        }
+        await controlMatterDevice(nodeId, action);
+        push({ kind: 'success', title: `${d.name} turned ${action.toLowerCase()}`, detail: 'The gateway confirmed the command.' });
+      }
     } catch (err) {
       push({
         kind: 'error',
@@ -286,12 +290,14 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
                           Unlock
                         </button>
                       )}
-                      {d.kind === 'matter' && (['On', 'Off'] as const).map((action) => (
+                      {(d.kind === 'matter' || d.kind === 'shelly') && (['On', 'Off'] as const).map((action) => (
                         <button
                           key={action}
-                          title={`Turn ${action.toLowerCase()} via the gateway's Matter hub`}
+                          title={d.kind === 'matter'
+                            ? `Turn ${action.toLowerCase()} via the gateway's Matter hub`
+                            : `Turn ${action.toLowerCase()} via the device's MQTT RPC`}
                           disabled={togglingId != null && togglingId.startsWith(`${d.id}:`)}
-                          onClick={(e) => handleMatterControl(e, d, action)}
+                          onClick={(e) => handleSwitchControl(e, d, action)}
                         >
                           <Power size={12} />
                           {togglingId === `${d.id}:${action}` ? `${action}…` : action}
