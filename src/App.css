@@ -3007,3 +3007,33 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
 /* Simple rotating spin animation for inline loader icons */
 @keyframes ce-spin { to { transform: rotate(360deg); } }
 .spin { animation: ce-spin 1s linear infinite; transform-origin: 50% 50%; }
+
+/* ── OT device power toggle ──────────────────────────────────────────── */
+.power-toggle {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  transition: color .25s ease, border-color .25s ease, background .25s ease,
+              box-shadow .25s ease, transform .15s ease;
+}
+.power-toggle:hover { color: var(--text); border-color: var(--text-muted); transform: scale(1.06); }
+.power-toggle:active { transform: scale(0.94); }
+.power-toggle.on {
+  color: var(--ok, #10b981);
+  border-color: color-mix(in srgb, var(--ok, #10b981) 55%, transparent);
+  background: color-mix(in srgb, var(--ok, #10b981) 14%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--ok, #10b981) 35%, transparent);
+}
+.power-toggle.on:hover { color: var(--ok, #10b981); }
+.power-toggle.busy {
+  pointer-events: none;
+  animation: power-toggle-pulse 0.9s ease-in-out infinite;
+}
+@keyframes power-toggle-pulse { 50% { opacity: 0.35; } }

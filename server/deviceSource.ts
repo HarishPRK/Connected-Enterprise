@@ -29,7 +29,7 @@ import { EventEmitter } from 'node:events';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Device } from '../src/types.js';
+import type { Device, DeviceTelemetry } from '../src/types.js';
 import { ipsecSource } from './ipsecSource.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -81,6 +81,8 @@ interface RawDevice {
   kind?: string;              // optional device-kind hint
   domain?: Domain;            // optional gateway classification hint
   id?: string;
+  power?: boolean;            // relay/switch state for controllable kinds
+  telemetry?: DeviceTelemetry; // live readings reported by the device itself
 }
 interface InventoryPayload {
   gateway?: string;
@@ -119,6 +121,18 @@ function matterMac(nodeId: string): string {
   return `0E:4D:${hex.slice(0, 2)}:${hex.slice(2, 4)}:${hex.slice(4, 6)}:${hex.slice(6, 8)}`;
 }
 
+/** OnOff state from the hub's endpoint/cluster dump, when present. */
+function matterPower(entry: MatterHubDevice): boolean | undefined {
+  if (!Array.isArray(entry.endPoints)) return undefined;
+  for (const ep of entry.endPoints as { clusters?: { onOff?: { onOff?: unknown } }[] }[]) {
+    for (const cl of ep?.clusters ?? []) {
+      const v = cl?.onOff?.onOff;
+      if (typeof v === 'string') return v.toUpperCase() === 'ON';
+    }
+  }
+  return undefined;
+}
+
 /**
  * Recognize a Matter hub device list (`{ result, mc_response: { Devices } }`,
  * with `mc_response` sometimes double-encoded as a JSON string) and convert it
@@ -152,6 +166,7 @@ function fromMatterList(payload: unknown): InventoryPayload | null {
       services: ['_matter._tcp'],
       conn: 'wifi',
       online: true,
+      power: matterPower(entry),
       connectedForHours: Number.isFinite(onboarded) && onboarded > 0
         ? Math.max(0, (nowSec - onboarded) / 3600)
         : 0,
@@ -255,6 +270,8 @@ function toDevice(r: RawDevice): { device: Device; autoDomain: Domain } {
     status: r.online === false ? 'err' : 'ok',
     connectedForHours: Math.max(0, Math.round(r.connectedForHours ?? 0)),
     conn: r.conn ?? 'wifi',
+    power: typeof r.power === 'boolean' ? r.power : undefined,
+    telemetry: r.telemetry,
   };
   return { device, autoDomain };
 }

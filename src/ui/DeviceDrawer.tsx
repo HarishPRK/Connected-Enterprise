@@ -2,6 +2,7 @@ import { Drawer } from './Drawer';
 import { StatusBadge } from '../components/StatusBadge';
 import type { Device, HealthSignal } from '../types';
 import { getDeviceHealth } from '../data/mock';
+import { telemetryHealth } from './deviceTelemetry';
 import { Activity, Cable, Wifi, Plug, Stethoscope, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 
 const connIcon = { wired: Cable, wifi: Wifi, poe: Plug } as const;
@@ -16,7 +17,7 @@ export function DeviceDrawer({
   const open = device != null;
   if (!device) return null;
   const Icon = connIcon[device.conn];
-  const health = getDeviceHealth(device);
+  const health = telemetryHealth(device) ?? getDeviceHealth(device);
 
   return (
     <Drawer open={open} onClose={onClose} title={device.name} width={520}>

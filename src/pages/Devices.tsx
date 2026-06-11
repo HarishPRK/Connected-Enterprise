@@ -11,6 +11,7 @@ import {
   Smartphone, Tablet, Cpu, Plug, HelpCircle, Power,
 } from 'lucide-react';
 import { DeviceDrawer } from '../ui/DeviceDrawer';
+import { telemetryHealth } from '../ui/deviceTelemetry';
 import { Modal } from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { DevicesDashboard } from '../components/widgets/DevicesDashboard';
@@ -114,25 +115,49 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
     }
   }
 
-  // Drive a switchable OT device. Matter devices go through the gateway's hub
-  // (nodeId encoded in the id as `matter-<nodeId>`); Shelly devices talk MQTT
-  // to IoT Core directly (their id IS the MQTT device id). Either way the
-  // round trip takes a few seconds, so the buttons show a busy state.
-  async function handleSwitchControl(e: React.MouseEvent, d: DeviceView, action: 'On' | 'Off') {
+  // Optimistic power state per device id — wins over the snapshot until the
+  // live feed reports the same value (then the override is dropped so external
+  // changes show through again).
+  const [powerOverrides, setPowerOverrides] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setPowerOverrides((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const d of allDevices) {
+        if (d.id in next && d.power === next[d.id]) {
+          delete next[d.id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [allDevices]);
+
+  // Flip a switchable OT device to the opposite of its displayed state.
+  // Matter devices go through the gateway's hub (nodeId encoded in the id as
+  // `matter-<nodeId>`); Shelly devices talk MQTT to IoT Core directly (their
+  // id IS the MQTT device id). The round trip takes a moment, so the button
+  // pulses until the ack lands.
+  async function handlePowerToggle(e: React.MouseEvent, d: DeviceView, currentlyOn: boolean) {
     e.stopPropagation();
-    setTogglingId(`${d.id}:${action}`);
+    const action: 'On' | 'Off' = currentlyOn ? 'Off' : 'On';
+    setTogglingId(d.id);
     try {
       if (d.kind === 'shelly') {
         await controlShellyDevice(d.id, action);
-        push({ kind: 'success', title: `${d.name} turned ${action.toLowerCase()}`, detail: 'The device confirmed the command.' });
       } else {
         const nodeId = Number(d.id.replace(/^matter-/, ''));
         if (!Number.isInteger(nodeId) || nodeId <= 0) {
           throw new Error(`${d.name} has no live nodeId — is the gateway feed up?`);
         }
         await controlMatterDevice(nodeId, action);
-        push({ kind: 'success', title: `${d.name} turned ${action.toLowerCase()}`, detail: 'The gateway confirmed the command.' });
       }
+      setPowerOverrides((prev) => ({ ...prev, [d.id]: action === 'On' }));
+      push({
+        kind: 'success',
+        title: `${d.name} turned ${action.toLowerCase()}`,
+        detail: d.kind === 'shelly' ? 'The device confirmed the command.' : 'The gateway confirmed the command.',
+      });
     } catch (err) {
       push({
         kind: 'error',
@@ -229,7 +254,7 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
           <tbody>
             {list.map((d) => {
               const Icon = iconFor[d.kind] ?? HelpCircle;
-              const health = getDeviceHealth(d);
+              const health = telemetryHealth(d) ?? getDeviceHealth(d);
               const reasonColor =
                 d.status === 'err'  ? 'var(--err)'  :
                 d.status === 'warn' ? 'var(--warn)' : 'var(--text-muted)';
@@ -277,32 +302,34 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <button
-                        title={`Move ${d.name} to ${d.domain === 'IT' ? 'OT' : 'IT'}`}
-                        onClick={(e) => handleReclassify(e, d)}
-                      >
-                        <ArrowLeftRight size={12} />
-                        {d.domain === 'IT' ? 'To OT' : 'To IT'}
-                      </button>
+                      {d.kind !== 'matter' && d.kind !== 'shelly' && (
+                        <button
+                          title={`Move ${d.name} to ${d.domain === 'IT' ? 'OT' : 'IT'}`}
+                          onClick={(e) => handleReclassify(e, d)}
+                        >
+                          <ArrowLeftRight size={12} />
+                          {d.domain === 'IT' ? 'To OT' : 'To IT'}
+                        </button>
+                      )}
                       {d.kind === 'door_lock' && (
                         <button className="danger" title="Emergency unlock" onClick={() => setUnlockTarget(d)}>
                           <Lock size={12} />
                           Unlock
                         </button>
                       )}
-                      {(d.kind === 'matter' || d.kind === 'shelly') && (['On', 'Off'] as const).map((action) => (
-                        <button
-                          key={action}
-                          title={d.kind === 'matter'
-                            ? `Turn ${action.toLowerCase()} via the gateway's Matter hub`
-                            : `Turn ${action.toLowerCase()} via the device's MQTT RPC`}
-                          disabled={togglingId != null && togglingId.startsWith(`${d.id}:`)}
-                          onClick={(e) => handleSwitchControl(e, d, action)}
-                        >
-                          <Power size={12} />
-                          {togglingId === `${d.id}:${action}` ? `${action}…` : action}
-                        </button>
-                      ))}
+                      {(d.kind === 'matter' || d.kind === 'shelly') && (() => {
+                        const isOn = powerOverrides[d.id] ?? d.power ?? false;
+                        const busy = togglingId === d.id;
+                        return (
+                          <button
+                            className={`power-toggle${isOn ? ' on' : ''}${busy ? ' busy' : ''}`}
+                            title={`${d.name} is ${d.power == null && !(d.id in powerOverrides) ? 'in an unknown state' : isOn ? 'on' : 'off'} — click to turn ${isOn ? 'off' : 'on'}`}
+                            onClick={(e) => handlePowerToggle(e, d, isOn)}
+                          >
+                            <Power size={15} />
+                          </button>
+                        );
+                      })()}
                     </div>
                   </td>
                 </tr>
