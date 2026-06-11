@@ -11,6 +11,7 @@ import {
   Smartphone, Tablet, Cpu, Plug, HelpCircle, Power,
 } from 'lucide-react';
 import { DeviceDrawer } from '../ui/DeviceDrawer';
+import { telemetryHealth } from '../ui/deviceTelemetry';
 import { Modal } from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { DevicesDashboard } from '../components/widgets/DevicesDashboard';
@@ -253,7 +254,7 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
           <tbody>
             {list.map((d) => {
               const Icon = iconFor[d.kind] ?? HelpCircle;
-              const health = getDeviceHealth(d);
+              const health = telemetryHealth(d) ?? getDeviceHealth(d);
               const reasonColor =
                 d.status === 'err'  ? 'var(--err)'  :
                 d.status === 'warn' ? 'var(--warn)' : 'var(--text-muted)';

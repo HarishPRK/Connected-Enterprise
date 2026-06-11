@@ -16,7 +16,7 @@
 
 import { mqtt, iot, auth } from 'aws-iot-device-sdk-v2';
 import { EventEmitter } from 'node:events';
-import type { IpsecGatewayState, IpsecMetrics } from '../src/types.js';
+import type { DeviceTelemetry, IpsecGatewayState, IpsecMetrics } from '../src/types.js';
 import { decodeIpsecMetrics } from './ipsecProto.js';
 
 const ENDPOINT  = process.env.IOT_ENDPOINT ?? 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';
@@ -130,6 +130,24 @@ export interface MatterCommandResult {
   timedOut?: boolean;
 }
 
+interface ShellyState {
+  online: boolean;
+  output?: boolean;
+  firstSeenAt: number;
+  telemetry?: DeviceTelemetry;
+}
+
+/** The `switch:0` component shape from a Shelly Gen2 NotifyStatus / status
+ *  dump. Notifications are partial — only changed fields are present. */
+interface ShellySwitchPayload {
+  output?: boolean;
+  apower?: number;
+  voltage?: number;
+  current?: number;
+  aenergy?: { total?: number };
+  temperature?: { tC?: number };
+}
+
 export interface ShellyCommandResult {
   ok: boolean;
   requestId?: number;
@@ -162,7 +180,7 @@ class IpsecSource extends EventEmitter {
   private pendingShellyCmds = new Map<number, (r: ShellyCommandResult) => void>();
   private shellyCmdSeq = 1;
   /** Last known state per Shelly device id (fed into the device inventory). */
-  private shellyStates = new Map<string, { online: boolean; output?: boolean; firstSeenAt: number }>();
+  private shellyStates = new Map<string, ShellyState>();
 
   /** Returns true if the SDK is wired up + AWS creds appear present. */
   hasCredentials(): boolean {
@@ -417,13 +435,27 @@ class IpsecSource extends EventEmitter {
     }
   }
 
-  private shellyState(id: string): { online: boolean; output?: boolean; firstSeenAt: number } {
+  private shellyState(id: string): ShellyState {
     let st = this.shellyStates.get(id);
     if (!st) {
       st = { online: true, firstSeenAt: Date.now() };
       this.shellyStates.set(id, st);
     }
     return st;
+  }
+
+  /** Merge a `switch:0` payload (output + live metering) into a device's
+   *  state. Notifications are partial, so only present fields are applied —
+   *  the rest carry over from the previous message. */
+  private applyShellySwitch(st: ShellyState, sw: ShellySwitchPayload | undefined): void {
+    if (!sw) return;
+    if (typeof sw.output === 'boolean') st.output = sw.output;
+    const t = st.telemetry ?? (st.telemetry = {});
+    if (typeof sw.apower === 'number') t.apowerW = sw.apower;
+    if (typeof sw.voltage === 'number') t.voltageV = sw.voltage;
+    if (typeof sw.current === 'number') t.currentA = sw.current;
+    if (typeof sw.aenergy?.total === 'number') t.energyWhTotal = sw.aenergy.total;
+    if (typeof sw.temperature?.tC === 'number') t.tempC = sw.temperature.tC;
   }
 
   /** Forward the current Shelly fleet to deviceSource as a partial (OT-only)
@@ -439,6 +471,7 @@ class IpsecSource extends EventEmitter {
       conn: 'wifi',
       online: st.online,
       power: st.output,
+      telemetry: st.telemetry,
       connectedForHours: (now - st.firstSeenAt) / 3_600_000,
     }));
     this.emit('inventory', { source: 'rdk:shelly', payload: { partial: true, devices } });
@@ -451,15 +484,15 @@ class IpsecSource extends EventEmitter {
     this.emitShellyInventory();
   }
 
-  /** `<id>/events/rpc` notification — track relay state when present. */
+  /** `<id>/events/rpc` NotifyStatus — track relay state + live metering
+   *  (apower / current / voltage / energy) as the device reports them. */
   private handleShellyEvent(id: string, payload: ArrayBuffer): void {
     try {
       const text = new TextDecoder().decode(new Uint8Array(payload));
       const msg = JSON.parse(text) as { params?: Record<string, unknown> };
       const st = this.shellyState(id);
       st.online = true;
-      const sw = msg.params?.['switch:0'] as { output?: boolean } | undefined;
-      if (sw && typeof sw.output === 'boolean') st.output = sw.output;
+      this.applyShellySwitch(st, msg.params?.['switch:0'] as ShellySwitchPayload | undefined);
       this.emitShellyInventory();
     } catch (err) {
       // eslint-disable-next-line no-console
