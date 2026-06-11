@@ -29,7 +29,7 @@ import { EventEmitter } from 'node:events';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Device, DeviceTelemetry } from '../src/types.js';
+import type { Device } from '../src/types.js';
 import { ipsecSource } from './ipsecSource.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -82,7 +82,6 @@ interface RawDevice {
   domain?: Domain;            // optional gateway classification hint
   id?: string;
   power?: boolean;            // relay/switch state for controllable kinds
-  telemetry?: DeviceTelemetry; // live readings reported by the device itself
 }
 interface InventoryPayload {
   gateway?: string;
@@ -271,7 +270,6 @@ function toDevice(r: RawDevice): { device: Device; autoDomain: Domain } {
     connectedForHours: Math.max(0, Math.round(r.connectedForHours ?? 0)),
     conn: r.conn ?? 'wifi',
     power: typeof r.power === 'boolean' ? r.power : undefined,
-    telemetry: r.telemetry,
   };
   return { device, autoDomain };
 }

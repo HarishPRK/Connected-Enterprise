@@ -62,21 +62,6 @@ export interface Device {
   /** Current relay/switch state for controllable kinds (matter, shelly).
    *  Undefined = unknown or not switchable. */
   power?: boolean;
-  /** Live readings reported by the device itself (e.g. a Shelly's full MQTT
-   *  status dump). Present only for devices that publish them. */
-  telemetry?: DeviceTelemetry;
-}
-
-export interface DeviceTelemetry {
-  apowerW?: number;        // active power draw
-  voltageV?: number;
-  currentA?: number;
-  energyWhTotal?: number;  // lifetime energy through the relay
-  tempC?: number;          // device internal temperature
-  rssiDbm?: number;
-  ssid?: string;
-  uptimeSec?: number;
-  fwUpdateVersion?: string; // newer stable firmware available, if any
 }
 
 export interface Alert {

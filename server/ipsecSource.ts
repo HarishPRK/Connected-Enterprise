@@ -16,7 +16,7 @@
 
 import { mqtt, iot, auth } from 'aws-iot-device-sdk-v2';
 import { EventEmitter } from 'node:events';
-import type { DeviceTelemetry, IpsecGatewayState, IpsecMetrics } from '../src/types.js';
+import type { IpsecGatewayState, IpsecMetrics } from '../src/types.js';
 import { decodeIpsecMetrics } from './ipsecProto.js';
 
 const ENDPOINT  = process.env.IOT_ENDPOINT ?? 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';
@@ -90,7 +90,7 @@ const MATTER_QUERY_CMD = process.env.IOT_MATTER_QUERY_CMD ?? 'UPDATE_DEVICE';
 // `src` reply prefix the device answers on (`<src>/rpc`). The fleet is
 // env-driven — add ids with IOT_SHELLY_DEVICES (comma-separated).
 const SHELLY_DEVICE_IDS: string[] = (
-  process.env.IOT_SHELLY_DEVICES ?? 'shellyplus1pm-c049ef8ce640'
+  process.env.IOT_SHELLY_DEVICES ?? 'shellyplus1pm-cc7b5c844c18'
 ).split(',').map((s) => s.trim()).filter(Boolean);
 const SHELLY_REPLY_SRC = process.env.IOT_SHELLY_REPLY_SRC ?? 'rdk/shelly/ce-server';
 
@@ -130,25 +130,6 @@ export interface MatterCommandResult {
   timedOut?: boolean;
 }
 
-interface ShellyState {
-  online: boolean;
-  output?: boolean;
-  firstSeenAt: number;
-  ip?: string;
-  telemetry?: DeviceTelemetry;
-}
-
-/** Switch-component payload shape shared by the full status dump
- *  (`status["switch:0"]`) and per-component notifications. */
-interface ShellySwitchPayload {
-  output?: boolean;
-  apower?: number;
-  voltage?: number;
-  current?: number;
-  aenergy?: { total?: number };
-  temperature?: { tC?: number };
-}
-
 export interface ShellyCommandResult {
   ok: boolean;
   requestId?: number;
@@ -181,7 +162,7 @@ class IpsecSource extends EventEmitter {
   private pendingShellyCmds = new Map<number, (r: ShellyCommandResult) => void>();
   private shellyCmdSeq = 1;
   /** Last known state per Shelly device id (fed into the device inventory). */
-  private shellyStates = new Map<string, ShellyState>();
+  private shellyStates = new Map<string, { online: boolean; output?: boolean; firstSeenAt: number }>();
 
   /** Returns true if the SDK is wired up + AWS creds appear present. */
   hasCredentials(): boolean {
@@ -317,17 +298,6 @@ class IpsecSource extends EventEmitter {
           mqtt.QoS.AtLeastOnce,
           (t, payload) => this.handleShellyOnline(id, payload),
         );
-        // Full status dumps (relay + wifi + sys) and per-component updates.
-        await this.connection.subscribe(
-          `${id}/status`,
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handleShellyStatus(id, payload),
-        );
-        await this.connection.subscribe(
-          `${id}/status/switch:0`,
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handleShellyStatus(id, payload),
-        );
       }
       if (SHELLY_DEVICE_IDS.length > 0) {
         await this.connection.subscribe(
@@ -447,25 +417,13 @@ class IpsecSource extends EventEmitter {
     }
   }
 
-  private shellyState(id: string): ShellyState {
+  private shellyState(id: string): { online: boolean; output?: boolean; firstSeenAt: number } {
     let st = this.shellyStates.get(id);
     if (!st) {
       st = { online: true, firstSeenAt: Date.now() };
       this.shellyStates.set(id, st);
     }
     return st;
-  }
-
-  /** Merge a switch-component payload into a device's state/telemetry. */
-  private applyShellySwitch(st: ShellyState, sw: ShellySwitchPayload | undefined): void {
-    if (!sw) return;
-    const t = st.telemetry ?? (st.telemetry = {});
-    if (typeof sw.output === 'boolean') st.output = sw.output;
-    if (typeof sw.apower === 'number') t.apowerW = sw.apower;
-    if (typeof sw.voltage === 'number') t.voltageV = sw.voltage;
-    if (typeof sw.current === 'number') t.currentA = sw.current;
-    if (typeof sw.aenergy?.total === 'number') t.energyWhTotal = sw.aenergy.total;
-    if (typeof sw.temperature?.tC === 'number') t.tempC = sw.temperature.tC;
   }
 
   /** Forward the current Shelly fleet to deviceSource as a partial (OT-only)
@@ -479,47 +437,11 @@ class IpsecSource extends EventEmitter {
       kind: 'shelly',
       services: ['_shelly._tcp'],
       conn: 'wifi',
-      ip: st.ip,
       online: st.online,
       power: st.output,
-      telemetry: st.telemetry,
-      connectedForHours: st.telemetry?.uptimeSec != null
-        ? st.telemetry.uptimeSec / 3600
-        : (now - st.firstSeenAt) / 3_600_000,
+      connectedForHours: (now - st.firstSeenAt) / 3_600_000,
     }));
     this.emit('inventory', { source: 'rdk:shelly', payload: { partial: true, devices } });
-  }
-
-  /** `<id>/status` (full dump: switch + wifi + sys) or `<id>/status/switch:0`
-   *  (the switch object alone) — harvest everything displayable. */
-  private handleShellyStatus(id: string, payload: ArrayBuffer): void {
-    try {
-      const text = new TextDecoder().decode(new Uint8Array(payload));
-      const msg = JSON.parse(text) as Record<string, unknown>;
-      const st = this.shellyState(id);
-      st.online = true;
-      const sw = (msg['switch:0'] ?? (typeof msg.output === 'boolean' ? msg : undefined)) as
-        ShellySwitchPayload | undefined;
-      this.applyShellySwitch(st, sw);
-      const wifi = msg.wifi as { sta_ip?: string; rssi?: number; ssid?: string } | undefined;
-      if (wifi) {
-        const t = st.telemetry ?? (st.telemetry = {});
-        if (typeof wifi.sta_ip === 'string') st.ip = wifi.sta_ip;
-        if (typeof wifi.rssi === 'number') t.rssiDbm = wifi.rssi;
-        if (typeof wifi.ssid === 'string') t.ssid = wifi.ssid;
-      }
-      const sys = msg.sys as { uptime?: number; available_updates?: { stable?: { version?: string } } } | undefined;
-      if (sys) {
-        const t = st.telemetry ?? (st.telemetry = {});
-        if (typeof sys.uptime === 'number') t.uptimeSec = sys.uptime;
-        const v = sys.available_updates?.stable?.version;
-        if (typeof v === 'string') t.fwUpdateVersion = v;
-      }
-      this.emitShellyInventory();
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(`[shelly] failed to parse status from "${id}":`, err);
-    }
   }
 
   /** Retained `<id>/online` flag — payload is the string "true"/"false". */
@@ -536,7 +458,8 @@ class IpsecSource extends EventEmitter {
       const msg = JSON.parse(text) as { params?: Record<string, unknown> };
       const st = this.shellyState(id);
       st.online = true;
-      this.applyShellySwitch(st, msg.params?.['switch:0'] as ShellySwitchPayload | undefined);
+      const sw = msg.params?.['switch:0'] as { output?: boolean } | undefined;
+      if (sw && typeof sw.output === 'boolean') st.output = sw.output;
       this.emitShellyInventory();
     } catch (err) {
       // eslint-disable-next-line no-console
