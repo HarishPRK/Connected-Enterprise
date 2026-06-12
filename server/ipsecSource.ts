@@ -174,11 +174,10 @@ interface IpsecSourceEvents {
 /** Map a gateway Wi-Fi client to the device-inventory wire shape consumed by
  *  deviceSource (telemetry + a status hint from the gateway's own verdict). */
 function wifiClientToRawDevice(c: IpsecWifiClient): Record<string, unknown> {
-  const h = (c.health || '').toLowerCase();
-  const status: 'ok' | 'warn' | 'err' =
-    !c.active || !c.authenticated ? 'err'
-    : (h && h !== 'ok' && h !== 'healthy' && h !== 'good') || c.rssi <= -80 ? 'warn'
-    : 'ok';
+  // Status reflects reachability only — the gateway's link-health verdict
+  // (high_retrans / tx_errors / weak RSSI) is surfaced separately in the
+  // device's telemetry and diagnostics, NOT as a Degraded badge.
+  const status: 'ok' | 'err' = !c.active || !c.authenticated ? 'err' : 'ok';
   return {
     id: `wifi-${c.mac}`,
     mac: c.mac,
