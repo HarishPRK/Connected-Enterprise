@@ -1780,7 +1780,9 @@ function IpsecFlowSvg({
   wanMbps?: number | null;
   wanPps?: number | null;
 }) {
-  const W = 1820;
+  // Keep the canvas tight: less dead space = a larger render scale when the
+  // SVG is fit to the card width, i.e. bigger, readable labels.
+  const W = 1612;
   const H = 480;
 
   // Live IT/OT device inventory (same feed as the Devices page). Show up to 3
@@ -1792,12 +1794,12 @@ function IpsecFlowSvg({
   // Column positions — left-to-right physical flow. The IT/OT endpoints sit at
   // the far left and feed the gateway; everything downstream is shifted right to
   // make room (the gateway used to be the leftmost origin).
-  const COL_DEVICES = { x: 48, w: 190 };
-  const COL_GW = { x: 430, w: 180 };
-  const COL_UNDERLAY = { x: 660, w: 160 };
-  const COL_MANIFOLD = { x: 870, w: 320 };
-  const COL_WAN = { x: 1240, w: 200 };
-  const COL_DEST = { x: 1490, w: 200 };
+  const COL_DEVICES = { x: 28, w: 190 };
+  const COL_GW = { x: 340, w: 180 };
+  const COL_UNDERLAY = { x: 566, w: 160 };
+  const COL_MANIFOLD = { x: 772, w: 320 };
+  const COL_WAN = { x: 1138, w: 200 };
+  const COL_DEST = { x: 1384, w: 200 };
 
   const GW_H = 120;
   const UNDERLAY_H = 100;
@@ -1959,7 +1961,7 @@ function IpsecFlowSvg({
                 <text
                   x={2}
                   y={2}
-                  fontSize={10}
+                  fontSize={12}
                   fontWeight={800}
                   fill="rgba(180,190,255,0.95)"
                   letterSpacing="0.12em"
@@ -1985,7 +1987,7 @@ function IpsecFlowSvg({
             x={t.x}
             y={32}
             textAnchor="middle"
-            fontSize={9.5}
+            fontSize={11.5}
             fontWeight={700}
             fill={c.textDim}
             letterSpacing="0.14em"
@@ -2248,7 +2250,7 @@ function IpsecFlowSvg({
         <text
           x={COL_MANIFOLD.x + 18}
           y={FIBER_BAND_Y - 1}
-          fontSize={11}
+          fontSize={13}
           fontWeight={800}
           fill={FIBER_COLOR}
           letterSpacing="0.06em"
@@ -2258,7 +2260,7 @@ function IpsecFlowSvg({
         <text
           x={COL_MANIFOLD.x + 70}
           y={FIBER_BAND_Y - 1}
-          fontSize={10}
+          fontSize={12}
           fill={c.textDim}
         >
           {fiberTunnels.filter((t) => t.reachable).length}/{fiberTunnels.length}{" "}
@@ -2277,7 +2279,7 @@ function IpsecFlowSvg({
         <text
           x={COL_MANIFOLD.x + 18}
           y={CELL_BAND_Y - 1}
-          fontSize={11}
+          fontSize={13}
           fontWeight={800}
           fill={CELL_COLOR}
           letterSpacing="0.06em"
@@ -2287,7 +2289,7 @@ function IpsecFlowSvg({
         <text
           x={COL_MANIFOLD.x + 70}
           y={CELL_BAND_Y - 1}
-          fontSize={10}
+          fontSize={12}
           fill={c.textDim}
         >
           {cellTunnels.filter((t) => t.reachable).length}/{cellTunnels.length}{" "}
@@ -2410,7 +2412,7 @@ function IpsecFlowSvg({
               <text
                 x={PILL_X + 36}
                 y={py + PILL_H / 2 - 3}
-                fontSize={13}
+                fontSize={15}
                 fontWeight={carrying ? 800 : 700}
                 fill={c.text}
                 letterSpacing="0.02em"
@@ -2421,7 +2423,7 @@ function IpsecFlowSvg({
               <text
                 x={PILL_X + 36}
                 y={py + PILL_H / 2 + 12}
-                fontSize={9.5}
+                fontSize={11.5}
                 fill={c.textDim}
                 fontFamily="JetBrains Mono, ui-monospace, monospace"
                 letterSpacing="0.04em"
@@ -2432,7 +2434,7 @@ function IpsecFlowSvg({
               <text
                 x={PILL_X + PILL_W - 14}
                 y={py + PILL_H / 2 - 3}
-                fontSize={11}
+                fontSize={13}
                 fontWeight={700}
                 fill={col}
                 textAnchor="end"
@@ -2447,7 +2449,7 @@ function IpsecFlowSvg({
                 <text
                   x={PILL_X + PILL_W - 14}
                   y={py + PILL_H / 2 + 12}
-                  fontSize={9}
+                  fontSize={11}
                   fontWeight={800}
                   fill={c.ok}
                   textAnchor="end"
@@ -2461,7 +2463,7 @@ function IpsecFlowSvg({
                 <text
                   x={PILL_X + PILL_W - 14}
                   y={py + PILL_H / 2 + 12}
-                  fontSize={9}
+                  fontSize={11}
                   fontWeight={800}
                   fill={c.warn}
                   textAnchor="end"
@@ -2484,7 +2486,7 @@ function IpsecFlowSvg({
                   <text
                     x={PILL_X + PILL_W - 39}
                     y={py + PILL_H / 2 + 13}
-                    fontSize={9}
+                    fontSize={11}
                     fontWeight={800}
                     fill={mosColor}
                     textAnchor="middle"
@@ -2536,7 +2538,7 @@ function IpsecFlowSvg({
             <text
               x={-58}
               y={4}
-              fontSize={9}
+              fontSize={11}
               fontWeight={700}
               fill={c.textDim}
               letterSpacing="0.10em"
@@ -2546,7 +2548,7 @@ function IpsecFlowSvg({
             <text
               x={62}
               y={4}
-              fontSize={10.5}
+              fontSize={12.5}
               fontWeight={800}
               textAnchor="end"
               fill={activeTunnelObj.reachable ? c.ok : c.warn}
@@ -2715,14 +2717,14 @@ function DeviceColumn({
         x={x + PAD + 13}
         y={groupY + 18}
         textAnchor="middle"
-        fontSize={10}
+        fontSize={12}
         fontWeight={800}
         fill="#0b1020"
         letterSpacing="0.04em"
       >
         {title}
       </text>
-      <text x={x + PAD + 34} y={groupY + 18} fontSize={10} fill={c.textDim}>
+      <text x={x + PAD + 34} y={groupY + 18} fontSize={12} fill={c.textDim}>
         {subtitle}
       </text>
       {/* device rows */}
@@ -2731,7 +2733,7 @@ function DeviceColumn({
           x={x + w / 2}
           y={groupY + HEADER_H + PAD + ROW_H / 2 + 4}
           textAnchor="middle"
-          fontSize={10}
+          fontSize={12}
           fill={c.textDim}
         >
           no devices
@@ -2765,7 +2767,7 @@ function DeviceColumn({
               <text
                 x={x + PAD + 28}
                 y={top + ROW_H / 2 + 3.5}
-                fontSize={11}
+                fontSize={13}
                 fontWeight={600}
                 fill={c.text}
               >
@@ -2794,18 +2796,23 @@ function DeviceColumn({
           flowing={d.status === "ok"}
         />
       ))}
-      {ot.map((d, i) => (
-        <NodeConnector
-          key={`otc-${d.id}`}
-          a={{ x: x + w - PAD, y: rowTop(otY, i) + ROW_H / 2 }}
-          b={gwLeft}
-          state={stateOf(d.status)}
-          c={c}
-          beziD={beziD}
-          accent={otColor}
-          flowing={d.status === "ok"}
-        />
-      ))}
+      {ot.map((d, i) =>
+        // Thread devices (e.g. Onvis sensors) talk to the gateway's Matter hub
+        // over the Thread mesh — their traffic terminates locally and never
+        // rides the WAN/IPsec tunnel path, so don't draw a flow into it.
+        d.conn === "thread" ? null : (
+          <NodeConnector
+            key={`otc-${d.id}`}
+            a={{ x: x + w - PAD, y: rowTop(otY, i) + ROW_H / 2 }}
+            b={gwLeft}
+            state={stateOf(d.status)}
+            c={c}
+            beziD={beziD}
+            accent={otColor}
+            flowing={d.status === "ok"}
+          />
+        ),
+      )}
       {renderGroup(it, itY, itH, "IT", `${it.length} endpoint${it.length === 1 ? "" : "s"}`, itColor)}
       {renderGroup(ot, otY, otH, "OT", `${ot.length} sensor${ot.length === 1 ? "" : "s"} / locks`, otColor)}
     </g>
@@ -2896,7 +2903,7 @@ function SysNodeBox({
         x={cx}
         y={titleY}
         textAnchor="middle"
-        fontSize={12.5}
+        fontSize={14}
         fontWeight={700}
         fill={c.text}
       >
@@ -2909,7 +2916,7 @@ function SysNodeBox({
         x={cx}
         y={subY}
         textAnchor="middle"
-        fontSize={10}
+        fontSize={12}
         fill={c.textDim}
       >
         {sub}
@@ -2972,7 +2979,7 @@ function RateBadge({
         x={0}
         y={4}
         textAnchor="middle"
-        fontSize={10.5}
+        fontSize={12.5}
         fontWeight={700}
         fill={accent}
         fontFamily="JetBrains Mono, ui-monospace, monospace"
