@@ -73,6 +73,18 @@ export interface DeviceTelemetry {
   currentA?: number;
   energyWhTotal?: number;  // lifetime energy through the relay
   tempC?: number;          // device internal temperature
+  // Wi-Fi link readings (from the gateway's per-client ipsec/metrics block).
+  rssiDbm?: number;
+  snrDb?: number;
+  linkDownMbps?: number;
+  linkUpMbps?: number;
+  wifiStandard?: string;   // e.g. "802.11ax"
+  wifiHealth?: string;     // gateway verdict, e.g. "high_retrans" | "tx_errors"
+  rxBytes?: number;
+  txBytes?: number;
+  // Live measured throughput, derived server-side from byte-counter deltas.
+  rxMbps?: number;
+  txMbps?: number;
 }
 
 export interface Alert {
@@ -119,6 +131,38 @@ export interface IpsecWanMetric {
   tx_packets: number;
 }
 
+export interface IpsecWifiClient {
+  mac: string;
+  ip: string;
+  hostname: string;
+  ap_index: number;
+  ssid: string;
+  active: boolean;
+  authenticated: boolean;
+  rssi: number;
+  snr: number;
+  standard: string;
+  downlink_rate: number;
+  uplink_rate: number;
+  rx_bytes: number;
+  tx_bytes: number;
+  rx_packets: number;
+  tx_packets: number;
+  errors_sent: number;
+  retrans_count: number;
+  failed_retrans_count: number;
+  health: string;
+}
+
+export interface IpsecWifiMetrics {
+  total_clients: number;
+  active_clients: number;
+  weak_signal_clients: number;
+  clients_with_errors: number;
+  high_retrans_clients: number;
+  clients: IpsecWifiClient[];
+}
+
 export interface IpsecMetrics {
   timestamp_ms: number;
   active_tunnel: string;
@@ -126,6 +170,7 @@ export interface IpsecMetrics {
   tunnels: IpsecTunnelMetric[];
   wan: IpsecWanMetric;
   gateway: IpsecGatewayMetric;
+  wifi?: IpsecWifiMetrics;
 }
 
 /** Server snapshot wrapper — adds when the message was received locally so the

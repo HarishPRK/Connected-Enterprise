@@ -16,7 +16,7 @@
 
 import { mqtt, iot, auth } from 'aws-iot-device-sdk-v2';
 import { EventEmitter } from 'node:events';
-import type { DeviceTelemetry, IpsecGatewayState, IpsecMetrics } from '../src/types.js';
+import type { DeviceTelemetry, IpsecGatewayState, IpsecMetrics, IpsecWifiClient } from '../src/types.js';
 import { decodeIpsecMetrics } from './ipsecProto.js';
 
 const ENDPOINT  = process.env.IOT_ENDPOINT ?? 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';
@@ -138,6 +138,7 @@ interface ShellyState {
   online: boolean;
   output?: boolean;
   firstSeenAt: number;
+  uptimeSec?: number;
   telemetry?: DeviceTelemetry;
 }
 
@@ -170,6 +171,37 @@ interface IpsecSourceEvents {
   inventory: (msg: { source: string; payload: unknown }) => void;
 }
 
+/** Map a gateway Wi-Fi client to the device-inventory wire shape consumed by
+ *  deviceSource (telemetry + a status hint from the gateway's own verdict). */
+function wifiClientToRawDevice(c: IpsecWifiClient): Record<string, unknown> {
+  const h = (c.health || '').toLowerCase();
+  const status: 'ok' | 'warn' | 'err' =
+    !c.active || !c.authenticated ? 'err'
+    : (h && h !== 'ok' && h !== 'healthy' && h !== 'good') || c.rssi <= -80 ? 'warn'
+    : 'ok';
+  return {
+    id: `wifi-${c.mac}`,
+    mac: c.mac,
+    ip: c.ip || undefined,
+    hostname: c.hostname || undefined,
+    name: c.hostname || undefined,
+    conn: 'wifi',
+    online: c.active !== false,
+    statusHint: status,
+    telemetry: {
+      rssiDbm: c.rssi,
+      snrDb: c.snr || undefined,
+      // The gateway reports link rates in kbps (e.g. 54000 = 54 Mbps).
+      linkDownMbps: c.downlink_rate ? c.downlink_rate / 1000 : undefined,
+      linkUpMbps: c.uplink_rate ? c.uplink_rate / 1000 : undefined,
+      wifiStandard: c.standard || undefined,
+      wifiHealth: c.health || undefined,
+      rxBytes: c.rx_bytes || undefined,
+      txBytes: c.tx_bytes || undefined,
+    },
+  };
+}
+
 class IpsecSource extends EventEmitter {
   private gateways = new Map<string, IpsecGatewayState>();
   private connection?: mqtt.MqttClientConnection;
@@ -185,6 +217,9 @@ class IpsecSource extends EventEmitter {
   private shellyCmdSeq = 1;
   /** Last known state per Shelly device id (fed into the device inventory). */
   private shellyStates = new Map<string, ShellyState>();
+  /** First time each Wi-Fi client MAC was seen this session — the gateway
+   *  doesn't report association time, so "connected for" grows from here. */
+  private wifiFirstSeen = new Map<string, number>();
 
   /** Returns true if the SDK is wired up + AWS creds appear present. */
   hasCredentials(): boolean {
@@ -320,6 +355,17 @@ class IpsecSource extends EventEmitter {
           mqtt.QoS.AtLeastOnce,
           (t, payload) => this.handleShellyOnline(id, payload),
         );
+        // Full status dumps (relay + sys) and per-component updates.
+        await this.connection.subscribe(
+          `${id}/status`,
+          mqtt.QoS.AtLeastOnce,
+          (t, payload) => this.handleShellyStatus(id, payload),
+        );
+        await this.connection.subscribe(
+          `${id}/status/switch:0`,
+          mqtt.QoS.AtLeastOnce,
+          (t, payload) => this.handleShellyStatus(id, payload),
+        );
       }
       if (SHELLY_DEVICE_IDS.length > 0) {
         await this.connection.subscribe(
@@ -327,6 +373,13 @@ class IpsecSource extends EventEmitter {
           mqtt.QoS.AtLeastOnce,
           (t, payload) => this.handleShellyReply(t, payload),
         );
+        // Pull a full status snapshot now and every minute — NotifyStatus only
+        // carries deltas, so a fresh server would otherwise show stale (often
+        // zero) metering until a value happens to change on the device.
+        for (const id of SHELLY_DEVICE_IDS) this.requestShellyStatus(id);
+        setInterval(() => {
+          for (const id of SHELLY_DEVICE_IDS) this.requestShellyStatus(id);
+        }, 60_000);
       }
     } catch (err) {
       this.connected = false;
@@ -386,6 +439,14 @@ class IpsecSource extends EventEmitter {
           prim_wan_ip: String(metrics.gateway?.prim_wan_ip ?? ''),
           sec_wan_ip:  String(metrics.gateway?.sec_wan_ip ?? ''),
         },
+        wifi: metrics.wifi ? {
+          total_clients:        Number(metrics.wifi.total_clients ?? 0),
+          active_clients:       Number(metrics.wifi.active_clients ?? 0),
+          weak_signal_clients:  Number(metrics.wifi.weak_signal_clients ?? 0),
+          clients_with_errors:  Number(metrics.wifi.clients_with_errors ?? 0),
+          high_retrans_clients: Number(metrics.wifi.high_retrans_clients ?? 0),
+          clients: Array.isArray(metrics.wifi.clients) ? metrics.wifi.clients : [],
+        } : undefined,
       };
 
       const source = topicToSource(topic);
@@ -396,6 +457,30 @@ class IpsecSource extends EventEmitter {
       const state: IpsecGatewayState = { metrics: normalised, receivedAt: Date.now(), source };
       this.gateways.set(gatewayKey, state);
       this.emit('update', { gatewayKey, state });
+
+      // The per-client Wi-Fi block is a live LAN inventory + link telemetry —
+      // forward it to deviceSource as a full source so real clients (laptops,
+      // the Shelly, …) populate the Devices pages with measured RSSI/health.
+      if (normalised.wifi && normalised.wifi.clients.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log('[wifi] ' + normalised.wifi.clients.map((c) =>
+          `${c.hostname || c.mac}: rssi=${c.rssi}dBm snr=${c.snr}dB health=${c.health || 'ok'}`).join(' | '));
+        const now = Date.now();
+        this.emit('inventory', {
+          source: `${source}:wifi`,
+          payload: {
+            devices: normalised.wifi.clients.map((c) => {
+              const key = c.mac.toUpperCase();
+              let first = this.wifiFirstSeen.get(key);
+              if (first == null) {
+                first = now;
+                this.wifiFirstSeen.set(key, first);
+              }
+              return { ...wifiClientToRawDevice(c), connectedForHours: (now - first) / 3_600_000 };
+            }),
+          },
+        });
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(`[ipsec] failed to parse payload on "${topic}":`, err);
@@ -476,7 +561,9 @@ class IpsecSource extends EventEmitter {
       online: st.online,
       power: st.output,
       telemetry: st.telemetry,
-      connectedForHours: (now - st.firstSeenAt) / 3_600_000,
+      connectedForHours: st.uptimeSec != null
+        ? st.uptimeSec / 3600
+        : (now - st.firstSeenAt) / 3_600_000,
     }));
     this.emit('inventory', { source: 'rdk:shelly', payload: { partial: true, devices } });
   }
@@ -501,6 +588,43 @@ class IpsecSource extends EventEmitter {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(`[shelly] failed to parse event from "${id}":`, err);
+    }
+  }
+
+  /** Ask the device to publish its full status on `<id>/status` (handled by
+   *  handleShellyStatus). Uses the Gen2 command topic, which works even with
+   *  RPC-over-MQTT disabled on the device — which is the case for this fleet
+   *  (probed: the device never answers on an RPC reply topic). */
+  private requestShellyStatus(deviceId: string): void {
+    if (!this.connection || !this.connected) return;
+    this.connection.publish(`${deviceId}/command`, 'status_update', mqtt.QoS.AtLeastOnce)
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(`[shelly] status poll publish failed for "${deviceId}":`, err);
+      });
+  }
+
+  /** Full status dump on `<id>/status` (response to a `status_update` command,
+   *  or pushed by firmwares with generic status updates enabled). */
+  private handleShellyStatus(id: string, payload: ArrayBuffer): void {
+    try {
+      const text = new TextDecoder().decode(new Uint8Array(payload));
+      const msg = JSON.parse(text) as Record<string, unknown>;
+      const st = this.shellyState(id);
+      st.online = true;
+      // Full dump nests the relay under "switch:0"; the per-component topic
+      // delivers the switch object itself.
+      const sw = (msg['switch:0'] ?? (typeof msg.output === 'boolean' ? msg : undefined)) as
+        ShellySwitchPayload | undefined;
+      this.applyShellySwitch(st, sw);
+      const sys = msg.sys as { uptime?: number } | undefined;
+      if (sys && typeof sys.uptime === 'number') st.uptimeSec = sys.uptime;
+      // eslint-disable-next-line no-console
+      console.log(`[shelly] ${id} status: output=${st.output} apower=${st.telemetry?.apowerW}W voltage=${st.telemetry?.voltageV}V uptime=${st.uptimeSec}s`);
+      this.emitShellyInventory();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[shelly] failed to parse status from "${id}":`, err);
     }
   }
 
@@ -673,47 +797,34 @@ class IpsecSource extends EventEmitter {
   }
 
   /**
-   * Drive a Shelly relay over its direct-to-IoT-Core MQTT RPC channel:
-   * publish Switch.Set to `<deviceId>/rpc`, await the device's reply on
-   * `<SHELLY_REPLY_SRC>/rpc` (correlated by numeric rpc id).
+   * Drive a Shelly relay via the Gen2 command topic: publish "on"/"off" to
+   * `<deviceId>/command/switch:0`. This fleet has RPC-over-MQTT disabled, so
+   * there's no reply to correlate — success means the publish was accepted;
+   * the resulting state lands via NotifyStatus plus a follow-up status poll.
    */
   async sendShellyCommand(
     deviceId: string,
     action: 'On' | 'Off',
-    timeoutMs = 10_000,
   ): Promise<ShellyCommandResult> {
     if (!this.connection || !this.connected) {
       return { ok: false, error: 'MQTT not connected — cannot reach the device' };
     }
-    const requestId = this.shellyCmdSeq++;
-
-    const ackPromise = new Promise<ShellyCommandResult>((resolve) => {
-      this.pendingShellyCmds.set(requestId, resolve);
-      setTimeout(() => {
-        if (this.pendingShellyCmds.has(requestId)) {
-          this.pendingShellyCmds.delete(requestId);
-          resolve({ ok: false, timedOut: true, requestId, error: 'No reply from the device within timeout' });
-        }
-      }, timeoutMs);
-    });
-
-    const rpc = { id: requestId, src: SHELLY_REPLY_SRC, method: 'Switch.Set', params: { id: 0, on: action === 'On' } };
-
     try {
-      await this.connection.publish(`${deviceId}/rpc`, JSON.stringify(rpc), mqtt.QoS.AtLeastOnce);
+      await this.connection.publish(
+        `${deviceId}/command/switch:0`,
+        action.toLowerCase(),
+        mqtt.QoS.AtLeastOnce,
+      );
       // eslint-disable-next-line no-console
-      console.log(`[shelly] published ${JSON.stringify(rpc)} to "${deviceId}/rpc"`);
+      console.log(`[shelly] published "${action.toLowerCase()}" to "${deviceId}/command/switch:0"`);
     } catch (err) {
-      this.pendingShellyCmds.delete(requestId);
-      return { ok: false, requestId, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
-
-    const res = await ackPromise;
-    if (res.ok) {
-      this.shellyState(deviceId).output = action === 'On';
-      this.emitShellyInventory();
-    }
-    return res;
+    this.shellyState(deviceId).output = action === 'On';
+    this.emitShellyInventory();
+    // Pull the authoritative state/metering shortly after the switch settles.
+    setTimeout(() => this.requestShellyStatus(deviceId), 1500);
+    return { ok: true };
   }
 
   getSnapshot() {

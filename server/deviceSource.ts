@@ -29,8 +29,9 @@ import { EventEmitter } from 'node:events';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Device, DeviceTelemetry } from '../src/types.js';
+import type { Device, DeviceTelemetry, Status } from '../src/types.js';
 import { ipsecSource } from './ipsecSource.js';
+import { currentRates, recordTelemetry } from './telemetryHistory.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,6 +84,7 @@ interface RawDevice {
   id?: string;
   power?: boolean;            // relay/switch state for controllable kinds
   telemetry?: DeviceTelemetry; // live electrical readings from the device
+  statusHint?: Status;        // explicit status (e.g. from the gateway's wifi health)
 }
 interface InventoryPayload {
   gateway?: string;
@@ -134,6 +136,28 @@ function matterPower(entry: MatterHubDevice): boolean | undefined {
 }
 
 /**
+ * Optional nodeId → real-MAC aliases (`IOT_MATTER_MAC_ALIASES="32768=F0:09:0D:8C:B5:7C,..."`).
+ * A Matter device that is also a Wi-Fi client appears in BOTH feeds under
+ * different identities — the hub reports a nodeId, the gateway reports the
+ * MAC — so there's no shared key to merge on. Aliasing the nodeId to the real
+ * MAC collapses the two rows into one device carrying the Matter control id
+ * AND the Wi-Fi telemetry. Default covers the Tapo P125M plug (node 32768).
+ */
+const MATTER_MAC_ALIASES: Record<string, string> = Object.fromEntries(
+  (process.env.IOT_MATTER_MAC_ALIASES ?? '32768=F0:09:0D:8C:B5:7C')
+    .split(',')
+    .map((pair) => pair.split('=').map((x) => x.trim()))
+    .filter((kv): kv is [string, string] => kv.length === 2 && !!kv[0] && !!kv[1])
+    .map(([nodeId, mac]) => [nodeId, mac.toUpperCase()]),
+);
+/** Reverse view: real MAC → Matter nodeId. Lets a device discovered only via
+ *  the Wi-Fi feed (e.g. the Tapo P125M) carry its Matter control identity —
+ *  and therefore the power button — even when the hub list isn't flowing. */
+const MAC_TO_NODEID: Record<string, string> = Object.fromEntries(
+  Object.entries(MATTER_MAC_ALIASES).map(([nodeId, mac]) => [mac, nodeId]),
+);
+
+/**
  * Recognize a Matter hub device list (`{ result, mc_response: { Devices } }`,
  * with `mc_response` sometimes double-encoded as a JSON string) and convert it
  * to the inventory contract. Returns null when the payload isn't a Matter list.
@@ -160,7 +184,7 @@ function fromMatterList(payload: unknown): InventoryPayload | null {
     const onboarded = Number(entry.onboardingTime);
     devices.push({
       id: `matter-${nodeId}`,
-      mac: matterMac(nodeId),
+      mac: MATTER_MAC_ALIASES[nodeId] ?? matterMac(nodeId),
       name: entry.deviceName || `matter-${nodeId}`,
       kind: 'matter',
       services: ['_matter._tcp'],
@@ -257,23 +281,91 @@ function classifyDomain(r: RawDevice, kind: Kind): Domain {
   return OT_HINTS.test(haystack(r)) ? 'OT' : 'IT';
 }
 
+const isWifiId = (id?: string) => (id ?? '').startsWith('wifi-');
+const realIp = (ip?: string) => (ip && ip !== '—' ? ip : undefined);
+const nonZero = (n?: number) => (typeof n === 'number' && n > 0 ? n : undefined);
+const SPECIFIC_KINDS = new Set<string>([
+  'matter', 'shelly', 'fire_sensor', 'smoke_sensor', 'door_lock',
+  'laptop', 'desktop', 'printer', 'payment', 'server', 'confphone', 'phone', 'tablet',
+]);
+const specificKind = (k?: string) => (k && SPECIFIC_KINDS.has(k) ? k : undefined);
+const STATUS_RANK: Record<Status, number> = { ok: 0, off: 0, warn: 1, err: 2 };
+function worseStatus(a?: Status, b?: Status): Status | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return STATUS_RANK[a] >= STATUS_RANK[b] ? a : b;
+}
+
+/** A seed device as a raw record, so it merges/maps through the same path. */
+function seedToRaw(d: Device): RawDevice {
+  return {
+    id: d.id, mac: d.mac, name: d.name, kind: d.kind, domain: d.domain,
+    ip: d.ip, conn: d.conn, connectedForHours: d.connectedForHours,
+    online: d.status !== 'err', statusHint: d.status,
+  };
+}
+
+/**
+ * Merge two raw records for the same MAC seen across sources — e.g. the Shelly
+ * reported both via its MQTT power telemetry and the gateway's Wi-Fi block.
+ * The non-Wi-Fi source is "primary" (it carries the control id, power state and
+ * specific kind); the Wi-Fi source contributes link telemetry. Telemetry from
+ * both is unioned, so a device ends up with power AND signal readings.
+ */
+function mergeRaw(a: RawDevice, b: RawDevice): RawDevice {
+  const [p, s] = isWifiId(a.id) && !isWifiId(b.id) ? [b, a] : [a, b];
+  return {
+    mac: p.mac,
+    id: p.id ?? s.id,
+    name: p.name ?? s.name,
+    hostname: p.hostname ?? s.hostname,
+    ip: realIp(p.ip) ?? realIp(s.ip),
+    vendor: p.vendor ?? s.vendor,
+    conn: p.conn ?? s.conn,
+    kind: specificKind(p.kind) ?? specificKind(s.kind) ?? p.kind ?? s.kind,
+    domain: p.domain ?? s.domain,
+    online: (p.online !== false) || (s.online !== false),
+    statusHint: worseStatus(p.statusHint, s.statusHint),
+    // Take the larger duration: a source that just (re)emitted reports a tiny
+    // session age, while the other may carry real uptime / a longer timer.
+    connectedForHours: nonZero(Math.max(p.connectedForHours ?? 0, s.connectedForHours ?? 0)),
+    services: [...(p.services ?? []), ...(s.services ?? [])],
+    power: typeof p.power === 'boolean' ? p.power : s.power,
+    telemetry: { ...(s.telemetry ?? {}), ...(p.telemetry ?? {}) },
+  };
+}
+
 /** Map a raw gateway device → the app's Device shape + its auto domain. */
 function toDevice(r: RawDevice): { device: Device; autoDomain: Domain } {
   const mac = normalizeMac(r.mac);
-  const kind = inferKind(r);
+  // A MAC with a known Matter nodeId IS a Matter device (e.g. the Tapo plug
+  // seen only through the Wi-Fi feed) — give it the controllable identity.
+  const aliasNodeId = MAC_TO_NODEID[mac];
+  const kind = aliasNodeId ? 'matter' : inferKind(r);
+  // A Shelly discovered only via the Wi-Fi feed: its hostname IS its MQTT
+  // device id, so use it as the row id to keep the relay controllable.
+  const wifiShellyId = kind === 'shelly' && (!r.id || isWifiId(r.id)) && /^shelly/i.test(r.hostname ?? '')
+    ? r.hostname
+    : undefined;
   const autoDomain = classifyDomain(r, kind);
   const device: Device = {
-    id: r.id ?? `gw-${mac}`,
+    id: aliasNodeId ? `matter-${aliasNodeId}` : (wifiShellyId ?? r.id ?? `gw-${mac}`),
     name: r.name ?? r.hostname ?? r.vendor ?? mac,
     kind,
     domain: autoDomain, // effective override is applied later
     ip: r.ip ?? '—',
     mac,
-    status: r.online === false ? 'err' : 'ok',
-    connectedForHours: Math.max(0, Math.round(r.connectedForHours ?? 0)),
+    status: r.online === false ? 'err' : (r.statusHint ?? 'ok'),
+    // Keep fractional hours — the UI renders sub-hour precision (m/s).
+    connectedForHours: Math.max(0, r.connectedForHours ?? 0),
     conn: r.conn ?? 'wifi',
     power: typeof r.power === 'boolean' ? r.power : undefined,
-    telemetry: r.telemetry,
+    telemetry: (() => {
+      // Attach the live throughput computed from the device's byte counters.
+      const rates = currentRates(mac);
+      if (r.telemetry) return { ...r.telemetry, ...rates };
+      return rates.rxMbps != null || rates.txMbps != null ? rates : undefined;
+    })(),
   };
   return { device, autoDomain };
 }
@@ -338,6 +430,8 @@ class DeviceSource extends EventEmitter {
     if (matter || (payload as InventoryPayload).partial === true) this.partialSources.add(source);
     else this.partialSources.delete(source);
     const valid = devices.filter((d) => d && typeof d.mac === 'string' && d.mac.trim());
+    // Feed the rolling telemetry history (throughput/RSSI/power charts).
+    for (const d of valid) recordTelemetry(normalizeMac(d.mac), d.telemetry);
     this.liveBySource.set(source, valid);
     this.receivedInventory = true;
     this.lastInventoryAt = Date.now();
@@ -352,22 +446,26 @@ class DeviceSource extends EventEmitter {
     if (!this.receivedInventory) {
       return SEED.map((d) => ({ device: d, autoDomain: d.domain }));
     }
-    const byMac = new Map<string, { device: Device; autoDomain: Domain }>();
+    // Merge raw records by MAC across sources, THEN map — so a device seen by
+    // more than one source (e.g. the Shelly via MQTT power + the gateway's
+    // Wi-Fi block) becomes one row carrying both sets of telemetry.
+    const rawByMac = new Map<string, RawDevice>();
     // While the only live data is partial (Matter lists are OT-only), keep the
     // seed's IT side so the IT page stays populated until real LAN discovery.
     const onlyPartial = [...this.liveBySource.keys()].every((k) => this.partialSources.has(k));
     if (onlyPartial) {
       for (const d of SEED) {
-        if (d.domain === 'IT') byMac.set(d.mac, { device: d, autoDomain: d.domain });
+        if (d.domain === 'IT') rawByMac.set(normalizeMac(d.mac), seedToRaw(d));
       }
     }
     for (const list of this.liveBySource.values()) {
       for (const raw of list) {
-        const mapped = toDevice(raw);
-        byMac.set(mapped.device.mac, mapped); // last source wins on MAC clash
+        const key = normalizeMac(raw.mac);
+        const existing = rawByMac.get(key);
+        rawByMac.set(key, existing ? mergeRaw(existing, raw) : raw);
       }
     }
-    return [...byMac.values()];
+    return [...rawByMac.values()].map(toDevice);
   }
 
   getSnapshot(): DeviceSnapshot {
@@ -394,7 +492,14 @@ class DeviceSource extends EventEmitter {
   classify(mac: string, domain: Domain): boolean {
     const key = normalizeMac(mac);
     const match = this.activeBase().find((b) => b.device.mac === key);
-    if (!match) return false; // unknown device
+    if (!match) {
+      // Device not currently reporting (e.g. a flapping Wi-Fi client) — store
+      // the override anyway so it applies the moment the device reappears.
+      this.overrides.set(key, domain);
+      this.saveOverrides();
+      this.emit('update', this.getSnapshot());
+      return true;
+    }
     if (domain === match.autoDomain) {
       this.overrides.delete(key);
     } else {

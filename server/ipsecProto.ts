@@ -24,6 +24,8 @@ import type {
   IpsecMetrics,
   IpsecTunnelMetric,
   IpsecWanMetric,
+  IpsecWifiClient,
+  IpsecWifiMetrics,
 } from '../src/types.js';
 
 /* ───────── low-level wire decoding ───────── */
@@ -63,6 +65,12 @@ function readDouble(r: Reader): number {
   const b = readFixed64(r);
   // The 8 fixed bytes are a little-endian IEEE 754 double.
   return new DataView(b.buffer, b.byteOffset, 8).getFloat64(0, true);
+}
+
+/** proto3 `int32` — negatives are encoded sign-extended to 64 bits, so read the
+ *  varint and interpret it as a signed 64-bit value (which fits int32). */
+function readInt32(r: Reader): number {
+  return Number(BigInt.asIntN(64, readVarint(r)));
 }
 
 /** Skip a single field whose tag has already been consumed. */
@@ -138,6 +146,57 @@ function decodeWan(buf: Uint8Array): IpsecWanMetric {
   return out;
 }
 
+function decodeWifiClient(buf: Uint8Array): IpsecWifiClient {
+  const out: IpsecWifiClient = {
+    mac: '', ip: '', hostname: '', ap_index: 0, ssid: '',
+    active: false, authenticated: false, rssi: 0, snr: 0, standard: '',
+    downlink_rate: 0, uplink_rate: 0, rx_bytes: 0, tx_bytes: 0,
+    rx_packets: 0, tx_packets: 0, errors_sent: 0, retrans_count: 0,
+    failed_retrans_count: 0, health: '',
+  };
+  for (const { field, wire, r } of fields(buf)) {
+    if      (field === 1  && wire === 2) out.mac = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 2  && wire === 2) out.ip = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 3  && wire === 2) out.hostname = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 4  && wire === 0) out.ap_index = Number(readVarint(r));
+    else if (field === 5  && wire === 2) out.ssid = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 6  && wire === 0) out.active = readVarint(r) !== 0n;
+    else if (field === 7  && wire === 0) out.authenticated = readVarint(r) !== 0n;
+    else if (field === 8  && wire === 0) out.rssi = readInt32(r);
+    else if (field === 9  && wire === 0) out.snr = readInt32(r);
+    else if (field === 10 && wire === 2) out.standard = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 11 && wire === 0) out.downlink_rate = Number(readVarint(r));
+    else if (field === 12 && wire === 0) out.uplink_rate = Number(readVarint(r));
+    else if (field === 13 && wire === 0) out.rx_bytes = Number(readVarint(r));
+    else if (field === 14 && wire === 0) out.tx_bytes = Number(readVarint(r));
+    else if (field === 15 && wire === 0) out.rx_packets = Number(readVarint(r));
+    else if (field === 16 && wire === 0) out.tx_packets = Number(readVarint(r));
+    else if (field === 17 && wire === 0) out.errors_sent = Number(readVarint(r));
+    else if (field === 18 && wire === 0) out.retrans_count = Number(readVarint(r));
+    else if (field === 19 && wire === 0) out.failed_retrans_count = Number(readVarint(r));
+    else if (field === 20 && wire === 2) out.health = new TextDecoder().decode(readLengthDelimited(r));
+    else skipField(r, wire);
+  }
+  return out;
+}
+
+function decodeWifi(buf: Uint8Array): IpsecWifiMetrics {
+  const out: IpsecWifiMetrics = {
+    total_clients: 0, active_clients: 0, weak_signal_clients: 0,
+    clients_with_errors: 0, high_retrans_clients: 0, clients: [],
+  };
+  for (const { field, wire, r } of fields(buf)) {
+    if      (field === 1 && wire === 0) out.total_clients = Number(readVarint(r));
+    else if (field === 2 && wire === 0) out.active_clients = Number(readVarint(r));
+    else if (field === 3 && wire === 0) out.weak_signal_clients = Number(readVarint(r));
+    else if (field === 4 && wire === 0) out.clients_with_errors = Number(readVarint(r));
+    else if (field === 5 && wire === 0) out.high_retrans_clients = Number(readVarint(r));
+    else if (field === 6 && wire === 2) out.clients.push(decodeWifiClient(readLengthDelimited(r)));
+    else skipField(r, wire);
+  }
+  return out;
+}
+
 export function decodeIpsecMetrics(buf: Uint8Array): IpsecMetrics {
   const out: IpsecMetrics = {
     timestamp_ms: 0,
@@ -154,6 +213,7 @@ export function decodeIpsecMetrics(buf: Uint8Array): IpsecMetrics {
     else if (field === 4 && wire === 2) out.tunnels.push(decodeTunnel(readLengthDelimited(r)));
     else if (field === 5 && wire === 2) out.wan = decodeWan(readLengthDelimited(r));
     else if (field === 6 && wire === 2) out.gateway = decodeGateway(readLengthDelimited(r));
+    else if (field === 7 && wire === 2) out.wifi = decodeWifi(readLengthDelimited(r));
     else skipField(r, wire);
   }
   return out;

@@ -11,7 +11,7 @@ import {
   Smartphone, Tablet, Cpu, Plug, HelpCircle, Power, RefreshCw,
 } from 'lucide-react';
 import { DeviceDrawer } from '../ui/DeviceDrawer';
-import { telemetryHealth } from '../ui/deviceTelemetry';
+import { telemetryHealth, formatConnectedFor } from '../ui/deviceTelemetry';
 import { Modal } from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { DevicesDashboard } from '../components/widgets/DevicesDashboard';
@@ -24,11 +24,7 @@ const iconFor: Record<Device['kind'], React.ComponentType<{ size?: number }>> = 
   phone: Smartphone, tablet: Tablet, matter: Cpu, shelly: Plug, generic: HelpCircle,
 };
 
-function fmtFor(h: number) {
-  if (h === 0) return '—';
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d ${h % 24}h`;
-}
+const fmtFor = formatConnectedFor;
 
 export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
   const [q, setQ] = useState('');
@@ -362,7 +358,13 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
         </table>
       </Card>
 
-      <DeviceDrawer device={selected} onClose={() => setSelected(null)} onAction={handleAction} />
+      {/* Resolve the selected device against the LIVE list so the drawer's
+          metering/duration keep updating while it's open. */}
+      <DeviceDrawer
+        device={selected ? (allDevices.find((d) => d.id === selected.id) ?? selected) : null}
+        onClose={() => setSelected(null)}
+        onAction={handleAction}
+      />
 
       <Modal
         open={unlockTarget != null}

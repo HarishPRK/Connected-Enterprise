@@ -2,7 +2,7 @@ import { Drawer } from './Drawer';
 import { StatusBadge } from '../components/StatusBadge';
 import type { Device, DeviceTelemetry, HealthSignal } from '../types';
 import { getDeviceHealth } from '../data/mock';
-import { telemetryHealth, meteringTiles } from './deviceTelemetry';
+import { telemetryHealth, meteringTiles, formatConnectedFor } from './deviceTelemetry';
 import { Activity, Cable, Wifi, Plug, Radio, Stethoscope, CheckCircle2, AlertTriangle, XCircle, Zap } from 'lucide-react';
 
 const connIcon = { wired: Cable, wifi: Wifi, poe: Plug, thread: Radio } as const;
@@ -31,7 +31,7 @@ export function DeviceDrawer({
         <Stat label="IP Address"     value={<span className="mono">{device.ip}</span>} />
         <Stat label="MAC Address"    value={<span className="mono">{device.mac}</span>} />
         <Stat label="Type"           value={<span style={{ textTransform: 'capitalize' }}>{device.kind.replace('_', ' ')}</span>} />
-        <Stat label="Connected for"  value={`${device.connectedForHours} h`} />
+        <Stat label="Connected for"  value={formatConnectedFor(device.connectedForHours)} />
       </div>
 
       {device.telemetry && <MeteringCard t={device.telemetry} />}

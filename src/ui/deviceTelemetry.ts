@@ -7,6 +7,14 @@
 
 import type { Device, DeviceHealth, DeviceTelemetry, HealthSignal } from '../types';
 
+/** Bytes → compact human string. */
+export function formatBytes(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)} KB`;
+  return `${Math.round(n)} B`;
+}
+
 /** Energy in Wh → a compact human string (kWh for ≥1000 Wh; sub-Wh kept
  *  precise so a barely-used relay doesn't render as a flat "0 Wh"). */
 export function formatEnergy(wh: number): string {
@@ -26,16 +34,33 @@ export function meteringTiles(t: DeviceTelemetry): { label: string; value: strin
   return tiles;
 }
 
+/** Connection duration from (possibly fractional) hours → human string with
+ *  seconds/minutes resolution, so a just-connected device reads "42s", not "0 h". */
+export function formatConnectedFor(hours: number): string {
+  const sec = Math.round(hours * 3600);
+  if (sec <= 0) return '—';
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  if (hours < 24) return `${Math.floor(hours)}h ${Math.floor((hours % 1) * 60)}m`;
+  return `${Math.floor(hours / 24)}d ${Math.floor(hours % 24)}h`;
+}
+
 export function telemetryHealth(d: Device): DeviceHealth | null {
   const t = d.telemetry;
   if (!t) return null;
 
-  // At-a-glance line (shown in the table): power · current · voltage · energy.
+  // At-a-glance line (shown in the table): power · current · voltage · energy
+  // plus the real Wi-Fi signal/health when the gateway reports them.
   const parts: string[] = [];
   if (t.apowerW != null) parts.push(`${t.apowerW.toFixed(1)} W`);
   if (t.currentA != null) parts.push(`${t.currentA.toFixed(3)} A`);
   if (t.voltageV != null) parts.push(`${t.voltageV.toFixed(1)} V`);
   if (t.energyWhTotal != null) parts.push(formatEnergy(t.energyWhTotal));
+  if (t.rssiDbm != null) parts.push(`RSSI ${t.rssiDbm} dBm`);
+  if (t.rxBytes != null || t.txBytes != null) {
+    parts.push(`↓${formatBytes(t.rxBytes ?? 0)} · ↑${formatBytes(t.txBytes ?? 0)}`);
+  }
+  if (t.wifiHealth && !/^(ok|healthy|good)$/i.test(t.wifiHealth)) parts.push(t.wifiHealth);
 
   const signals: HealthSignal[] = [];
   if (t.apowerW != null) {
@@ -64,6 +89,58 @@ export function telemetryHealth(d: Device): DeviceHealth | null {
       status: t.tempC < 70 ? 'ok' : t.tempC < 85 ? 'warn' : 'err',
       threshold: '< 70 °C',
       why: t.tempC >= 70 ? 'Relay running hot' : undefined,
+    });
+  }
+  if (t.rssiDbm != null) {
+    signals.push({
+      label: 'Wi-Fi RSSI',
+      value: `${t.rssiDbm} dBm`,
+      status: t.rssiDbm > -70 ? 'ok' : t.rssiDbm > -80 ? 'warn' : 'err',
+      threshold: '≥ −70 dBm',
+      why: t.rssiDbm <= -70 ? 'Weak signal — consider relocating the device or AP' : undefined,
+    });
+  }
+  if (t.snrDb != null) {
+    signals.push({
+      label: 'SNR',
+      value: `${t.snrDb} dB`,
+      status: t.snrDb >= 20 ? 'ok' : t.snrDb >= 10 ? 'warn' : 'err',
+      threshold: '≥ 20 dB',
+    });
+  }
+  if (t.rxBytes != null || t.txBytes != null) {
+    signals.push({
+      label: 'Data transferred',
+      value: `↓ ${formatBytes(t.rxBytes ?? 0)} · ↑ ${formatBytes(t.txBytes ?? 0)}`,
+      status: 'ok',
+    });
+  }
+  if (t.rxMbps != null || t.txMbps != null) {
+    signals.push({
+      label: 'Throughput now',
+      value: `${(t.rxMbps ?? 0).toFixed(2)}↓ / ${(t.txMbps ?? 0).toFixed(2)}↑ Mbps`,
+      status: 'ok',
+    });
+  }
+  if (t.linkDownMbps != null || t.linkUpMbps != null) {
+    const std = t.wifiStandard ? (t.wifiStandard.startsWith('802') ? t.wifiStandard : `802.11${t.wifiStandard}`) : null;
+    signals.push({
+      label: 'Link rate',
+      value: `${t.linkDownMbps ?? '—'}↓ / ${t.linkUpMbps ?? '—'}↑ Mbps${std ? ` · ${std}` : ''}`,
+      status: 'ok',
+    });
+  }
+  if (t.wifiHealth && !/^(ok|healthy|good)$/i.test(t.wifiHealth)) {
+    const why: Record<string, string> = {
+      high_retrans: 'High retransmission rate on the wireless link',
+      tx_errors: 'Transmit errors reported by the access point',
+      weak_signal: 'The AP classifies this client as weak-signal',
+    };
+    signals.push({
+      label: 'Link health',
+      value: t.wifiHealth,
+      status: 'warn',
+      why: why[t.wifiHealth.toLowerCase()] ?? "Gateway's link-health verdict for this client",
     });
   }
 

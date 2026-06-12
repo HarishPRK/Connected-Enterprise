@@ -14,6 +14,7 @@ import { runAgent } from './agent.js';
 import { runChat, type ChatMessage } from './chat.js';
 import { ipsecSource } from './ipsecSource.js';
 import { deviceSource } from './deviceSource.js';
+import { historySeries } from './telemetryHistory.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -632,6 +633,13 @@ app.post('/api/devices/classify', (req, res) => {
     return;
   }
   res.json({ ok: true, mac, domain });
+});
+
+/** GET /api/devices/telemetry/history — rolling per-device telemetry series
+ *  (real throughput from byte-counter deltas, RSSI, power draw) keyed by MAC.
+ *  Session-scoped; powers the live dashboard charts. */
+app.get('/api/devices/telemetry/history', (_req, res) => {
+  res.json({ series: historySeries(), receivedAt: Date.now() });
 });
 
 /** POST /api/devices/matter/refresh — poke the gateway to re-fetch the Matter
