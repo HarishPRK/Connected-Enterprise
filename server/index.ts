@@ -634,6 +634,18 @@ app.post('/api/devices/classify', (req, res) => {
   res.json({ ok: true, mac, domain });
 });
 
+/** POST /api/devices/matter/refresh — poke the gateway to re-fetch the Matter
+ *  hub device list and republish it. The fresh list arrives over the live
+ *  inventory stream, so this just confirms the poke was sent. */
+app.post('/api/devices/matter/refresh', async (_req, res) => {
+  const ok = await ipsecSource.requestMatterRefresh();
+  if (ok) {
+    res.json({ ok: true });
+  } else {
+    res.status(503).json({ ok: false, error: 'MQTT not connected — cannot reach the gateway' });
+  }
+});
+
 /** POST /api/devices/matter/control — drive a Matter device (OnOff cluster)
  *  through the gateway's `com.rdk.matter.devicecontrol` component. We write the
  *  RDKMatterControl shadow over MQTT; the component forwards the command to the

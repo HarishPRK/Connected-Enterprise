@@ -108,6 +108,22 @@ export async function controlShellyDevice(deviceId: string, action: MatterAction
   }
 }
 
+/** Ask the gateway to re-fetch and republish the Matter device list. Resolves
+ *  when the poke is sent; the refreshed inventory then arrives over the SSE
+ *  stream like any other live update. */
+export async function refreshMatterDevices(): Promise<void> {
+  const res = await fetch('/api/devices/matter/refresh', { method: 'POST' });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = (await res.json())?.error ?? '';
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail || `refresh failed (${res.status})`);
+  }
+}
+
 export function useDevices(): UseDevicesResult {
   const [devices, setDevices] = useState<DeviceView[]>([]);
   const [loaded, setLoaded] = useState(false);

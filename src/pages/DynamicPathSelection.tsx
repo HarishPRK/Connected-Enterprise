@@ -817,19 +817,19 @@ function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRunAt, setLastRunAt] = useState<number | null>(null);
-  // Throttle: don't auto-refire more than once per 30s window even if the
-  // payload arrives more often.
-  const lastAutoRef = useRef<number>(0);
   const stopRef = useRef<(() => void) | null>(null);
+  const runIdRef = useRef(0);
 
   const generate = useCallback(() => {
     stopRef.current?.();
+    const myRun = ++runIdRef.current;
     setText("");
     setError(null);
     setLoading(true);
     setLastRunAt(Date.now());
     stopRef.current = runIpsecInsightSSE({
       onEvent: (e) => {
+        if (myRun !== runIdRef.current) return; // ignore a superseded run
         if (e.event === "chunk" && typeof e.data.text === "string") {
           setText((t) => t + (e.data.text as string));
         } else if (e.event === "error" && typeof e.data.message === "string") {
@@ -838,23 +838,21 @@ function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
         }
       },
       onError: (msg) => {
-        setError(msg);
-        setLoading(false);
+        if (myRun === runIdRef.current) { setError(msg); setLoading(false); }
       },
-      onDone: () => setLoading(false),
+      onDone: () => { if (myRun === runIdRef.current) setLoading(false); },
     });
   }, []);
 
-  // Auto-generate the first insight after the first payload — once.
+  // Auto-generate once the first payload has arrived. The cleanup aborts the
+  // stream, so a StrictMode remount re-fires cleanly rather than leaving the
+  // only run aborted; it fires once because `hasPayload` flips false→true once.
+  const hasPayload = receivedAt > 0;
   useEffect(() => {
-    if (lastAutoRef.current === 0) {
-      lastAutoRef.current = Date.now();
-      generate();
-    }
-  }, [receivedAt, generate]);
-
-  // Clean up an in-flight stream if the card unmounts.
-  useEffect(() => () => stopRef.current?.(), []);
+    if (!hasPayload) return;
+    generate();
+    return () => stopRef.current?.();
+  }, [hasPayload, generate]);
 
   return (
     <Card
@@ -862,17 +860,6 @@ function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
           <Sparkles size={13} style={{ color: c.accent3 }} />
           AI Insight
-          <span
-            className="badge"
-            style={{
-              fontSize: 9,
-              padding: "1px 6px",
-              background: "var(--grad-accent-soft)",
-              borderColor: "rgba(124,140,255,0.35)",
-            }}
-          >
-            BEDROCK · CLAUDE
-          </span>
         </span>
       }
       sub={

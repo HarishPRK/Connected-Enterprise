@@ -3010,30 +3010,57 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
 
 /* ── OT device power toggle ──────────────────────────────────────────── */
 .power-toggle {
-  width: 34px;
-  height: 34px;
+  --pt-accent: var(--ok, #10b981);
+  position: relative;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  cursor: pointer;
   border: 1px solid var(--border);
-  background: transparent;
+  background:
+    radial-gradient(120% 120% at 50% 20%,
+      color-mix(in srgb, var(--surface-1) 85%, transparent),
+      color-mix(in srgb, var(--surface-1) 40%, transparent));
   color: var(--text-muted);
-  transition: color .25s ease, border-color .25s ease, background .25s ease,
-              box-shadow .25s ease, transform .15s ease;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  transition: color .2s ease, border-color .2s ease, background .3s ease,
+              box-shadow .3s ease, transform .12s cubic-bezier(.3, 1.4, .5, 1);
 }
-.power-toggle:hover { color: var(--text); border-color: var(--text-muted); transform: scale(1.06); }
-.power-toggle:active { transform: scale(0.94); }
+.power-toggle:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+  transform: translateY(-1px);
+}
+.power-toggle:active { transform: translateY(0) scale(.9); }
+.power-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pt-accent) 32%, transparent);
+}
+
+/* ON: filled, glossy, glowing — reads as energised. */
 .power-toggle.on {
-  color: var(--ok, #10b981);
-  border-color: color-mix(in srgb, var(--ok, #10b981) 55%, transparent);
-  background: color-mix(in srgb, var(--ok, #10b981) 14%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--ok, #10b981) 35%, transparent);
+  color: #fff;
+  border-color: transparent;
+  background:
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--pt-accent) 92%, white),
+      color-mix(in srgb, var(--pt-accent) 72%, black));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--pt-accent) 55%, transparent),
+    0 4px 14px color-mix(in srgb, var(--pt-accent) 45%, transparent),
+    inset 0 1px 1px rgba(255, 255, 255, .35);
 }
-.power-toggle.on:hover { color: var(--ok, #10b981); }
-.power-toggle.busy {
-  pointer-events: none;
-  animation: power-toggle-pulse 0.9s ease-in-out infinite;
+.power-toggle.on:hover {
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--pt-accent) 70%, transparent),
+    0 7px 20px color-mix(in srgb, var(--pt-accent) 58%, transparent),
+    inset 0 1px 1px rgba(255, 255, 255, .4);
 }
-@keyframes power-toggle-pulse { 50% { opacity: 0.35; } }
+.power-toggle.on svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .25)); }

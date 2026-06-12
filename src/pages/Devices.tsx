@@ -4,11 +4,11 @@ import { Card } from '../components/Card';
 import { StatusBadge } from '../components/StatusBadge';
 import { devices as mockDevices, getDeviceHealth } from '../data/mock';
 import type { Device } from '../types';
-import { useDevices, classifyDevice, controlMatterDevice, controlShellyDevice, type DeviceView } from '../ui/useDevices';
+import { useDevices, classifyDevice, controlMatterDevice, controlShellyDevice, refreshMatterDevices, type DeviceView } from '../ui/useDevices';
 import {
   Laptop, Monitor, Printer, CreditCard, Server, PhoneCall,
   Flame, Wind, DoorClosed, Lock, Search, Download, Plus, ArrowLeftRight,
-  Smartphone, Tablet, Cpu, Plug, HelpCircle, Power,
+  Smartphone, Tablet, Cpu, Plug, HelpCircle, Power, RefreshCw,
 } from 'lucide-react';
 import { DeviceDrawer } from '../ui/DeviceDrawer';
 import { telemetryHealth } from '../ui/deviceTelemetry';
@@ -36,9 +36,24 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
   const [selected, setSelected] = useState<Device | null>(null);
   const [unlockTarget, setUnlockTarget] = useState<Device | null>(null);
   const [reason, setReason] = useState('');
-  const [togglingId, setTogglingId] = useState<string | null>(null);
   const { push } = useToast();
   const { devices: liveDevices, loaded, source, connected } = useDevices();
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Poke the gateway to re-fetch the Matter device list. The fresh inventory
+  // arrives over the live SSE stream, so we just confirm the request and keep
+  // the spinner up briefly for feedback.
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await refreshMatterDevices();
+      push({ kind: 'info', title: 'Refresh requested', detail: 'The gateway is re-fetching the Matter device list.' });
+    } catch (err) {
+      push({ kind: 'error', title: 'Refresh failed', detail: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTimeout(() => setRefreshing(false), 1500);
+    }
+  }
 
   // Live inventory from the gateway feed (Phase 0: server seed + persisted
   // IT/OT overrides). Fall back to the bundled mock until the first snapshot
@@ -136,12 +151,15 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
   // Flip a switchable OT device to the opposite of its displayed state.
   // Matter devices go through the gateway's hub (nodeId encoded in the id as
   // `matter-<nodeId>`); Shelly devices talk MQTT to IoT Core directly (their
-  // id IS the MQTT device id). The round trip takes a moment, so the button
-  // pulses until the ack lands.
+  // id IS the MQTT device id). The relay switches the moment the device gets
+  // the command — halfway through the round trip — so we flip the button
+  // optimistically on click and let the live feed reconcile to the device's
+  // real state (or revert if the command fails).
   async function handlePowerToggle(e: React.MouseEvent, d: DeviceView, currentlyOn: boolean) {
     e.stopPropagation();
     const action: 'On' | 'Off' = currentlyOn ? 'Off' : 'On';
-    setTogglingId(d.id);
+    const desired = !currentlyOn;
+    setPowerOverrides((prev) => ({ ...prev, [d.id]: desired }));
     try {
       if (d.kind === 'shelly') {
         await controlShellyDevice(d.id, action);
@@ -152,20 +170,19 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
         }
         await controlMatterDevice(nodeId, action);
       }
-      setPowerOverrides((prev) => ({ ...prev, [d.id]: action === 'On' }));
       push({
         kind: 'success',
         title: `${d.name} turned ${action.toLowerCase()}`,
         detail: d.kind === 'shelly' ? 'The device confirmed the command.' : 'The gateway confirmed the command.',
       });
     } catch (err) {
+      // Command failed — undo the optimistic flip.
+      setPowerOverrides((prev) => ({ ...prev, [d.id]: currentlyOn }));
       push({
         kind: 'error',
         title: `${action} failed for ${d.name}`,
         detail: err instanceof Error ? err.message : String(err),
       });
-    } finally {
-      setTogglingId(null);
     }
   }
 
@@ -188,6 +205,10 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
         right={
           <div className="toolbar" style={{ alignItems: 'center' }}>
             <SourcePill source={source} connected={connected} />
+            <button onClick={handleRefresh} disabled={refreshing} title="Re-fetch the Matter device list from the gateway">
+              <RefreshCw size={14} className={refreshing ? 'spin' : undefined} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
             <button><Plus size={14} />Add device</button>
             <button><Download size={14} />Export</button>
           </div>
@@ -278,7 +299,7 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
                     )}
                   </td>
                   <td style={{ textTransform: 'capitalize', color: 'var(--text-dim)' }}>
-                    {d.kind.replace('_', ' ')}
+                    {d.kind === 'shelly' ? 'MQTT' : d.kind.replace('_', ' ')}
                   </td>
                   <td className="mono">{d.ip}</td>
                   <td className="mono" style={{ color: 'var(--text-muted)' }}>{d.mac}</td>
@@ -319,10 +340,9 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
                       )}
                       {(d.kind === 'matter' || d.kind === 'shelly') && (() => {
                         const isOn = powerOverrides[d.id] ?? d.power ?? false;
-                        const busy = togglingId === d.id;
                         return (
                           <button
-                            className={`power-toggle${isOn ? ' on' : ''}${busy ? ' busy' : ''}`}
+                            className={`power-toggle${isOn ? ' on' : ''}`}
                             title={`${d.name} is ${d.power == null && !(d.id in powerOverrides) ? 'in an unknown state' : isOn ? 'on' : 'off'} — click to turn ${isOn ? 'off' : 'on'}`}
                             onClick={(e) => handlePowerToggle(e, d, isOn)}
                           >

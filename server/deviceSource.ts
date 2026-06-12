@@ -74,7 +74,7 @@ interface RawDevice {
   hostname?: string;
   name?: string;
   vendor?: string;            // OUI vendor string, if the gateway resolves it
-  conn?: 'wifi' | 'wired' | 'poe';
+  conn?: 'wifi' | 'wired' | 'poe' | 'thread';
   online?: boolean;           // reachable right now (default true)
   connectedForHours?: number;
   services?: string[];        // mDNS/SSDP hints, e.g. ['_matter._tcp']
@@ -164,7 +164,9 @@ function fromMatterList(payload: unknown): InventoryPayload | null {
       name: entry.deviceName || `matter-${nodeId}`,
       kind: 'matter',
       services: ['_matter._tcp'],
-      conn: 'wifi',
+      // The hub reports the device's radio: Thread devices (e.g. Onvis sensors)
+      // come in as radioType 2, Wi-Fi devices (e.g. the Tapo plug) as 1.
+      conn: entry.radioType === 2 ? 'thread' : 'wifi',
       online: true,
       power: matterPower(entry),
       connectedForHours: Number.isFinite(onboarded) && onboarded > 0

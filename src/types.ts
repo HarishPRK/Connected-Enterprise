@@ -58,7 +58,7 @@ export interface Device {
   mac: string;
   status: Status;
   connectedForHours: number;
-  conn: 'wired' | 'wifi' | 'poe';
+  conn: 'wired' | 'wifi' | 'poe' | 'thread';
   /** Current relay/switch state for controllable kinds (matter, shelly).
    *  Undefined = unknown or not switchable. */
   power?: boolean;

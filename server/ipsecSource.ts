@@ -76,6 +76,10 @@ const MATTER_TOPICS: string[] = (
 // result topic.
 const MATTER_CONTROL_TOPIC = process.env.IOT_MATTER_CONTROL_TOPIC ?? 'rdk/matter/device/control';
 const MATTER_RESULT_TOPIC = process.env.IOT_MATTER_RESULT_TOPIC ?? 'rdk/matter/device/control/result';
+// Poking this topic makes the devicelist component (v2+) re-fetch the hub
+// device list and republish it on `rdk/matter/devices/list` — an on-demand
+// refresh so the cloud doesn't need a redeploy for a fresh Matter inventory.
+const MATTER_REFRESH_TOPIC = process.env.IOT_MATTER_REFRESH_TOPIC ?? 'rdk/matter/devices/refresh';
 // CGI branch the component posts to. The Plano hub firmware's CONTROL_DEVICE
 // branch is broken (its parser needs jq, which the matter_bundle image doesn't
 // ship), so we ride the UPDATE_DEVICE branch — it forwards the POST body
@@ -588,6 +592,30 @@ class IpsecSource extends EventEmitter {
     }
 
     return ackPromise;
+  }
+
+  /**
+   * Poke the gateway to re-fetch and republish the Matter device list. The
+   * fresh list arrives on the existing `rdk/matter/devices/list` subscription
+   * (→ deviceSource → SSE), so this is fire-and-forget. Returns false if MQTT
+   * isn't connected.
+   */
+  async requestMatterRefresh(): Promise<boolean> {
+    if (!this.connection || !this.connected) return false;
+    try {
+      await this.connection.publish(
+        MATTER_REFRESH_TOPIC,
+        JSON.stringify({ ts: Date.now() }),
+        mqtt.QoS.AtLeastOnce,
+      );
+      // eslint-disable-next-line no-console
+      console.log(`[matterctl] published refresh poke to "${MATTER_REFRESH_TOPIC}"`);
+      return true;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[matterctl] failed to publish refresh poke:', err);
+      return false;
+    }
   }
 
   /**

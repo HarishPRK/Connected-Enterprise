@@ -3,9 +3,9 @@ import { StatusBadge } from '../components/StatusBadge';
 import type { Device, DeviceTelemetry, HealthSignal } from '../types';
 import { getDeviceHealth } from '../data/mock';
 import { telemetryHealth, meteringTiles } from './deviceTelemetry';
-import { Activity, Cable, Wifi, Plug, Stethoscope, CheckCircle2, AlertTriangle, XCircle, Zap } from 'lucide-react';
+import { Activity, Cable, Wifi, Plug, Radio, Stethoscope, CheckCircle2, AlertTriangle, XCircle, Zap } from 'lucide-react';
 
-const connIcon = { wired: Cable, wifi: Wifi, poe: Plug } as const;
+const connIcon = { wired: Cable, wifi: Wifi, poe: Plug, thread: Radio } as const;
 
 export function DeviceDrawer({
   device, onClose, onAction,

@@ -18,7 +18,7 @@ import { useIpsecMetrics } from '../ui/useIpsecMetrics';
 import {
   Download, RefreshCcw, X, Search, CheckCircle2, AlertCircle, Cpu,
   Laptop, CreditCard, PhoneCall, DoorClosed, Flame, AlertTriangle,
-  Cable, Wifi, Zap,
+  Cable, Wifi, Zap, Radio,
 } from 'lucide-react';
 
 interface OverviewProps {
@@ -228,9 +228,10 @@ const ICON_FOR_KIND: Record<Device['kind'], React.ComponentType<{ size?: number 
   generic:      Laptop,
 };
 const ICON_FOR_CONN: Record<Device['conn'], React.ComponentType<{ size?: number }>> = {
-  wired: Cable,
-  wifi:  Wifi,
-  poe:   Zap,
+  wired:  Cable,
+  wifi:   Wifi,
+  poe:    Zap,
+  thread: Radio,
 };
 
 const KIND_LABEL: Record<Device['kind'], string> = {

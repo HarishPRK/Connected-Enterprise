@@ -39,7 +39,7 @@ function wave(seed: number, i: number, baseline: number, amp: number): number {
 }
 
 const connLabel: Record<Device['conn'], string> = {
-  wifi: 'Wi-Fi', wired: 'Wired', poe: 'PoE',
+  wifi: 'Wi-Fi', wired: 'Wired', poe: 'PoE', thread: 'Thread',
 };
 
 const kindLabel: Record<Device['kind'], string> = {
