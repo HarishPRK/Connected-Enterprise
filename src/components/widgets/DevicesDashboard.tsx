@@ -137,10 +137,32 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
     }
     return derived;
   }, [history]);
-  const liveThroughput = useMemo(
-    () => buildLiveRows(liveTransfer, macToName, (p) => p.transferredMB),
-    [liveTransfer, macToName],
-  );
+  const liveThroughput = useMemo(() => {
+    const built = buildLiveRows(liveTransfer, macToName, (p) => p.transferredMB);
+    // Cumulative series: forward-fill bins a device didn't report in —
+    // stacked areas can't stack across nulls, and carrying the last value
+    // forward is exactly correct for a running total.
+    const lastSeen: Record<string, number> = {};
+    for (const row of built.rows) {
+      for (const name of built.names) {
+        const v = row[name];
+        if (typeof v === 'number') lastSeen[name] = v;
+        else row[name] = lastSeen[name] ?? 0;
+      }
+    }
+    // Auto-unit: sessions usually move KBs, which are sub-pixel in MB.
+    const maxVal = built.rows.reduce((m, row) =>
+      Math.max(m, ...built.names.map((n) => (typeof row[n] === 'number' ? (row[n] as number) : 0))), 0);
+    const useKB = maxVal > 0 && maxVal < 1;
+    if (useKB) {
+      for (const row of built.rows) {
+        for (const name of built.names) {
+          if (typeof row[name] === 'number') row[name] = +(((row[name] as number) * 1000).toFixed(1));
+        }
+      }
+    }
+    return { ...built, unit: useKB ? 'KB' : 'MB', allZero: maxVal === 0 };
+  }, [liveTransfer, macToName]);
   const liveRssi = useMemo(
     () => buildLiveRows(history, macToName, (p) => p.rssiDbm),
     [history, macToName],
@@ -487,13 +509,15 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
         <Card
           title={hasLiveThroughput ? 'Data transferred · live' : 'Throughput · 24 h'}
           sub={hasLiveThroughput
-            ? 'Cumulative MB per device this session (rx + tx) — measured from the gateway’s byte counters'
+            ? `Cumulative ${liveThroughput.unit} per device this session (rx + tx) — measured from the gateway’s byte counters`
             : 'Sum of avg Mbps per device, stacked by device type'}
           right={<RangeBadge label={hasLiveThroughput ? 'live · measured' : '24 h · simulated'} />}
         >
           <div style={{ height: 260 }}>
             {kinds.length === 0 ? (
               <EmptyPanel msg="No devices in the current filter." />
+            ) : hasLiveThroughput && liveThroughput.allZero ? (
+              <EmptyPanel msg="No traffic measured yet this session — collecting from the gateway's byte counters…" />
             ) : hasLiveThroughput ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={liveThroughput.rows} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
@@ -516,7 +540,7 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
                     contentStyle={tooltipStyle(c)}
                     labelStyle={{ color: c.textDim, marginBottom: 4 }}
                     cursor={{ stroke: c.chartCursor, strokeWidth: 1 }}
-                    formatter={(v: unknown, n: unknown) => [`${typeof v === 'number' ? v.toFixed(2) : v} MB`, String(n)]}
+                    formatter={(v: unknown, n: unknown) => [`${typeof v === 'number' ? v.toFixed(2) : v} ${liveThroughput.unit}`, String(n)]}
                   />
                   {liveThroughput.names.map((name, i) => (
                     <Area
@@ -527,7 +551,6 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
                       stroke={seriesPalette[i % seriesPalette.length]}
                       fill={`url(#dev-live-th-${i})`}
                       strokeWidth={1.6}
-                      connectNulls
                       isAnimationActive={false}
                     />
                   ))}
