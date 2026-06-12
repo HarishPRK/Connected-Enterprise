@@ -2000,6 +2000,7 @@ function IpsecFlowSvg({
         <DeviceColumn
           x={COL_DEVICES.x}
           w={COL_DEVICES.w}
+          canvasH={H}
           it={itDevices}
           ot={otDevices}
           gwLeft={gwLeft}
@@ -2019,16 +2020,24 @@ function IpsecFlowSvg({
           const itUnderlay: "fiber" | "5g" | null =
             cellReachable ? "5g" : fiberReachable ? "fiber" : null;
           const shared = otUnderlay != null && otUnderlay === itUnderlay;
-          const endFor = (u: "fiber" | "5g", off: number) => {
+          // Leave the gateway on the side facing the destination (Fiber sits
+          // above the midline, 5G below) so the two flows never cross; when
+          // both domains share one underlay (failover) keep them parallel
+          // with a constant OT-above/IT-below separation.
+          const startFor = (u: "fiber" | "5g", sep: number) => ({
+            x: gwRight.x,
+            y: gwRight.y + (u === "fiber" ? -10 : 10) + (shared ? sep : 0),
+          });
+          const endFor = (u: "fiber" | "5g", sep: number) => {
             const base = u === "fiber" ? fiberLeft : cellLeft;
-            return shared ? { x: base.x, y: base.y + off } : base;
+            return shared ? { x: base.x, y: base.y + sep } : base;
           };
           return (
             <>
               {otUnderlay && (
                 <NodeConnector
-                  a={{ x: gwRight.x, y: gwRight.y + 10 }}
-                  b={endFor(otUnderlay, 10)}
+                  a={startFor(otUnderlay, -5)}
+                  b={endFor(otUnderlay, -8)}
                   state="ok"
                   c={c}
                   beziD={beziD}
@@ -2038,8 +2047,8 @@ function IpsecFlowSvg({
               )}
               {itUnderlay && (
                 <NodeConnector
-                  a={{ x: gwRight.x, y: gwRight.y - 10 }}
-                  b={endFor(itUnderlay, -10)}
+                  a={startFor(itUnderlay, 5)}
+                  b={endFor(itUnderlay, 8)}
                   state="ok"
                   c={c}
                   beziD={beziD}
@@ -2682,6 +2691,7 @@ const DEVICE_KIND_ICON: Record<DeviceView["kind"], typeof Laptop> = {
 function DeviceColumn({
   x,
   w,
+  canvasH,
   it,
   ot,
   gwLeft,
@@ -2692,6 +2702,7 @@ function DeviceColumn({
 }: {
   x: number;
   w: number;
+  canvasH: number;
   it: DeviceView[];
   ot: DeviceView[];
   gwLeft: { x: number; y: number };
@@ -2704,13 +2715,16 @@ function DeviceColumn({
   const ROW_H = 26;
   const ROW_GAP = 7;
   const PAD = 9;
+  const GROUP_GAP = 24;
   const groupH = (n: number) =>
     HEADER_H + PAD + Math.max(n, 1) * ROW_H + (Math.max(n, 1) - 1) * ROW_GAP + PAD;
 
-  const itY = 78;
   const itH = groupH(it.length);
-  const otY = itY + itH + 24;
   const otH = groupH(ot.length);
+  // Centre the IT+OT stack on the canvas midline so the column lines up with
+  // the gateway row instead of hugging the top of the diagram.
+  const itY = Math.max(40, (canvasH - (itH + GROUP_GAP + otH)) / 2);
+  const otY = itY + itH + GROUP_GAP;
 
   const rowTop = (groupY: number, idx: number) =>
     groupY + HEADER_H + PAD + idx * (ROW_H + ROW_GAP);
