@@ -213,6 +213,8 @@ class IpsecSource extends EventEmitter {
   private pendingMatterCmds = new Map<string, (r: MatterCommandResult) => void>();
   /** In-flight Shelly RPCs keyed by their numeric rpc id. */
   private pendingShellyCmds = new Map<number, (r: ShellyCommandResult) => void>();
+  /** In-flight Shelly.GetStatus polls: rpc id → device id. */
+  private pendingStatusReqs = new Map<number, string>();
   private shellyCmdSeq = 1;
   /** Last known state per Shelly device id (fed into the device inventory). */
   private shellyStates = new Map<string, ShellyState>();
@@ -590,13 +592,16 @@ class IpsecSource extends EventEmitter {
     }
   }
 
-  /** Ask the device to publish its full status on `<id>/status` (handled by
-   *  handleShellyStatus). Uses the Gen2 command topic, which works even with
-   *  RPC-over-MQTT disabled on the device — which is the case for this fleet
-   *  (probed: the device never answers on an RPC reply topic). */
+  /** Poll a device's full status via RPC: Shelly.GetStatus to `<id>/rpc`; the
+   *  reply (correlated by rpc id) is folded into state by handleShellyReply.
+   *  Requires "RPC over MQTT" to be enabled in the device's MQTT settings. */
   private requestShellyStatus(deviceId: string): void {
     if (!this.connection || !this.connected) return;
-    this.connection.publish(`${deviceId}/command`, 'status_update', mqtt.QoS.AtLeastOnce)
+    const id = this.shellyCmdSeq++;
+    this.pendingStatusReqs.set(id, deviceId);
+    setTimeout(() => this.pendingStatusReqs.delete(id), 15_000);
+    const rpc = { id, src: SHELLY_REPLY_SRC, method: 'Shelly.GetStatus' };
+    this.connection.publish(`${deviceId}/rpc`, JSON.stringify(rpc), mqtt.QoS.AtLeastOnce)
       .catch((err) => {
         // eslint-disable-next-line no-console
         console.error(`[shelly] status poll publish failed for "${deviceId}":`, err);
@@ -636,6 +641,24 @@ class IpsecSource extends EventEmitter {
         result?: unknown;
         error?: { code?: number; message?: string };
       };
+
+      // A full-status poll reply — fold the snapshot into the device state.
+      if (typeof msg.id === 'number' && this.pendingStatusReqs.has(msg.id)) {
+        const devId = this.pendingStatusReqs.get(msg.id)!;
+        this.pendingStatusReqs.delete(msg.id);
+        const status = msg.result as Record<string, unknown> | undefined;
+        if (status) {
+          const st = this.shellyState(devId);
+          st.online = true;
+          this.applyShellySwitch(st, status['switch:0'] as ShellySwitchPayload | undefined);
+          const sys = status.sys as { uptime?: number } | undefined;
+          if (sys && typeof sys.uptime === 'number') st.uptimeSec = sys.uptime;
+          // eslint-disable-next-line no-console
+          console.log(`[shelly] ${devId} status: output=${st.output} apower=${st.telemetry?.apowerW}W uptime=${st.uptimeSec}s`);
+          this.emitShellyInventory();
+        }
+        return;
+      }
       // eslint-disable-next-line no-console
       console.log(`[shelly] reply on "${topic}":`, text);
       if (typeof msg.id === 'number' && this.pendingShellyCmds.has(msg.id)) {
@@ -796,34 +819,55 @@ class IpsecSource extends EventEmitter {
   }
 
   /**
-   * Drive a Shelly relay via the Gen2 command topic: publish "on"/"off" to
-   * `<deviceId>/command/switch:0`. This fleet has RPC-over-MQTT disabled, so
-   * there's no reply to correlate — success means the publish was accepted;
-   * the resulting state lands via NotifyStatus plus a follow-up status poll.
+   * Drive a Shelly relay over RPC-over-MQTT: publish Switch.Set to
+   * `<deviceId>/rpc` and await the device's reply on `<SHELLY_REPLY_SRC>/rpc`
+   * (correlated by the numeric rpc id). Requires "RPC over MQTT" enabled in
+   * the device's MQTT settings — a timeout here means it isn't.
    */
   async sendShellyCommand(
     deviceId: string,
     action: 'On' | 'Off',
+    timeoutMs = 10_000,
   ): Promise<ShellyCommandResult> {
     if (!this.connection || !this.connected) {
       return { ok: false, error: 'MQTT not connected — cannot reach the device' };
     }
+    const requestId = this.shellyCmdSeq++;
+
+    const ackPromise = new Promise<ShellyCommandResult>((resolve) => {
+      this.pendingShellyCmds.set(requestId, resolve);
+      setTimeout(() => {
+        if (this.pendingShellyCmds.has(requestId)) {
+          this.pendingShellyCmds.delete(requestId);
+          resolve({
+            ok: false,
+            timedOut: true,
+            requestId,
+            error: 'No RPC reply from the device — is "RPC over MQTT" enabled in its MQTT settings?',
+          });
+        }
+      }, timeoutMs);
+    });
+
+    const rpc = { id: requestId, src: SHELLY_REPLY_SRC, method: 'Switch.Set', params: { id: 0, on: action === 'On' } };
+
     try {
-      await this.connection.publish(
-        `${deviceId}/command/switch:0`,
-        action.toLowerCase(),
-        mqtt.QoS.AtLeastOnce,
-      );
+      await this.connection.publish(`${deviceId}/rpc`, JSON.stringify(rpc), mqtt.QoS.AtLeastOnce);
       // eslint-disable-next-line no-console
-      console.log(`[shelly] published "${action.toLowerCase()}" to "${deviceId}/command/switch:0"`);
+      console.log(`[shelly] published ${JSON.stringify(rpc)} to "${deviceId}/rpc"`);
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      this.pendingShellyCmds.delete(requestId);
+      return { ok: false, requestId, error: err instanceof Error ? err.message : String(err) };
     }
-    this.shellyState(deviceId).output = action === 'On';
-    this.emitShellyInventory();
-    // Pull the authoritative state/metering shortly after the switch settles.
-    setTimeout(() => this.requestShellyStatus(deviceId), 1500);
-    return { ok: true };
+
+    const res = await ackPromise;
+    if (res.ok) {
+      this.shellyState(deviceId).output = action === 'On';
+      this.emitShellyInventory();
+      // Pull fresh metering shortly after the relay settles.
+      setTimeout(() => this.requestShellyStatus(deviceId), 1500);
+    }
+    return res;
   }
 
   getSnapshot() {
