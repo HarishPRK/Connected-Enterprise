@@ -2009,25 +2009,55 @@ function IpsecFlowSvg({
           otColor={OT_COLOR}
         />
 
-        {/* ─── Gateway → underlays (particle only on the active underlay) ─── */}
-        <NodeConnector
-          a={gwRight}
-          b={fiberLeft}
-          state={fiberReachable ? "ok" : "warn"}
-          c={c}
-          beziD={beziD}
-          accent={FIBER_COLOR}
-          flowing={activeUnderlay === "fiber"}
-        />
-        <NodeConnector
-          a={gwRight}
-          b={cellLeft}
-          state={cellReachable ? "ok" : "warn"}
-          c={c}
-          beziD={beziD}
-          accent={CELL_COLOR}
-          flowing={activeUnderlay === "5g"}
-        />
+        {/* ─── Gateway → underlays: domain-steered paths ───
+            Demo policy: OT traffic rides the Fiber underlay, IT rides 5G.
+            If a domain's home underlay has no reachable tunnel, its flow
+            fails over visually to the surviving underlay. */}
+        {(() => {
+          const otUnderlay: "fiber" | "5g" | null =
+            fiberReachable ? "fiber" : cellReachable ? "5g" : null;
+          const itUnderlay: "fiber" | "5g" | null =
+            cellReachable ? "5g" : fiberReachable ? "fiber" : null;
+          const shared = otUnderlay != null && otUnderlay === itUnderlay;
+          const endFor = (u: "fiber" | "5g", off: number) => {
+            const base = u === "fiber" ? fiberLeft : cellLeft;
+            return shared ? { x: base.x, y: base.y + off } : base;
+          };
+          return (
+            <>
+              {otUnderlay && (
+                <NodeConnector
+                  a={{ x: gwRight.x, y: gwRight.y + 10 }}
+                  b={endFor(otUnderlay, 10)}
+                  state="ok"
+                  c={c}
+                  beziD={beziD}
+                  accent={OT_COLOR}
+                  flowing
+                />
+              )}
+              {itUnderlay && (
+                <NodeConnector
+                  a={{ x: gwRight.x, y: gwRight.y - 10 }}
+                  b={endFor(itUnderlay, -10)}
+                  state="ok"
+                  c={c}
+                  beziD={beziD}
+                  accent={IT_COLOR}
+                  flowing
+                />
+              )}
+              {/* Faint base links so an underlay with no domain flow (all its
+                  tunnels down) still reads as part of the topology. */}
+              {!fiberReachable && (
+                <NodeConnector a={gwRight} b={fiberLeft} state="warn" c={c} beziD={beziD} accent={FIBER_COLOR} flowing={false} />
+              )}
+              {!cellReachable && (
+                <NodeConnector a={gwRight} b={cellLeft} state="warn" c={c} beziD={beziD} accent={CELL_COLOR} flowing={false} />
+              )}
+            </>
+          );
+        })()}
 
         {/* ─── Underlay → tunnel pills (particles only on active path) ─── */}
         {fiberTunnels.map((t, i) => {
