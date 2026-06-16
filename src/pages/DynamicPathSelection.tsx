@@ -1776,8 +1776,69 @@ function IpsecFlowSvg({
     ? inferUnderlay(activeTunnelObj.ifname)
     : null;
 
+  // ── Application-aware routing (demo policy, hardcoded) ──
+  // OT device traffic egresses on a Fiber tunnel; IT device traffic egresses
+  // on a 5G tunnel — concurrently. The "carrier" for each class is the first
+  // reachable tunnel in its underlay (falls back to the first tunnel so the
+  // path still renders when none are reachable). Both carriers animate at once,
+  // tinted to match their device class (OT = pink, IT = emerald); the remaining
+  // tunnels read as dimmed standby paths.
+  const otCarrier = fiberTunnels.find((t) => t.reachable) ?? fiberTunnels[0];
+  const itCarrier = cellTunnels.find((t) => t.reachable) ?? cellTunnels[0];
+
   return (
     <div className="ipsec-flow-wrap">
+      {/* App-aware routing legend — colour key for the two concurrent flows */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: "var(--text-muted)",
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+          }}
+        >
+          Application-aware routing
+        </span>
+        <span style={{ display: "inline-flex", gap: 16, flexWrap: "wrap" }}>
+          {[
+            { color: OT_COLOR, label: "OT devices → Fiber" },
+            { color: IT_COLOR, label: "IT devices → 5G" },
+          ].map((l) => (
+            <span
+              key={l.label}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11,
+                color: "var(--text-dim)",
+              }}
+            >
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 3,
+                  background: l.color,
+                  boxShadow: `0 0 6px ${l.color}`,
+                }}
+              />
+              {l.label}
+            </span>
+          ))}
+        </span>
+      </div>
       <svg
         viewBox={`0 0 ${W} ${H}`}
         style={{ width: "100%", height: "auto", display: "block" }}
@@ -1957,9 +2018,11 @@ function IpsecFlowSvg({
         {/* ─── Underlay → tunnel pills (particles only on active path) ─── */}
         {fiberTunnels.map((t, i) => {
           const col = tunnelColor(t);
-          const isActive = !!t.ifname && t.ifname === m.active_tunnel;
           const reachable = t.reachable;
-          const carrying = isActive && reachable;
+          // OT traffic rides Fiber — the OT carrier flows live, tinted OT pink.
+          const carrying =
+            !!t.ifname && t.ifname === otCarrier?.ifname && reachable;
+          const flowColor = OT_COLOR;
           const pid = `ipsec-fiber-in-${i}`;
           const target = { x: PILL_X, y: fiberPillY(i) + PILL_H / 2 };
           const d = beziD(fiberRight, target);
@@ -1969,7 +2032,7 @@ function IpsecFlowSvg({
                 id={pid}
                 d={d}
                 fill="none"
-                stroke={carrying ? "url(#ipsec-flow-active)" : col}
+                stroke={carrying ? flowColor : col}
                 strokeWidth={carrying ? 3 : reachable ? 1.2 : 0.9}
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
@@ -1986,12 +2049,12 @@ function IpsecFlowSvg({
               </path>
               {carrying && (
                 <>
-                  <circle r={4} fill={c.ok} filter="url(#ipsec-flow-glow)">
+                  <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
                     <animateMotion dur="1.1s" repeatCount="indefinite">
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
-                  <circle r={2.4} fill={accentPurple} opacity={0.85}>
+                  <circle r={2.4} fill={flowColor} opacity={0.7}>
                     <animateMotion
                       dur="1.1s"
                       begin="0.55s"
@@ -2007,9 +2070,11 @@ function IpsecFlowSvg({
         })}
         {cellTunnels.map((t, i) => {
           const col = tunnelColor(t);
-          const isActive = !!t.ifname && t.ifname === m.active_tunnel;
           const reachable = t.reachable;
-          const carrying = isActive && reachable;
+          // IT traffic rides 5G — the IT carrier flows live, tinted IT emerald.
+          const carrying =
+            !!t.ifname && t.ifname === itCarrier?.ifname && reachable;
+          const flowColor = IT_COLOR;
           const pid = `ipsec-cell-in-${i}`;
           const target = { x: PILL_X, y: cellPillY(i) + PILL_H / 2 };
           const d = beziD(cellRight, target);
@@ -2019,7 +2084,7 @@ function IpsecFlowSvg({
                 id={pid}
                 d={d}
                 fill="none"
-                stroke={carrying ? "url(#ipsec-flow-active)" : col}
+                stroke={carrying ? flowColor : col}
                 strokeWidth={carrying ? 3 : reachable ? 1.2 : 0.9}
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
@@ -2036,12 +2101,12 @@ function IpsecFlowSvg({
               </path>
               {carrying && (
                 <>
-                  <circle r={4} fill={c.ok} filter="url(#ipsec-flow-glow)">
+                  <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
                     <animateMotion dur="1.1s" repeatCount="indefinite">
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
-                  <circle r={2.4} fill={accentPurple} opacity={0.85}>
+                  <circle r={2.4} fill={flowColor} opacity={0.7}>
                     <animateMotion
                       dur="1.1s"
                       begin="0.55s"
@@ -2072,9 +2137,13 @@ function IpsecFlowSvg({
           })),
         ].map(({ t, i, kind, source }, idx) => {
           const col = tunnelColor(t);
-          const isActive = !!t.ifname && t.ifname === m.active_tunnel;
           const reachable = t.reachable;
-          const carrying = isActive && reachable;
+          // Same app-aware carriers as the inbound leg: Fiber carries OT,
+          // 5G carries IT — both colour-matched to their device class.
+          const carrier = kind === "fiber" ? otCarrier : itCarrier;
+          const flowColor = kind === "fiber" ? OT_COLOR : IT_COLOR;
+          const carrying =
+            !!t.ifname && t.ifname === carrier?.ifname && reachable;
           const pid = `ipsec-${kind}-out-${i}`;
           const total = Math.max(1, m.tunnels.length - 1);
           const band = WAN_H / 2 - 22;
@@ -2089,7 +2158,7 @@ function IpsecFlowSvg({
                 id={pid}
                 d={d}
                 fill="none"
-                stroke={carrying ? "url(#ipsec-flow-active)" : col}
+                stroke={carrying ? flowColor : col}
                 strokeWidth={carrying ? 3 : reachable ? 1.2 : 0.9}
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
@@ -2106,12 +2175,12 @@ function IpsecFlowSvg({
               </path>
               {carrying && (
                 <>
-                  <circle r={4} fill={c.ok} filter="url(#ipsec-flow-glow)">
+                  <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
                     <animateMotion dur="1.1s" repeatCount="indefinite">
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
-                  <circle r={2.4} fill={accentPurple} opacity={0.85}>
+                  <circle r={2.4} fill={flowColor} opacity={0.7}>
                     <animateMotion
                       dur="1.1s"
                       begin="0.55s"
@@ -2229,6 +2298,7 @@ function IpsecFlowSvg({
             py: fiberPillY(i),
             underlay: FIBER_COLOR,
             label: `Tunnel ${i + 1}`,
+            cls: "ot" as const,
           })),
           ...cellTunnels.map((t, i) => ({
             t,
@@ -2236,13 +2306,18 @@ function IpsecFlowSvg({
             underlay: CELL_COLOR,
             // 5G tunnels continue the numbering after Fiber's two: Tunnel 3 / 4.
             label: `Tunnel ${i + 3}`,
+            cls: "it" as const,
           })),
-        ].map(({ t, py, underlay, label }, idx) => {
+        ].map(({ t, py, underlay, label, cls }, idx) => {
           const col = tunnelColor(t);
-          const isActive = !!t.ifname && t.ifname === m.active_tunnel;
           const reachable = t.reachable;
-          const carrying = isActive && reachable;
-          const preferredButDown = isActive && !reachable;
+          // App-aware carrier for this tunnel's class (OT→Fiber, IT→5G).
+          const carrier = cls === "ot" ? otCarrier : itCarrier;
+          const isCarrier = !!t.ifname && t.ifname === carrier?.ifname;
+          const carrying = isCarrier && reachable;
+          const preferredButDown = isCarrier && !reachable;
+          const classLabel = cls === "ot" ? "OT" : "IT";
+          const classColor = cls === "ot" ? OT_COLOR : IT_COLOR;
           // Dim non-carrying tunnels so the eye lands on the active one.
           const dim = !carrying;
           const pillOpacity = carrying ? 1 : reachable ? 0.55 : 0.38;
@@ -2283,7 +2358,7 @@ function IpsecFlowSvg({
                   height={PILL_H + 8}
                   rx={12}
                   fill="none"
-                  stroke="url(#ipsec-flow-active)"
+                  stroke={classColor}
                   strokeWidth={2.2}
                   strokeDasharray="6 5"
                 >
@@ -2376,13 +2451,13 @@ function IpsecFlowSvg({
                   y={py + PILL_H / 2 + 12}
                   fontSize={11}
                   fontWeight={800}
-                  fill={c.ok}
+                  fill={classColor}
                   textAnchor="end"
                   letterSpacing="0.10em"
                 >
                   {mos > 0
-                    ? `● MOS ${mosGrade} · CARRYING`
-                    : "● CARRYING TRAFFIC"}
+                    ? `● ${classLabel} · MOS ${mosGrade}`
+                    : `● ${classLabel} TRAFFIC`}
                 </text>
               ) : preferredButDown ? (
                 <text
@@ -2394,7 +2469,7 @@ function IpsecFlowSvg({
                   textAnchor="end"
                   letterSpacing="0.10em"
                 >
-                  ◌ PREFERRED · DOWN
+                  ◌ {classLabel} CARRIER · DOWN
                 </text>
               ) : mos > 0 ? (
                 <g>
