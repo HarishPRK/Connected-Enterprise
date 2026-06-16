@@ -63,6 +63,15 @@ const metricCfg: Record<
   loss: { label: "Packet loss", unit: "%", ref: 1, ref2: 3 },
 };
 
+/** Resolve a branch's IPsec source tag to the exact MQTT topic it consumes.
+ *  Plano (`rdk`) → `rdk/ipsec/metrics`; McKinney (`mckinney`) →
+ *  `mckinney/rdk/ipsec/metrics`. Returns null for branches with no live feed. */
+function sourceToTopic(source: string | undefined): string | null {
+  if (!source) return null;
+  if (source === "mckinney") return "mckinney/rdk/ipsec/metrics";
+  return `${source}/ipsec/metrics`;
+}
+
 /** Classify a tunnel into its underlay bucket from the ifname. */
 type Underlay = "fiber" | "5g";
 function inferUnderlay(ifname: string): Underlay {
@@ -152,12 +161,15 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   const ipsec = useIpsecMetrics();
 
   // Scope the live list to the current branch's MQTT source — Plano sees
-  // `rdk/...` gateways, McKinney sees `prpl/...` gateways. Branches without
-  // a mapped source see the unfiltered list (handy during development).
+  // `rdk/...` gateways, McKinney sees `mckinney/rdk/...` gateways. Branches
+  // without a mapped source see the unfiltered list (handy during development).
   const branchSource = branchId ? BRANCH_TO_IPSEC_SOURCE[branchId] : undefined;
   const branchList = branchSource
     ? ipsec.list.filter((g) => g.source === branchSource)
     : ipsec.list;
+  // Exact topic this branch is bound to — shown across the live/ingest/AI cards
+  // so the UI names the real feed (`mckinney/rdk/ipsec/metrics` for McKinney).
+  const branchTopic = sourceToTopic(branchSource);
 
   // Effective IPsec data — either the live snapshot, or the captured sample
   // when the user clicks "Load sample" on the ingest card.
@@ -313,7 +325,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
             showSample={showSample}
             onToggleSample={() => setShowSample((s) => !s)}
             effectiveList={effectiveList}
-            branchTopic={branchSource ? `${branchSource}/ipsec/metrics` : null}
+            branchTopic={branchTopic}
           />
         </div>
 
@@ -326,6 +338,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
               slaSeries={slaSeries}
               flipCount={flipCount}
               sessionStartMs={sessionStartMs}
+              topic={branchTopic ?? "ipsec/metrics"}
             />
           </div>
         )}
@@ -334,7 +347,10 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
             streams a plain-English analysis. Only shown when we have data. */}
         {liveState && (
           <div className="col-12">
-            <IpsecAiInsightsCard receivedAt={liveState.receivedAt} />
+            <IpsecAiInsightsCard
+              receivedAt={liveState.receivedAt}
+              topic={branchTopic ?? "ipsec/metrics"}
+            />
           </div>
         )}
 
@@ -597,11 +613,14 @@ function EnterpriseOpsCard({
   slaSeries,
   flipCount,
   sessionStartMs,
+  topic = "rdk/ipsec/metrics",
 }: {
   state: IpsecGatewayState;
   slaSeries: SlaSample[];
   flipCount: number;
   sessionStartMs: number | null;
+  /** The live MQTT topic this branch consumes — named in the footer. */
+  topic?: string;
 }) {
   const c = useThemeColors();
   const m = state.metrics;
@@ -729,8 +748,8 @@ function EnterpriseOpsCard({
         }}
       >
         All values derive from the live{" "}
-        <span className="mono">rdk/ipsec/metrics</span> protobuf — no synthetic
-        data. SLA thresholds match the path-selector defaults above.
+        <span className="mono">{topic}</span> protobuf — no synthetic data. SLA
+        thresholds match the path-selector defaults above.
       </div>
     </Card>
   );
@@ -811,7 +830,14 @@ function EnterpriseTile({
   );
 }
 
-function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
+function IpsecAiInsightsCard({
+  receivedAt,
+  topic = "rdk/ipsec/metrics",
+}: {
+  receivedAt: number;
+  /** The live MQTT topic this branch consumes — named while streaming. */
+  topic?: string;
+}) {
   const c = useThemeColors();
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -934,7 +960,7 @@ function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
           >
             <Loader2 size={13} className="spin" />
             Reading the latest payload from{" "}
-            <span className="mono">rdk/ipsec/metrics</span>…
+            <span className="mono">{topic}</span>…
           </div>
         ) : (
           <div style={{ color: "var(--text-muted)" }}>
@@ -1150,8 +1176,8 @@ function LiveIpsecCard({
   onToggleSample: () => void;
   effectiveList: IpsecGatewayState[];
   /** Topic the current branch is bound to (e.g. `rdk/ipsec/metrics` for
-   *  Plano, `prpl/ipsec/metrics` for McKinney). Falls back to the server's
-   *  full subscription list when the branch has no live mapping. */
+   *  Plano, `mckinney/rdk/ipsec/metrics` for McKinney). Falls back to the
+   *  server's full subscription list when the branch has no live mapping. */
   branchTopic: string | null;
 }) {
   const c = useThemeColors();
@@ -1307,7 +1333,7 @@ const TUNNEL_OPTIONS: Record<
  *  gateway confirmed (ok) or the command was sent but not yet acked (pending). */
 async function postGatewayPathMode(
   mode: PathCommand,
-  source: "rdk" | "prpl",
+  source: "rdk" | "mckinney",
 ): Promise<{ pending: boolean }> {
   const res = await fetch("/api/gateway/path", {
     method: "POST",
@@ -1352,7 +1378,7 @@ function GatewayBlock({
 
   // The gateway's topic family — drives which IoT Core topic the command is
   // published to. Falls back to 'rdk' for the captured-sample / unknown case.
-  const source: "rdk" | "prpl" = g.source === "prpl" ? "prpl" : "rdk";
+  const source: "rdk" | "mckinney" = g.source === "mckinney" ? "mckinney" : "rdk";
 
   const commandTitle = (cmd: PathCommand) =>
     cmd === "auto"

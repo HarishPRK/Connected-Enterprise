@@ -25,8 +25,8 @@ import { LiveDataProvider } from './ui/LiveData';
 import { CommandPalette } from './ui/CommandPalette';
 import { NotificationsDrawer } from './ui/NotificationsDrawer';
 
-// Default branch — McKinney (backed by the prpl/ipsec/metrics live feed).
-// Falls back to the first configured branch if the id ever drifts.
+// Default branch — McKinney (backed by the mckinney/rdk/ipsec/metrics feed:
+// fiber live, 5G simulated). Falls back to the first branch if the id drifts.
 const DEFAULT_BRANCH_ID = branches.find((b) => b.id === 'b-mck-03')?.id ?? branches[0].id;
 
 export default function App() {

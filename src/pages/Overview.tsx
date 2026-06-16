@@ -38,7 +38,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const branchDevices = useMemo(() => getDevicesForBranch(branchId), [branchId]);
   const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
-  // ── Live IPsec overlay (Plano = rdk topic, McKinney = prpl topic) ──
+  // ── Live IPsec overlay (Plano = rdk topic, McKinney = mckinney/rdk topic) ──
   // Pick the cached gateway whose source-tag matches the current branch's
   // MQTT family. Falls back to "no live data" for branches not in the map.
   const ipsec = useIpsecMetrics();

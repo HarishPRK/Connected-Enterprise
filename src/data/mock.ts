@@ -11,9 +11,9 @@ import type {
 /** Branches that are backed by a live IPsec MQTT feed. The value matches the
  *  `source` tag the server attaches to each cached gateway state (derived from
  *  the topic prefix it arrived on). */
-export const BRANCH_TO_IPSEC_SOURCE: Record<string, 'rdk' | 'prpl'> = {
-  'b-pln-01': 'rdk',   // Plano  → rdk/ipsec/metrics
-  'b-mck-03': 'prpl',  // McKinney → prpl/ipsec/metrics
+export const BRANCH_TO_IPSEC_SOURCE: Record<string, 'rdk' | 'mckinney'> = {
+  'b-pln-01': 'rdk',        // Plano    → rdk/ipsec/metrics
+  'b-mck-03': 'mckinney',   // McKinney → mckinney/rdk/ipsec/metrics (fiber live, 5G simulated)
 };
 
 export const branches: Branch[] = [

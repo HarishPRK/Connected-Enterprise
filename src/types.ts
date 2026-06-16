@@ -186,8 +186,10 @@ export interface IpsecGatewayState {
   /** Server epoch ms — the moment WE received the decoded payload. */
   receivedAt: number;
   /** Which MQTT topic family this gateway is publishing under. Drives the
-   *  per-branch live-data routing — Plano uses `rdk`, McKinney uses `prpl`. */
-  source?: 'rdk' | 'prpl' | 'other';
+   *  per-branch live-data routing — Plano uses `rdk` (`rdk/ipsec/metrics`),
+   *  McKinney uses `mckinney` (`mckinney/rdk/ipsec/metrics`). `prpl` is kept
+   *  for backwards-compat with older deploys. */
+  source?: 'rdk' | 'prpl' | 'mckinney' | 'other';
 }
 
 export type WanPath = '5G' | 'Fiber';

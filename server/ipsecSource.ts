@@ -24,29 +24,43 @@ const REGION    = process.env.IOT_REGION   ?? process.env.AWS_REGION ?? 'us-east
 const CLIENT_ID = process.env.IOT_CLIENT_ID ?? `ce-server-${Math.random().toString(36).slice(2, 10)}`;
 
 // We subscribe to one topic per gateway family. Defaults cover Plano (rdk)
-// and McKinney (prpl). Override the whole list with `IOT_IPSEC_TOPICS` as a
-// comma-separated string. `IOT_IPSEC_TOPIC` (singular) is honoured for
+// and McKinney (mckinney/rdk). Override the whole list with `IOT_IPSEC_TOPICS`
+// as a comma-separated string. `IOT_IPSEC_TOPIC` (singular) is honoured for
 // backwards-compat with older deploys.
 const SUBSCRIBE_TOPICS: string[] = (() => {
   const single = process.env.IOT_IPSEC_TOPIC;
   const list   = process.env.IOT_IPSEC_TOPICS;
-  const raw = list ?? single ?? 'rdk/ipsec/metrics,prpl/ipsec/metrics';
+  const raw = list ?? single ?? 'rdk/ipsec/metrics,mckinney/rdk/ipsec/metrics';
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 })();
 
 /** Map the MQTT topic to the gateway-source tag exposed in IpsecGatewayState.
- *  Anything starting with `rdk/` → 'rdk', `prpl/` → 'prpl', else 'other'. */
-function topicToSource(topic: string): 'rdk' | 'prpl' | 'other' {
-  if (topic.startsWith('rdk/'))  return 'rdk';
-  if (topic.startsWith('prpl/')) return 'prpl';
+ *  `mckinney/...` → 'mckinney', `rdk/` → 'rdk', `prpl/` → 'prpl', else 'other'.
+ *  McKinney's metrics arrive on `mckinney/rdk/ipsec/metrics`, so its prefix is
+ *  tested first — `rdk/` would never match it (the `rdk` isn't at the start). */
+function topicToSource(topic: string): 'rdk' | 'prpl' | 'mckinney' | 'other' {
+  if (topic.startsWith('mckinney/')) return 'mckinney';
+  if (topic.startsWith('rdk/'))      return 'rdk';
+  if (topic.startsWith('prpl/'))     return 'prpl';
   return 'other';
+}
+
+/** Mirror of the client's `inferUnderlay` 5G test — an ifname hinting at a
+ *  cellular interface is 5G, everything else is fiber. */
+function isCellularIfname(ifname: string): boolean {
+  const n = (ifname || '').toLowerCase();
+  return n.includes('cell') || n.includes('5g') || n.includes('lte') || n.includes('wwan');
+}
+
+function clampNum(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
 }
 
 // Path-control: the gateway runs a `com.rdk.pathcontrol` Greengrass component
 // subscribed to `<prefix>/path/control`. We publish a command there and listen
 // for the gateway's ack on `<prefix>/path/control/result`. Prefixes mirror the
-// metric topic families (Plano=rdk, McKinney=prpl).
-const PATH_PREFIXES: string[] = (process.env.IOT_PATH_PREFIXES ?? 'rdk,prpl')
+// metric topic families (Plano=rdk, McKinney=mckinney/rdk).
+const PATH_PREFIXES: string[] = (process.env.IOT_PATH_PREFIXES ?? 'rdk,mckinney/rdk')
   .split(',').map((s) => s.trim()).filter(Boolean);
 const pathControlTopic = (prefix: string) => `${prefix}/path/control`;
 const pathResultTopic  = (prefix: string) => `${prefix}/path/control/result`;
@@ -221,6 +235,19 @@ class IpsecSource extends EventEmitter {
   /** First time each Wi-Fi client MAC was seen this session — the gateway
    *  doesn't report association time, so "connected for" grows from here. */
   private wifiFirstSeen = new Map<string, number>();
+
+  /** Synthetic 5G underlay for the McKinney feed. The gateway publishing on
+   *  `mckinney/rdk/ipsec/metrics` carries only real Fiber tunnels — its 5G
+   *  modem isn't wired up yet — so we synthesise two cellular tunnels here and
+   *  merge them into every McKinney payload. Values random-walk on each real
+   *  Fiber tick (healthy, slightly worse than fiber, occasionally grazing the
+   *  warn line), so the dashboard renders 5G as a live failover path on the
+   *  same SSE stream as the real underlay. Remove once the gateway reports a
+   *  real 5G tunnel of its own. */
+  private mck5gTunnels = [
+    { ifname: 'vti-5g1', latency_ms: 52, loss_percent: 0.20, rx_bytes: 2_400_000, tx_bytes: 1_300_000 },
+    { ifname: 'vti-5g2', latency_ms: 63, loss_percent: 0.35, rx_bytes: 1_900_000, tx_bytes:   980_000 },
+  ];
 
   /** Returns true if the SDK is wired up + AWS creds appear present. */
   hasCredentials(): boolean {
@@ -451,11 +478,17 @@ class IpsecSource extends EventEmitter {
       };
 
       const source = topicToSource(topic);
+      // McKinney: fiber is real, 5G is synthesised — merge the simulated 5G
+      // underlay in before caching so every downstream consumer (SSE, SLA
+      // chart, KPIs, AI insight) treats it as live telemetry.
+      const metricsForState = source === 'mckinney'
+        ? this.withSimulated5g(normalised)
+        : normalised;
       // Key by `<source>:<gateway-name>` so the two streams never collide even
       // if both ever publish a gateway with the same name.
       const baseKey = (normalised.gateway.name || normalised.gateway.mac || 'unknown').toLowerCase();
       const gatewayKey = `${source}:${baseKey}`;
-      const state: IpsecGatewayState = { metrics: normalised, receivedAt: Date.now(), source };
+      const state: IpsecGatewayState = { metrics: metricsForState, receivedAt: Date.now(), source };
       this.gateways.set(gatewayKey, state);
       this.emit('update', { gatewayKey, state });
 
@@ -486,6 +519,42 @@ class IpsecSource extends EventEmitter {
       // eslint-disable-next-line no-console
       console.error(`[ipsec] failed to parse payload on "${topic}":`, err);
     }
+  }
+
+  /** Advance the synthetic McKinney 5G tunnels one tick and return them in the
+   *  same wire shape as a real tunnel. Mean-reverting random walk keeps them
+   *  healthy but lively (latency ~56ms, loss ~0.2%), with counters that only
+   *  grow so throughput + traffic-mix read as a live path. */
+  private stepMck5gTunnels(): IpsecMetrics['tunnels'] {
+    return this.mck5gTunnels.map((t) => {
+      // Latency: revert toward ~56ms with jitter; clamp 38..96ms (grazes warn).
+      t.latency_ms = clampNum(
+        t.latency_ms + (56 - t.latency_ms) * 0.15 + (Math.random() - 0.5) * 16, 38, 96);
+      // Loss: hover near 0.2%, rare small bumps; clamp 0..1.4%.
+      t.loss_percent = clampNum(
+        t.loss_percent + (0.2 - t.loss_percent) * 0.25 + (Math.random() - 0.5) * 0.3, 0, 1.4);
+      // Counters grow each tick so the WAN/traffic-mix badges look live.
+      t.rx_bytes += Math.floor(60_000 + Math.random() * 180_000);
+      t.tx_bytes += Math.floor(30_000 + Math.random() * 110_000);
+      return {
+        ifname: t.ifname,
+        present: true,
+        reachable: true,
+        latency_ms: Math.round(t.latency_ms * 10) / 10,
+        loss_percent: Math.round(t.loss_percent * 100) / 100,
+        rx_bytes: t.rx_bytes,
+        tx_bytes: t.tx_bytes,
+      };
+    });
+  }
+
+  /** McKinney feed only: keep the real Fiber tunnels, drop any (dead) 5G ones
+   *  the gateway might report, and append the synthetic 5G underlay so 5G
+   *  renders as a live failover path. */
+  private withSimulated5g(metrics: IpsecMetrics): IpsecMetrics {
+    const fiber = metrics.tunnels.filter((t) => !isCellularIfname(t.ifname));
+    const tunnels = [...fiber, ...this.stepMck5gTunnels()];
+    return { ...metrics, tunnels, tunnel_count: tunnels.length };
   }
 
   /** Result-topic handler — matches the ack back to its pending command by id. */

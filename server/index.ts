@@ -110,9 +110,9 @@ app.post('/api/agent/run', async (req, res) => {
  *  gateway picks it up and calls its local `:8090/api/path`. We can't reach the
  *  gateway's NAT'd LAN over HTTP from the cloud, so MQTT is the transport.
  *
- *  Body: `{ mode: 'auto'|'fiber'|'5g', source?: 'rdk'|'prpl' }`
+ *  Body: `{ mode: 'auto'|'fiber'|'5g', source?: 'rdk'|'mckinney' }`
  *  `source` selects the topic family — Plano gateways listen on `rdk/...`,
- *  McKinney on `prpl/...`. Defaults to `rdk` for backwards-compat. */
+ *  McKinney on `mckinney/rdk/...`. Defaults to `rdk` for backwards-compat. */
 app.post('/api/gateway/path', async (req, res) => {
   const mode = req.body?.mode;
   const source = req.body?.source ?? 'rdk';
@@ -127,12 +127,15 @@ app.post('/api/gateway/path', async (req, res) => {
     res.status(400).json({ error: `mode must be one of: ${VALID_MODES.join(', ')} (got ${JSON.stringify(mode)})` });
     return;
   }
-  if (source !== 'rdk' && source !== 'prpl') {
-    res.status(400).json({ error: `source must be one of: rdk, prpl (got ${JSON.stringify(source)})` });
+  if (source !== 'rdk' && source !== 'mckinney') {
+    res.status(400).json({ error: `source must be one of: rdk, mckinney (got ${JSON.stringify(source)})` });
     return;
   }
+  // Map the source tag to its path-control topic prefix. McKinney's metrics
+  // ride `mckinney/rdk/...`, so its path commands go to `mckinney/rdk/path/...`.
+  const prefix = source === 'mckinney' ? 'mckinney/rdk' : 'rdk';
 
-  const result = await ipsecSource.sendPathCommand(source, mode, 6000, tunnel);
+  const result = await ipsecSource.sendPathCommand(prefix, mode, 6000, tunnel);
   if (result.ok) {
     res.json({ ok: true, mode, source, tunnel, httpStatus: result.httpStatus });
   } else if (result.timedOut) {
