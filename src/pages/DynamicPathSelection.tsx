@@ -1270,6 +1270,33 @@ function LiveIpsecCard({
 /** UI highlight state for the three path-override buttons. */
 type ForceMode = "auto" | "fiber" | "5g";
 
+/** Device-class colours — shared by the device links, the topology flows, and
+ *  the per-tunnel rows so the IT/OT story reads consistently everywhere. */
+const IT_COLOR = "#34d399"; // emerald — IT devices
+const OT_COLOR = "#ec4899"; // pink — OT devices
+const classColorOf = (cls: "it" | "ot") => (cls === "it" ? IT_COLOR : OT_COLOR);
+
+/** Application-aware routing demo policy (hardcoded, mode-aware). Returns which
+ *  device class egresses on a given tunnel, where `idx` is the tunnel's position
+ *  within its underlay (0 = Tunnel 1/3, 1 = Tunnel 2/4):
+ *   • auto       → IT on the first Fiber tunnel, OT on the first 5G tunnel.
+ *   • Force Fiber → both on Fiber: IT = Tunnel 1, OT = Tunnel 2 (5G idle).
+ *   • Force 5G    → both on 5G:    IT = Tunnel 3, OT = Tunnel 4 (Fiber idle).
+ *  Single source of truth for the topology diagram AND the per-tunnel rows. */
+function routeClassFor(
+  mode: ForceMode,
+  underlay: Underlay,
+  idx: number,
+): "it" | "ot" | null {
+  if (mode === "fiber")
+    return underlay === "fiber" ? (idx === 0 ? "it" : idx === 1 ? "ot" : null) : null;
+  if (mode === "5g")
+    return underlay === "5g" ? (idx === 0 ? "it" : idx === 1 ? "ot" : null) : null;
+  // auto: IT on the first Fiber tunnel, OT on the first 5G tunnel.
+  if (underlay === "fiber") return idx === 0 ? "it" : null;
+  return idx === 0 ? "ot" : null;
+}
+
 /** The exact `mode` strings the gateway's local path API (`/api/path`) accepts.
  *  `auto` lets the device decide; `tunnel1`/`tunnel2` pin the two Fiber tunnels,
  *  `tunnel3`/`tunnel4` pin the two 5G tunnels. The UI now exposes only two
@@ -1451,6 +1478,27 @@ function GatewayBlock({
   const effectiveM =
     forceMode === "auto" ? m : { ...m, active_tunnel: effectiveActiveTunnel };
 
+  // App-aware class each tunnel carries (IT / OT / none) under the current mode
+  // — same `routeClassFor` policy the topology diagram uses, so the per-tunnel
+  // rows below tag the exact tunnels the diagram lights up. Resolved by the
+  // tunnel's position within its underlay (Tunnel 1/3 = idx 0, Tunnel 2/4 = 1).
+  const fiberOrdered = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "fiber"),
+  );
+  const cellOrdered = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "5g"),
+  );
+  const tunnelClass = (t: IpsecTunnelMetric): "it" | "ot" | null => {
+    const underlay = inferUnderlay(t.ifname);
+    const list = underlay === "fiber" ? fiberOrdered : cellOrdered;
+    const idx = list.findIndex((x) => x.ifname === t.ifname);
+    return routeClassFor(forceMode, underlay, idx);
+  };
+  // The IT/OT carrier tunnel names for the gateway header — same policy as the
+  // diagram + rows, so the header never disagrees with what's shown below it.
+  const itCarrierName = m.tunnels.find((t) => tunnelClass(t) === "it")?.ifname;
+  const otCarrierName = m.tunnels.find((t) => tunnelClass(t) === "ot")?.ifname;
+
   // Force Fiber pins Tunnel 1 (first fiber tunnel, vti1); Force 5G pins Tunnel 3
   // (first 5G tunnel, vti3). We pass the matching ifname so the diagram + rows
   // highlight that exact tunnel. The published command is fixed (tunnel1/tunnel3)
@@ -1502,9 +1550,18 @@ function GatewayBlock({
             </strong>
           </div>
           <div className="ipsec-gw-meta-kv">
-            <span>PREFERRED</span>
-            <strong style={{ color: c.accent3 }}>
-              {effectiveActiveTunnel || "—"}
+            <span>CARRYING</span>
+            <strong
+              style={{
+                display: "inline-flex",
+                flexDirection: "column",
+                alignItems: "flex-end",
+                gap: 1,
+                lineHeight: 1.2,
+              }}
+            >
+              <span style={{ color: IT_COLOR }}>IT · {itCarrierName ?? "—"}</span>
+              <span style={{ color: OT_COLOR }}>OT · {otCarrierName ?? "—"}</span>
             </strong>
           </div>
           <div className="ipsec-gw-meta-kv">
@@ -1583,7 +1640,13 @@ function GatewayBlock({
       </div>
 
       {/* Real-data topology flow */}
-      <IpsecFlowSvg m={effectiveM} c={c} wanMbps={wanMbps} wanPps={wanPps} />
+      <IpsecFlowSvg
+        m={effectiveM}
+        c={c}
+        wanMbps={wanMbps}
+        wanPps={wanPps}
+        forceMode={forceMode}
+      />
 
       {/* WAN line — link status + counters */}
       <div className="ipsec-gw-wan">
@@ -1635,7 +1698,11 @@ function GatewayBlock({
             <TunnelRow
               key={t.ifname}
               t={t}
-              active={t.ifname === effectiveActiveTunnel}
+              // "Active/carrying" now follows the app-aware policy (a tunnel is
+              // active iff it carries IT or OT this mode) — consistent with the
+              // diagram, not the device's raw single active_tunnel.
+              active={tunnelClass(t) != null}
+              carrierClass={tunnelClass(t)}
               c={c}
             />
           ))
@@ -1659,12 +1726,17 @@ function IpsecFlowSvg({
   c,
   wanMbps,
   wanPps,
+  forceMode,
 }: {
   m: IpsecGatewayState["metrics"];
   c: ThemeColors;
   /** Live WAN throughput (Mbps) and packet rate (pps), if computed. */
   wanMbps?: number | null;
   wanPps?: number | null;
+  /** Active path-override mode — drives the app-aware routing visualisation:
+   *  auto → IT rides Fiber / OT rides 5G; fiber → both on Fiber (IT=T1, OT=T2);
+   *  5g → both on 5G (IT=T3, OT=T4). */
+  forceMode: ForceMode;
 }) {
   // Keep the canvas tight: less dead space = a larger render scale when the
   // SVG is fit to the card width, i.e. bigger, readable labels.
@@ -1703,8 +1775,7 @@ function IpsecFlowSvg({
   const CELL_COLOR = "#ffa07c"; // peach (Overview's 5G)
   const INT_COLOR = "#a5f3fc"; // cyan
   const GCP_COLOR = "#9aa7ff"; // soft blue-violet (GCP-ish)
-  const IT_COLOR = "#34d399"; // emerald — IT endpoint links
-  const OT_COLOR = "#ec4899"; // pink — OT endpoint links
+  // IT_COLOR / OT_COLOR are module-level (shared with the per-tunnel rows).
   const accentPurple = c.accent3 ?? "#c084fc";
 
   // Sort within each underlay by name so the pill numbering is stable —
@@ -1771,20 +1842,53 @@ function IpsecFlowSvg({
   const fiberReachable = fiberTunnels.some((t) => t.reachable);
   const cellReachable = cellTunnels.some((t) => t.reachable);
   const anyReachable = fiberReachable || cellReachable;
-  const activeTunnelObj = m.tunnels.find((t) => t.ifname === m.active_tunnel);
-  const activeUnderlay = activeTunnelObj
-    ? inferUnderlay(activeTunnelObj.ifname)
-    : null;
 
-  // ── Application-aware routing (demo policy, hardcoded) ──
-  // OT device traffic egresses on a Fiber tunnel; IT device traffic egresses
-  // on a 5G tunnel — concurrently. The "carrier" for each class is the first
-  // reachable tunnel in its underlay (falls back to the first tunnel so the
-  // path still renders when none are reachable). Both carriers animate at once,
-  // tinted to match their device class (OT = pink, IT = emerald); the remaining
-  // tunnels read as dimmed standby paths.
-  const otCarrier = fiberTunnels.find((t) => t.reachable) ?? fiberTunnels[0];
-  const itCarrier = cellTunnels.find((t) => t.reachable) ?? cellTunnels[0];
+  // ── Application-aware routing (mode-aware demo policy) ──
+  // `carrierClass` resolves which device class egresses on each tunnel via the
+  // shared `routeClassFor` policy (single source of truth with the per-tunnel
+  // rows). Carriers animate tinted to their class (IT = emerald, OT = pink);
+  // every other tunnel reads as a dimmed standby path.
+  const carrierClass = (underlay: Underlay, idx: number) =>
+    routeClassFor(forceMode, underlay, idx);
+
+  // The two carrier tunnels under the current mode — used for the gateway badge
+  // and the underlay "active" sub-labels so every "active" marker on the page
+  // tracks the app-aware policy, not the device's raw single active_tunnel.
+  const itCarrierTunnel =
+    fiberTunnels.find((t, i) => carrierClass("fiber", i) === "it") ??
+    cellTunnels.find((t, i) => carrierClass("5g", i) === "it");
+  const otCarrierTunnel =
+    fiberTunnels.find((t, i) => carrierClass("fiber", i) === "ot") ??
+    cellTunnels.find((t, i) => carrierClass("5g", i) === "ot");
+  // An underlay reads as "active" if it carries any reachable class this mode.
+  const fiberActive = fiberTunnels.some(
+    (t, i) => carrierClass("fiber", i) != null && t.reachable,
+  );
+  const cellActive = cellTunnels.some(
+    (t, i) => carrierClass("5g", i) != null && t.reachable,
+  );
+
+  // Which underlay each device class is steered into, for the gateway→underlay
+  // leg. Force modes collapse both onto one underlay; auto splits them.
+  const itUnderlay: Underlay = forceMode === "5g" ? "5g" : "fiber";
+  const otUnderlay: Underlay = forceMode === "fiber" ? "fiber" : "5g";
+
+  // Legend reflects the active mode's mapping.
+  const legend =
+    forceMode === "fiber"
+      ? [
+          { color: IT_COLOR, label: "IT devices → Fiber · T1" },
+          { color: OT_COLOR, label: "OT devices → Fiber · T2" },
+        ]
+      : forceMode === "5g"
+        ? [
+            { color: IT_COLOR, label: "IT devices → 5G · T3" },
+            { color: OT_COLOR, label: "OT devices → 5G · T4" },
+          ]
+        : [
+            { color: IT_COLOR, label: "IT devices → Fiber" },
+            { color: OT_COLOR, label: "OT devices → 5G" },
+          ];
 
   return (
     <div className="ipsec-flow-wrap">
@@ -1811,10 +1915,7 @@ function IpsecFlowSvg({
           Application-aware routing
         </span>
         <span style={{ display: "inline-flex", gap: 16, flexWrap: "wrap" }}>
-          {[
-            { color: OT_COLOR, label: "OT devices → Fiber" },
-            { color: IT_COLOR, label: "IT devices → 5G" },
-          ].map((l) => (
+          {legend.map((l) => (
             <span
               key={l.label}
               style={{
@@ -1957,58 +2058,48 @@ function IpsecFlowSvg({
           otColor={OT_COLOR}
         />
 
-        {/* ─── Gateway → underlays: domain-steered paths ───
-            Demo policy: OT traffic rides the Fiber underlay, IT rides 5G.
-            If a domain's home underlay has no reachable tunnel, its flow
-            fails over visually to the surviving underlay. */}
+        {/* ─── Gateway → underlays: class-steered paths (mode-aware) ───
+            auto → IT into Fiber, OT into 5G. Force Fiber → both into Fiber.
+            Force 5G → both into 5G. When both classes share one underlay the
+            two flows run parallel (IT below, OT above) instead of overlapping. */}
         {(() => {
-          const otUnderlay: "fiber" | "5g" | null =
-            fiberReachable ? "fiber" : cellReachable ? "5g" : null;
-          const itUnderlay: "fiber" | "5g" | null =
-            cellReachable ? "5g" : fiberReachable ? "fiber" : null;
-          const shared = otUnderlay != null && otUnderlay === itUnderlay;
-          // Leave the gateway on the side facing the destination (Fiber sits
-          // above the midline, 5G below) so the two flows never cross; when
-          // both domains share one underlay (failover) keep them parallel
-          // with a constant OT-above/IT-below separation.
-          const startFor = (u: "fiber" | "5g", sep: number) => ({
+          const shared = itUnderlay === otUnderlay;
+          // Keep the two flows from crossing: offset the gateway-side and
+          // underlay-side anchors when both classes share an underlay.
+          const startFor = (u: Underlay, sep: number) => ({
             x: gwRight.x,
             y: gwRight.y + (u === "fiber" ? -10 : 10) + (shared ? sep : 0),
           });
-          const endFor = (u: "fiber" | "5g", sep: number) => {
+          const endFor = (u: Underlay, sep: number) => {
             const base = u === "fiber" ? fiberLeft : cellLeft;
             return shared ? { x: base.x, y: base.y + sep } : base;
           };
           return (
             <>
-              {otUnderlay && (
-                <NodeConnector
-                  a={startFor(otUnderlay, -5)}
-                  b={endFor(otUnderlay, -8)}
-                  state="ok"
-                  c={c}
-                  beziD={beziD}
-                  accent={OT_COLOR}
-                  flowing
-                />
-              )}
-              {itUnderlay && (
-                <NodeConnector
-                  a={startFor(itUnderlay, 5)}
-                  b={endFor(itUnderlay, 8)}
-                  state="ok"
-                  c={c}
-                  beziD={beziD}
-                  accent={IT_COLOR}
-                  flowing
-                />
-              )}
-              {/* Faint base links so an underlay with no domain flow (all its
-                  tunnels down) still reads as part of the topology. */}
-              {!fiberReachable && (
+              <NodeConnector
+                a={startFor(otUnderlay, -5)}
+                b={endFor(otUnderlay, -8)}
+                state="ok"
+                c={c}
+                beziD={beziD}
+                accent={OT_COLOR}
+                flowing
+              />
+              <NodeConnector
+                a={startFor(itUnderlay, 5)}
+                b={endFor(itUnderlay, 8)}
+                state="ok"
+                c={c}
+                beziD={beziD}
+                accent={IT_COLOR}
+                flowing
+              />
+              {/* Faint base link for an underlay carrying no class in this mode
+                  (e.g. 5G under Force Fiber) so it still reads as present. */}
+              {itUnderlay !== "fiber" && otUnderlay !== "fiber" && (
                 <NodeConnector a={gwRight} b={fiberLeft} state="warn" c={c} beziD={beziD} accent={FIBER_COLOR} flowing={false} />
               )}
-              {!cellReachable && (
+              {itUnderlay !== "5g" && otUnderlay !== "5g" && (
                 <NodeConnector a={gwRight} b={cellLeft} state="warn" c={c} beziD={beziD} accent={CELL_COLOR} flowing={false} />
               )}
             </>
@@ -2019,10 +2110,10 @@ function IpsecFlowSvg({
         {fiberTunnels.map((t, i) => {
           const col = tunnelColor(t);
           const reachable = t.reachable;
-          // OT traffic rides Fiber — the OT carrier flows live, tinted OT pink.
-          const carrying =
-            !!t.ifname && t.ifname === otCarrier?.ifname && reachable;
-          const flowColor = OT_COLOR;
+          // Which class (if any) this Fiber tunnel carries in the current mode.
+          const cls = carrierClass("fiber", i);
+          const carrying = cls != null && reachable;
+          const flowColor = cls ? classColorOf(cls) : FIBER_COLOR;
           const pid = `ipsec-fiber-in-${i}`;
           const target = { x: PILL_X, y: fiberPillY(i) + PILL_H / 2 };
           const d = beziD(fiberRight, target);
@@ -2071,10 +2162,10 @@ function IpsecFlowSvg({
         {cellTunnels.map((t, i) => {
           const col = tunnelColor(t);
           const reachable = t.reachable;
-          // IT traffic rides 5G — the IT carrier flows live, tinted IT emerald.
-          const carrying =
-            !!t.ifname && t.ifname === itCarrier?.ifname && reachable;
-          const flowColor = IT_COLOR;
+          // Which class (if any) this 5G tunnel carries in the current mode.
+          const cls = carrierClass("5g", i);
+          const carrying = cls != null && reachable;
+          const flowColor = cls ? classColorOf(cls) : CELL_COLOR;
           const pid = `ipsec-cell-in-${i}`;
           const target = { x: PILL_X, y: cellPillY(i) + PILL_H / 2 };
           const d = beziD(cellRight, target);
@@ -2138,12 +2229,11 @@ function IpsecFlowSvg({
         ].map(({ t, i, kind, source }, idx) => {
           const col = tunnelColor(t);
           const reachable = t.reachable;
-          // Same app-aware carriers as the inbound leg: Fiber carries OT,
-          // 5G carries IT — both colour-matched to their device class.
-          const carrier = kind === "fiber" ? otCarrier : itCarrier;
-          const flowColor = kind === "fiber" ? OT_COLOR : IT_COLOR;
-          const carrying =
-            !!t.ifname && t.ifname === carrier?.ifname && reachable;
+          // Same mode-aware carrier mapping as the inbound leg, colour-matched
+          // to the device class the tunnel carries (IT = emerald, OT = pink).
+          const cls = carrierClass(kind === "fiber" ? "fiber" : "5g", i);
+          const carrying = cls != null && reachable;
+          const flowColor = cls ? classColorOf(cls) : col;
           const pid = `ipsec-${kind}-out-${i}`;
           const total = Math.max(1, m.tunnels.length - 1);
           const band = WAN_H / 2 - 22;
@@ -2298,7 +2388,8 @@ function IpsecFlowSvg({
             py: fiberPillY(i),
             underlay: FIBER_COLOR,
             label: `Tunnel ${i + 1}`,
-            cls: "ot" as const,
+            uk: "fiber" as Underlay,
+            ui: i,
           })),
           ...cellTunnels.map((t, i) => ({
             t,
@@ -2306,18 +2397,19 @@ function IpsecFlowSvg({
             underlay: CELL_COLOR,
             // 5G tunnels continue the numbering after Fiber's two: Tunnel 3 / 4.
             label: `Tunnel ${i + 3}`,
-            cls: "it" as const,
+            uk: "5g" as Underlay,
+            ui: i,
           })),
-        ].map(({ t, py, underlay, label, cls }, idx) => {
+        ].map(({ t, py, underlay, label, uk, ui }, idx) => {
           const col = tunnelColor(t);
           const reachable = t.reachable;
-          // App-aware carrier for this tunnel's class (OT→Fiber, IT→5G).
-          const carrier = cls === "ot" ? otCarrier : itCarrier;
-          const isCarrier = !!t.ifname && t.ifname === carrier?.ifname;
+          // Device class this tunnel carries in the current mode (or none).
+          const cls = carrierClass(uk, ui);
+          const isCarrier = cls != null;
           const carrying = isCarrier && reachable;
           const preferredButDown = isCarrier && !reachable;
-          const classLabel = cls === "ot" ? "OT" : "IT";
-          const classColor = cls === "ot" ? OT_COLOR : IT_COLOR;
+          const classLabel = cls === "it" ? "IT" : "OT";
+          const classColor = cls ? classColorOf(cls) : col;
           // Dim non-carrying tunnels so the eye lands on the active one.
           const dim = !carrying;
           const pillOpacity = carrying ? 1 : reachable ? 0.55 : 0.38;
@@ -2520,42 +2612,56 @@ function IpsecFlowSvg({
           }
           haloPulse={anyReachable}
         />
-        {/* Preferred-tunnel badge sitting just below the gateway box */}
-        {activeTunnelObj && (
+        {/* Carrier badges below the gateway — one per device class, matching the
+            app-aware routing the diagram shows (IT and OT each on their tunnel). */}
+        {(itCarrierTunnel || otCarrierTunnel) && (
           <g
-            transform={`translate(${COL_GW.x + COL_GW.w / 2} ${ROW_CENTER + GW_H / 2 + 22})`}
+            transform={`translate(${COL_GW.x + COL_GW.w / 2} ${ROW_CENTER + GW_H / 2 + 16})`}
           >
-            <rect
-              x={-72}
-              y={-12}
-              width={144}
-              height={24}
-              rx={12}
-              fill={activeTunnelObj.reachable ? `${c.ok}22` : `${c.warn}22`}
-              stroke={activeTunnelObj.reachable ? `${c.ok}66` : `${c.warn}66`}
-              strokeWidth={1}
-            />
-            <text
-              x={-58}
-              y={4}
-              fontSize={11}
-              fontWeight={700}
-              fill={c.textDim}
-              letterSpacing="0.10em"
-            >
-              → ACTIVE
-            </text>
-            <text
-              x={62}
-              y={4}
-              fontSize={12.5}
-              fontWeight={800}
-              textAnchor="end"
-              fill={activeTunnelObj.reachable ? c.ok : c.warn}
-              fontFamily="JetBrains Mono, ui-monospace, monospace"
-            >
-              {activeTunnelObj.ifname.toUpperCase()}
-            </text>
+            {(
+              [
+                { cls: "IT", t: itCarrierTunnel, color: IT_COLOR },
+                { cls: "OT", t: otCarrierTunnel, color: OT_COLOR },
+              ].filter((x) => x.t) as {
+                cls: string;
+                t: IpsecTunnelMetric;
+                color: string;
+              }[]
+            ).map((x, i) => (
+              <g key={x.cls} transform={`translate(0 ${i * 26})`}>
+                <rect
+                  x={-82}
+                  y={-10}
+                  width={164}
+                  height={20}
+                  rx={10}
+                  fill={x.t.reachable ? `${x.color}1f` : `${c.warn}1f`}
+                  stroke={x.t.reachable ? `${x.color}66` : `${c.warn}66`}
+                  strokeWidth={1}
+                />
+                <text
+                  x={-72}
+                  y={4}
+                  fontSize={10.5}
+                  fontWeight={800}
+                  fill={x.t.reachable ? x.color : c.warn}
+                  letterSpacing="0.08em"
+                >
+                  {x.cls} →
+                </text>
+                <text
+                  x={72}
+                  y={4}
+                  fontSize={11}
+                  fontWeight={700}
+                  textAnchor="end"
+                  fill={x.t.reachable ? x.color : c.warn}
+                  fontFamily="JetBrains Mono, ui-monospace, monospace"
+                >
+                  {x.t.ifname.toUpperCase()}
+                </text>
+              </g>
+            ))}
           </g>
         )}
 
@@ -2569,7 +2675,7 @@ function IpsecFlowSvg({
           status={fiberReachable ? "ok" : "warn"}
           c={c}
           label="Fiber"
-          sub={`${fiberTunnels.length} tunnels${activeUnderlay === "fiber" ? " · active" : ""}`}
+          sub={`${fiberTunnels.length} tunnels${fiberActive ? " · active" : ""}`}
           illustration={<FiberIllustration tint={FIBER_COLOR} />}
         />
 
@@ -2583,7 +2689,7 @@ function IpsecFlowSvg({
           status={cellReachable ? "ok" : "warn"}
           c={c}
           label="5G / Cellular"
-          sub={`${cellTunnels.length} tunnels${activeUnderlay === "5g" ? " · active" : ""}`}
+          sub={`${cellTunnels.length} tunnels${cellActive ? " · active" : ""}`}
           illustration={<CellularIllustration tint={CELL_COLOR} />}
         />
 
@@ -3395,10 +3501,14 @@ function InternetIllustration({ tint }: { tint: string }) {
 function TunnelRow({
   t,
   active,
+  carrierClass,
   c,
 }: {
   t: IpsecTunnelMetric;
   active: boolean;
+  /** Device class this tunnel carries under the current mode (app-aware demo
+   *  policy), or null if it's an idle standby in this mode. */
+  carrierClass: "it" | "ot" | null;
   c: ThemeColors;
 }) {
   const stateColor = !t.present
@@ -3422,11 +3532,15 @@ function TunnelRow({
   // UNREACHABLE was contradictory.
   const carrying = active && t.reachable;
   const preferredButDown = active && !t.reachable;
+  // App-aware routing tag (IT / OT) — only meaningful while the tunnel is
+  // reachable; colour-matched to the topology diagram above.
+  const carries = carrierClass && t.reachable ? carrierClass : null;
+  const carryColor = carries ? classColorOf(carries) : null;
 
   return (
     <div
       className={`ipsec-tunnel ${carrying ? "is-active" : ""}`}
-      style={{ borderLeftColor: carrying ? c.ok : stateColor }}
+      style={{ borderLeftColor: carryColor ?? (carrying ? c.ok : stateColor) }}
     >
       <div className="ipsec-tunnel-id">
         <CircleDot size={12} style={{ color: stateColor }} />
@@ -3436,6 +3550,21 @@ function TunnelRow({
         >
           {t.ifname}
         </span>
+        {carries && (
+          <span
+            className="badge"
+            style={{
+              fontSize: 9.5,
+              padding: "1px 6px",
+              color: carryColor!,
+              borderColor: `${carryColor}66`,
+              background: `${carryColor}1a`,
+            }}
+            title={`${carries === "it" ? "IT" : "OT"} devices route through this tunnel`}
+          >
+            {carries === "it" ? "IT" : "OT"}
+          </span>
+        )}
         {carrying && (
           <span
             className="badge ok"
