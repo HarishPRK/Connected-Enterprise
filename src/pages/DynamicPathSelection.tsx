@@ -1932,8 +1932,10 @@ function IpsecFlowSvg({
     if (isTarget) return routeClassFor(forceMode, underlay, idx);
     return ifname && ifname === activeIfname ? "both" : null;
   };
+  // "both" (live single active tunnel) leads with IT emerald; its trailing
+  // particle is OT pink (set per-leg) so one tunnel shows IT+OT together.
   const carryColorOf = (carry: "it" | "ot" | "both") =>
-    carry === "it" ? IT_COLOR : carry === "ot" ? OT_COLOR : c.ok;
+    carry === "it" ? IT_COLOR : carry === "ot" ? OT_COLOR : IT_COLOR;
 
   // Carrier tunnels for the gateway badge (target = IT/OT carriers; live = the
   // single active tunnel).
@@ -1971,7 +1973,10 @@ function IpsecFlowSvg({
     ? "Application-aware routing"
     : "Live path · single active tunnel";
   const legend = !isTarget
-    ? [{ color: c.ok, label: `IT + OT → ${activeIfname || "active tunnel"}` }]
+    ? [
+        { color: IT_COLOR, label: `IT → ${activeIfname || "active"}` },
+        { color: OT_COLOR, label: `OT → ${activeIfname || "active"}` },
+      ]
     : forceMode === "fiber"
       ? [
           { color: IT_COLOR, label: "IT devices → Fiber · T1" },
@@ -2062,9 +2067,11 @@ function IpsecFlowSvg({
         style={{ width: "100%", height: "auto", display: "block" }}
       >
         <defs>
+          {/* Live single-active flow carries BOTH classes — emerald (IT) → pink
+              (OT) so the one active tunnel visibly shows IT+OT combined. */}
           <linearGradient id="ipsec-flow-active" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor={c.ok} />
-            <stop offset="100%" stopColor={accentPurple} />
+            <stop offset="0%" stopColor={IT_COLOR} />
+            <stop offset="100%" stopColor={OT_COLOR} />
           </linearGradient>
           <pattern
             id="ipsec-flow-dotgrid"
@@ -2191,19 +2198,32 @@ function IpsecFlowSvg({
           );
 
           if (!isTarget) {
-            // Live — one active leg to the device's active underlay.
+            // Live — both IT (emerald) and OT (pink) converge on the device's
+            // single active tunnel, so OT stays visible all the way to the path.
+            const end = activeUnderlayOf === "fiber" ? fiberLeft : cellLeft;
             return (
               <>
                 {activeUnderlayOf && (
-                  <NodeConnector
-                    a={gwRight}
-                    b={activeUnderlayOf === "fiber" ? fiberLeft : cellLeft}
-                    state="ok"
-                    c={c}
-                    beziD={beziD}
-                    accent={c.ok}
-                    flowing
-                  />
+                  <>
+                    <NodeConnector
+                      a={{ x: gwRight.x, y: gwRight.y - 6 }}
+                      b={{ x: end.x, y: end.y - 8 }}
+                      state="ok"
+                      c={c}
+                      beziD={beziD}
+                      accent={IT_COLOR}
+                      flowing
+                    />
+                    <NodeConnector
+                      a={{ x: gwRight.x, y: gwRight.y + 6 }}
+                      b={{ x: end.x, y: end.y + 8 }}
+                      state="ok"
+                      c={c}
+                      beziD={beziD}
+                      accent={OT_COLOR}
+                      flowing
+                    />
+                  </>
                 )}
                 {activeUnderlayOf !== "fiber" && standbyFiber}
                 {activeUnderlayOf !== "5g" && standbyCell}
@@ -2255,10 +2275,10 @@ function IpsecFlowSvg({
           const cls = tunnelCarry("fiber", i, t.ifname);
           const carrying = cls != null && reachable;
           const flowColor = cls ? carryColorOf(cls) : FIBER_COLOR;
-          // Live single-active flow keeps the original green→purple two-tone;
-          // target class flows stay solid in their class colour.
+          // Live single-active flow shows IT+OT combined (emerald→pink); target
+          // class flows stay solid in their own class colour.
           const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
-          const flowDot2 = cls === "both" ? accentPurple : flowColor;
+          const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
           const pid = `ipsec-fiber-in-${i}`;
           const target = { x: PILL_X, y: fiberPillY(i) + PILL_H / 2 };
           const d = beziD(fiberRight, target);
@@ -2311,10 +2331,10 @@ function IpsecFlowSvg({
           const cls = tunnelCarry("5g", i, t.ifname);
           const carrying = cls != null && reachable;
           const flowColor = cls ? carryColorOf(cls) : CELL_COLOR;
-          // Live single-active flow keeps the original green→purple two-tone;
-          // target class flows stay solid in their class colour.
+          // Live single-active flow shows IT+OT combined (emerald→pink); target
+          // class flows stay solid in their own class colour.
           const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
-          const flowDot2 = cls === "both" ? accentPurple : flowColor;
+          const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
           const pid = `ipsec-cell-in-${i}`;
           const target = { x: PILL_X, y: cellPillY(i) + PILL_H / 2 };
           const d = beziD(cellRight, target);
@@ -2379,12 +2399,12 @@ function IpsecFlowSvg({
           const col = tunnelColor(t);
           const reachable = t.reachable;
           // Same carrier mapping as the inbound leg, colour-matched to what the
-          // tunnel carries (IT = emerald, OT = pink, both = active green→purple).
+          // tunnel carries (IT = emerald, OT = pink, both = IT+OT emerald→pink).
           const cls = tunnelCarry(kind === "fiber" ? "fiber" : "5g", i, t.ifname);
           const carrying = cls != null && reachable;
           const flowColor = cls ? carryColorOf(cls) : col;
           const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
-          const flowDot2 = cls === "both" ? accentPurple : flowColor;
+          const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
           const pid = `ipsec-${kind}-out-${i}`;
           const total = Math.max(1, m.tunnels.length - 1);
           const band = WAN_H / 2 - 22;
