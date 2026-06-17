@@ -1270,6 +1270,11 @@ function LiveIpsecCard({
 /** UI highlight state for the three path-override buttons. */
 type ForceMode = "auto" | "fiber" | "5g";
 
+/** Topology view mode: `live` mirrors the device (single active tunnel, IT+OT
+ *  share it); `target` shows the application-aware routing policy (IT/OT split
+ *  across tunnels) as a roadmap capability. */
+type ViewMode = "live" | "target";
+
 /** Device-class colours — shared by the device links, the topology flows, and
  *  the per-tunnel rows so the IT/OT story reads consistently everywhere. */
 const IT_COLOR = "#34d399"; // emerald — IT devices
@@ -1351,6 +1356,10 @@ function GatewayBlock({
 }) {
   const m = g.metrics;
   const [forceMode, setForceMode] = useState<ForceMode>("auto");
+  // Topology view: "live" mirrors the device exactly (single active tunnel, both
+  // IT+OT on it); "target" shows the application-aware routing policy (IT/OT
+  // steered onto separate tunnels) as a roadmap capability. Default = live.
+  const [viewMode, setViewMode] = useState<ViewMode>("live");
   const [pathBusy, setPathBusy] = useState(false);
   // The specific tunnel ifname the Force button pinned — so the diagram
   // and rows highlight that exact tunnel, not just the first reachable one in
@@ -1488,14 +1497,22 @@ function GatewayBlock({
   const cellOrdered = orderTunnelsByName(
     m.tunnels.filter((t) => inferUnderlay(t.ifname) === "5g"),
   );
+  const isTarget = viewMode === "target";
+  // In target view a tunnel is tagged with the class it carries (app-aware
+  // policy); in live view there are no per-class tags (one active tunnel).
   const tunnelClass = (t: IpsecTunnelMetric): "it" | "ot" | null => {
+    if (!isTarget) return null;
     const underlay = inferUnderlay(t.ifname);
     const list = underlay === "fiber" ? fiberOrdered : cellOrdered;
     const idx = list.findIndex((x) => x.ifname === t.ifname);
     return routeClassFor(forceMode, underlay, idx);
   };
-  // The IT/OT carrier tunnel names for the gateway header — same policy as the
-  // diagram + rows, so the header never disagrees with what's shown below it.
+  // A row is "active/carrying": in target view, if it carries a class; in live
+  // view, if it's the device's single active tunnel.
+  const rowActive = (t: IpsecTunnelMetric): boolean =>
+    isTarget ? tunnelClass(t) != null : t.ifname === effectiveActiveTunnel;
+  // Carrier tunnel names for the gateway header — same policy as the diagram +
+  // rows, so the header never disagrees with what's shown below it.
   const itCarrierName = m.tunnels.find((t) => tunnelClass(t) === "it")?.ifname;
   const otCarrierName = m.tunnels.find((t) => tunnelClass(t) === "ot")?.ifname;
 
@@ -1549,21 +1566,34 @@ function GatewayBlock({
               {upCount} / {m.tunnels.length}
             </strong>
           </div>
-          <div className="ipsec-gw-meta-kv">
-            <span>CARRYING</span>
-            <strong
-              style={{
-                display: "inline-flex",
-                flexDirection: "column",
-                alignItems: "flex-end",
-                gap: 1,
-                lineHeight: 1.2,
-              }}
-            >
-              <span style={{ color: IT_COLOR }}>IT · {itCarrierName ?? "—"}</span>
-              <span style={{ color: OT_COLOR }}>OT · {otCarrierName ?? "—"}</span>
-            </strong>
-          </div>
+          {isTarget ? (
+            <div className="ipsec-gw-meta-kv">
+              <span>CARRYING</span>
+              <strong
+                style={{
+                  display: "inline-flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: 1,
+                  lineHeight: 1.2,
+                }}
+              >
+                <span style={{ color: IT_COLOR }}>
+                  IT · {itCarrierName ?? "—"}
+                </span>
+                <span style={{ color: OT_COLOR }}>
+                  OT · {otCarrierName ?? "—"}
+                </span>
+              </strong>
+            </div>
+          ) : (
+            <div className="ipsec-gw-meta-kv">
+              <span>ACTIVE</span>
+              <strong style={{ color: c.accent3 }}>
+                {effectiveActiveTunnel || "—"}
+              </strong>
+            </div>
+          )}
           <div className="ipsec-gw-meta-kv">
             <span>RECEIVED</span>
             <strong>{fmtAgo(g.receivedAt)}</strong>
@@ -1605,37 +1635,73 @@ function GatewayBlock({
             </span>
           )}
         </div>
-        <div className="toolbar">
-          {(
-            [
-              { id: "auto", label: "Auto" },
-              { id: "fiber", label: "Force Fiber" },
-              { id: "5g", label: "Force 5G" },
-            ] as { id: ForceMode; label: string }[]
-          ).map((b) => (
-            <button
-              key={b.id}
-              onClick={() =>
-                b.id === "auto"
-                  ? applyPathMode("auto", "auto")
-                  : b.id === "fiber"
-                    ? applyPathMode("fiber", "tunnel1", fiberTunnelIfname)
-                    : applyPathMode("5g", "tunnel3", cellTunnelIfname)
-              }
-              disabled={pathBusy}
-              style={
-                b.id === forceMode
-                  ? {
-                      background: "var(--grad-accent-soft)",
-                      borderColor: "rgba(124,140,255,0.35)",
-                      color: "var(--text)",
-                    }
-                  : undefined
-              }
-            >
-              {b.label}
-            </button>
-          ))}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          {/* View toggle — Live (device truth) vs Target policy (app-aware) */}
+          <div className="toolbar">
+            {(
+              [
+                { id: "live", label: "Live" },
+                { id: "target", label: "Target policy" },
+              ] as { id: ViewMode; label: string }[]
+            ).map((v) => (
+              <button
+                key={v.id}
+                onClick={() => setViewMode(v.id)}
+                title={
+                  v.id === "live"
+                    ? "Live device path — single active tunnel from telemetry"
+                    : "Application-aware routing policy — IT/OT steered onto separate tunnels"
+                }
+                style={
+                  v.id === viewMode
+                    ? {
+                        background: "var(--grad-accent-soft)",
+                        borderColor: "rgba(124,140,255,0.35)",
+                        color: "var(--text)",
+                      }
+                    : undefined
+                }
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <span
+            style={{ width: 1, height: 20, background: "var(--border)" }}
+            aria-hidden
+          />
+          <div className="toolbar">
+            {(
+              [
+                { id: "auto", label: "Auto" },
+                { id: "fiber", label: "Force Fiber" },
+                { id: "5g", label: "Force 5G" },
+              ] as { id: ForceMode; label: string }[]
+            ).map((b) => (
+              <button
+                key={b.id}
+                onClick={() =>
+                  b.id === "auto"
+                    ? applyPathMode("auto", "auto")
+                    : b.id === "fiber"
+                      ? applyPathMode("fiber", "tunnel1", fiberTunnelIfname)
+                      : applyPathMode("5g", "tunnel3", cellTunnelIfname)
+                }
+                disabled={pathBusy}
+                style={
+                  b.id === forceMode
+                    ? {
+                        background: "var(--grad-accent-soft)",
+                        borderColor: "rgba(124,140,255,0.35)",
+                        color: "var(--text)",
+                      }
+                    : undefined
+                }
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1646,6 +1712,7 @@ function GatewayBlock({
         wanMbps={wanMbps}
         wanPps={wanPps}
         forceMode={forceMode}
+        viewMode={viewMode}
       />
 
       {/* WAN line — link status + counters */}
@@ -1698,10 +1765,9 @@ function GatewayBlock({
             <TunnelRow
               key={t.ifname}
               t={t}
-              // "Active/carrying" now follows the app-aware policy (a tunnel is
-              // active iff it carries IT or OT this mode) — consistent with the
-              // diagram, not the device's raw single active_tunnel.
-              active={tunnelClass(t) != null}
+              // Live view: the device's single active tunnel. Target view: the
+              // app-aware carriers. Either way, consistent with the diagram.
+              active={rowActive(t)}
               carrierClass={tunnelClass(t)}
               c={c}
             />
@@ -1727,6 +1793,7 @@ function IpsecFlowSvg({
   wanMbps,
   wanPps,
   forceMode,
+  viewMode,
 }: {
   m: IpsecGatewayState["metrics"];
   c: ThemeColors;
@@ -1737,6 +1804,9 @@ function IpsecFlowSvg({
    *  auto → IT rides Fiber / OT rides 5G; fiber → both on Fiber (IT=T1, OT=T2);
    *  5g → both on 5G (IT=T3, OT=T4). */
   forceMode: ForceMode;
+  /** `live` mirrors the device (single active tunnel carries IT+OT); `target`
+   *  shows the application-aware routing policy (IT/OT split across tunnels). */
+  viewMode: ViewMode;
 }) {
   // Keep the canvas tight: less dead space = a larger render scale when the
   // SVG is fit to the card width, i.e. bigger, readable labels.
@@ -1843,39 +1913,66 @@ function IpsecFlowSvg({
   const cellReachable = cellTunnels.some((t) => t.reachable);
   const anyReachable = fiberReachable || cellReachable;
 
-  // ── Application-aware routing (mode-aware demo policy) ──
-  // `carrierClass` resolves which device class egresses on each tunnel via the
-  // shared `routeClassFor` policy (single source of truth with the per-tunnel
-  // rows). Carriers animate tinted to their class (IT = emerald, OT = pink);
-  // every other tunnel reads as a dimmed standby path.
-  const carrierClass = (underlay: Underlay, idx: number) =>
-    routeClassFor(forceMode, underlay, idx);
+  // ── Routing visualisation — live vs target-policy ──
+  // Live: the device's single active tunnel carries everything ("both"). Target:
+  // the app-aware policy splits IT/OT across tunnels (shared `routeClassFor`).
+  // `tunnelCarry` is the single source of truth used by every flow leg, pill,
+  // row, and badge so the whole page stays consistent.
+  const isTarget = viewMode === "target";
+  const activeIfname = (m.active_tunnel ?? "").trim();
+  const activeUnderlayOf: Underlay | null = activeIfname
+    ? inferUnderlay(activeIfname)
+    : null;
 
-  // The two carrier tunnels under the current mode — used for the gateway badge
-  // and the underlay "active" sub-labels so every "active" marker on the page
-  // tracks the app-aware policy, not the device's raw single active_tunnel.
-  const itCarrierTunnel =
-    fiberTunnels.find((_t, i) => carrierClass("fiber", i) === "it") ??
-    cellTunnels.find((_t, i) => carrierClass("5g", i) === "it");
-  const otCarrierTunnel =
-    fiberTunnels.find((_t, i) => carrierClass("fiber", i) === "ot") ??
-    cellTunnels.find((_t, i) => carrierClass("5g", i) === "ot");
-  // An underlay reads as "active" if it carries any reachable class this mode.
-  const fiberActive = fiberTunnels.some(
-    (t, i) => carrierClass("fiber", i) != null && t.reachable,
-  );
-  const cellActive = cellTunnels.some(
-    (t, i) => carrierClass("5g", i) != null && t.reachable,
-  );
+  const tunnelCarry = (
+    underlay: Underlay,
+    idx: number,
+    ifname: string,
+  ): "it" | "ot" | "both" | null => {
+    if (isTarget) return routeClassFor(forceMode, underlay, idx);
+    return ifname && ifname === activeIfname ? "both" : null;
+  };
+  const carryColorOf = (carry: "it" | "ot" | "both") =>
+    carry === "it" ? IT_COLOR : carry === "ot" ? OT_COLOR : c.ok;
+
+  // Carrier tunnels for the gateway badge (target = IT/OT carriers; live = the
+  // single active tunnel).
+  const itCarrierTunnel = isTarget
+    ? (fiberTunnels.find((_t, i) => routeClassFor(forceMode, "fiber", i) === "it") ??
+       cellTunnels.find((_t, i) => routeClassFor(forceMode, "5g", i) === "it"))
+    : undefined;
+  const otCarrierTunnel = isTarget
+    ? (fiberTunnels.find((_t, i) => routeClassFor(forceMode, "fiber", i) === "ot") ??
+       cellTunnels.find((_t, i) => routeClassFor(forceMode, "5g", i) === "ot"))
+    : undefined;
+  const liveActiveTunnel = isTarget
+    ? undefined
+    : m.tunnels.find((t) => t.ifname === activeIfname);
+
+  // An underlay reads as "active" if it carries traffic in the current view.
+  const fiberActive = isTarget
+    ? fiberTunnels.some((t, i) => routeClassFor(forceMode, "fiber", i) != null && t.reachable)
+    : activeUnderlayOf === "fiber";
+  const cellActive = isTarget
+    ? cellTunnels.some((t, i) => routeClassFor(forceMode, "5g", i) != null && t.reachable)
+    : activeUnderlayOf === "5g";
 
   // Which underlay each device class is steered into, for the gateway→underlay
-  // leg. Force modes collapse both onto one underlay; auto splits them.
-  const itUnderlay: Underlay = forceMode === "5g" ? "5g" : "fiber";
-  const otUnderlay: Underlay = forceMode === "fiber" ? "fiber" : "5g";
+  // leg. Target: mode-based split. Live: both classes ride the active underlay.
+  const itUnderlay: Underlay = isTarget
+    ? forceMode === "5g" ? "5g" : "fiber"
+    : activeUnderlayOf ?? "fiber";
+  const otUnderlay: Underlay = isTarget
+    ? forceMode === "fiber" ? "fiber" : "5g"
+    : activeUnderlayOf ?? "fiber";
 
-  // Legend reflects the active mode's mapping.
-  const legend =
-    forceMode === "fiber"
+  // Section title + legend reflect the current view.
+  const sectionTitle = isTarget
+    ? "Application-aware routing"
+    : "Live path · single active tunnel";
+  const legend = !isTarget
+    ? [{ color: c.ok, label: `IT + OT → ${activeIfname || "active tunnel"}` }]
+    : forceMode === "fiber"
       ? [
           { color: IT_COLOR, label: "IT devices → Fiber · T1" },
           { color: OT_COLOR, label: "OT devices → Fiber · T2" },
@@ -1905,6 +2002,9 @@ function IpsecFlowSvg({
       >
         <span
           style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
             fontSize: 11,
             fontWeight: 700,
             color: "var(--text-muted)",
@@ -1912,7 +2012,24 @@ function IpsecFlowSvg({
             textTransform: "uppercase",
           }}
         >
-          Application-aware routing
+          {sectionTitle}
+          {isTarget && (
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: "0.1em",
+                color: c.accent3,
+                background: `${c.accent3}1f`,
+                border: `1px solid ${c.accent3}55`,
+                borderRadius: 999,
+                padding: "1px 7px",
+              }}
+              title="Application-aware routing policy via policy-based routing (fwmark + routing tables) — roadmap capability"
+            >
+              TARGET POLICY
+            </span>
+          )}
         </span>
         <span style={{ display: "inline-flex", gap: 16, flexWrap: "wrap" }}>
           {legend.map((l) => (
@@ -2058,14 +2175,44 @@ function IpsecFlowSvg({
           otColor={OT_COLOR}
         />
 
-        {/* ─── Gateway → underlays: class-steered paths (mode-aware) ───
-            auto → IT into Fiber, OT into 5G. Force Fiber → both into Fiber.
-            Force 5G → both into 5G. When both classes share one underlay the
-            two flows run parallel (IT below, OT above) instead of overlapping. */}
+        {/* ─── Gateway → underlays ───
+            Live: both IT+OT merge into the single active tunnel, so draw ONE
+            unified active leg (green — matches the flow downstream); the other
+            underlay shows as a dim standby in its own colour.
+            Target: class-steered split — IT and OT each into their underlay
+            (parallel, non-crossing, when they share one). */}
         {(() => {
+          // Dim standby links use each underlay's own colour (not alarm-orange).
+          const standbyFiber = (
+            <NodeConnector a={gwRight} b={fiberLeft} state="ok" c={c} beziD={beziD} accent={FIBER_COLOR} flowing={false} />
+          );
+          const standbyCell = (
+            <NodeConnector a={gwRight} b={cellLeft} state="ok" c={c} beziD={beziD} accent={CELL_COLOR} flowing={false} />
+          );
+
+          if (!isTarget) {
+            // Live — one active leg to the device's active underlay.
+            return (
+              <>
+                {activeUnderlayOf && (
+                  <NodeConnector
+                    a={gwRight}
+                    b={activeUnderlayOf === "fiber" ? fiberLeft : cellLeft}
+                    state="ok"
+                    c={c}
+                    beziD={beziD}
+                    accent={c.ok}
+                    flowing
+                  />
+                )}
+                {activeUnderlayOf !== "fiber" && standbyFiber}
+                {activeUnderlayOf !== "5g" && standbyCell}
+              </>
+            );
+          }
+
+          // Target — IT/OT split.
           const shared = itUnderlay === otUnderlay;
-          // Keep the two flows from crossing: offset the gateway-side and
-          // underlay-side anchors when both classes share an underlay.
           const startFor = (u: Underlay, sep: number) => ({
             x: gwRight.x,
             y: gwRight.y + (u === "fiber" ? -10 : 10) + (shared ? sep : 0),
@@ -2094,14 +2241,8 @@ function IpsecFlowSvg({
                 accent={IT_COLOR}
                 flowing
               />
-              {/* Faint base link for an underlay carrying no class in this mode
-                  (e.g. 5G under Force Fiber) so it still reads as present. */}
-              {itUnderlay !== "fiber" && otUnderlay !== "fiber" && (
-                <NodeConnector a={gwRight} b={fiberLeft} state="warn" c={c} beziD={beziD} accent={FIBER_COLOR} flowing={false} />
-              )}
-              {itUnderlay !== "5g" && otUnderlay !== "5g" && (
-                <NodeConnector a={gwRight} b={cellLeft} state="warn" c={c} beziD={beziD} accent={CELL_COLOR} flowing={false} />
-              )}
+              {itUnderlay !== "fiber" && otUnderlay !== "fiber" && standbyFiber}
+              {itUnderlay !== "5g" && otUnderlay !== "5g" && standbyCell}
             </>
           );
         })()}
@@ -2110,10 +2251,14 @@ function IpsecFlowSvg({
         {fiberTunnels.map((t, i) => {
           const col = tunnelColor(t);
           const reachable = t.reachable;
-          // Which class (if any) this Fiber tunnel carries in the current mode.
-          const cls = carrierClass("fiber", i);
+          // What this Fiber tunnel carries in the current view (class / both / none).
+          const cls = tunnelCarry("fiber", i, t.ifname);
           const carrying = cls != null && reachable;
-          const flowColor = cls ? classColorOf(cls) : FIBER_COLOR;
+          const flowColor = cls ? carryColorOf(cls) : FIBER_COLOR;
+          // Live single-active flow keeps the original green→purple two-tone;
+          // target class flows stay solid in their class colour.
+          const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
+          const flowDot2 = cls === "both" ? accentPurple : flowColor;
           const pid = `ipsec-fiber-in-${i}`;
           const target = { x: PILL_X, y: fiberPillY(i) + PILL_H / 2 };
           const d = beziD(fiberRight, target);
@@ -2123,7 +2268,7 @@ function IpsecFlowSvg({
                 id={pid}
                 d={d}
                 fill="none"
-                stroke={carrying ? flowColor : col}
+                stroke={carrying ? flowStroke : col}
                 strokeWidth={carrying ? 3 : reachable ? 1.2 : 0.9}
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
@@ -2145,7 +2290,7 @@ function IpsecFlowSvg({
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
-                  <circle r={2.4} fill={flowColor} opacity={0.7}>
+                  <circle r={2.4} fill={flowDot2} opacity={0.85}>
                     <animateMotion
                       dur="1.1s"
                       begin="0.55s"
@@ -2162,10 +2307,14 @@ function IpsecFlowSvg({
         {cellTunnels.map((t, i) => {
           const col = tunnelColor(t);
           const reachable = t.reachable;
-          // Which class (if any) this 5G tunnel carries in the current mode.
-          const cls = carrierClass("5g", i);
+          // What this 5G tunnel carries in the current view (class / both / none).
+          const cls = tunnelCarry("5g", i, t.ifname);
           const carrying = cls != null && reachable;
-          const flowColor = cls ? classColorOf(cls) : CELL_COLOR;
+          const flowColor = cls ? carryColorOf(cls) : CELL_COLOR;
+          // Live single-active flow keeps the original green→purple two-tone;
+          // target class flows stay solid in their class colour.
+          const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
+          const flowDot2 = cls === "both" ? accentPurple : flowColor;
           const pid = `ipsec-cell-in-${i}`;
           const target = { x: PILL_X, y: cellPillY(i) + PILL_H / 2 };
           const d = beziD(cellRight, target);
@@ -2175,7 +2324,7 @@ function IpsecFlowSvg({
                 id={pid}
                 d={d}
                 fill="none"
-                stroke={carrying ? flowColor : col}
+                stroke={carrying ? flowStroke : col}
                 strokeWidth={carrying ? 3 : reachable ? 1.2 : 0.9}
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
@@ -2197,7 +2346,7 @@ function IpsecFlowSvg({
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
-                  <circle r={2.4} fill={flowColor} opacity={0.7}>
+                  <circle r={2.4} fill={flowDot2} opacity={0.85}>
                     <animateMotion
                       dur="1.1s"
                       begin="0.55s"
@@ -2229,11 +2378,13 @@ function IpsecFlowSvg({
         ].map(({ t, i, kind, source }, idx) => {
           const col = tunnelColor(t);
           const reachable = t.reachable;
-          // Same mode-aware carrier mapping as the inbound leg, colour-matched
-          // to the device class the tunnel carries (IT = emerald, OT = pink).
-          const cls = carrierClass(kind === "fiber" ? "fiber" : "5g", i);
+          // Same carrier mapping as the inbound leg, colour-matched to what the
+          // tunnel carries (IT = emerald, OT = pink, both = active green→purple).
+          const cls = tunnelCarry(kind === "fiber" ? "fiber" : "5g", i, t.ifname);
           const carrying = cls != null && reachable;
-          const flowColor = cls ? classColorOf(cls) : col;
+          const flowColor = cls ? carryColorOf(cls) : col;
+          const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
+          const flowDot2 = cls === "both" ? accentPurple : flowColor;
           const pid = `ipsec-${kind}-out-${i}`;
           const total = Math.max(1, m.tunnels.length - 1);
           const band = WAN_H / 2 - 22;
@@ -2248,7 +2399,7 @@ function IpsecFlowSvg({
                 id={pid}
                 d={d}
                 fill="none"
-                stroke={carrying ? flowColor : col}
+                stroke={carrying ? flowStroke : col}
                 strokeWidth={carrying ? 3 : reachable ? 1.2 : 0.9}
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
@@ -2270,7 +2421,7 @@ function IpsecFlowSvg({
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
-                  <circle r={2.4} fill={flowColor} opacity={0.7}>
+                  <circle r={2.4} fill={flowDot2} opacity={0.85}>
                     <animateMotion
                       dur="1.1s"
                       begin="0.55s"
@@ -2403,13 +2554,14 @@ function IpsecFlowSvg({
         ].map(({ t, py, underlay, label, uk, ui }, idx) => {
           const col = tunnelColor(t);
           const reachable = t.reachable;
-          // Device class this tunnel carries in the current mode (or none).
-          const cls = carrierClass(uk, ui);
+          // What this tunnel carries in the current view (class / both / none).
+          const cls = tunnelCarry(uk, ui, t.ifname);
           const isCarrier = cls != null;
           const carrying = isCarrier && reachable;
           const preferredButDown = isCarrier && !reachable;
-          const classLabel = cls === "it" ? "IT" : "OT";
-          const classColor = cls ? classColorOf(cls) : col;
+          const classLabel =
+            cls === "it" ? "IT" : cls === "ot" ? "OT" : "IT+OT";
+          const classColor = cls ? carryColorOf(cls) : col;
           // Dim non-carrying tunnels so the eye lands on the active one.
           const dim = !carrying;
           const pillOpacity = carrying ? 1 : reachable ? 0.55 : 0.38;
@@ -2612,17 +2764,20 @@ function IpsecFlowSvg({
           }
           haloPulse={anyReachable}
         />
-        {/* Carrier badges below the gateway — one per device class, matching the
-            app-aware routing the diagram shows (IT and OT each on their tunnel). */}
-        {(itCarrierTunnel || otCarrierTunnel) && (
+        {/* Carrier badges below the gateway — target view: one per device class
+            (IT / OT). Live view: the single active tunnel. */}
+        {(itCarrierTunnel || otCarrierTunnel || liveActiveTunnel) && (
           <g
             transform={`translate(${COL_GW.x + COL_GW.w / 2} ${ROW_CENTER + GW_H / 2 + 16})`}
           >
             {(
-              [
-                { cls: "IT", t: itCarrierTunnel, color: IT_COLOR },
-                { cls: "OT", t: otCarrierTunnel, color: OT_COLOR },
-              ].filter((x) => x.t) as {
+              (isTarget
+                ? [
+                    { cls: "IT", t: itCarrierTunnel, color: IT_COLOR },
+                    { cls: "OT", t: otCarrierTunnel, color: OT_COLOR },
+                  ]
+                : [{ cls: "ACTIVE", t: liveActiveTunnel, color: c.ok }]
+              ).filter((x) => x.t) as {
                 cls: string;
                 t: IpsecTunnelMetric;
                 color: string;
