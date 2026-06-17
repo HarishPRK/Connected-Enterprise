@@ -1855,11 +1855,11 @@ function IpsecFlowSvg({
   // and the underlay "active" sub-labels so every "active" marker on the page
   // tracks the app-aware policy, not the device's raw single active_tunnel.
   const itCarrierTunnel =
-    fiberTunnels.find((t, i) => carrierClass("fiber", i) === "it") ??
-    cellTunnels.find((t, i) => carrierClass("5g", i) === "it");
+    fiberTunnels.find((_t, i) => carrierClass("fiber", i) === "it") ??
+    cellTunnels.find((_t, i) => carrierClass("5g", i) === "it");
   const otCarrierTunnel =
-    fiberTunnels.find((t, i) => carrierClass("fiber", i) === "ot") ??
-    cellTunnels.find((t, i) => carrierClass("5g", i) === "ot");
+    fiberTunnels.find((_t, i) => carrierClass("fiber", i) === "ot") ??
+    cellTunnels.find((_t, i) => carrierClass("5g", i) === "ot");
   // An underlay reads as "active" if it carries any reachable class this mode.
   const fiberActive = fiberTunnels.some(
     (t, i) => carrierClass("fiber", i) != null && t.reachable,
