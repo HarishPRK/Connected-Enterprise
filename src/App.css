@@ -1142,7 +1142,9 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
 }
 .ipsec-tunnel-metrics {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  /* One column per metric (Latency · Jitter · Loss · SLA · RX · TX) so every
+     value for a tunnel stays on a single line. */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
 }
 .ipsec-metric {

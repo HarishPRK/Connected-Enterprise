@@ -6,6 +6,7 @@ import { Sparkline } from '../components/widgets/Sparkline';
 import { useToast } from '../ui/Toast';
 import { useThemeColors } from '../ui/Theme';
 import { useLiveData } from '../ui/LiveData';
+import { useOpsIncidents } from '../ui/OpsIncidents';
 import { runAgentSSE } from '../ui/agentClient';
 import { RichText } from '../ui/markdown';
 import { branches, incidents as seed } from '../data/mock';
@@ -98,8 +99,15 @@ export function IncidentsPage() {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | 'all'>('all');
   const { newIncidentTrigger } = useLiveData();
+  // Real incidents derived from the live failover telemetry (auto-resolve etc).
+  const { liveIncidents, patchIncident: patchLive, appendStep: appendLive } = useOpsIncidents();
   const { push } = useToast();
   const lastTriggerRef = useRef(0);
+
+  // Display set = live-derived incidents (newest, on top) + the scripted/demo
+  // seed list. Live ones are owned by the provider; their mutations route there.
+  const allList = useMemo(() => [...liveIncidents, ...list], [liveIncidents, list]);
+  const isLive = (id: string) => liveIncidents.some((i) => i.id === id);
 
   // When the live trigger fires, prepend a fresh INC-0143 (only once).
   useEffect(() => {
@@ -114,7 +122,7 @@ export function IncidentsPage() {
   }, [newIncidentTrigger]);
 
   const filtered = useMemo(() => {
-    return [...list]
+    return [...allList]
       .filter((i) => statusFilter === 'all' || i.status === statusFilter)
       .filter((i) => !query || i.title.toLowerCase().includes(query.toLowerCase()) || i.id.toLowerCase().includes(query.toLowerCase()))
       .sort((a, b) => {
@@ -125,18 +133,18 @@ export function IncidentsPage() {
         if (sevOrder[a.severity] !== sevOrder[b.severity]) return sevOrder[a.severity] - sevOrder[b.severity];
         return new Date(b.createdISO).getTime() - new Date(a.createdISO).getTime();
       });
-  }, [list, statusFilter, query]);
+  }, [allList, statusFilter, query]);
 
-  const selected = list.find((i) => i.id === selectedId);
+  const selected = allList.find((i) => i.id === selectedId);
 
   // KPI stats
   const stats = useMemo(() => {
-    const open = list.filter((i) => i.status !== 'resolved' && i.status !== 'escalated').length;
-    const awaiting = list.filter((i) => i.status === 'awaiting_approval').length;
-    const autoResolved = list.filter((i) => i.status === 'resolved' && i.assignee === 'agent').length;
-    const escalated = list.filter((i) => i.status === 'escalated').length;
+    const open = allList.filter((i) => i.status !== 'resolved' && i.status !== 'escalated').length;
+    const awaiting = allList.filter((i) => i.status === 'awaiting_approval').length;
+    const autoResolved = allList.filter((i) => i.status === 'resolved' && i.assignee === 'agent').length;
+    const escalated = allList.filter((i) => i.status === 'escalated').length;
     return { open, awaiting, autoResolved, escalated };
-  }, [list]);
+  }, [allList]);
 
   // ─── Live Claude agent runner ───
   // Streams real Claude responses via /api/agent/run and appends them as
@@ -144,12 +152,22 @@ export function IncidentsPage() {
   const [liveRunningId, setLiveRunningId] = useState<string | null>(null);
   const stopLiveRef = useRef<(() => void) | null>(null);
 
+  // Route mutations: live-derived incidents live in the OpsIncidents provider;
+  // seed/demo incidents live in this page's local state.
   function appendLiveStep(id: string, step: AgentStep) {
+    if (isLive(id)) {
+      appendLive(id, step);
+      return;
+    }
     setList((prev) =>
       prev.map((inc) => (inc.id === id ? { ...inc, steps: [...inc.steps, step] } : inc)),
     );
   }
   function setIncidentStatus(id: string, status: IncidentStatus, patch?: Partial<Incident>) {
+    if (isLive(id)) {
+      patchLive(id, { status, ...patch });
+      return;
+    }
     setList((prev) =>
       prev.map((inc) => (inc.id === id ? { ...inc, status, ...patch } : inc)),
     );
@@ -207,9 +225,13 @@ export function IncidentsPage() {
               reason:      (args.reason as string) ?? 'Agent requested human approval.',
             };
             sawProposal = true;
-            setList((prev) =>
-              prev.map((i) => (i.id === inc.id ? { ...i, pendingAction: pending } : i)),
-            );
+            if (isLive(inc.id)) {
+              patchLive(inc.id, { pendingAction: pending });
+            } else {
+              setList((prev) =>
+                prev.map((i) => (i.id === inc.id ? { ...i, pendingAction: pending } : i)),
+              );
+            }
             // Also append a visible "proposal" step in the timeline.
             appendLiveStep(inc.id, {
               id: mkId(), ts: 0, kind: 'proposal',
@@ -271,6 +293,15 @@ export function IncidentsPage() {
   }
 
   function applyApproval(id: string) {
+    // Live incidents (no scripted post-approval steps) just move resolving→resolved.
+    if (isLive(id)) {
+      patchLive(id, { status: 'resolving', pendingAction: undefined });
+      window.setTimeout(
+        () => patchLive(id, { status: 'resolved', resolvedISO: new Date().toISOString() }),
+        4_000,
+      );
+      return;
+    }
     setList((prev) =>
       prev.map((inc) => {
         if (inc.id !== id || !inc.pendingAction || !inc.postApprovalSteps) return inc;
@@ -296,6 +327,10 @@ export function IncidentsPage() {
   }
 
   function escalate(id: string) {
+    if (isLive(id)) {
+      patchLive(id, { status: 'escalated', assignee: 'On-call NetEng' });
+      return;
+    }
     setList((prev) =>
       prev.map((inc) =>
         inc.id === id

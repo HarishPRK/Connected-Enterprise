@@ -22,6 +22,7 @@ import { AgenticAIPage } from './pages/AgenticAI';
 import { alerts, branches } from './data/mock';
 import { ToastProvider } from './ui/Toast';
 import { LiveDataProvider } from './ui/LiveData';
+import { OpsIncidentsProvider } from './ui/OpsIncidents';
 import { CommandPalette } from './ui/CommandPalette';
 import { NotificationsDrawer } from './ui/NotificationsDrawer';
 
@@ -57,6 +58,7 @@ export default function App() {
   return (
     <ToastProvider>
      <LiveDataProvider>
+      <OpsIncidentsProvider>
       <div className="app-shell">
         <TopBar
           branchId={branchId}
@@ -97,6 +99,7 @@ export default function App() {
         onBranchChange={setBranchId}
       />
       <NotificationsDrawer open={notifOpen} onClose={() => setNotifOpen(false)} />
+      </OpsIncidentsProvider>
      </LiveDataProvider>
     </ToastProvider>
   );
