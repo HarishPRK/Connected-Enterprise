@@ -424,6 +424,7 @@ function FormRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
+
 /* App → Path Sankey-ish flow diagram */
 function AppFlowDiagram() {
   const W = 760, H = 360;

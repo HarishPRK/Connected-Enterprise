@@ -1,0 +1,44 @@
+{
+  "RecipeFormatVersion": "2020-01-25",
+  "ComponentName": "com.rdk.matter.devicecontrol",
+  "ComponentVersion": "1.0.3",
+  "ComponentType": "aws.greengrass.generic",
+  "ComponentDescription": "Polls the RDKMatterControl thing shadow for desired.command, forwards it to the Matter hub CGI, publishes the outcome to rdk/matter/device/control/result, then clears the shadow.",
+  "ComponentPublisher": "Connected Enterprise",
+  "ComponentConfiguration": {
+    "DefaultConfiguration": {
+      "hubApi": "http://192.168.1.201:8089/cgi-bin/matterapi.ha",
+      "awsEndpoint": "https://alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com:8443",
+      "controlThing": "RDKMatterControl",
+      "resultTopic": "rdk/matter/device/control/result",
+      "pollSeconds": "3",
+      "rootCa": "/greengrass/AmazonRootCA1.pem",
+      "certPath": "/greengrass/368dc30029adf5ab982329db91f4b356368c7109a3c06ad00fbe9534451c3a7f-certificate.pem.crt",
+      "keyPath": "/greengrass/368dc30029adf5ab982329db91f4b356368c7109a3c06ad00fbe9534451c3a7f-private.pem.key"
+    }
+  },
+  "Manifests": [
+    {
+      "Platform": {
+        "os": "linux"
+      },
+      "Lifecycle": {
+        "Run": {
+          "RequiresPrivilege": true,
+          "Setenv": {
+            "HUB_API": "{configuration:/hubApi}",
+            "AWS_ENDPOINT": "{configuration:/awsEndpoint}",
+            "CONTROL_THING": "{configuration:/controlThing}",
+            "RESULT_TOPIC": "{configuration:/resultTopic}",
+            "POLL_SECONDS": "{configuration:/pollSeconds}",
+            "ROOT_CA": "{configuration:/rootCa}",
+            "CERT_PATH": "{configuration:/certPath}",
+            "KEY_PATH": "{configuration:/keyPath}"
+          },
+          "Script": "export PATH=\"/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/bin:/opt/usr/bin:$PATH\"\necho \"[matter-devicecontrol] started: thing=$CONTROL_THING result=$RESULT_TOPIC\"\nwhile true; do\n  rm -f /tmp/rdk_matter_ctrl_shadow.json\n  curl -s --tlsv1.2 --cacert \"$ROOT_CA\" --cert \"$CERT_PATH\" --key \"$KEY_PATH\" \"$AWS_ENDPOINT/things/$CONTROL_THING/shadow\" -o /tmp/rdk_matter_ctrl_shadow.json\n  CMD_JSON=$(python3 -c \"\nimport json\ntry:\n    d = json.load(open('/tmp/rdk_matter_ctrl_shadow.json'))\n    c = d.get('state', {}).get('desired', {}).get('command')\n    if isinstance(c, dict):\n        print(json.dumps(c, separators=(',', ':')))\nexcept Exception:\n    pass\n\")\n  if [ -n \"$CMD_JSON\" ]; then\n    echo \"[matter-devicecontrol] command: $CMD_JSON\"\n    REQUEST_ID=$(echo \"$CMD_JSON\" | python3 -c \"import sys, json; print(json.load(sys.stdin).get('requestId', ''))\")\n    HUB_PAYLOAD=$(echo \"$CMD_JSON\" | python3 -c \"\nimport sys, json\nc = json.load(sys.stdin)\nc.pop('requestId', None)\nc.setdefault('cmd', 'CONTROL_DEVICE')\nprint(json.dumps(c, separators=(',', ':')))\n\")\n    echo \"[matter-devicecontrol] hub query: $HUB_PAYLOAD -> $HUB_API\"\n    rm -f /tmp/rdk_matter_ctrl_result.json\n    curl -s -G --connect-timeout 5 --max-time 60 --data-urlencode \"$HUB_PAYLOAD\" \"$HUB_API\" -o /tmp/rdk_matter_ctrl_result.json\n    RESULT=$(REQUEST_ID=\"$REQUEST_ID\" python3 -c \"\nimport json, os\ntry:\n    hub = json.load(open('/tmp/rdk_matter_ctrl_result.json'))\n    ok = True\nexcept Exception:\n    hub = None\n    ok = False\nprint(json.dumps({'requestId': os.environ.get('REQUEST_ID', ''), 'success': ok, 'hubResponse': hub}, separators=(',', ':')))\n\")\n    curl -s --tlsv1.2 --cacert \"$ROOT_CA\" --cert \"$CERT_PATH\" --key \"$KEY_PATH\" -X POST -H \"Content-Type: application/json\" -d \"$RESULT\" \"$AWS_ENDPOINT/topics/$RESULT_TOPIC?qos=1\" > /dev/null\n    echo \"[matter-devicecontrol] result published to $RESULT_TOPIC\"\n    curl -s --tlsv1.2 --cacert \"$ROOT_CA\" --cert \"$CERT_PATH\" --key \"$KEY_PATH\" -X POST -H \"Content-Type: application/json\" -d '{\"state\":{\"desired\":{\"command\":null}}}' \"$AWS_ENDPOINT/things/$CONTROL_THING/shadow\" > /dev/null\n    echo \"[matter-devicecontrol] shadow cleared\"\n  fi\n  sleep \"$POLL_SECONDS\"\ndone\n"
+        }
+      },
+      "Artifacts": []
+    }
+  ]
+}

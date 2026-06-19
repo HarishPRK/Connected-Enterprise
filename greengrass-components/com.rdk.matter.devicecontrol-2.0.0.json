@@ -1,0 +1,40 @@
+{
+  "RecipeFormatVersion": "2020-01-25",
+  "ComponentName": "com.rdk.matter.devicecontrol",
+  "ComponentVersion": "2.0.0",
+  "ComponentType": "aws.greengrass.generic",
+  "ComponentDescription": "Listens on the LOCAL MQTT broker for Matter control commands (rdk/matter/device/control), forwards them to the Matter hub CGI with axios (the transport proven against matterapi.ha), and publishes the outcome to rdk/matter/device/control/result. Cloud<->gateway relay handled by clientdevices.mqtt.Bridge, same as com.rdk.pathcontrol. Deps pinned for the gateway's Node 10 runtime.",
+  "ComponentPublisher": "Connected Enterprise",
+  "ComponentConfiguration": {
+    "DefaultConfiguration": {
+      "hubApi": "http://192.168.1.201:8089/cgi-bin/matterapi.ha",
+      "localBrokerUri": "tcp://192.168.10.1:1883",
+      "controlTopic": "rdk/matter/device/control",
+      "resultTopic": "rdk/matter/device/control/result"
+    }
+  },
+  "Manifests": [
+    {
+      "Platform": {
+        "os": "linux"
+      },
+      "Lifecycle": {
+        "Install": {
+          "RequiresPrivilege": false,
+          "Script": "#!/bin/bash\nset -e\necho '[matterctl] install: writing project files'\n\ncat > package.json << 'EOF'\n{\n  \"name\": \"rdk-matter-device-control\",\n  \"version\": \"2.0.0\",\n  \"description\": \"Matter device control via local broker + bridge\",\n  \"main\": \"index.js\",\n  \"license\": \"ISC\"\n}\nEOF\n\ncat > index.js << 'EOF'\nconst axios = require('axios');\nconst mqtt = require('mqtt');\n\nconst BROKER        = process.env.MATTERCTL_BROKER_URI   || 'tcp://192.168.10.1:1883';\nconst HUB_API       = process.env.MATTERCTL_HUB_API      || 'http://192.168.1.201:8089/cgi-bin/matterapi.ha';\nconst CONTROL_TOPIC = process.env.MATTERCTL_CONTROL_TOPIC || 'rdk/matter/device/control';\nconst RESULT_TOPIC  = process.env.MATTERCTL_RESULT_TOPIC  || 'rdk/matter/device/control/result';\n\nconsole.log('[matterctl] connecting to local broker ' + BROKER);\nconst client = mqtt.connect(BROKER, {\n  clientId: 'matterctl-' + Math.random().toString(36).slice(2, 10),\n  reconnectPeriod: 3000,\n  keepalive: 30,\n});\n\nfunction publishResult(body) {\n  const payload = JSON.stringify(body);\n  client.publish(RESULT_TOPIC, payload, { qos: 1 });\n  console.log('[matterctl] result:', payload);\n}\n\nclient.on('connect', function () {\n  console.log('[matterctl] connected; control=' + CONTROL_TOPIC + ' result=' + RESULT_TOPIC);\n  client.subscribe(CONTROL_TOPIC, { qos: 1 }, function (err) {\n    if (err) console.error('[matterctl] subscribe failed:', err.message);\n    else console.log('[matterctl] subscribed; waiting for commands');\n  });\n});\nclient.on('error', function (e) { console.error('[matterctl] mqtt error:', e && e.message); });\nclient.on('reconnect', function () { console.log('[matterctl] reconnecting...'); });\nclient.on('close', function () { console.log('[matterctl] connection closed'); });\n\nclient.on('message', function (topic, payload) {\n  var raw = payload.toString('utf-8');\n  console.log('[matterctl] command received on ' + topic + ': ' + raw);\n  var msg;\n  try { msg = JSON.parse(raw); }\n  catch (e) { publishResult({ requestId: null, success: false, error: 'invalid JSON payload' }); return; }\n  var requestId = msg.requestId || null;\n  delete msg.requestId;\n  if (!msg.cmd) msg.cmd = 'CONTROL_DEVICE';\n  var url = HUB_API + '?' + msg.cmd;\n  console.log('[matterctl] hub call: ' + JSON.stringify(msg) + ' -> ' + url);\n  axios.post(url, msg, { timeout: 15000, headers: { 'Content-Type': 'application/json' } })\n    .then(function (res) {\n      console.log('[matterctl] hub status ' + res.status + ': ' + JSON.stringify(res.data));\n      publishResult({ requestId: requestId, success: true, hubResponse: res.data });\n    })\n    .catch(function (e) {\n      var hubData = e && e.response ? e.response.data : null;\n      var detail = hubData ? JSON.stringify(hubData) : (e && e.message);\n      console.error('[matterctl] hub call failed:', detail);\n      publishResult({ requestId: requestId, success: false, error: detail, hubResponse: hubData });\n    });\n});\n\n// Keep the event loop alive for the lifetime of the component.\nsetInterval(function () {}, 1 << 30);\nEOF\n\necho '[matterctl] install: npm install (Node-10-safe pins)'\nnpm install mqtt@4.3.7 axios@0.27.2 --cache /tmp/npm-cache --omit=dev\necho '[matterctl] install: done'\n"
+        },
+        "Run": {
+          "RequiresPrivilege": false,
+          "Setenv": {
+            "MATTERCTL_BROKER_URI": "{configuration:/localBrokerUri}",
+            "MATTERCTL_HUB_API": "{configuration:/hubApi}",
+            "MATTERCTL_CONTROL_TOPIC": "{configuration:/controlTopic}",
+            "MATTERCTL_RESULT_TOPIC": "{configuration:/resultTopic}"
+          },
+          "Script": "node index.js"
+        }
+      },
+      "Artifacts": []
+    }
+  ]
+}

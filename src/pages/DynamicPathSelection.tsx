@@ -27,12 +27,30 @@ import {
   CircleDot,
   Sparkles,
   Loader2,
+  Laptop,
+  Monitor,
+  Printer,
+  CreditCard,
+  Server,
+  PhoneCall,
+  Flame,
+  AlertTriangle,
+  DoorClosed,
+  Smartphone,
+  Tablet,
+  Plug,
+  HelpCircle,
 } from "lucide-react";
 import { pathThresholds, BRANCH_TO_IPSEC_SOURCE } from "../data/mock";
-import type { IpsecGatewayState, IpsecTunnelMetric } from "../types";
+import type {
+  IpsecGatewayState,
+  IpsecTunnelMetric,
+  IpsecWifiClient,
+} from "../types";
 import { useThemeColors } from "../ui/Theme";
 import type { ThemeColors } from "../ui/Theme";
 import { useIpsecMetrics } from "../ui/useIpsecMetrics";
+import { useDevices, type DeviceView } from "../ui/useDevices";
 import { runIpsecInsightSSE } from "../ui/agentClient";
 import { RichText } from "../ui/markdown";
 import { useToast } from "../ui/Toast";
@@ -61,6 +79,19 @@ function inferUnderlay(ifname: string): Underlay {
   )
     return "5g";
   return "fiber";
+}
+
+/** Order tunnels by the numeric part of their ifname, ascending — so the WAN
+ *  list and probe table read vti1, vti2, vti3, vti4 regardless of the order
+ *  the gateway happens to report them in. Non-numeric names sort to the front. */
+function orderTunnelsByName(
+  tunnels: IpsecTunnelMetric[],
+): IpsecTunnelMetric[] {
+  const numOf = (s: string) => {
+    const match = (s || "").match(/\d+/);
+    return match ? parseInt(match[0], 10) : 0;
+  };
+  return [...tunnels].sort((a, b) => numOf(a.ifname) - numOf(b.ifname));
 }
 
 /** Turn a raw device hostname (`rdk-bpi4-gateway`) into a friendly title
@@ -213,7 +244,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   const cellMos = latest?.fiveg_mos ?? 0;
 
   return (
-    <>
+    <div className="failover-page" style={{ display: "contents" }}>
       <PageHeader
         title="Dynamic Failover"
         subtitle="Real-time SLA-driven failover between Fiber and 5G — sub-second decisions per flow"
@@ -231,10 +262,10 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
         }
       />
 
-      {/* SLA cards: 4 metrics × 2 paths — all live from IPsec telemetry */}
+      {/* SLA cards: 4 metrics × 2 paths + Wi-Fi RSSI — all live from telemetry */}
       <div
         className="kpi-strip"
-        style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
+        style={{ gridTemplateColumns: "repeat(5, 1fr)" }}
       >
         <SlaCard
           label="Latency"
@@ -275,6 +306,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           series={slaSeries.map((h) => h.fiber_mos)}
           digits={1}
         />
+        <RssiCard clients={liveState?.metrics.wifi?.clients ?? []} />
       </div>
 
       <div className="grid">
@@ -437,176 +469,111 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           </Card>
         </div>
 
-        {/* Active probes — one row per IPsec tunnel reported by the gateway.
-            RTT, success% and state are computed from the latest payload. */}
-        <div className="col-7">
-          <Card
-            title={
-              <span>
-                <Zap size={13} /> Active probes
-              </span>
-            }
-            sub={
-              liveState
-                ? `${liveState.metrics.tunnels.length} IPsec tunnels feeding the SLA engine`
-                : "Awaiting first IPsec payload…"
-            }
-          >
-            <table>
-              <thead>
-                <tr>
-                  <th>Target</th>
-                  <th>Type</th>
-                  <th>Interval</th>
-                  <th>RTT</th>
-                  <th>Success</th>
-                  <th>State</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(liveState?.metrics.tunnels ?? []).map((t) => {
-                  const successPct = t.reachable
-                    ? Math.max(0, Math.min(100, 100 - t.loss_percent))
-                    : 0;
-                  const underlay = inferUnderlay(t.ifname);
-                  return (
-                    <tr key={t.ifname}>
-                      <td className="mono" style={{ color: "var(--text)" }}>
-                        {t.ifname}
-                      </td>
-                      <td>
-                        <span className="badge">
-                          IPSEC · {underlay.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="mono" style={{ color: "var(--text-dim)" }}>
-                        10s
-                      </td>
-                      <td className="mono">
-                        {t.reachable ? `${t.latency_ms.toFixed(1)} ms` : "—"}
-                      </td>
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                          }}
-                        >
-                          <div className="progress" style={{ width: 80 }}>
-                            <span style={{ width: `${successPct}%` }} />
-                          </div>
-                          <span
-                            className="mono"
-                            style={{ fontSize: 11, color: "var(--text-dim)" }}
-                          >
-                            {successPct.toFixed(1)}%
-                          </span>
-                        </div>
-                      </td>
-                      <td>
-                        <span
-                          className={`badge ${t.reachable ? "ok" : t.present ? "warn" : ""}`}
-                        >
-                          {t.reachable
-                            ? "Up"
-                            : t.present
-                              ? "Unreachable"
-                              : "Absent"}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!liveState && (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      style={{
-                        color: "var(--text-muted)",
-                        fontSize: 12.5,
-                        padding: "14px 0",
-                      }}
-                    >
-                      Waiting for first payload on{" "}
-                      <span className="mono">rdk/ipsec/metrics</span>…
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </Card>
-        </div>
-
-        {/* Thresholds editor */}
-        <div className="col-5">
+        {/* Thresholds editor — full-width now that the Active probes card has
+            been folded into the per-tunnel rows above (Interval + Success). */}
+        <div className="col-12">
           <Card
             title={
               <span>
                 <Gauge size={13} /> SLA thresholds
               </span>
             }
-            sub="Used by the path selector to decide warn / fail"
+            sub="Separate Fiber & 5G bounds — used by the path selector to decide warn / fail"
           >
-            {pathThresholds.map((t) => (
-              <div
-                key={t.metric}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr",
-                  gap: 10,
-                  alignItems: "center",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    color: "var(--text-dim)",
-                    textTransform: "capitalize",
-                  }}
-                >
-                  {t.metric}
+            {/* Compact metric blocks — laid out across the row so the inputs
+                stay small instead of stretching the full card width. */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+                gap: "14px 24px",
+              }}
+            >
+              {pathThresholds.map((t) => (
+                <div key={t.metric}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "var(--text-dim)",
+                      textTransform: "capitalize",
+                      marginBottom: 6,
+                    }}
+                  >
+                    {t.metric}
+                  </div>
+                  {/* per-block Warn / Fail headers */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "44px 1fr 1fr",
+                      gap: 8,
+                      marginBottom: 4,
+                    }}
+                  >
+                    <span />
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: "var(--warn)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      Warn
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: "var(--err)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      Fail
+                    </span>
+                  </div>
+                  {[
+                    { name: "Fiber", color: c.accent, vals: t.fiber },
+                    { name: "5G", color: c.accent2, vals: t.fiveg },
+                  ].map(({ name, color, vals }) => (
+                    <div
+                      key={name}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "44px 1fr 1fr",
+                        gap: 8,
+                        alignItems: "center",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color,
+                          letterSpacing: "0.04em",
+                        }}
+                      >
+                        {name}
+                      </span>
+                      <input
+                        defaultValue={`${vals.warn}${t.unit}`}
+                        className="mono"
+                        style={{ padding: "6px 8px", width: "100%", minWidth: 0 }}
+                      />
+                      <input
+                        defaultValue={`${vals.fail}${t.unit}`}
+                        className="mono"
+                        style={{ padding: "6px 8px", width: "100%", minWidth: 0 }}
+                      />
+                    </div>
+                  ))}
                 </div>
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: "var(--warn)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                    }}
-                  >
-                    Warn
-                  </span>
-                  <input
-                    defaultValue={`${t.warn}${t.unit}`}
-                    className="mono"
-                    style={{ padding: "6px 8px" }}
-                  />
-                </label>
-                <label
-                  style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: "var(--err)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                    }}
-                  >
-                    Fail
-                  </span>
-                  <input
-                    defaultValue={`${t.fail}${t.unit}`}
-                    className="mono"
-                    style={{ padding: "6px 8px" }}
-                  />
-                </label>
-              </div>
-            ))}
+              ))}
+            </div>
             <div
               style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}
             >
@@ -618,7 +585,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           </Card>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -855,19 +822,19 @@ function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRunAt, setLastRunAt] = useState<number | null>(null);
-  // Throttle: don't auto-refire more than once per 30s window even if the
-  // payload arrives more often.
-  const lastAutoRef = useRef<number>(0);
   const stopRef = useRef<(() => void) | null>(null);
+  const runIdRef = useRef(0);
 
   const generate = useCallback(() => {
     stopRef.current?.();
+    const myRun = ++runIdRef.current;
     setText("");
     setError(null);
     setLoading(true);
     setLastRunAt(Date.now());
     stopRef.current = runIpsecInsightSSE({
       onEvent: (e) => {
+        if (myRun !== runIdRef.current) return; // ignore a superseded run
         if (e.event === "chunk" && typeof e.data.text === "string") {
           setText((t) => t + (e.data.text as string));
         } else if (e.event === "error" && typeof e.data.message === "string") {
@@ -876,23 +843,21 @@ function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
         }
       },
       onError: (msg) => {
-        setError(msg);
-        setLoading(false);
+        if (myRun === runIdRef.current) { setError(msg); setLoading(false); }
       },
-      onDone: () => setLoading(false),
+      onDone: () => { if (myRun === runIdRef.current) setLoading(false); },
     });
   }, []);
 
-  // Auto-generate the first insight after the first payload — once.
+  // Auto-generate once the first payload has arrived. The cleanup aborts the
+  // stream, so a StrictMode remount re-fires cleanly rather than leaving the
+  // only run aborted; it fires once because `hasPayload` flips false→true once.
+  const hasPayload = receivedAt > 0;
   useEffect(() => {
-    if (lastAutoRef.current === 0) {
-      lastAutoRef.current = Date.now();
-      generate();
-    }
-  }, [receivedAt, generate]);
-
-  // Clean up an in-flight stream if the card unmounts.
-  useEffect(() => () => stopRef.current?.(), []);
+    if (!hasPayload) return;
+    generate();
+    return () => stopRef.current?.();
+  }, [hasPayload, generate]);
 
   return (
     <Card
@@ -900,17 +865,6 @@ function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
           <Sparkles size={13} style={{ color: c.accent3 }} />
           AI Insight
-          <span
-            className="badge"
-            style={{
-              fontSize: 9,
-              padding: "1px 6px",
-              background: "var(--grad-accent-soft)",
-              borderColor: "rgba(124,140,255,0.35)",
-            }}
-          >
-            BEDROCK · CLAUDE
-          </span>
         </span>
       }
       sub={
@@ -1091,6 +1045,289 @@ function SlaCard({
         />
       </div>
     </div>
+  );
+}
+
+/** KPI card: Wi-Fi RSSI for the devices associated to the gateway. Real values
+ *  from the payload's `wifi.clients[].rssi` (dBm). Shows the average signal,
+ *  client count, and a per-client signal bar list. */
+function RssiCard({ clients }: { clients: IpsecWifiClient[] }) {
+  const c = useThemeColors();
+  const [open, setOpen] = useState(false);
+  // A real association has a negative dBm; 0 means "no reading".
+  const valid = clients.filter((cl) => cl.rssi < 0);
+  const count = valid.length;
+  const avg = count
+    ? Math.round(valid.reduce((s, x) => s + x.rssi, 0) / count)
+    : 0;
+  const qcol = (dbm: number) => (dbm >= -55 ? c.ok : dbm >= -67 ? c.warn : c.err);
+  // Bucket the fleet by signal quality — constant-size display for any N clients
+  // (5 or 50), instead of a per-client list that would overflow the card.
+  const strong = valid.filter((cl) => cl.rssi >= -55).length;
+  const fair = valid.filter((cl) => cl.rssi < -55 && cl.rssi >= -67).length;
+  const weak = valid.filter((cl) => cl.rssi < -67).length;
+  // The one client that actually needs attention (lowest signal).
+  const worst = valid.reduce<IpsecWifiClient | null>(
+    (a, b) => (a && a.rssi <= b.rssi ? a : b),
+    null,
+  );
+  // Full list (weakest first) for the click-through modal.
+  const sorted = [...valid].sort((a, b) => a.rssi - b.rssi);
+  // Map -90…-30 dBm → 0…100% for the signal bars.
+  const pct = (dbm: number) => Math.max(4, Math.min(100, ((dbm + 90) / 60) * 100));
+  return (
+    <>
+    <div
+      className="kpi-card"
+      onClick={() => count > 0 && setOpen(true)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if ((e.key === "Enter" || e.key === " ") && count > 0) setOpen(true);
+      }}
+      style={{ cursor: count > 0 ? "pointer" : "default" }}
+      title={count > 0 ? "View all connected devices" : undefined}
+    >
+      <div className="kpi-top">
+        <div
+          className="kpi-icon"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(var(--accent-rgb) / 0.22), transparent)",
+            color: "var(--accent)",
+          }}
+        >
+          <Wifi size={16} />
+        </div>
+        <div className="kpi-label">Wi-Fi RSSI</div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div>
+          <div
+            style={{
+              fontSize: 10,
+              color: c.textMuted,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+            }}
+          >
+            AVERAGE
+          </div>
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: 600,
+              color: count ? qcol(avg) : c.textMuted,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {count ? `${avg} dBm` : "—"}
+          </div>
+        </div>
+        <div>
+          <div
+            style={{
+              fontSize: 10,
+              color: c.textMuted,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+            }}
+          >
+            CLIENTS
+          </div>
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: 600,
+              color: c.text,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {count}
+          </div>
+        </div>
+      </div>
+      <div
+        style={{
+          marginTop: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        {count === 0 ? (
+          <div style={{ fontSize: 11, color: c.textMuted }}>
+            No Wi-Fi clients connected
+          </div>
+        ) : (
+          <>
+            {/* Signal-quality distribution — proportional, so it stays one row
+                whether there are 2 clients or 50. */}
+            <div
+              style={{
+                display: "flex",
+                height: 6,
+                borderRadius: 3,
+                overflow: "hidden",
+                background: "rgba(255,255,255,0.08)",
+              }}
+            >
+              {[
+                { n: strong, color: c.ok },
+                { n: fair, color: c.warn },
+                { n: weak, color: c.err },
+              ].map((seg, i) =>
+                seg.n > 0 ? (
+                  <span
+                    key={i}
+                    style={{ width: `${(seg.n / count) * 100}%`, background: seg.color }}
+                  />
+                ) : null,
+              )}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                fontSize: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ color: c.ok }}>● {strong} strong</span>
+              <span style={{ color: c.warn }}>● {fair} fair</span>
+              <span style={{ color: c.err }}>● {weak} weak</span>
+            </div>
+            {worst && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  fontSize: 10.5,
+                }}
+              >
+                <span
+                  style={{
+                    color: c.textMuted,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    minWidth: 0,
+                  }}
+                >
+                  Weakest · {worst.hostname || worst.mac}
+                </span>
+                <span
+                  className="mono"
+                  style={{ color: qcol(worst.rssi), fontWeight: 600 }}
+                >
+                  {worst.rssi} dBm
+                </span>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+
+    {/* Click-through: full RSSI list for every connected Wi-Fi client. */}
+    <Modal
+      open={open}
+      onClose={() => setOpen(false)}
+      title={`Wi-Fi RSSI · ${count} connected ${count === 1 ? "device" : "devices"}`}
+      width={480}
+    >
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          maxHeight: 380,
+          overflowY: "auto",
+        }}
+      >
+        {sorted.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: "var(--text-muted)", padding: 8 }}>
+            No Wi-Fi clients connected to the gateway.
+          </div>
+        ) : (
+          sorted.map((cl) => {
+            const col = qcol(cl.rssi);
+            return (
+              <div
+                key={cl.mac}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 10px",
+                  background: "var(--panel-2)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      color: "var(--text)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {cl.hostname || cl.mac}
+                  </div>
+                  <div
+                    className="mono"
+                    style={{ fontSize: 10.5, color: "var(--text-muted)" }}
+                  >
+                    {[
+                      cl.mac,
+                      cl.ip || null,
+                      cl.standard ? `802.11${cl.standard}` : null,
+                      cl.snr ? `SNR ${cl.snr} dB` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", minWidth: 96 }}>
+                  <div
+                    className="mono"
+                    style={{ fontSize: 14, fontWeight: 700, color: col }}
+                  >
+                    {cl.rssi} dBm
+                  </div>
+                  <div
+                    style={{
+                      width: 80,
+                      height: 4,
+                      borderRadius: 2,
+                      background: "rgba(255,255,255,0.08)",
+                      overflow: "hidden",
+                      marginTop: 3,
+                      marginLeft: "auto",
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: "block",
+                        width: `${pct(cl.rssi)}%`,
+                        height: "100%",
+                        background: col,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </Modal>
+    </>
   );
 }
 
@@ -1319,7 +1556,54 @@ function LiveIpsecCard({
   );
 }
 
+/** UI highlight state for the three path-override buttons. */
 type ForceMode = "auto" | "fiber" | "5g";
+
+/** Topology view mode: `live` mirrors the device (single active tunnel, IT+OT
+ *  share it); `target` shows the application-aware routing policy (IT/OT split
+ *  across tunnels) as a roadmap capability. */
+type ViewMode = "live" | "target";
+
+/** Device-class colours — shared by the device links, the topology flows, and
+ *  the per-tunnel rows so the IT/OT story reads consistently everywhere. */
+const IT_COLOR = "#34d399"; // emerald — IT devices
+const OT_COLOR = "#ec4899"; // pink — OT devices
+const classColorOf = (cls: "it" | "ot") => (cls === "it" ? IT_COLOR : OT_COLOR);
+
+/** Application-aware routing demo policy (hardcoded, mode-aware). Returns which
+ *  device class egresses on a given tunnel, where `idx` is the tunnel's position
+ *  within its underlay (0 = Tunnel 1/3, 1 = Tunnel 2/4):
+ *   • auto       → IT on the first Fiber tunnel, OT on the first 5G tunnel.
+ *   • Force Fiber → both on Fiber: IT = Tunnel 1, OT = Tunnel 2 (5G idle).
+ *   • Force 5G    → both on 5G:    IT = Tunnel 3, OT = Tunnel 4 (Fiber idle).
+ *  Single source of truth for the topology diagram AND the per-tunnel rows. */
+function routeClassFor(
+  mode: ForceMode,
+  underlay: Underlay,
+  idx: number,
+): "it" | "ot" | null {
+  if (mode === "fiber")
+    return underlay === "fiber" ? (idx === 0 ? "it" : idx === 1 ? "ot" : null) : null;
+  if (mode === "5g")
+    return underlay === "5g" ? (idx === 0 ? "it" : idx === 1 ? "ot" : null) : null;
+  // auto: IT on the first Fiber tunnel, OT on the first 5G tunnel.
+  if (underlay === "fiber") return idx === 0 ? "it" : null;
+  return idx === 0 ? "ot" : null;
+}
+
+/** The exact `mode` strings the gateway's local path API (`/api/path`) accepts.
+ *  `auto` lets the device decide; `tunnel1`/`tunnel2` pin the two Fiber tunnels,
+ *  `tunnel3`/`tunnel4` pin the two 5G tunnels. The UI now exposes only two
+ *  overrides — Force Fiber pins `tunnel1`, Force 5G pins `tunnel3` — but the
+ *  other commands (`tunnel2`/`tunnel4`, `fiber`/`5g`) stay valid on the API. */
+type PathCommand =
+  | "auto"
+  | "fiber"
+  | "5g"
+  | "tunnel1"
+  | "tunnel2"
+  | "tunnel3"
+  | "tunnel4";
 
 /** Calls the gateway's path-control endpoint via the same-origin proxy
  *  (`server/index.ts → /api/gateway/path`). The server publishes the command
@@ -1327,14 +1611,13 @@ type ForceMode = "auto" | "fiber" | "5g";
  *  Greengrass component applies it locally and acks. Returns whether the
  *  gateway confirmed (ok) or the command was sent but not yet acked (pending). */
 async function postGatewayPathMode(
-  mode: ForceMode,
+  mode: PathCommand,
   source: "rdk" | "prpl",
-  tunnel?: string,
 ): Promise<{ pending: boolean }> {
   const res = await fetch("/api/gateway/path", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, source, tunnel }),
+    body: JSON.stringify({ mode, source }),
   });
   // 202 = published but no ack yet (component may be offline). Treat as a soft
   // success so the UI keeps the optimistic flip but flags it as unconfirmed.
@@ -1362,59 +1645,76 @@ function GatewayBlock({
 }) {
   const m = g.metrics;
   const [forceMode, setForceMode] = useState<ForceMode>("auto");
+  // Topology view: "live" mirrors the device exactly (single active tunnel, both
+  // IT+OT on it); "target" shows the application-aware routing policy (IT/OT
+  // steered onto separate tunnels) as a roadmap capability. Default = live.
+  const [viewMode, setViewMode] = useState<ViewMode>("live");
   const [pathBusy, setPathBusy] = useState(false);
-  // When non-null, show the tunnel-picker modal for the requested underlay.
-  // The user must pick Tunnel 1 / Tunnel 2 before the command is sent.
-  const [tunnelPicker, setTunnelPicker] = useState<"fiber" | "5g" | null>(null);
+  // The specific tunnel ifname the Force button pinned — so the diagram
+  // and rows highlight that exact tunnel, not just the first reachable one in
+  // the underlay. Null in auto mode (the device decides).
+  const [forcedTunnel, setForcedTunnel] = useState<string | null>(null);
   const { push } = useToast();
+  // Device presence — gate the per-tunnel rows' IT/OT tags so they match the
+  // topology (no IT devices ⇒ no IT tag, same as no IT flow in the diagram).
+  const { devices: blockDevices } = useDevices();
+  const hasIT = blockDevices.some((d) => d.domain === "IT");
+  const hasOT = blockDevices.some((d) => d.domain === "OT");
 
   // The gateway's topic family — drives which IoT Core topic the command is
   // published to. Falls back to 'rdk' for the captured-sample / unknown case.
   const source: "rdk" | "prpl" = g.source === "prpl" ? "prpl" : "rdk";
 
-  const modeTitle = (m: ForceMode) =>
-    m === "auto"
+  const commandTitle = (cmd: PathCommand) =>
+    cmd === "auto"
       ? "Auto path-selection"
-      : m === "fiber"
-        ? "Forced to Fiber"
-        : "Forced to 5G";
+      : cmd === "tunnel1"
+        ? "Forced to Fiber · Tunnel 1"
+        : cmd === "tunnel2"
+          ? "Forced to Fiber · Tunnel 2"
+          : cmd === "tunnel3"
+            ? "Forced to 5G · Tunnel 3"
+            : cmd === "tunnel4"
+              ? "Forced to 5G · Tunnel 4"
+              : cmd === "fiber"
+                ? "Forced to Fiber"
+                : "Forced to 5G";
 
-  /** Click handler for the Auto / Force-Fiber / Force-5G buttons. Auto fires
-   *  immediately; Force-Fiber / Force-5G open the tunnel-picker modal first so
-   *  the user picks Tunnel 1 or Tunnel 2 within that underlay. Optimistically
-   *  flips the UI to the requested mode, publishes the command over IoT Core,
-   *  and reverts the UI on hard failure. A "pending" ack (component offline)
-   *  keeps the flip but flags it as unconfirmed. */
-  const applyPathMode = async (next: ForceMode, tunnelIfname?: string) => {
+  /** Publishes a path-control command to the gateway's Greengrass component over
+   *  IoT Core. `highlight` is the button to light up (auto / fiber / 5g); `command`
+   *  is the exact `mode` published (auto, or tunnel1–tunnel4). Optimistically flips
+   *  the UI and reverts on hard failure; a "pending" ack (component offline) keeps
+   *  the flip but flags it as unconfirmed. */
+  const applyPathMode = async (
+    highlight: ForceMode,
+    command: PathCommand,
+    tunnelIfname?: string,
+  ) => {
     if (pathBusy) return;
-    // For Auto, no tunnel pick is needed. For Fiber/5G, open the picker
-    // unless a tunnel was already supplied (i.e. called from the modal).
-    if ((next === "fiber" || next === "5g") && !tunnelIfname) {
-      setTunnelPicker(next);
-      return;
-    }
     const previous = forceMode;
-    setForceMode(next);
+    const previousTunnel = forcedTunnel;
+    setForceMode(highlight);
+    setForcedTunnel(highlight === "auto" ? null : (tunnelIfname ?? null));
     setPathBusy(true);
     try {
-      const { pending } = await postGatewayPathMode(next, source, tunnelIfname);
-      const tunnelSuffix = tunnelIfname ? ` · ${tunnelIfname}` : "";
+      const { pending } = await postGatewayPathMode(command, source);
       push(
         pending
           ? {
               kind: "info",
-              title: `${modeTitle(next)}${tunnelSuffix} — command sent`,
+              title: `${commandTitle(command)} — command sent`,
               detail:
                 "Published to the gateway, but no ack received yet. It may apply once the gateway reconnects.",
             }
           : {
               kind: "success",
-              title: `${modeTitle(next)}${tunnelSuffix}`,
+              title: commandTitle(command),
               detail: "Gateway confirmed the mode change.",
             },
       );
     } catch (err) {
       setForceMode(previous);
+      setForcedTunnel(previousTunnel);
       push({
         kind: "error",
         title: "Path-change failed",
@@ -1424,12 +1724,6 @@ function GatewayBlock({
       setPathBusy(false);
     }
   };
-
-  // Tunnels in the underlay the user is picking from (Fiber or 5G). The
-  // picker modal reads this to show Tunnel 1 / Tunnel 2 with their ifnames.
-  const pickerTunnels = tunnelPicker
-    ? m.tunnels.filter((t) => inferUnderlay(t.ifname) === tunnelPicker)
-    : [];
 
   // Compute live WAN throughput + packet rate from successive payloads so the
   // diagram can show a numerical badge along the active path.
@@ -1467,13 +1761,84 @@ function GatewayBlock({
     m.wan.tx_packets,
   ]);
 
+  // ── Per-tunnel time-series: live throughput (Mbps), rolling latency history
+  //    (for sparklines + jitter), and active-tunnel failover events. All from
+  //    successive real payloads; keyed by ifname so they survive re-renders. ──
+  const lastTunnelRef = useRef<Record<string, { bytes: number; ts: number }>>({});
+  const prevActiveRef = useRef<string>("");
+  const [tunnelRates, setTunnelRates] = useState<Record<string, number>>({});
+  const [tunnelHist, setTunnelHist] = useState<Record<string, number[]>>({});
+  const [flowEvents, setFlowEvents] = useState<
+    { ts: number; kind: "flip" | "breach"; text: string }[]
+  >([]);
+  useEffect(() => {
+    const ts = g.receivedAt;
+    // Per-tunnel Mbps from rx+tx byte deltas.
+    const rates: Record<string, number> = {};
+    for (const t of m.tunnels) {
+      const bytes = t.rx_bytes + t.tx_bytes;
+      const prev = lastTunnelRef.current[t.ifname];
+      if (prev) {
+        const dt = (ts - prev.ts) / 1000;
+        if (dt > 0.1) {
+          rates[t.ifname] = Math.max(0, ((bytes - prev.bytes) * 8) / dt / 1e6);
+        }
+      }
+      lastTunnelRef.current[t.ifname] = { bytes, ts };
+    }
+    if (Object.keys(rates).length) {
+      setTunnelRates((prev) => ({ ...prev, ...rates }));
+    }
+    // Rolling latency history per tunnel (last 24 samples) for sparkline+jitter.
+    setTunnelHist((prev) => {
+      const next = { ...prev };
+      for (const t of m.tunnels) {
+        if (t.reachable && t.latency_ms > 0) {
+          next[t.ifname] = [...(prev[t.ifname] ?? []), t.latency_ms].slice(-24);
+        }
+      }
+      return next;
+    });
+    // Failover events — record active-tunnel flips + SLA breaches this session.
+    const a = (m.active_tunnel ?? "").trim();
+    const newEvents: { ts: number; kind: "flip" | "breach"; text: string }[] = [];
+    if (prevActiveRef.current && a && prevActiveRef.current !== a) {
+      newEvents.push({ ts, kind: "flip", text: `${prevActiveRef.current} → ${a}` });
+    }
+    prevActiveRef.current = a;
+    const act = m.tunnels.find((t) => t.ifname === a);
+    if (act && act.reachable && (act.latency_ms > 150 || act.loss_percent > 3)) {
+      newEvents.push({
+        ts,
+        kind: "breach",
+        text: `${a} ${act.latency_ms > 150 ? `${act.latency_ms.toFixed(0)}ms` : `${act.loss_percent.toFixed(1)}% loss`}`,
+      });
+    }
+    if (newEvents.length) {
+      setFlowEvents((e) => [...e, ...newEvents].slice(-40));
+    }
+  }, [g.receivedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Composite SLA score (0–100) per tunnel: latency + loss + jitter penalties.
+  const jitterOf = (ifname: string) => stddev(tunnelHist[ifname] ?? []);
+  const slaScoreOf = (t: IpsecTunnelMetric): number => {
+    if (!t.reachable || t.latency_ms < 0) return 0;
+    const latPen = Math.min(45, (t.latency_ms / 150) * 45);
+    const lossPen = Math.min(35, t.loss_percent * (35 / 3));
+    const jitPen = Math.min(20, (jitterOf(t.ifname) / 60) * 20);
+    return Math.round(Math.max(0, 100 - latPen - lossPen - jitPen));
+  };
+
   // Resolve the "effective" active tunnel: in auto mode, the device decides;
-  // in force-fiber / force-5g mode, the UI overrides to the first reachable
-  // tunnel in the selected underlay so the diagram + tunnel rows highlight
-  // that path instead. (UI-only override — device behaviour unchanged.)
+  // in force mode the UI overrides to the exact tunnel the user pinned via the
+  // picker (so the diagram + rows highlight *that* tunnel — e.g. Tunnel 4, not
+  // just the first reachable one in the underlay). Falls back to the first
+  // reachable tunnel in the forced underlay if no specific pin is set.
+  // (UI-only override — device behaviour unchanged.)
   const deviceActive = (m.active_tunnel ?? "").trim();
   const effectiveActiveTunnel = (() => {
     if (forceMode === "auto") return deviceActive;
+    if (forcedTunnel) return forcedTunnel;
     const pool = m.tunnels.filter(
       (t) =>
         inferUnderlay(t.ifname) === (forceMode === "fiber" ? "fiber" : "5g"),
@@ -1483,6 +1848,50 @@ function GatewayBlock({
   })();
   const effectiveM =
     forceMode === "auto" ? m : { ...m, active_tunnel: effectiveActiveTunnel };
+
+  // App-aware class each tunnel carries (IT / OT / none) under the current mode
+  // — same `routeClassFor` policy the topology diagram uses, so the per-tunnel
+  // rows below tag the exact tunnels the diagram lights up. Resolved by the
+  // tunnel's position within its underlay (Tunnel 1/3 = idx 0, Tunnel 2/4 = 1).
+  const fiberOrdered = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "fiber"),
+  );
+  const cellOrdered = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "5g"),
+  );
+  const isTarget = viewMode === "target";
+  // In target view a tunnel is tagged with the class it carries (app-aware
+  // policy); in live view there are no per-class tags (one active tunnel).
+  const tunnelClass = (t: IpsecTunnelMetric): "it" | "ot" | null => {
+    if (!isTarget) return null;
+    const underlay = inferUnderlay(t.ifname);
+    const list = underlay === "fiber" ? fiberOrdered : cellOrdered;
+    const idx = list.findIndex((x) => x.ifname === t.ifname);
+    const cls = routeClassFor(forceMode, underlay, idx);
+    // Drop the tag when that class has no connected devices.
+    if (cls === "it" && !hasIT) return null;
+    if (cls === "ot" && !hasOT) return null;
+    return cls;
+  };
+  // A row is "active/carrying": in target view, if it carries a class; in live
+  // view, if it's the device's single active tunnel.
+  const rowActive = (t: IpsecTunnelMetric): boolean =>
+    isTarget ? tunnelClass(t) != null : t.ifname === effectiveActiveTunnel;
+  // Carrier tunnel names for the gateway header — same policy as the diagram +
+  // rows, so the header never disagrees with what's shown below it.
+  const itCarrierName = m.tunnels.find((t) => tunnelClass(t) === "it")?.ifname;
+  const otCarrierName = m.tunnels.find((t) => tunnelClass(t) === "ot")?.ifname;
+
+  // Force Fiber pins Tunnel 1 (first fiber tunnel, vti1); Force 5G pins Tunnel 3
+  // (first 5G tunnel, vti3). We pass the matching ifname so the diagram + rows
+  // highlight that exact tunnel. The published command is fixed (tunnel1/tunnel3)
+  // and fires even if the tunnel is currently down.
+  const fiberTunnelIfname = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "fiber"),
+  )[0]?.ifname;
+  const cellTunnelIfname = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "5g"),
+  )[0]?.ifname;
 
   const upCount = m.tunnels.filter((t) => t.present && t.reachable).length;
 
@@ -1523,12 +1932,34 @@ function GatewayBlock({
               {upCount} / {m.tunnels.length}
             </strong>
           </div>
-          <div className="ipsec-gw-meta-kv">
-            <span>PREFERRED</span>
-            <strong style={{ color: c.accent3 }}>
-              {effectiveActiveTunnel || "—"}
-            </strong>
-          </div>
+          {isTarget ? (
+            <div className="ipsec-gw-meta-kv">
+              <span>CARRYING</span>
+              <strong
+                style={{
+                  display: "inline-flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: 1,
+                  lineHeight: 1.2,
+                }}
+              >
+                <span style={{ color: IT_COLOR }}>
+                  IT · {itCarrierName ?? "—"}
+                </span>
+                <span style={{ color: OT_COLOR }}>
+                  OT · {otCarrierName ?? "—"}
+                </span>
+              </strong>
+            </div>
+          ) : (
+            <div className="ipsec-gw-meta-kv">
+              <span>ACTIVE</span>
+              <strong style={{ color: c.accent3 }}>
+                {effectiveActiveTunnel || "—"}
+              </strong>
+            </div>
+          )}
           <div className="ipsec-gw-meta-kv">
             <span>RECEIVED</span>
             <strong>{fmtAgo(g.receivedAt)}</strong>
@@ -1570,36 +2001,90 @@ function GatewayBlock({
             </span>
           )}
         </div>
-        <div className="toolbar">
-          {(
-            [
-              { id: "auto", label: "Auto" },
-              { id: "fiber", label: "Force Fiber" },
-              { id: "5g", label: "Force 5G" },
-            ] as { id: ForceMode; label: string }[]
-          ).map((b) => (
-            <button
-              key={b.id}
-              onClick={() => applyPathMode(b.id as ForceMode)}
-              disabled={pathBusy}
-              style={
-                b.id === forceMode
-                  ? {
-                      background: "var(--grad-accent-soft)",
-                      borderColor: "rgba(124,140,255,0.35)",
-                      color: "var(--text)",
-                    }
-                  : undefined
-              }
-            >
-              {b.label}
-            </button>
-          ))}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          {/* View toggle — Live (device truth) vs Target policy (app-aware) */}
+          <div className="toolbar">
+            {(
+              [
+                { id: "live", label: "Live" },
+                { id: "target", label: "Target policy" },
+              ] as { id: ViewMode; label: string }[]
+            ).map((v) => (
+              <button
+                key={v.id}
+                onClick={() => setViewMode(v.id)}
+                title={
+                  v.id === "live"
+                    ? "Live device path — single active tunnel from telemetry"
+                    : "Application-aware routing policy — IT/OT steered onto separate tunnels"
+                }
+                style={
+                  v.id === viewMode
+                    ? {
+                        background: "var(--grad-accent-soft)",
+                        borderColor: "rgba(124,140,255,0.35)",
+                        color: "var(--text)",
+                      }
+                    : undefined
+                }
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <span
+            style={{ width: 1, height: 20, background: "var(--border)" }}
+            aria-hidden
+          />
+          <div className="toolbar">
+            {(
+              [
+                { id: "auto", label: "Auto" },
+                { id: "fiber", label: "Force Fiber" },
+                { id: "5g", label: "Force 5G" },
+              ] as { id: ForceMode; label: string }[]
+            ).map((b) => (
+              <button
+                key={b.id}
+                onClick={() =>
+                  b.id === "auto"
+                    ? applyPathMode("auto", "auto")
+                    : b.id === "fiber"
+                      ? applyPathMode("fiber", "tunnel1", fiberTunnelIfname)
+                      : applyPathMode("5g", "tunnel3", cellTunnelIfname)
+                }
+                disabled={pathBusy}
+                style={
+                  b.id === forceMode
+                    ? {
+                        background: "var(--grad-accent-soft)",
+                        borderColor: "rgba(124,140,255,0.35)",
+                        color: "var(--text)",
+                      }
+                    : undefined
+                }
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Real-data topology flow */}
-      <IpsecFlowSvg m={effectiveM} c={c} wanMbps={wanMbps} wanPps={wanPps} />
+      <IpsecFlowSvg
+        m={effectiveM}
+        c={c}
+        wanMbps={wanMbps}
+        wanPps={wanPps}
+        forceMode={forceMode}
+        viewMode={viewMode}
+        tunnelRates={tunnelRates}
+        tunnelHist={tunnelHist}
+      />
+
+      {/* Failover / SLA event ribbon — flips + breaches over the live session */}
+      <FlowEventRibbon events={flowEvents} c={c} />
 
       {/* WAN line — link status + counters */}
       <div className="ipsec-gw-wan">
@@ -1647,122 +2132,22 @@ function GatewayBlock({
             No tunnels reported.
           </div>
         ) : (
-          m.tunnels.map((t) => (
+          orderTunnelsByName(m.tunnels).map((t) => (
             <TunnelRow
               key={t.ifname}
               t={t}
-              active={t.ifname === effectiveActiveTunnel}
+              // Live view: the device's single active tunnel. Target view: the
+              // app-aware carriers. Either way, consistent with the diagram.
+              active={rowActive(t)}
+              carrierClass={tunnelClass(t)}
+              jitter={jitterOf(t.ifname)}
+              score={slaScoreOf(t)}
               c={c}
             />
           ))
         )}
       </div>
 
-      {/* Tunnel picker — opens when the user clicks Force Fiber / Force 5G.
-          Shows the two tunnels in the chosen underlay; picking one fires the
-          gateway command with that tunnel ifname. */}
-      <Modal
-        open={tunnelPicker != null}
-        onClose={() => setTunnelPicker(null)}
-        title={
-          tunnelPicker === "fiber"
-            ? "Select tunnel — Fiber"
-            : tunnelPicker === "5g"
-              ? "Select tunnel — 5G"
-              : ""
-        }
-        width={460}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            padding: "4px 0 6px",
-          }}
-        >
-          <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-            Pick which tunnel the gateway should pin to in this underlay.
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 10,
-              marginTop: 4,
-            }}
-          >
-            {pickerTunnels.map((t, i) => {
-              const ok = t.present && t.reachable;
-              const accent = ok ? c.ok : c.warn;
-              return (
-                <button
-                  key={t.ifname || `slot-${i}`}
-                  onClick={() => {
-                    const target = tunnelPicker;
-                    setTunnelPicker(null);
-                    if (target) void applyPathMode(target, t.ifname);
-                  }}
-                  disabled={!t.present}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-start",
-                    gap: 6,
-                    padding: "12px 14px",
-                    borderRadius: 10,
-                    border: `1px solid ${accent}55`,
-                    background: `${accent}10`,
-                    textAlign: "left",
-                    cursor: t.present ? "pointer" : "not-allowed",
-                    opacity: t.present ? 1 : 0.55,
-                  }}
-                  title={t.ifname}
-                >
-                  <span
-                    style={{ fontSize: 13, fontWeight: 800, color: accent }}
-                  >
-                    Tunnel {i + 1}
-                  </span>
-                  <span
-                    className="mono"
-                    style={{ fontSize: 11, color: "var(--text)" }}
-                  >
-                    {t.ifname || "—"}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 10.5,
-                      color: "var(--text-muted)",
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {!t.present
-                      ? "absent"
-                      : t.reachable
-                        ? `reachable · ${t.latency_ms.toFixed(0)} ms`
-                        : "unreachable"}
-                  </span>
-                </button>
-              );
-            })}
-            {pickerTunnels.length === 0 && (
-              <div
-                style={{
-                  gridColumn: "1 / -1",
-                  fontSize: 12,
-                  color: "var(--text-muted)",
-                  fontStyle: "italic",
-                  padding: 12,
-                }}
-              >
-                No tunnels reported in this underlay.
-              </div>
-            )}
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
@@ -1772,31 +2157,72 @@ function GatewayBlock({
  * WAN at the bottom. Each tunnel coloured by state; the device-reported
  * `active_tunnel` value (matched by ifname) gets a pulsing border. */
 /* ───── IPsec topology — physically-accurate horizontal flow ─────
- * Gateway (origin) → Fiber & 5G underlays → IPsec tunnels (2 per underlay) →
- * WAN egress (erouter0 → GCP) → HQ peers + Internet (destinations).
+ * IT/OT devices → Gateway → Fiber & 5G underlays → IPsec tunnels (2 per
+ * underlay) → WAN egress (erouter0 → GCP) → Internet (destination).
  * Mirrors the visual idiom of the Overview page's `Topology` widget. */
 function IpsecFlowSvg({
   m,
   c,
   wanMbps,
   wanPps,
+  forceMode,
+  viewMode,
+  tunnelRates,
+  tunnelHist,
 }: {
   m: IpsecGatewayState["metrics"];
   c: ThemeColors;
   /** Live WAN throughput (Mbps) and packet rate (pps), if computed. */
   wanMbps?: number | null;
   wanPps?: number | null;
+  /** Live per-tunnel throughput (Mbps), keyed by ifname. */
+  tunnelRates: Record<string, number>;
+  /** Rolling per-tunnel latency history (ms), keyed by ifname. */
+  tunnelHist: Record<string, number[]>;
+  /** Active path-override mode — drives the app-aware routing visualisation:
+   *  auto → IT rides Fiber / OT rides 5G; fiber → both on Fiber (IT=T1, OT=T2);
+   *  5g → both on 5G (IT=T3, OT=T4). */
+  forceMode: ForceMode;
+  /** `live` mirrors the device (single active tunnel carries IT+OT); `target`
+   *  shows the application-aware routing policy (IT/OT split across tunnels). */
+  viewMode: ViewMode;
 }) {
-  const W = 1520;
+  // Keep the canvas tight: less dead space = a larger render scale when the
+  // SVG is fit to the card width, i.e. bigger, readable labels.
+  const W = 1612;
   const H = 480;
 
-  // Column positions — left-to-right physical flow.
-  // Centered: ~130 px margin on each side of the 1520-wide canvas.
-  const COL_GW = { x: 130, w: 180 };
-  const COL_UNDERLAY = { x: 360, w: 160 };
-  const COL_MANIFOLD = { x: 570, w: 320 };
-  const COL_WAN = { x: 940, w: 200 };
-  const COL_DEST = { x: 1190, w: 200 };
+  // Live IT/OT device inventory (same feed as the Devices page). Show up to 3
+  // per domain as the on-prem endpoints originating traffic into the gateway.
+  const { devices: allDevices } = useDevices();
+  const itAll = allDevices.filter((d) => d.domain === "IT");
+  const otAll = allDevices.filter((d) => d.domain === "OT");
+  const itDevices = itAll.slice(0, 3);
+  const otDevices = otAll.slice(0, 3);
+  // Whether each class actually has connected devices — the topology only draws
+  // a class's traffic flow when devices of that class are present.
+  const hasIT = itAll.length > 0;
+  const hasOT = otAll.length > 0;
+
+  // Hover tooltip — which tunnel is hovered + pointer position within the wrap.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<
+    { t: IpsecTunnelMetric; x: number; y: number } | null
+  >(null);
+  const onTunnelHover = (t: IpsecTunnelMetric) => (e: { clientX: number; clientY: number }) => {
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (r) setHover({ t, x: e.clientX - r.left, y: e.clientY - r.top });
+  };
+
+  // Column positions — left-to-right physical flow. The IT/OT endpoints sit at
+  // the far left and feed the gateway; everything downstream is shifted right to
+  // make room (the gateway used to be the leftmost origin).
+  const COL_DEVICES = { x: 28, w: 190 };
+  const COL_GW = { x: 340, w: 180 };
+  const COL_UNDERLAY = { x: 566, w: 160 };
+  const COL_MANIFOLD = { x: 772, w: 320 };
+  const COL_WAN = { x: 1138, w: 200 };
+  const COL_DEST = { x: 1384, w: 200 };
 
   const GW_H = 120;
   const UNDERLAY_H = 100;
@@ -1807,23 +2233,25 @@ function IpsecFlowSvg({
 
   const FIBER_Y = 100; // top of fiber underlay box
   const CELL_Y = H - UNDERLAY_H - 100; // top of 5G underlay box
-  // 3 destinations stacked: HQ peers (top), AWS Cloud (centre), Internet (bottom)
-  const HQ_Y = 78;
-  const AWS_Y = ROW_CENTER - DEST_H / 2; // perfectly aligned with GCP egress
-  const INT_Y = H - DEST_H - 78;
+  // Single destination (Internet) — centred on the GCP egress row.
+  const INT_Y = ROW_CENTER - DEST_H / 2;
 
   const FIBER_COLOR = "#5ac8ff"; // sky blue (Overview's fiber)
   const CELL_COLOR = "#ffa07c"; // peach (Overview's 5G)
-  const HQ_COLOR = "#7c8cff"; // indigo
-  const AWS_COLOR = "#ff9f43"; // orange (AWS brand)
   const INT_COLOR = "#a5f3fc"; // cyan
   const GCP_COLOR = "#9aa7ff"; // soft blue-violet (GCP-ish)
+  // IT_COLOR / OT_COLOR are module-level (shared with the per-tunnel rows).
   const accentPurple = c.accent3 ?? "#c084fc";
 
-  const fiberTunnels = m.tunnels.filter(
-    (t) => inferUnderlay(t.ifname) === "fiber",
+  // Sort within each underlay by name so the pill numbering is stable —
+  // Tunnel 1/2 = vti1/vti2 (fiber), Tunnel 3/4 = vti3/vti4 (5G) — matching the
+  // tunnel rows and the Force-Fiber/5G picker regardless of payload order.
+  const fiberTunnels = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "fiber"),
   );
-  const cellTunnels = m.tunnels.filter((t) => inferUnderlay(t.ifname) === "5g");
+  const cellTunnels = orderTunnelsByName(
+    m.tunnels.filter((t) => inferUnderlay(t.ifname) === "5g"),
+  );
 
   const tunnelColor = (t: IpsecTunnelMetric) => {
     if (!t.present) return c.textMuted;
@@ -1860,6 +2288,7 @@ function IpsecFlowSvg({
   };
 
   // Anchor points
+  const gwLeft = { x: COL_GW.x, y: ROW_CENTER };
   const gwRight = { x: COL_GW.x + COL_GW.w, y: ROW_CENTER };
   const fiberLeft = { x: COL_UNDERLAY.x, y: FIBER_Y + UNDERLAY_H / 2 };
   const fiberRight = {
@@ -1873,28 +2302,217 @@ function IpsecFlowSvg({
   };
   const wanLeft = { x: COL_WAN.x, y: ROW_CENTER };
   const wanRight = { x: COL_WAN.x + COL_WAN.w, y: ROW_CENTER };
-  const hqLeft = { x: COL_DEST.x, y: HQ_Y + DEST_H / 2 };
-  const awsLeft = { x: COL_DEST.x, y: AWS_Y + DEST_H / 2 };
   const intLeft = { x: COL_DEST.x, y: INT_Y + DEST_H / 2 };
 
   const fiberReachable = fiberTunnels.some((t) => t.reachable);
   const cellReachable = cellTunnels.some((t) => t.reachable);
   const anyReachable = fiberReachable || cellReachable;
-  const activeTunnelObj = m.tunnels.find((t) => t.ifname === m.active_tunnel);
-  const activeUnderlay = activeTunnelObj
-    ? inferUnderlay(activeTunnelObj.ifname)
+
+  // ── Routing visualisation — live vs target-policy ──
+  // Live: the device's single active tunnel carries everything ("both"). Target:
+  // the app-aware policy splits IT/OT across tunnels (shared `routeClassFor`).
+  // `tunnelCarry` is the single source of truth used by every flow leg, pill,
+  // row, and badge so the whole page stays consistent.
+  const isTarget = viewMode === "target";
+  const activeIfname = (m.active_tunnel ?? "").trim();
+  const activeUnderlayOf: Underlay | null = activeIfname
+    ? inferUnderlay(activeIfname)
     : null;
 
+  // Drop a class when it has no connected devices — no IT devices ⇒ no IT flow.
+  const presentClass = (cls: "it" | "ot" | null): "it" | "ot" | null => {
+    if (cls === "it") return hasIT ? "it" : null;
+    if (cls === "ot") return hasOT ? "ot" : null;
+    return null;
+  };
+
+  const tunnelCarry = (
+    underlay: Underlay,
+    idx: number,
+    ifname: string,
+  ): "it" | "ot" | "both" | null => {
+    if (isTarget) return presentClass(routeClassFor(forceMode, underlay, idx));
+    // Live: the single active tunnel carries whichever classes are connected.
+    if (!ifname || ifname !== activeIfname) return null;
+    if (hasIT && hasOT) return "both";
+    if (hasIT) return "it";
+    if (hasOT) return "ot";
+    return null;
+  };
+  // "both" (live single active tunnel) leads with IT emerald; its trailing
+  // particle is OT pink (set per-leg) so one tunnel shows IT+OT together.
+  const carryColorOf = (carry: "it" | "ot" | "both") =>
+    carry === "it" ? IT_COLOR : carry === "ot" ? OT_COLOR : IT_COLOR;
+
+  // Carrier tunnels for the gateway badge (target = IT/OT carriers, only when
+  // that class has devices; live = the single active tunnel).
+  const itCarrierTunnel = isTarget && hasIT
+    ? (fiberTunnels.find((_t, i) => routeClassFor(forceMode, "fiber", i) === "it") ??
+       cellTunnels.find((_t, i) => routeClassFor(forceMode, "5g", i) === "it"))
+    : undefined;
+  const otCarrierTunnel = isTarget && hasOT
+    ? (fiberTunnels.find((_t, i) => routeClassFor(forceMode, "fiber", i) === "ot") ??
+       cellTunnels.find((_t, i) => routeClassFor(forceMode, "5g", i) === "ot"))
+    : undefined;
+  const liveActiveTunnel = isTarget
+    ? undefined
+    : m.tunnels.find((t) => t.ifname === activeIfname);
+
+  // An underlay reads as "active" only if it carries a *present* class's traffic.
+  const fiberActive = fiberTunnels.some(
+    (t, i) => tunnelCarry("fiber", i, t.ifname) != null && t.reachable,
+  );
+  const cellActive = cellTunnels.some(
+    (t, i) => tunnelCarry("5g", i, t.ifname) != null && t.reachable,
+  );
+
+  // Which underlay each device class is steered into, for the gateway→underlay
+  // leg. Target: mode-based split. Live: both classes ride the active underlay.
+  const itUnderlay: Underlay = isTarget
+    ? forceMode === "5g" ? "5g" : "fiber"
+    : activeUnderlayOf ?? "fiber";
+  const otUnderlay: Underlay = isTarget
+    ? forceMode === "fiber" ? "fiber" : "5g"
+    : activeUnderlayOf ?? "fiber";
+
+  // ── Live throughput → reactive flow speed + rate labels ──
+  const rateOf = (ifname: string) => tunnelRates[ifname] ?? 0;
+  const maxRate = Math.max(
+    0,
+    ...m.tunnels.filter((t) => t.reachable).map((t) => rateOf(t.ifname)),
+  );
+  // Busiest carrier ⇒ fastest particles; idle ⇒ slow. Clamped for sanity.
+  const flowDur = (ifname: string) => {
+    const base = maxRate > 0 ? 1.5 - 0.85 * (rateOf(ifname) / maxRate) : 1.1;
+    return Math.max(0.55, Math.min(1.6, base));
+  };
+  // Carrier stroke width nudges up with relative throughput.
+  const flowWidth = (ifname: string) =>
+    2.4 + (maxRate > 0 ? (rateOf(ifname) / maxRate) * 1.6 : 0.6);
+  const fmtRate = (mbps: number) =>
+    mbps >= 1 ? `${mbps.toFixed(1)} Mbps` : `${Math.round(mbps * 1000)} Kbps`;
+  // Build a tiny sparkline path inside a box for the latency history.
+  const sparkPath = (vals: number[], x: number, y: number, w: number, h: number) => {
+    if (vals.length < 2) return "";
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const span = max - min || 1;
+    return vals
+      .map((v, i) => {
+        const px = x + (i / (vals.length - 1)) * w;
+        const py = y + h - ((v - min) / span) * h;
+        return `${i === 0 ? "M" : "L"} ${px.toFixed(1)} ${py.toFixed(1)}`;
+      })
+      .join(" ");
+  };
+
+  // Section title + legend reflect the current view — and only list a class when
+  // it actually has connected devices (so the key matches the drawn flows).
+  const sectionTitle = isTarget
+    ? "Application-aware routing"
+    : "Live path · single active tunnel";
+  const itLabel = isTarget
+    ? forceMode === "fiber"
+      ? "IT devices → Fiber · T1"
+      : forceMode === "5g"
+        ? "IT devices → 5G · T3"
+        : "IT devices → Fiber"
+    : `IT → ${activeIfname || "active"}`;
+  const otLabel = isTarget
+    ? forceMode === "fiber"
+      ? "OT devices → Fiber · T2"
+      : forceMode === "5g"
+        ? "OT devices → 5G · T4"
+        : "OT devices → 5G"
+    : `OT → ${activeIfname || "active"}`;
+  const legend: { color: string; label: string }[] = [
+    ...(hasIT ? [{ color: IT_COLOR, label: itLabel }] : []),
+    ...(hasOT ? [{ color: OT_COLOR, label: otLabel }] : []),
+  ];
+  if (legend.length === 0) {
+    legend.push({ color: c.textMuted, label: "No device traffic" });
+  }
+
   return (
-    <div className="ipsec-flow-wrap">
+    <div className="ipsec-flow-wrap" ref={wrapRef} style={{ position: "relative" }}>
+      {/* App-aware routing legend — colour key for the two concurrent flows */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 11,
+            fontWeight: 700,
+            color: "var(--text-muted)",
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+          }}
+        >
+          {sectionTitle}
+          {isTarget && (
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: "0.1em",
+                color: c.accent3,
+                background: `${c.accent3}1f`,
+                border: `1px solid ${c.accent3}55`,
+                borderRadius: 999,
+                padding: "1px 7px",
+              }}
+              title="Application-aware routing policy via policy-based routing (fwmark + routing tables) — roadmap capability"
+            >
+              TARGET POLICY
+            </span>
+          )}
+        </span>
+        <span style={{ display: "inline-flex", gap: 16, flexWrap: "wrap" }}>
+          {legend.map((l) => (
+            <span
+              key={l.label}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11,
+                color: "var(--text-dim)",
+              }}
+            >
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 3,
+                  background: l.color,
+                  boxShadow: `0 0 6px ${l.color}`,
+                }}
+              />
+              {l.label}
+            </span>
+          ))}
+        </span>
+      </div>
       <svg
         viewBox={`0 0 ${W} ${H}`}
         style={{ width: "100%", height: "auto", display: "block" }}
       >
         <defs>
+          {/* Live single-active flow carries BOTH classes — emerald (IT) → pink
+              (OT) so the one active tunnel visibly shows IT+OT combined. */}
           <linearGradient id="ipsec-flow-active" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor={c.ok} />
-            <stop offset="100%" stopColor={accentPurple} />
+            <stop offset="0%" stopColor={IT_COLOR} />
+            <stop offset="100%" stopColor={OT_COLOR} />
           </linearGradient>
           <pattern
             id="ipsec-flow-dotgrid"
@@ -1956,7 +2574,7 @@ function IpsecFlowSvg({
                 <text
                   x={2}
                   y={2}
-                  fontSize={10}
+                  fontSize={12}
                   fontWeight={800}
                   fill="rgba(180,190,255,0.95)"
                   letterSpacing="0.12em"
@@ -1970,6 +2588,7 @@ function IpsecFlowSvg({
 
         {/* Tier labels */}
         {[
+          { x: COL_DEVICES.x + COL_DEVICES.w / 2, label: "IT / OT DEVICES" },
           { x: COL_GW.x + COL_GW.w / 2, label: "EDGE GATEWAY" },
           { x: COL_UNDERLAY.x + COL_UNDERLAY.w / 2, label: "WAN UNDERLAYS" },
           { x: COL_MANIFOLD.x + COL_MANIFOLD.w / 2, label: "IPSEC TUNNELS" },
@@ -1981,41 +2600,132 @@ function IpsecFlowSvg({
             x={t.x}
             y={32}
             textAnchor="middle"
-            fontSize={9.5}
+            fontSize={11.5}
             fontWeight={700}
-            fill={c.textMuted}
+            fill={c.textDim}
             letterSpacing="0.14em"
           >
             {t.label}
           </text>
         ))}
 
-        {/* ─── Gateway → underlays (particle only on the active underlay) ─── */}
-        <NodeConnector
-          a={gwRight}
-          b={fiberLeft}
-          state={fiberReachable ? "ok" : "warn"}
+        {/* ─── IT/OT endpoints → gateway (on-prem device origins) ─── */}
+        <DeviceColumn
+          x={COL_DEVICES.x}
+          w={COL_DEVICES.w}
+          canvasH={H}
+          it={itDevices}
+          ot={otDevices}
+          gwLeft={gwLeft}
           c={c}
           beziD={beziD}
-          accent={FIBER_COLOR}
-          flowing={activeUnderlay === "fiber"}
+          itColor={IT_COLOR}
+          otColor={OT_COLOR}
         />
-        <NodeConnector
-          a={gwRight}
-          b={cellLeft}
-          state={cellReachable ? "ok" : "warn"}
-          c={c}
-          beziD={beziD}
-          accent={CELL_COLOR}
-          flowing={activeUnderlay === "5g"}
-        />
+
+        {/* ─── Gateway → underlays ───
+            Live: both IT+OT merge into the single active tunnel, so draw ONE
+            unified active leg (green — matches the flow downstream); the other
+            underlay shows as a dim standby in its own colour.
+            Target: class-steered split — IT and OT each into their underlay
+            (parallel, non-crossing, when they share one). */}
+        {(() => {
+          // Dim standby links use each underlay's own colour (not alarm-orange).
+          const standbyFiber = (
+            <NodeConnector a={gwRight} b={fiberLeft} state="ok" c={c} beziD={beziD} accent={FIBER_COLOR} flowing={false} />
+          );
+          const standbyCell = (
+            <NodeConnector a={gwRight} b={cellLeft} state="ok" c={c} beziD={beziD} accent={CELL_COLOR} flowing={false} />
+          );
+
+          if (!isTarget) {
+            // Live — the connected classes converge on the device's single
+            // active tunnel. Only draw a class's line if it has devices; when
+            // both are present they run parallel, otherwise the one runs centred.
+            const end = activeUnderlayOf === "fiber" ? fiberLeft : cellLeft;
+            const both = hasIT && hasOT;
+            return (
+              <>
+                {activeUnderlayOf && hasIT && (
+                  <NodeConnector
+                    a={{ x: gwRight.x, y: gwRight.y + (both ? -6 : 0) }}
+                    b={{ x: end.x, y: end.y + (both ? -8 : 0) }}
+                    state="ok"
+                    c={c}
+                    beziD={beziD}
+                    accent={IT_COLOR}
+                    flowing
+                  />
+                )}
+                {activeUnderlayOf && hasOT && (
+                  <NodeConnector
+                    a={{ x: gwRight.x, y: gwRight.y + (both ? 6 : 0) }}
+                    b={{ x: end.x, y: end.y + (both ? 8 : 0) }}
+                    state="ok"
+                    c={c}
+                    beziD={beziD}
+                    accent={OT_COLOR}
+                    flowing
+                  />
+                )}
+                {activeUnderlayOf !== "fiber" && standbyFiber}
+                {activeUnderlayOf !== "5g" && standbyCell}
+              </>
+            );
+          }
+
+          // Target — IT/OT split.
+          const shared = itUnderlay === otUnderlay;
+          const startFor = (u: Underlay, sep: number) => ({
+            x: gwRight.x,
+            y: gwRight.y + (u === "fiber" ? -10 : 10) + (shared ? sep : 0),
+          });
+          const endFor = (u: Underlay, sep: number) => {
+            const base = u === "fiber" ? fiberLeft : cellLeft;
+            return shared ? { x: base.x, y: base.y + sep } : base;
+          };
+          return (
+            <>
+              {hasOT && (
+                <NodeConnector
+                  a={startFor(otUnderlay, -5)}
+                  b={endFor(otUnderlay, -8)}
+                  state="ok"
+                  c={c}
+                  beziD={beziD}
+                  accent={OT_COLOR}
+                  flowing
+                />
+              )}
+              {hasIT && (
+                <NodeConnector
+                  a={startFor(itUnderlay, 5)}
+                  b={endFor(itUnderlay, 8)}
+                  state="ok"
+                  c={c}
+                  beziD={beziD}
+                  accent={IT_COLOR}
+                  flowing
+                />
+              )}
+              {itUnderlay !== "fiber" && otUnderlay !== "fiber" && standbyFiber}
+              {itUnderlay !== "5g" && otUnderlay !== "5g" && standbyCell}
+            </>
+          );
+        })()}
 
         {/* ─── Underlay → tunnel pills (particles only on active path) ─── */}
         {fiberTunnels.map((t, i) => {
           const col = tunnelColor(t);
-          const isActive = !!t.ifname && t.ifname === m.active_tunnel;
           const reachable = t.reachable;
-          const carrying = isActive && reachable;
+          // What this Fiber tunnel carries in the current view (class / both / none).
+          const cls = tunnelCarry("fiber", i, t.ifname);
+          const carrying = cls != null && reachable;
+          const flowColor = cls ? carryColorOf(cls) : FIBER_COLOR;
+          // Live single-active flow shows IT+OT combined (emerald→pink); target
+          // class flows stay solid in their own class colour.
+          const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
+          const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
           const pid = `ipsec-fiber-in-${i}`;
           const target = { x: PILL_X, y: fiberPillY(i) + PILL_H / 2 };
           const d = beziD(fiberRight, target);
@@ -2025,8 +2735,8 @@ function IpsecFlowSvg({
                 id={pid}
                 d={d}
                 fill="none"
-                stroke={carrying ? "url(#ipsec-flow-active)" : col}
-                strokeWidth={carrying ? 3 : reachable ? 1.2 : 0.9}
+                stroke={carrying ? flowStroke : col}
+                strokeWidth={carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9}
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
                 strokeLinecap="round"
@@ -2042,14 +2752,14 @@ function IpsecFlowSvg({
               </path>
               {carrying && (
                 <>
-                  <circle r={4} fill={c.ok} filter="url(#ipsec-flow-glow)">
-                    <animateMotion dur="1.1s" repeatCount="indefinite">
+                  <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
+                    <animateMotion dur={`${flowDur(t.ifname)}s`} repeatCount="indefinite">
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
-                  <circle r={2.4} fill={accentPurple} opacity={0.85}>
+                  <circle r={2.4} fill={flowDot2} opacity={0.85}>
                     <animateMotion
-                      dur="1.1s"
+                      dur={`${flowDur(t.ifname)}s`}
                       begin="0.55s"
                       repeatCount="indefinite"
                     >
@@ -2063,9 +2773,15 @@ function IpsecFlowSvg({
         })}
         {cellTunnels.map((t, i) => {
           const col = tunnelColor(t);
-          const isActive = !!t.ifname && t.ifname === m.active_tunnel;
           const reachable = t.reachable;
-          const carrying = isActive && reachable;
+          // What this 5G tunnel carries in the current view (class / both / none).
+          const cls = tunnelCarry("5g", i, t.ifname);
+          const carrying = cls != null && reachable;
+          const flowColor = cls ? carryColorOf(cls) : CELL_COLOR;
+          // Live single-active flow shows IT+OT combined (emerald→pink); target
+          // class flows stay solid in their own class colour.
+          const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
+          const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
           const pid = `ipsec-cell-in-${i}`;
           const target = { x: PILL_X, y: cellPillY(i) + PILL_H / 2 };
           const d = beziD(cellRight, target);
@@ -2075,8 +2791,8 @@ function IpsecFlowSvg({
                 id={pid}
                 d={d}
                 fill="none"
-                stroke={carrying ? "url(#ipsec-flow-active)" : col}
-                strokeWidth={carrying ? 3 : reachable ? 1.2 : 0.9}
+                stroke={carrying ? flowStroke : col}
+                strokeWidth={carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9}
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
                 strokeLinecap="round"
@@ -2092,14 +2808,14 @@ function IpsecFlowSvg({
               </path>
               {carrying && (
                 <>
-                  <circle r={4} fill={c.ok} filter="url(#ipsec-flow-glow)">
-                    <animateMotion dur="1.1s" repeatCount="indefinite">
+                  <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
+                    <animateMotion dur={`${flowDur(t.ifname)}s`} repeatCount="indefinite">
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
-                  <circle r={2.4} fill={accentPurple} opacity={0.85}>
+                  <circle r={2.4} fill={flowDot2} opacity={0.85}>
                     <animateMotion
-                      dur="1.1s"
+                      dur={`${flowDur(t.ifname)}s`}
                       begin="0.55s"
                       repeatCount="indefinite"
                     >
@@ -2128,9 +2844,14 @@ function IpsecFlowSvg({
           })),
         ].map(({ t, i, kind, source }, idx) => {
           const col = tunnelColor(t);
-          const isActive = !!t.ifname && t.ifname === m.active_tunnel;
           const reachable = t.reachable;
-          const carrying = isActive && reachable;
+          // Same carrier mapping as the inbound leg, colour-matched to what the
+          // tunnel carries (IT = emerald, OT = pink, both = IT+OT emerald→pink).
+          const cls = tunnelCarry(kind === "fiber" ? "fiber" : "5g", i, t.ifname);
+          const carrying = cls != null && reachable;
+          const flowColor = cls ? carryColorOf(cls) : col;
+          const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
+          const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
           const pid = `ipsec-${kind}-out-${i}`;
           const total = Math.max(1, m.tunnels.length - 1);
           const band = WAN_H / 2 - 22;
@@ -2145,8 +2866,8 @@ function IpsecFlowSvg({
                 id={pid}
                 d={d}
                 fill="none"
-                stroke={carrying ? "url(#ipsec-flow-active)" : col}
-                strokeWidth={carrying ? 3 : reachable ? 1.2 : 0.9}
+                stroke={carrying ? flowStroke : col}
+                strokeWidth={carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9}
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
                 strokeLinecap="round"
@@ -2162,14 +2883,14 @@ function IpsecFlowSvg({
               </path>
               {carrying && (
                 <>
-                  <circle r={4} fill={c.ok} filter="url(#ipsec-flow-glow)">
-                    <animateMotion dur="1.1s" repeatCount="indefinite">
+                  <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
+                    <animateMotion dur={`${flowDur(t.ifname)}s`} repeatCount="indefinite">
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
-                  <circle r={2.4} fill={accentPurple} opacity={0.85}>
+                  <circle r={2.4} fill={flowDot2} opacity={0.85}>
                     <animateMotion
-                      dur="1.1s"
+                      dur={`${flowDur(t.ifname)}s`}
                       begin="0.55s"
                       repeatCount="indefinite"
                     >
@@ -2182,30 +2903,8 @@ function IpsecFlowSvg({
           );
         })}
 
-        {/* ─── GCP transit → destinations.
-             HQ peers : IPsec-carried branch traffic (flows when an active
-                        tunnel is up).
-             AWS Cloud: analytics / cross-cloud traffic via HA-VPN or
-                        Partner-Interconnect (flows whenever WAN is up).
-             Internet : public egress via Cloud NAT (flows whenever WAN is up). */}
-        <NodeConnector
-          a={wanRight}
-          b={hqLeft}
-          state={!!activeTunnelObj?.reachable && m.wan.link_up ? "ok" : "warn"}
-          c={c}
-          beziD={beziD}
-          accent={HQ_COLOR}
-          flowing={!!activeTunnelObj?.reachable && m.wan.link_up}
-        />
-        <NodeConnector
-          a={wanRight}
-          b={awsLeft}
-          state={m.wan.link_up ? "ok" : "err"}
-          c={c}
-          beziD={beziD}
-          accent={AWS_COLOR}
-          flowing={m.wan.link_up}
-        />
+        {/* ─── GCP transit → Internet (public egress via Cloud NAT, flows
+             whenever WAN is up). */}
         <NodeConnector
           a={wanRight}
           b={intLeft}
@@ -2253,7 +2952,7 @@ function IpsecFlowSvg({
         <text
           x={COL_MANIFOLD.x + 18}
           y={FIBER_BAND_Y - 1}
-          fontSize={11}
+          fontSize={13}
           fontWeight={800}
           fill={FIBER_COLOR}
           letterSpacing="0.06em"
@@ -2263,8 +2962,8 @@ function IpsecFlowSvg({
         <text
           x={COL_MANIFOLD.x + 70}
           y={FIBER_BAND_Y - 1}
-          fontSize={10}
-          fill={c.textMuted}
+          fontSize={12}
+          fill={c.textDim}
         >
           {fiberTunnels.filter((t) => t.reachable).length}/{fiberTunnels.length}{" "}
           reachable
@@ -2282,7 +2981,7 @@ function IpsecFlowSvg({
         <text
           x={COL_MANIFOLD.x + 18}
           y={CELL_BAND_Y - 1}
-          fontSize={11}
+          fontSize={13}
           fontWeight={800}
           fill={CELL_COLOR}
           letterSpacing="0.06em"
@@ -2292,8 +2991,8 @@ function IpsecFlowSvg({
         <text
           x={COL_MANIFOLD.x + 70}
           y={CELL_BAND_Y - 1}
-          fontSize={10}
-          fill={c.textMuted}
+          fontSize={12}
+          fill={c.textDim}
         >
           {cellTunnels.filter((t) => t.reachable).length}/{cellTunnels.length}{" "}
           reachable
@@ -2307,19 +3006,29 @@ function IpsecFlowSvg({
             py: fiberPillY(i),
             underlay: FIBER_COLOR,
             label: `Tunnel ${i + 1}`,
+            uk: "fiber" as Underlay,
+            ui: i,
           })),
           ...cellTunnels.map((t, i) => ({
             t,
             py: cellPillY(i),
             underlay: CELL_COLOR,
-            label: `Tunnel ${i + 1}`,
+            // 5G tunnels continue the numbering after Fiber's two: Tunnel 3 / 4.
+            label: `Tunnel ${i + 3}`,
+            uk: "5g" as Underlay,
+            ui: i,
           })),
-        ].map(({ t, py, underlay, label }, idx) => {
+        ].map(({ t, py, underlay, label, uk, ui }, idx) => {
           const col = tunnelColor(t);
-          const isActive = !!t.ifname && t.ifname === m.active_tunnel;
           const reachable = t.reachable;
-          const carrying = isActive && reachable;
-          const preferredButDown = isActive && !reachable;
+          // What this tunnel carries in the current view (class / both / none).
+          const cls = tunnelCarry(uk, ui, t.ifname);
+          const isCarrier = cls != null;
+          const carrying = isCarrier && reachable;
+          const preferredButDown = isCarrier && !reachable;
+          const classLabel =
+            cls === "it" ? "IT" : cls === "ot" ? "OT" : "IT+OT";
+          const classColor = cls ? carryColorOf(cls) : col;
           // Dim non-carrying tunnels so the eye lands on the active one.
           const dim = !carrying;
           const pillOpacity = carrying ? 1 : reachable ? 0.55 : 0.38;
@@ -2350,8 +3059,15 @@ function IpsecFlowSvg({
                 : mos >= 3.6
                   ? c.warn
                   : c.err;
+          const spark = tunnelHist[t.ifname] ?? [];
           return (
-            <g key={`pill-${idx}-${t.ifname}`} opacity={pillOpacity}>
+            <g
+              key={`pill-${idx}-${t.ifname}`}
+              opacity={pillOpacity}
+              style={{ cursor: "pointer" }}
+              onMouseMove={onTunnelHover(t)}
+              onMouseLeave={() => setHover(null)}
+            >
               {carrying && (
                 <rect
                   x={PILL_X - 4}
@@ -2360,7 +3076,7 @@ function IpsecFlowSvg({
                   height={PILL_H + 8}
                   rx={12}
                   fill="none"
-                  stroke="url(#ipsec-flow-active)"
+                  stroke={classColor}
                   strokeWidth={2.2}
                   strokeDasharray="6 5"
                 >
@@ -2383,6 +3099,18 @@ function IpsecFlowSvg({
                 strokeWidth={carrying ? 2 : dim ? 0.9 : 1.3}
                 strokeDasharray={t.present ? "0" : "4 4"}
               />
+              {/* Faint latency-trend sparkline behind the pill text. */}
+              {spark.length > 1 && (
+                <path
+                  d={sparkPath(spark, PILL_X + 60, py + 8, PILL_W - 120, PILL_H - 16)}
+                  fill="none"
+                  stroke={col}
+                  strokeWidth={1.4}
+                  opacity={0.3}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
               {/* Underlay-color left rail */}
               <rect
                 x={PILL_X}
@@ -2414,7 +3142,7 @@ function IpsecFlowSvg({
               <text
                 x={PILL_X + 36}
                 y={py + PILL_H / 2 - 3}
-                fontSize={13}
+                fontSize={15}
                 fontWeight={carrying ? 800 : 700}
                 fill={c.text}
                 letterSpacing="0.02em"
@@ -2425,18 +3153,21 @@ function IpsecFlowSvg({
               <text
                 x={PILL_X + 36}
                 y={py + PILL_H / 2 + 12}
-                fontSize={9.5}
-                fill={c.textMuted}
+                fontSize={11.5}
+                fill={c.textDim}
                 fontFamily="JetBrains Mono, ui-monospace, monospace"
                 letterSpacing="0.04em"
               >
                 {t.ifname || "—"}
+                {reachable && rateOf(t.ifname) > 0
+                  ? ` · ${fmtRate(rateOf(t.ifname))}`
+                  : ""}
               </text>
               {/* Top-right: state metric (latency · loss) */}
               <text
                 x={PILL_X + PILL_W - 14}
                 y={py + PILL_H / 2 - 3}
-                fontSize={11}
+                fontSize={13}
                 fontWeight={700}
                 fill={col}
                 textAnchor="end"
@@ -2451,27 +3182,27 @@ function IpsecFlowSvg({
                 <text
                   x={PILL_X + PILL_W - 14}
                   y={py + PILL_H / 2 + 12}
-                  fontSize={9}
+                  fontSize={11}
                   fontWeight={800}
-                  fill={c.ok}
+                  fill={classColor}
                   textAnchor="end"
                   letterSpacing="0.10em"
                 >
                   {mos > 0
-                    ? `● MOS ${mosGrade} · CARRYING`
-                    : "● CARRYING TRAFFIC"}
+                    ? `● ${classLabel} · MOS ${mosGrade}`
+                    : `● ${classLabel} TRAFFIC`}
                 </text>
               ) : preferredButDown ? (
                 <text
                   x={PILL_X + PILL_W - 14}
                   y={py + PILL_H / 2 + 12}
-                  fontSize={9}
+                  fontSize={11}
                   fontWeight={800}
                   fill={c.warn}
                   textAnchor="end"
                   letterSpacing="0.10em"
                 >
-                  ◌ PREFERRED · DOWN
+                  ◌ {classLabel} CARRIER · DOWN
                 </text>
               ) : mos > 0 ? (
                 <g>
@@ -2488,7 +3219,7 @@ function IpsecFlowSvg({
                   <text
                     x={PILL_X + PILL_W - 39}
                     y={py + PILL_H / 2 + 13}
-                    fontSize={9}
+                    fontSize={11}
                     fontWeight={800}
                     fill={mosColor}
                     textAnchor="middle"
@@ -2522,42 +3253,59 @@ function IpsecFlowSvg({
           }
           haloPulse={anyReachable}
         />
-        {/* Preferred-tunnel badge sitting just below the gateway box */}
-        {activeTunnelObj && (
+        {/* Carrier badges below the gateway — target view: one per device class
+            (IT / OT). Live view: the single active tunnel. */}
+        {(itCarrierTunnel || otCarrierTunnel || liveActiveTunnel) && (
           <g
-            transform={`translate(${COL_GW.x + COL_GW.w / 2} ${ROW_CENTER + GW_H / 2 + 22})`}
+            transform={`translate(${COL_GW.x + COL_GW.w / 2} ${ROW_CENTER + GW_H / 2 + 16})`}
           >
-            <rect
-              x={-72}
-              y={-12}
-              width={144}
-              height={24}
-              rx={12}
-              fill={activeTunnelObj.reachable ? `${c.ok}22` : `${c.warn}22`}
-              stroke={activeTunnelObj.reachable ? `${c.ok}66` : `${c.warn}66`}
-              strokeWidth={1}
-            />
-            <text
-              x={-58}
-              y={4}
-              fontSize={9}
-              fontWeight={700}
-              fill={c.textMuted}
-              letterSpacing="0.10em"
-            >
-              → ACTIVE
-            </text>
-            <text
-              x={62}
-              y={4}
-              fontSize={10.5}
-              fontWeight={800}
-              textAnchor="end"
-              fill={activeTunnelObj.reachable ? c.ok : c.warn}
-              fontFamily="JetBrains Mono, ui-monospace, monospace"
-            >
-              {activeTunnelObj.ifname.toUpperCase()}
-            </text>
+            {(
+              (isTarget
+                ? [
+                    { cls: "IT", t: itCarrierTunnel, color: IT_COLOR },
+                    { cls: "OT", t: otCarrierTunnel, color: OT_COLOR },
+                  ]
+                : [{ cls: "ACTIVE", t: liveActiveTunnel, color: c.ok }]
+              ).filter((x) => x.t) as {
+                cls: string;
+                t: IpsecTunnelMetric;
+                color: string;
+              }[]
+            ).map((x, i) => (
+              <g key={x.cls} transform={`translate(0 ${i * 26})`}>
+                <rect
+                  x={-82}
+                  y={-10}
+                  width={164}
+                  height={20}
+                  rx={10}
+                  fill={x.t.reachable ? `${x.color}1f` : `${c.warn}1f`}
+                  stroke={x.t.reachable ? `${x.color}66` : `${c.warn}66`}
+                  strokeWidth={1}
+                />
+                <text
+                  x={-72}
+                  y={4}
+                  fontSize={10.5}
+                  fontWeight={800}
+                  fill={x.t.reachable ? x.color : c.warn}
+                  letterSpacing="0.08em"
+                >
+                  {x.cls} →
+                </text>
+                <text
+                  x={72}
+                  y={4}
+                  fontSize={11}
+                  fontWeight={700}
+                  textAnchor="end"
+                  fill={x.t.reachable ? x.color : c.warn}
+                  fontFamily="JetBrains Mono, ui-monospace, monospace"
+                >
+                  {x.t.ifname.toUpperCase()}
+                </text>
+              </g>
+            ))}
           </g>
         )}
 
@@ -2571,7 +3319,7 @@ function IpsecFlowSvg({
           status={fiberReachable ? "ok" : "warn"}
           c={c}
           label="Fiber"
-          sub={`${fiberTunnels.length} tunnels${activeUnderlay === "fiber" ? " · active" : ""}`}
+          sub={`${fiberTunnels.length} tunnels${fiberActive ? " · active" : ""}`}
           illustration={<FiberIllustration tint={FIBER_COLOR} />}
         />
 
@@ -2585,7 +3333,7 @@ function IpsecFlowSvg({
           status={cellReachable ? "ok" : "warn"}
           c={c}
           label="5G / Cellular"
-          sub={`${cellTunnels.length} tunnels${activeUnderlay === "5g" ? " · active" : ""}`}
+          sub={`${cellTunnels.length} tunnels${cellActive ? " · active" : ""}`}
           illustration={<CellularIllustration tint={CELL_COLOR} />}
         />
 
@@ -2611,31 +3359,7 @@ function IpsecFlowSvg({
           }
         />
 
-        {/* ─── Destinations (3 stacked): HQ peers · AWS Cloud · Internet ─── */}
-        <SysNodeBox
-          x={COL_DEST.x}
-          y={HQ_Y}
-          w={COL_DEST.w}
-          h={DEST_H}
-          tint={HQ_COLOR}
-          status={anyReachable ? "ok" : "warn"}
-          c={c}
-          label="HQ peers"
-          sub={`${m.tunnels.length}× VPN endpoints`}
-          illustration={<HqIllustration tint={HQ_COLOR} />}
-        />
-        <SysNodeBox
-          x={COL_DEST.x}
-          y={AWS_Y}
-          w={COL_DEST.w}
-          h={DEST_H}
-          tint={AWS_COLOR}
-          status={m.wan.link_up ? "ok" : "warn"}
-          c={c}
-          label="AWS Cloud"
-          sub="analytics · us-east-1"
-          illustration={<AwsIllustration tint={AWS_COLOR} />}
-        />
+        {/* ─── Destination: Internet (public egress) ─── */}
         <SysNodeBox
           x={COL_DEST.x}
           y={INT_Y}
@@ -2649,7 +3373,281 @@ function IpsecFlowSvg({
           illustration={<InternetIllustration tint={INT_COLOR} />}
         />
       </svg>
+
+      {/* Hover tooltip — rich per-tunnel metric card following the pointer. */}
+      {hover &&
+        (() => {
+          const ht = hover.t;
+          const u = inferUnderlay(ht.ifname);
+          const mos =
+            ht.reachable && ht.latency_ms > 0
+              ? approxMos(ht.latency_ms, ht.loss_percent)
+              : 0;
+          const jit = stddev(tunnelHist[ht.ifname] ?? []);
+          const rate = rateOf(ht.ifname);
+          const rows: [string, string][] = [
+            ["Underlay", u === "fiber" ? "Fiber" : "5G"],
+            ["State", ht.reachable ? "reachable" : ht.present ? "unreachable" : "absent"],
+            ["Latency", ht.reachable ? `${ht.latency_ms.toFixed(1)} ms` : "—"],
+            ["Jitter", ht.reachable ? `${jit.toFixed(1)} ms` : "—"],
+            ["Loss", ht.reachable ? `${ht.loss_percent.toFixed(2)} %` : "—"],
+            ["MOS", mos > 0 ? mos.toFixed(2) : "—"],
+            ["Throughput", rate > 0 ? fmtRate(rate) : "idle"],
+            ["RX / TX", `${fmtBytes(ht.rx_bytes)} / ${fmtBytes(ht.tx_bytes)}`],
+          ];
+          // Keep the card on-screen: flip left of the cursor past the midline.
+          const W = wrapRef.current?.clientWidth ?? 1200;
+          const left = hover.x > W - 230 ? hover.x - 226 : hover.x + 16;
+          return (
+            <div
+              style={{
+                position: "absolute",
+                left,
+                top: Math.max(8, hover.y - 40),
+                width: 210,
+                pointerEvents: "none",
+                zIndex: 20,
+                background: "var(--panel-2)",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
+                padding: "10px 12px",
+                backdropFilter: "blur(8px)",
+              }}
+            >
+              <div
+                className="mono"
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  color: "var(--text)",
+                  marginBottom: 6,
+                }}
+              >
+                {ht.ifname}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {rows.map(([k, v]) => (
+                  <div
+                    key={k}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      fontSize: 11.5,
+                    }}
+                  >
+                    <span style={{ color: "var(--text-muted)" }}>{k}</span>
+                    <span
+                      className="mono"
+                      style={{ color: "var(--text-dim)", fontWeight: 600 }}
+                    >
+                      {v}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
     </div>
+  );
+}
+
+/* ─── IT/OT device column — on-prem endpoints feeding the gateway ───
+ * Renders two dashed group boxes (IT on top, OT below), each listing up to 3
+ * live devices from the same feed as the Devices page, with a Bézier connector
+ * from every device into the gateway's left edge. Connector colour follows the
+ * device's health (green/amber/red), matching the rest of the flow. */
+const DEVICE_KIND_ICON: Record<DeviceView["kind"], typeof Laptop> = {
+  laptop: Laptop,
+  desktop: Monitor,
+  printer: Printer,
+  payment: CreditCard,
+  server: Server,
+  confphone: PhoneCall,
+  fire_sensor: Flame,
+  smoke_sensor: AlertTriangle,
+  door_lock: DoorClosed,
+  phone: Smartphone,
+  tablet: Tablet,
+  matter: Cpu,
+  shelly: Plug,
+  generic: HelpCircle,
+};
+
+function DeviceColumn({
+  x,
+  w,
+  canvasH,
+  it,
+  ot,
+  gwLeft,
+  c,
+  beziD,
+  itColor,
+  otColor,
+}: {
+  x: number;
+  w: number;
+  canvasH: number;
+  it: DeviceView[];
+  ot: DeviceView[];
+  gwLeft: { x: number; y: number };
+  c: ThemeColors;
+  beziD: (a: { x: number; y: number }, b: { x: number; y: number }) => string;
+  itColor: string;
+  otColor: string;
+}) {
+  const HEADER_H = 24;
+  const ROW_H = 26;
+  const ROW_GAP = 7;
+  const PAD = 9;
+  const GROUP_GAP = 24;
+  const groupH = (n: number) =>
+    HEADER_H + PAD + Math.max(n, 1) * ROW_H + (Math.max(n, 1) - 1) * ROW_GAP + PAD;
+
+  const itH = groupH(it.length);
+  const otH = groupH(ot.length);
+  // Centre the IT+OT stack on the canvas midline so the column lines up with
+  // the gateway row instead of hugging the top of the diagram.
+  const itY = Math.max(40, (canvasH - (itH + GROUP_GAP + otH)) / 2);
+  const otY = itY + itH + GROUP_GAP;
+
+  const rowTop = (groupY: number, idx: number) =>
+    groupY + HEADER_H + PAD + idx * (ROW_H + ROW_GAP);
+
+  const stateOf = (s: DeviceView["status"]): "ok" | "warn" | "err" =>
+    s === "ok" ? "ok" : s === "warn" ? "warn" : "err";
+  const dotColor = (s: DeviceView["status"]) =>
+    s === "ok" ? c.ok : s === "warn" ? c.warn : s === "err" ? c.err : c.textMuted;
+
+  const renderGroup = (
+    devices: DeviceView[],
+    groupY: number,
+    groupH2: number,
+    title: string,
+    subtitle: string,
+    accent: string,
+  ) => (
+    <g>
+      {/* group box */}
+      <rect
+        x={x}
+        y={groupY}
+        width={w}
+        height={groupH2}
+        rx={14}
+        fill="rgba(255,255,255,0.02)"
+        stroke={`${accent}44`}
+        strokeDasharray="6 6"
+        strokeWidth={1.2}
+      />
+      {/* header: domain chip + count */}
+      <rect x={x + PAD} y={groupY + 6} width={26} height={16} rx={4} fill={accent} opacity={0.9} />
+      <text
+        x={x + PAD + 13}
+        y={groupY + 18}
+        textAnchor="middle"
+        fontSize={12}
+        fontWeight={800}
+        fill="#0b1020"
+        letterSpacing="0.04em"
+      >
+        {title}
+      </text>
+      <text x={x + PAD + 34} y={groupY + 18} fontSize={12} fill={c.textDim}>
+        {subtitle}
+      </text>
+      {/* device rows */}
+      {devices.length === 0 ? (
+        <text
+          x={x + w / 2}
+          y={groupY + HEADER_H + PAD + ROW_H / 2 + 4}
+          textAnchor="middle"
+          fontSize={12}
+          fill={c.textDim}
+        >
+          no devices
+        </text>
+      ) : (
+        devices.map((d, i) => {
+          const top = rowTop(groupY, i);
+          const Icon = DEVICE_KIND_ICON[d.kind] ?? HelpCircle;
+          const highlight = d.status !== "ok";
+          const border = highlight ? dotColor(d.status) : "rgba(255,255,255,0.10)";
+          const name = d.name.length > 16 ? `${d.name.slice(0, 15)}…` : d.name;
+          return (
+            <g key={d.id}>
+              <rect
+                x={x + PAD}
+                y={top}
+                width={w - PAD * 2}
+                height={ROW_H}
+                rx={7}
+                fill="rgba(255,255,255,0.03)"
+                stroke={border}
+                strokeWidth={highlight ? 1.5 : 1}
+              />
+              <Icon
+                x={x + PAD + 8}
+                y={top + (ROW_H - 13) / 2}
+                width={13}
+                height={13}
+                color={c.textDim}
+              />
+              <text
+                x={x + PAD + 28}
+                y={top + ROW_H / 2 + 3.5}
+                fontSize={13}
+                fontWeight={600}
+                fill={c.text}
+              >
+                {name}
+              </text>
+              <circle cx={x + w - PAD - 10} cy={top + ROW_H / 2} r={3.5} fill={dotColor(d.status)} />
+            </g>
+          );
+        })
+      )}
+    </g>
+  );
+
+  return (
+    <g>
+      {/* connectors first so the group boxes paint over the tails */}
+      {it.map((d, i) => (
+        <NodeConnector
+          key={`itc-${d.id}`}
+          a={{ x: x + w - PAD, y: rowTop(itY, i) + ROW_H / 2 }}
+          b={gwLeft}
+          state={stateOf(d.status)}
+          c={c}
+          beziD={beziD}
+          accent={itColor}
+          flowing={d.status === "ok"}
+        />
+      ))}
+      {ot.map((d, i) =>
+        // Thread devices (e.g. Onvis sensors) talk to the gateway's Matter hub
+        // over the Thread mesh — their traffic terminates locally and never
+        // rides the WAN/IPsec tunnel path, so don't draw a flow into it.
+        d.conn === "thread" ? null : (
+          <NodeConnector
+            key={`otc-${d.id}`}
+            a={{ x: x + w - PAD, y: rowTop(otY, i) + ROW_H / 2 }}
+            b={gwLeft}
+            state={stateOf(d.status)}
+            c={c}
+            beziD={beziD}
+            accent={otColor}
+            flowing={d.status === "ok"}
+          />
+        ),
+      )}
+      {renderGroup(it, itY, itH, "IT", `${it.length} endpoint${it.length === 1 ? "" : "s"}`, itColor)}
+      {renderGroup(ot, otY, otH, "OT", `${ot.length} sensor${ot.length === 1 ? "" : "s"} / locks`, otColor)}
+    </g>
   );
 }
 
@@ -2737,7 +3735,7 @@ function SysNodeBox({
         x={cx}
         y={titleY}
         textAnchor="middle"
-        fontSize={12.5}
+        fontSize={14}
         fontWeight={700}
         fill={c.text}
       >
@@ -2750,8 +3748,8 @@ function SysNodeBox({
         x={cx}
         y={subY}
         textAnchor="middle"
-        fontSize={10}
-        fill={c.textMuted}
+        fontSize={12}
+        fill={c.textDim}
       >
         {sub}
       </text>
@@ -2813,7 +3811,7 @@ function RateBadge({
         x={0}
         y={4}
         textAnchor="middle"
-        fontSize={10.5}
+        fontSize={12.5}
         fontWeight={700}
         fill={accent}
         fontFamily="JetBrains Mono, ui-monospace, monospace"
@@ -2892,28 +3890,6 @@ function NodeConnector({
 }
 
 /* ─── Inline illustrations (Overview-style, centered around 0,0) ─── */
-function HqIllustration({ tint }: { tint: string }) {
-  // Cloud + peer dots, centred around y=0 (range y ∈ [-10, +10]).
-  return (
-    <g>
-      {/* cloud silhouette */}
-      <path
-        d="M -22 2 C -22 -8, -10 -12, -4 -8 C 0 -14, 10 -14, 14 -8 C 22 -10, 28 -2, 24 4 C 26 8, 20 12, 14 12 L -14 12 C -24 12, -28 6, -22 2 Z"
-        fill={tint}
-        fillOpacity={0.14}
-        stroke={tint}
-        strokeWidth={1.3}
-      />
-      {/* peer dots inside */}
-      <circle cx={-8} cy={0} r={1.8} fill={tint} />
-      <circle cx={0} cy={-1} r={1.8} fill={tint} />
-      <circle cx={8} cy={0} r={1.8} fill={tint} />
-      <circle cx={-4} cy={6} r={1.4} fill={tint} opacity={0.7} />
-      <circle cx={4} cy={6} r={1.4} fill={tint} opacity={0.7} />
-    </g>
-  );
-}
-
 function GatewayIllustration({
   tint,
   okColor,
@@ -3091,55 +4067,6 @@ function GcpIllustration({ tint: _tint }: { tint: string }) {
   );
 }
 
-function AwsIllustration({ tint }: { tint: string }) {
-  // AWS-style cloud + service cubes, centred around y=0 (range y ∈ [-9, +9]).
-  return (
-    <g>
-      <path
-        d="M -22 3
-           C -22 -7, -10 -11, -4 -7
-           C 0 -13, 10 -13, 14 -7
-           C 22 -9, 28 -1, 22 5
-           C 24 9, 18 9, 12 9
-           L -12 9
-           C -24 9, -28 7, -22 3 Z"
-        fill={tint}
-        fillOpacity={0.16}
-        stroke={tint}
-        strokeWidth={1.4}
-      />
-      <rect
-        x={-9}
-        y={-2}
-        width={5}
-        height={5}
-        rx={0.6}
-        fill={tint}
-        opacity={0.85}
-      />
-      <rect
-        x={-2}
-        y={-2}
-        width={5}
-        height={5}
-        rx={0.6}
-        fill={tint}
-        opacity={0.85}
-      />
-      <rect
-        x={5}
-        y={-2}
-        width={5}
-        height={5}
-        rx={0.6}
-        fill={tint}
-        opacity={0.85}
-      />
-      <circle cx={0} cy={7} r={1.4} fill="#ffffff" opacity={0.85} />
-    </g>
-  );
-}
-
 function FiberIllustration({ tint }: { tint: string }) {
   // Content centred around y=0 (range y ∈ [-7, +7]).
   return (
@@ -3292,13 +4219,115 @@ function InternetIllustration({ tint }: { tint: string }) {
   );
 }
 
+/** Thin timeline under the topology marking active-tunnel flips (path changes)
+ *  and SLA breaches over the live session. Purely from data we already track. */
+function FlowEventRibbon({
+  events,
+  c,
+}: {
+  events: { ts: number; kind: "flip" | "breach"; text: string }[];
+  c: ThemeColors;
+}) {
+  const flips = events.filter((e) => e.kind === "flip").length;
+  const breaches = events.filter((e) => e.kind === "breach").length;
+  const now = Date.now();
+  const start = events[0]?.ts ?? now;
+  const span = Math.max(now - start, 60_000);
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: "8px 12px",
+        background: "var(--panel-2)",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: events.length ? 8 : 0,
+          flexWrap: "wrap",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "var(--text-muted)",
+          }}
+        >
+          Path events
+        </span>
+        <span style={{ display: "inline-flex", gap: 14, fontSize: 11 }}>
+          <span style={{ color: c.accent3 }}>{flips} failover{flips === 1 ? "" : "s"}</span>
+          <span style={{ color: breaches ? c.warn : "var(--text-muted)" }}>
+            {breaches} SLA breach{breaches === 1 ? "" : "es"}
+          </span>
+        </span>
+      </div>
+      {events.length === 0 ? (
+        <div style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+          No failover events this session · path stable
+        </div>
+      ) : (
+        <div
+          style={{
+            position: "relative",
+            height: 16,
+            borderRadius: 8,
+            background:
+              "linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08))",
+          }}
+        >
+          {events.map((e, i) => {
+            const leftPct = ((e.ts - start) / span) * 100;
+            const color = e.kind === "flip" ? c.accent3 : c.warn;
+            return (
+              <span
+                key={i}
+                title={`${e.kind === "flip" ? "Failover" : "SLA breach"} · ${e.text}`}
+                style={{
+                  position: "absolute",
+                  left: `calc(${Math.max(0, Math.min(100, leftPct))}% - 4px)`,
+                  top: 2,
+                  width: 8,
+                  height: 12,
+                  borderRadius: 3,
+                  background: color,
+                  boxShadow: `0 0 8px ${color}`,
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TunnelRow({
   t,
   active,
+  carrierClass,
+  jitter,
+  score,
   c,
 }: {
   t: IpsecTunnelMetric;
   active: boolean;
+  /** Device class this tunnel carries under the current mode (app-aware demo
+   *  policy), or null if it's an idle standby in this mode. */
+  carrierClass: "it" | "ot" | null;
+  /** Rolling jitter (ms) — stddev of recent latency samples. */
+  jitter: number;
+  /** Composite SLA score 0–100 (latency + loss + jitter). */
+  score: number;
   c: ThemeColors;
 }) {
   const stateColor = !t.present
@@ -3322,11 +4351,15 @@ function TunnelRow({
   // UNREACHABLE was contradictory.
   const carrying = active && t.reachable;
   const preferredButDown = active && !t.reachable;
+  // App-aware routing tag (IT / OT) — only meaningful while the tunnel is
+  // reachable; colour-matched to the topology diagram above.
+  const carries = carrierClass && t.reachable ? carrierClass : null;
+  const carryColor = carries ? classColorOf(carries) : null;
 
   return (
     <div
       className={`ipsec-tunnel ${carrying ? "is-active" : ""}`}
-      style={{ borderLeftColor: carrying ? c.ok : stateColor }}
+      style={{ borderLeftColor: carryColor ?? (carrying ? c.ok : stateColor) }}
     >
       <div className="ipsec-tunnel-id">
         <CircleDot size={12} style={{ color: stateColor }} />
@@ -3336,6 +4369,21 @@ function TunnelRow({
         >
           {t.ifname}
         </span>
+        {carries && (
+          <span
+            className="badge"
+            style={{
+              fontSize: 9.5,
+              padding: "1px 6px",
+              color: carryColor!,
+              borderColor: `${carryColor}66`,
+              background: `${carryColor}1a`,
+            }}
+            title={`${carries === "it" ? "IT" : "OT"} devices route through this tunnel`}
+          >
+            {carries === "it" ? "IT" : "OT"}
+          </span>
+        )}
         {carrying && (
           <span
             className="badge ok"
@@ -3363,10 +4411,58 @@ function TunnelRow({
           accent={stateColor}
         />
         <Metric
+          label="Jitter"
+          value={t.reachable ? `${jitter.toFixed(1)} ms` : "—"}
+          accent={t.reachable && jitter > 30 ? c.warn : c.textDim}
+        />
+        <Metric
           label="Loss"
           value={t.reachable ? `${t.loss_percent.toFixed(2)} %` : "—"}
           accent={stateColor}
         />
+        {/* Composite SLA score with a mini progress bar. */}
+        <div className="ipsec-metric" style={{ minWidth: 64 }}>
+          <span className="ipsec-metric-label">SLA score</span>
+          {t.reachable ? (
+            (() => {
+              const sc = score >= 80 ? c.ok : score >= 60 ? c.warn : c.err;
+              return (
+                <span
+                  style={{ display: "inline-flex", flexDirection: "column", gap: 3 }}
+                >
+                  <span
+                    className="mono"
+                    style={{ fontSize: 13, fontWeight: 700, color: sc, lineHeight: 1 }}
+                  >
+                    {score}
+                  </span>
+                  <span
+                    style={{
+                      width: 52,
+                      height: 3,
+                      borderRadius: 2,
+                      background: "rgba(255,255,255,0.10)",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: "block",
+                        width: `${score}%`,
+                        height: "100%",
+                        background: sc,
+                      }}
+                    />
+                  </span>
+                </span>
+              );
+            })()
+          ) : (
+            <span className="ipsec-metric-value mono" style={{ color: c.textMuted }}>
+              —
+            </span>
+          )}
+        </div>
         <Metric label="RX" value={fmtBytes(t.rx_bytes)} accent={c.textDim} />
         <Metric label="TX" value={fmtBytes(t.tx_bytes)} accent={c.textDim} />
       </div>

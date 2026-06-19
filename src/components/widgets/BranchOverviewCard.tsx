@@ -34,6 +34,11 @@ const KIND_LABEL: Record<Device['kind'], string> = {
   fire_sensor: 'Fire sensors',
   smoke_sensor: 'Smoke sensors',
   door_lock: 'Door locks',
+  phone: 'Phones',
+  tablet: 'Tablets',
+  matter: 'Matter',
+  shelly: 'Shelly',
+  generic: 'Other',
 };
 
 const PALETTE = ['#10b981', '#ec4899', '#a855f7', '#84cc16', '#f59e0b', '#ef4444', '#06b6d4', '#6366f1', '#f43f5e'];

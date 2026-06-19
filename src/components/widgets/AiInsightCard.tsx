@@ -30,17 +30,23 @@ export function AiInsightCard({
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState<string | null>(null);
   const [lastRunAt, setLastRunAt] = useState<number | null>(null);
-  const firedRef = useRef(false);
   const stopRef  = useRef<(() => void) | null>(null);
+  const runIdRef = useRef(0);
+  // Read the latest page data at generation time without making `generate`
+  // change identity every render (which would re-fire the stream constantly).
+  const dataRef  = useRef(data);
+  dataRef.current = data;
 
   const generate = useCallback(() => {
     stopRef.current?.();
+    const myRun = ++runIdRef.current;
     setText('');
     setError(null);
     setLoading(true);
     setLastRunAt(Date.now());
-    stopRef.current = runInsightSSE(topic, data, {
+    stopRef.current = runInsightSSE(topic, dataRef.current, {
       onEvent: (e) => {
+        if (myRun !== runIdRef.current) return; // ignore a superseded run
         if (e.event === 'chunk' && typeof e.data.text === 'string') {
           setText((t) => t + (e.data.text as string));
         } else if (e.event === 'error' && typeof e.data.message === 'string') {
@@ -48,21 +54,20 @@ export function AiInsightCard({
           setLoading(false);
         }
       },
-      onError: (msg) => { setError(msg); setLoading(false); },
-      onDone:  () => setLoading(false),
+      onError: (msg) => { if (myRun === runIdRef.current) { setError(msg); setLoading(false); } },
+      onDone:  () => { if (myRun === runIdRef.current) setLoading(false); },
     });
-  }, [topic, data]);
+  }, [topic]);
 
-  // Auto-fire once on first render (per card instance).
+  // Auto-fire on mount. The cleanup aborts the stream, so a StrictMode remount
+  // (or future re-mount) re-fires cleanly instead of leaving the only run
+  // aborted. `generate` is stable (data is read via a ref), so this runs once
+  // per mount — not on every data change.
   useEffect(() => {
-    if (autoRun && !firedRef.current) {
-      firedRef.current = true;
-      generate();
-    }
+    if (!autoRun) return;
+    generate();
+    return () => stopRef.current?.();
   }, [autoRun, generate]);
-
-  // Cancel any in-flight stream on unmount.
-  useEffect(() => () => stopRef.current?.(), []);
 
   const agoLabel = (() => {
     if (!lastRunAt) return null;
@@ -79,13 +84,6 @@ export function AiInsightCard({
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <Sparkles size={13} style={{ color: c.accent3 }} />
           {title}
-          <span className="badge" style={{
-            fontSize: 9, padding: '1px 6px',
-            background: 'var(--grad-accent-soft)',
-            borderColor: 'rgba(124,140,255,0.35)',
-          }}>
-            BEDROCK · CLAUDE
-          </span>
         </span>
       }
       sub={lastRunAt

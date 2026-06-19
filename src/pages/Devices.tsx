@@ -2,13 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { StatusBadge } from '../components/StatusBadge';
-import { devices, getDeviceHealth } from '../data/mock';
+import { devices as mockDevices, getDeviceHealth } from '../data/mock';
 import type { Device } from '../types';
+import { useDevices, classifyDevice, controlMatterDevice, controlShellyDevice, refreshMatterDevices, type DeviceView } from '../ui/useDevices';
 import {
   Laptop, Monitor, Printer, CreditCard, Server, PhoneCall,
-  Flame, Wind, DoorClosed, Lock, Search, Download, Plus,
+  Flame, Wind, DoorClosed, Lock, Search, Download, Plus, ArrowLeftRight,
+  Smartphone, Tablet, Cpu, Plug, HelpCircle, Power, RefreshCw,
 } from 'lucide-react';
 import { DeviceDrawer } from '../ui/DeviceDrawer';
+import { telemetryHealth, formatConnectedFor } from '../ui/deviceTelemetry';
 import { Modal } from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { DevicesDashboard } from '../components/widgets/DevicesDashboard';
@@ -18,13 +21,10 @@ const iconFor: Record<Device['kind'], React.ComponentType<{ size?: number }>> = 
   laptop: Laptop, desktop: Monitor, printer: Printer, payment: CreditCard,
   server: Server, confphone: PhoneCall,
   fire_sensor: Flame, smoke_sensor: Wind, door_lock: DoorClosed,
+  phone: Smartphone, tablet: Tablet, matter: Cpu, shelly: Plug, generic: HelpCircle,
 };
 
-function fmtFor(h: number) {
-  if (h === 0) return '—';
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d ${h % 24}h`;
-}
+const fmtFor = formatConnectedFor;
 
 export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
   const [q, setQ] = useState('');
@@ -33,6 +33,33 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
   const [unlockTarget, setUnlockTarget] = useState<Device | null>(null);
   const [reason, setReason] = useState('');
   const { push } = useToast();
+  const { devices: liveDevices, loaded, source, connected } = useDevices();
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Poke the gateway to re-fetch the Matter device list. The fresh inventory
+  // arrives over the live SSE stream, so we just confirm the request and keep
+  // the spinner up briefly for feedback.
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await refreshMatterDevices();
+      push({ kind: 'info', title: 'Refresh requested', detail: 'The gateway is re-fetching the Matter device list.' });
+    } catch (err) {
+      push({ kind: 'error', title: 'Refresh failed', detail: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTimeout(() => setRefreshing(false), 1500);
+    }
+  }
+
+  // Live inventory from the gateway feed (Phase 0: server seed + persisted
+  // IT/OT overrides). Fall back to the bundled mock until the first snapshot
+  // lands or if the server is unreachable, so the page never renders empty.
+  const allDevices: DeviceView[] = useMemo(
+    () => (loaded && liveDevices.length
+      ? liveDevices
+      : mockDevices.map((d) => ({ ...d, autoDomain: d.domain, overridden: false }))),
+    [loaded, liveDevices],
+  );
 
   // The drawer is position: fixed at top: 0, so its content sits at the top of
   // the viewport. If the user clicked a row near the bottom of the table, they
@@ -44,11 +71,11 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
   }, [selected]);
 
   const list = useMemo(
-    () => devices
+    () => allDevices
       .filter((d) => d.domain === domain)
       .filter((d) => statusFilter === 'all' || d.status === statusFilter)
       .filter((d) => !q || d.name.toLowerCase().includes(q.toLowerCase()) || d.ip.includes(q)),
-    [domain, q, statusFilter],
+    [allDevices, domain, q, statusFilter],
   );
 
   const title = domain === 'IT' ? 'IT Devices' : 'OT Devices';
@@ -57,10 +84,10 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
     : 'Fire & smoke sensors, door locks — remote actions available';
 
   const counts = {
-    all:  devices.filter(d => d.domain === domain).length,
-    ok:   devices.filter(d => d.domain === domain && d.status === 'ok').length,
-    warn: devices.filter(d => d.domain === domain && d.status === 'warn').length,
-    err:  devices.filter(d => d.domain === domain && d.status === 'err').length,
+    all:  allDevices.filter(d => d.domain === domain).length,
+    ok:   allDevices.filter(d => d.domain === domain && d.status === 'ok').length,
+    warn: allDevices.filter(d => d.domain === domain && d.status === 'warn').length,
+    err:  allDevices.filter(d => d.domain === domain && d.status === 'err').length,
   };
 
   function handleAction(kind: 'unlock' | 'reboot' | 'disable', d: Device) {
@@ -74,6 +101,85 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
       title: kind === 'reboot' ? `Reboot queued for ${d.name}` : `${d.name} disabled`,
       detail: kind === 'reboot' ? 'Device will reconnect within ~60s' : 'Network access revoked',
     });
+  }
+
+  // Move a device between IT and OT. The server persists the override and pushes
+  // a fresh snapshot over SSE, so the table re-sorts itself across both pages.
+  async function handleReclassify(e: React.MouseEvent, d: DeviceView) {
+    e.stopPropagation();
+    const target: 'IT' | 'OT' = d.domain === 'IT' ? 'OT' : 'IT';
+    try {
+      await classifyDevice(d.mac, target);
+      push({
+        kind: 'success',
+        title: `${d.name} moved to ${target}`,
+        detail: d.autoDomain === target
+          ? 'Reverted to its auto-classification.'
+          : `Now classified as ${target} (manual override).`,
+      });
+    } catch (err) {
+      push({
+        kind: 'error',
+        title: 'Reclassify failed',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Optimistic power state per device id — wins over the snapshot until the
+  // live feed reports the same value (then the override is dropped so external
+  // changes show through again).
+  const [powerOverrides, setPowerOverrides] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setPowerOverrides((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const d of allDevices) {
+        if (d.id in next && d.power === next[d.id]) {
+          delete next[d.id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [allDevices]);
+
+  // Flip a switchable OT device to the opposite of its displayed state.
+  // Matter devices go through the gateway's hub (nodeId encoded in the id as
+  // `matter-<nodeId>`); Shelly devices talk MQTT to IoT Core directly (their
+  // id IS the MQTT device id). The relay switches the moment the device gets
+  // the command — halfway through the round trip — so we flip the button
+  // optimistically on click and let the live feed reconcile to the device's
+  // real state (or revert if the command fails).
+  async function handlePowerToggle(e: React.MouseEvent, d: DeviceView, currentlyOn: boolean) {
+    e.stopPropagation();
+    const action: 'On' | 'Off' = currentlyOn ? 'Off' : 'On';
+    const desired = !currentlyOn;
+    setPowerOverrides((prev) => ({ ...prev, [d.id]: desired }));
+    try {
+      if (d.kind === 'shelly') {
+        await controlShellyDevice(d.id, action);
+      } else {
+        const nodeId = Number(d.id.replace(/^matter-/, ''));
+        if (!Number.isInteger(nodeId) || nodeId <= 0) {
+          throw new Error(`${d.name} has no live nodeId — is the gateway feed up?`);
+        }
+        await controlMatterDevice(nodeId, action);
+      }
+      push({
+        kind: 'success',
+        title: `${d.name} turned ${action.toLowerCase()}`,
+        detail: d.kind === 'shelly' ? 'The device confirmed the command.' : 'The gateway confirmed the command.',
+      });
+    } catch (err) {
+      // Command failed — undo the optimistic flip.
+      setPowerOverrides((prev) => ({ ...prev, [d.id]: currentlyOn }));
+      push({
+        kind: 'error',
+        title: `${action} failed for ${d.name}`,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   function confirmUnlock() {
@@ -93,7 +199,12 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
         title={title}
         subtitle={subtitle}
         right={
-          <div className="toolbar">
+          <div className="toolbar" style={{ alignItems: 'center' }}>
+            <SourcePill source={source} connected={connected} />
+            <button onClick={handleRefresh} disabled={refreshing} title="Re-fetch the Matter device list from the gateway">
+              <RefreshCw size={14} className={refreshing ? 'spin' : undefined} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
             <button><Plus size={14} />Add device</button>
             <button><Download size={14} />Export</button>
           </div>
@@ -154,22 +265,37 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
               <th>Connection</th>
               <th>Connected for</th>
               <th>Status · justification</th>
-              {domain === 'OT' && <th>Actions</th>}
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {list.map((d) => {
-              const Icon = iconFor[d.kind];
-              const health = getDeviceHealth(d);
+              const Icon = iconFor[d.kind] ?? HelpCircle;
+              const health = telemetryHealth(d) ?? getDeviceHealth(d);
               const reasonColor =
                 d.status === 'err'  ? 'var(--err)'  :
                 d.status === 'warn' ? 'var(--warn)' : 'var(--text-muted)';
               return (
                 <tr key={d.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(d)}>
                   <td><Icon size={16} /></td>
-                  <td style={{ color: 'var(--text)', fontWeight: 500 }}>{d.name}</td>
+                  <td style={{ color: 'var(--text)', fontWeight: 500 }}>
+                    {d.name}
+                    {d.overridden && (
+                      <span
+                        title={`Manually classified — auto-detected as ${d.autoDomain}`}
+                        style={{
+                          marginLeft: 8, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                          textTransform: 'uppercase', padding: '1px 6px', borderRadius: 4,
+                          background: 'var(--grad-accent-soft)', color: 'var(--text-dim)',
+                          border: '1px solid rgba(var(--accent-rgb) / 0.3)',
+                        }}
+                      >
+                        moved
+                      </span>
+                    )}
+                  </td>
                   <td style={{ textTransform: 'capitalize', color: 'var(--text-dim)' }}>
-                    {d.kind.replace('_', ' ')}
+                    {d.kind === 'shelly' ? 'MQTT' : d.kind.replace('_', ' ')}
                   </td>
                   <td className="mono">{d.ip}</td>
                   <td className="mono" style={{ color: 'var(--text-muted)' }}>{d.mac}</td>
@@ -191,27 +317,54 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
                       </span>
                     </div>
                   </td>
-                  {domain === 'OT' && (
-                    <td onClick={(e) => e.stopPropagation()}>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {d.kind !== 'matter' && d.kind !== 'shelly' && (
+                        <button
+                          title={`Move ${d.name} to ${d.domain === 'IT' ? 'OT' : 'IT'}`}
+                          onClick={(e) => handleReclassify(e, d)}
+                        >
+                          <ArrowLeftRight size={12} />
+                          {d.domain === 'IT' ? 'To OT' : 'To IT'}
+                        </button>
+                      )}
                       {d.kind === 'door_lock' && (
                         <button className="danger" title="Emergency unlock" onClick={() => setUnlockTarget(d)}>
                           <Lock size={12} />
                           Unlock
                         </button>
                       )}
-                    </td>
-                  )}
+                      {(d.kind === 'matter' || d.kind === 'shelly') && (() => {
+                        const isOn = powerOverrides[d.id] ?? d.power ?? false;
+                        return (
+                          <button
+                            className={`power-toggle${isOn ? ' on' : ''}`}
+                            title={`${d.name} is ${d.power == null && !(d.id in powerOverrides) ? 'in an unknown state' : isOn ? 'on' : 'off'} — click to turn ${isOn ? 'off' : 'on'}`}
+                            onClick={(e) => handlePowerToggle(e, d, isOn)}
+                          >
+                            <Power size={15} />
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  </td>
                 </tr>
               );
             })}
             {list.length === 0 && (
-              <tr><td colSpan={domain === 'OT' ? 9 : 8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>No devices match the current filters.</td></tr>
+              <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>No devices match the current filters.</td></tr>
             )}
           </tbody>
         </table>
       </Card>
 
-      <DeviceDrawer device={selected} onClose={() => setSelected(null)} onAction={handleAction} />
+      {/* Resolve the selected device against the LIVE list so the drawer's
+          metering/duration keep updating while it's open. */}
+      <DeviceDrawer
+        device={selected ? (allDevices.find((d) => d.id === selected.id) ?? selected) : null}
+        onClose={() => setSelected(null)}
+        onAction={handleAction}
+      />
 
       <Modal
         open={unlockTarget != null}
@@ -238,5 +391,36 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
         </label>
       </Modal>
     </>
+  );
+}
+
+/** Small status chip showing where the inventory is coming from: the live
+ *  gateway feed, the gateway-but-currently-offline case, or the demo seed used
+ *  until the gateway's discovery component starts publishing. */
+function SourcePill({ source, connected }: { source: 'seed' | 'gateway'; connected: boolean }) {
+  const live = source === 'gateway' && connected;
+  const label = source === 'seed'
+    ? 'Demo data · no gateway feed'
+    : connected ? 'Live · gateway feed' : 'Gateway offline · last known';
+  const color = source === 'seed'
+    ? 'var(--text-muted)'
+    : connected ? 'var(--ok, #10b981)' : 'var(--warn, #f59e0b)';
+  return (
+    <span
+      title={source === 'seed'
+        ? 'Showing the built-in demo inventory. Real devices appear once the gateway publishes to rdk/devices/inventory.'
+        : connected ? 'Streaming live device inventory from the gateway.' : 'No live inventory right now — showing the last devices the gateway reported.'}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5,
+        color: 'var(--text-dim)', padding: '3px 9px', borderRadius: 999,
+        border: '1px solid var(--border)', whiteSpace: 'nowrap',
+      }}
+    >
+      <span style={{
+        width: 7, height: 7, borderRadius: '50%', background: color,
+        boxShadow: live ? `0 0 0 3px color-mix(in srgb, ${color} 25%, transparent)` : 'none',
+      }} />
+      {label}
+    </span>
   );
 }

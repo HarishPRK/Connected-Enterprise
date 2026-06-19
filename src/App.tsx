@@ -22,6 +22,7 @@ import { AgenticAIPage } from './pages/AgenticAI';
 import { alerts, branches } from './data/mock';
 import { ToastProvider } from './ui/Toast';
 import { LiveDataProvider } from './ui/LiveData';
+import { OpsIncidentsProvider } from './ui/OpsIncidents';
 import { CommandPalette } from './ui/CommandPalette';
 import { NotificationsDrawer } from './ui/NotificationsDrawer';
 
@@ -57,6 +58,7 @@ export default function App() {
   return (
     <ToastProvider>
      <LiveDataProvider>
+      <OpsIncidentsProvider>
       <div className="app-shell">
         <TopBar
           branchId={branchId}
@@ -83,7 +85,7 @@ export default function App() {
               <Route path="/path-selection" element={<DynamicPathSelectionPage branchId={branchId} />} />
               <Route path="/app-routing"    element={<ApplicationAwareRoutingPage />} />
               <Route path="/traffic-policy" element={<TrafficPolicyPage />} />
-              <Route path="/onboarding"     element={<OnboardingPage />} />
+              <Route path="/onboarding"     element={<OnboardingPage branchId={branchId} />} />
               <Route path="/ask-ai"         element={<AskAiPage />} />
               <Route path="/agentic-ai"     element={<AgenticAIPage />} />
               <Route path="/settings"       element={<SettingsPage />} />
@@ -97,6 +99,7 @@ export default function App() {
         onBranchChange={setBranchId}
       />
       <NotificationsDrawer open={notifOpen} onClose={() => setNotifOpen(false)} />
+      </OpsIncidentsProvider>
      </LiveDataProvider>
     </ToastProvider>
   );

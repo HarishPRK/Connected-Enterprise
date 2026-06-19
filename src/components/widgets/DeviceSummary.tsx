@@ -12,6 +12,11 @@ const labels: Record<Device['kind'], string> = {
   fire_sensor: 'Fire sensors',
   smoke_sensor: 'Smoke sensors',
   door_lock: 'Door locks',
+  phone: 'Phones',
+  tablet: 'Tablets',
+  matter: 'Matter devices',
+  shelly: 'Shelly devices',
+  generic: 'Other devices',
 };
 
 export function DeviceSummary({

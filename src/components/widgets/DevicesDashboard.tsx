@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart,
   Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -39,19 +39,136 @@ function wave(seed: number, i: number, baseline: number, amp: number): number {
 }
 
 const connLabel: Record<Device['conn'], string> = {
-  wifi: 'Wi-Fi', wired: 'Wired', poe: 'PoE',
+  wifi: 'Wi-Fi', wired: 'Wired', poe: 'PoE', thread: 'Thread',
 };
+
+/* ─────────── live telemetry history (measured, from the server) ─────────── */
+
+interface HistoryPoint {
+  t: number;
+  rxMbps?: number;
+  txMbps?: number;
+  rssiDbm?: number;
+  apowerW?: number;
+  rxBytes?: number;
+  txBytes?: number;
+  /** Derived client-side: cumulative MB moved since the session started. */
+  transferredMB?: number;
+}
+
+/** Bucket per-device history into 15s bins → recharts rows keyed by device
+ *  name. Only devices present in the current filter are charted. */
+function buildLiveRows(
+  history: Record<string, HistoryPoint[]>,
+  macToName: Map<string, string>,
+  field: (p: HistoryPoint) => number | undefined,
+): { rows: Record<string, string | number>[]; names: string[] } {
+  const BIN = 15_000;
+  const byBin = new Map<number, Record<string, string | number>>();
+  const names = new Set<string>();
+  for (const [mac, points] of Object.entries(history)) {
+    const name = macToName.get(mac.toUpperCase());
+    if (!name) continue;
+    for (const p of points) {
+      const v = field(p);
+      if (v == null) continue;
+      const bin = Math.floor(p.t / BIN) * BIN;
+      let row = byBin.get(bin);
+      if (!row) {
+        row = {
+          ts: bin,
+          hour: new Date(bin).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        };
+        byBin.set(bin, row);
+      }
+      row[name] = v;
+      names.add(name);
+    }
+  }
+  const rows = [...byBin.values()].sort((a, b) => (a.ts as number) - (b.ts as number));
+  return { rows, names: [...names] };
+}
 
 const kindLabel: Record<Device['kind'], string> = {
   laptop: 'Laptop', desktop: 'Desktop', printer: 'Printer', payment: 'Payment',
   server: 'Server', confphone: 'ConfPhone',
   fire_sensor: 'Fire sensor', smoke_sensor: 'Smoke sensor', door_lock: 'Door lock',
+  phone: 'Phone', tablet: 'Tablet', matter: 'Matter', shelly: 'Shelly', generic: 'Device',
 };
 
 /* ─────────── main component ─────────── */
 
 export function DevicesDashboard({ devices }: { devices: Device[] }) {
   const c = useThemeColors();
+
+  // ── Live telemetry history (measured throughput / RSSI from the server) ──
+  const [history, setHistory] = useState<Record<string, HistoryPoint[]>>({});
+  useEffect(() => {
+    let stop = false;
+    const load = () =>
+      fetch('/api/devices/telemetry/history')
+        .then((r) => r.json())
+        .then((j) => { if (!stop) setHistory(j.series ?? {}); })
+        .catch(() => { /* keep last */ });
+    load();
+    const t = setInterval(load, 10_000);
+    return () => { stop = true; clearInterval(t); };
+  }, []);
+
+  const macToName = useMemo(
+    () => new Map(devices.map((d) => [d.mac.toUpperCase(), d.name])),
+    [devices],
+  );
+  // Cumulative data moved per device since the session started — always
+  // visibly climbing (devices keep chatting with IoT Core), unlike the
+  // instantaneous rate which is ~0 for idle IoT devices.
+  const liveTransfer = useMemo(() => {
+    const derived: Record<string, HistoryPoint[]> = {};
+    for (const [mac, pts] of Object.entries(history)) {
+      const first = pts.find((p) => p.rxBytes != null || p.txBytes != null);
+      if (!first) continue;
+      const base = (first.rxBytes ?? 0) + (first.txBytes ?? 0);
+      derived[mac] = pts.map((p) => ({
+        ...p,
+        transferredMB: p.rxBytes != null || p.txBytes != null
+          ? Math.max(0, +((((p.rxBytes ?? 0) + (p.txBytes ?? 0)) - base) / 1e6).toFixed(3))
+          : undefined,
+      }));
+    }
+    return derived;
+  }, [history]);
+  const liveThroughput = useMemo(() => {
+    const built = buildLiveRows(liveTransfer, macToName, (p) => p.transferredMB);
+    // Cumulative series: forward-fill bins a device didn't report in —
+    // stacked areas can't stack across nulls, and carrying the last value
+    // forward is exactly correct for a running total.
+    const lastSeen: Record<string, number> = {};
+    for (const row of built.rows) {
+      for (const name of built.names) {
+        const v = row[name];
+        if (typeof v === 'number') lastSeen[name] = v;
+        else row[name] = lastSeen[name] ?? 0;
+      }
+    }
+    // Auto-unit: sessions usually move KBs, which are sub-pixel in MB.
+    const maxVal = built.rows.reduce((m, row) =>
+      Math.max(m, ...built.names.map((n) => (typeof row[n] === 'number' ? (row[n] as number) : 0))), 0);
+    const useKB = maxVal > 0 && maxVal < 1;
+    if (useKB) {
+      for (const row of built.rows) {
+        for (const name of built.names) {
+          if (typeof row[name] === 'number') row[name] = +(((row[name] as number) * 1000).toFixed(1));
+        }
+      }
+    }
+    return { ...built, unit: useKB ? 'KB' : 'MB', allZero: maxVal === 0 };
+  }, [liveTransfer, macToName]);
+  const liveRssi = useMemo(
+    () => buildLiveRows(history, macToName, (p) => p.rssiDbm),
+    [history, macToName],
+  );
+  const hasLiveThroughput = liveThroughput.rows.length >= 2 && liveThroughput.names.length > 0;
+  const hasLiveRssi = liveRssi.rows.length >= 2 && liveRssi.names.length > 0;
 
   // ── KPI numbers ──
   const total      = devices.length;
@@ -60,7 +177,11 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
   const offline    = devices.filter((d) => d.status === 'err').length;
 
   const wifi = devices.filter((d) => d.conn === 'wifi' && d.status !== 'err');
-  const wifiRssis = wifi.map((d) => {
+  // Real measured RSSI when devices report it; synthetic only as fallback.
+  const realRssis = devices
+    .map((d) => d.telemetry?.rssiDbm)
+    .filter((x): x is number => typeof x === 'number');
+  const wifiRssis = realRssis.length > 0 ? realRssis : wifi.map((d) => {
     const seed = hashId(d.id);
     const base = d.status === 'warn' ? -80 : -60;
     const amp  = d.status === 'warn' ? 4 : 5;
@@ -84,10 +205,16 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
   const offlineSpark = labels.slice(-sparkLen).map((_, i) => ({
     t: i, v: Math.max(0, Math.round(offline + (Math.sin(i / 2 + 1) > 0.4 ? 1 : 0))),
   }));
-  const rssiSpark = labels.slice(-sparkLen).map((_, i) => ({
-    t: i,
-    v: Math.round(wave(7, i + (HOURS - sparkLen), avgRssi ?? -65, 3)),
-  }));
+  // RSSI sparkline from real history when present; synthetic fallback.
+  const rssiSpark = hasLiveRssi
+    ? liveRssi.rows.slice(-sparkLen).map((row, i) => {
+        const vals = liveRssi.names.map((n) => row[n]).filter((v): v is number => typeof v === 'number');
+        return { t: i, v: vals.length ? Math.round(vals.reduce((s, x) => s + x, 0) / vals.length) : (avgRssi ?? -65) };
+      })
+    : labels.slice(-sparkLen).map((_, i) => ({
+        t: i,
+        v: Math.round(wave(7, i + (HOURS - sparkLen), avgRssi ?? -65, 3)),
+      }));
   const uptimeSpark = labels.slice(-sparkLen).map((_, i) => ({
     t: i, v: avgUptimeH + Math.round(Math.sin(i / 4) * 2),
   }));
@@ -225,16 +352,58 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
         </div>
       </div>
 
-      {/* ── Link quality 24h — all devices, normalised 0–100 % ── */}
+      {/* ── Link quality — measured RSSI when live history exists, else the
+             simulated 24h view ── */}
       <div className="col-8">
         <Card
-          title="Link quality · 24 h"
-          sub="Per-device link health (0 – 100 %). Wi-Fi derives from RSSI · wired from FCS / loss · PoE from power budget. Dashed lines mark warn / err thresholds."
-          right={<RangeBadge label="24 h · 1 h step" />}
+          title={hasLiveRssi ? 'Wi-Fi signal · live' : 'Link quality · 24 h'}
+          sub={hasLiveRssi
+            ? 'Measured per-device RSSI (dBm) streamed from the gateway. Dashed lines mark warn / err thresholds.'
+            : 'Per-device link health (0 – 100 %). Wi-Fi derives from RSSI · wired from FCS / loss · PoE from power budget. Dashed lines mark warn / err thresholds.'}
+          right={<RangeBadge label={hasLiveRssi ? 'live · measured' : '24 h · simulated'} />}
         >
           <div style={{ height: 260 }}>
             {devices.length === 0 ? (
               <EmptyPanel msg="No devices in the current filter." />
+            ) : hasLiveRssi ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={liveRssi.rows} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
+                  <CartesianGrid stroke={c.chartGrid} strokeDasharray="3 3" />
+                  <XAxis dataKey="hour" stroke={c.textMuted} fontSize={11} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                  <YAxis
+                    stroke={c.textMuted}
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    domain={[-90, -30]}
+                    ticks={[-90, -80, -70, -60, -50, -40, -30]}
+                    tickFormatter={(v) => `${v}`}
+                  />
+                  <Tooltip
+                    contentStyle={tooltipStyle(c)}
+                    labelStyle={{ color: c.textDim, marginBottom: 4 }}
+                    cursor={{ stroke: c.chartCursor, strokeWidth: 1 }}
+                    formatter={(v: unknown, n: unknown) => [`${v} dBm`, String(n)]}
+                  />
+                  <ReferenceLine y={-70} stroke={c.warn} strokeDasharray="4 4" strokeOpacity={0.7}
+                    label={{ value: 'warn −70', position: 'insideTopRight', fill: c.warn, fontSize: 10 }} />
+                  <ReferenceLine y={-80} stroke={c.err} strokeDasharray="4 4" strokeOpacity={0.7}
+                    label={{ value: 'err −80', position: 'insideBottomRight', fill: c.err, fontSize: 10 }} />
+                  {liveRssi.names.map((name, i) => (
+                    <Line
+                      key={name}
+                      type="monotone"
+                      dataKey={name}
+                      stroke={seriesPalette[i % seriesPalette.length]}
+                      strokeWidth={1.7}
+                      dot={false}
+                      connectNulls
+                      activeDot={{ r: 4 }}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={linkSeries} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
@@ -276,10 +445,12 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
             )}
           </div>
           {devices.length > 0 && (
-            <LegendStrip items={devices.map((d, i) => ({
-              label: `${d.name} · ${connLabel[d.conn]}`,
-              color: seriesPalette[i % seriesPalette.length],
-            }))} />
+            <LegendStrip items={(hasLiveRssi
+              ? liveRssi.names.map((name, i) => ({ label: name, color: seriesPalette[i % seriesPalette.length] }))
+              : devices.map((d, i) => ({
+                  label: `${d.name} · ${connLabel[d.conn]}`,
+                  color: seriesPalette[i % seriesPalette.length],
+                })))} />
           )}
         </Card>
       </div>
@@ -333,16 +504,58 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
         </Card>
       </div>
 
-      {/* ── Throughput stacked area ── */}
+      {/* ── Data transferred — measured cumulative MB when live history exists ── */}
       <div className="col-8">
         <Card
-          title="Throughput · 24 h"
-          sub="Sum of avg Mbps per device, stacked by device type"
-          right={<RangeBadge label="24 h · 1 h step" />}
+          title={hasLiveThroughput ? 'Data transferred · live' : 'Throughput · 24 h'}
+          sub={hasLiveThroughput
+            ? `Cumulative ${liveThroughput.unit} per device this session (rx + tx) — measured from the gateway’s byte counters`
+            : 'Sum of avg Mbps per device, stacked by device type'}
+          right={<RangeBadge label={hasLiveThroughput ? 'live · measured' : '24 h · simulated'} />}
         >
           <div style={{ height: 260 }}>
             {kinds.length === 0 ? (
               <EmptyPanel msg="No devices in the current filter." />
+            ) : hasLiveThroughput && liveThroughput.allZero ? (
+              <EmptyPanel msg="No traffic measured yet this session — collecting from the gateway's byte counters…" />
+            ) : hasLiveThroughput ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={liveThroughput.rows} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
+                  <defs>
+                    {liveThroughput.names.map((name, i) => {
+                      const color = seriesPalette[i % seriesPalette.length];
+                      return (
+                        <linearGradient key={name} id={`dev-live-th-${i}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%"   stopColor={color} stopOpacity={0.55} />
+                          <stop offset="100%" stopColor={color} stopOpacity={0} />
+                        </linearGradient>
+                      );
+                    })}
+                  </defs>
+                  <CartesianGrid stroke={c.chartGrid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="hour" stroke={c.textMuted} fontSize={11} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                  <YAxis stroke={c.textMuted} fontSize={11} tickLine={false} axisLine={false}
+                    tickFormatter={(v) => `${typeof v === 'number' && v < 10 ? v : Math.round(Number(v))}`} />
+                  <Tooltip
+                    contentStyle={tooltipStyle(c)}
+                    labelStyle={{ color: c.textDim, marginBottom: 4 }}
+                    cursor={{ stroke: c.chartCursor, strokeWidth: 1 }}
+                    formatter={(v: unknown, n: unknown) => [`${typeof v === 'number' ? v.toFixed(2) : v} ${liveThroughput.unit}`, String(n)]}
+                  />
+                  {liveThroughput.names.map((name, i) => (
+                    <Area
+                      key={name}
+                      type="monotone"
+                      stackId="1"
+                      dataKey={name}
+                      stroke={seriesPalette[i % seriesPalette.length]}
+                      fill={`url(#dev-live-th-${i})`}
+                      strokeWidth={1.6}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                </AreaChart>
+              </ResponsiveContainer>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={throughputSeries} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
@@ -381,7 +594,9 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
               </ResponsiveContainer>
             )}
           </div>
-          <LegendStrip items={kinds.map((k, i) => ({ label: kindLabel[k], color: seriesPalette[i % seriesPalette.length] }))} />
+          <LegendStrip items={(hasLiveThroughput
+            ? liveThroughput.names.map((name, i) => ({ label: name, color: seriesPalette[i % seriesPalette.length] }))
+            : kinds.map((k, i) => ({ label: kindLabel[k], color: seriesPalette[i % seriesPalette.length] })))} />
         </Card>
       </div>
 

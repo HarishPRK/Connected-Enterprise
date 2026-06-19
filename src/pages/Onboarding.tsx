@@ -2,14 +2,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import {
-  Check, Cable, Radio, Cpu, ShieldCheck, Activity, Globe2, Cloud, Network,
-  MapPin, Settings2, Sparkles,
+  Check, Lock, Sparkles, SlidersHorizontal, Info, Search, ChevronDown, Plus, Trash2, X, MapPin, PackagePlus,
+  Cpu, Network, Globe2, ShieldCheck, KeyRound, Radio, Clock, Activity,
+  Shuffle, Gauge, Route, Layers, Wifi,
 } from 'lucide-react';
+import { branches } from '../data/mock';
 
-/* ────────── Gateway models ────────── */
+type Branch = (typeof branches)[number];
+
+type IconType = React.ComponentType<{ size?: number }>;
+
+/* ────────── Gateway model catalog ────────── */
 
 interface GatewayModel {
-  id: 'CE-GW-300' | 'CE-GW-500' | 'CE-GW-700';
+  id: string;
   name: string;
   tagline: string;
   description: string;
@@ -25,173 +31,755 @@ interface GatewayModel {
 
 const GATEWAY_MODELS: GatewayModel[] = [
   {
-    id: 'CE-GW-300',
-    name: 'CE-GW-300',
-    tagline: 'Compact branch',
+    id: 'Capgemini-U120', name: 'Capgemini-U120', tagline: 'Compact branch',
     description: 'Small office or retail — 4 LAN ports, 1 Gbps Fiber, optional 5G failover.',
-    lanPorts: 4,
-    has5G: false,
-    dualFiber: false,
-    maxThroughputMbps: 1000,
-    antennaCount: 2,
-    poeWatts: 30,
-    color: '#5fc1f5',
-    badges: ['1 Gbps', '4× LAN', 'Wi-Fi 6', 'PoE 30W'],
+    lanPorts: 4, has5G: false, dualFiber: false, maxThroughputMbps: 1000, antennaCount: 2, poeWatts: 30,
+    color: '#5fc1f5', badges: ['1 Gbps', '4× LAN', 'Wi-Fi 6', 'PoE 30W'],
   },
   {
-    id: 'CE-GW-500',
-    name: 'CE-GW-500',
-    tagline: 'Standard branch',
-    description: 'Mid-sized branch — 8 LAN ports, dual-WAN (Fiber + 5G n78), 60 W PoE budget.',
-    lanPorts: 8,
-    has5G: true,
-    dualFiber: false,
-    maxThroughputMbps: 1000,
-    antennaCount: 3,
-    poeWatts: 60,
-    color: '#7cffd4',
-    badges: ['1 Gbps', '8× LAN', '5G n78', 'PoE 60W'],
+    id: 'CE-GW-300', name: 'CE-GW-300', tagline: 'Small branch',
+    description: 'Retail / small office — 4 LAN, 1 Gbps Fiber + 5G failover, Wi-Fi 6.',
+    lanPorts: 4, has5G: true, dualFiber: false, maxThroughputMbps: 1000, antennaCount: 2, poeWatts: 30,
+    color: '#7cffd4', badges: ['1 Gbps', '4× LAN', '5G', 'PoE 30W'],
   },
   {
-    id: 'CE-GW-700',
-    name: 'CE-GW-700',
-    tagline: 'High-density / HQ',
+    id: 'CE-GW-500', name: 'CE-GW-500', tagline: 'Standard branch',
+    description: 'Mid-sized branch — 8 LAN, dual-WAN (Fiber + 5G n78), 60 W PoE budget.',
+    lanPorts: 8, has5G: true, dualFiber: false, maxThroughputMbps: 1000, antennaCount: 3, poeWatts: 60,
+    color: '#c084fc', badges: ['1 Gbps', '8× LAN', '5G n78', 'PoE 60W'],
+  },
+  {
+    id: 'CE-GW-700', name: 'CE-GW-700', tagline: 'High-density / HQ',
     description: 'HQ or large site — 12 LAN, 10 Gbps dual-Fiber + dual 5G, redundant PSU.',
-    lanPorts: 12,
-    has5G: true,
-    dualFiber: true,
-    maxThroughputMbps: 10_000,
-    antennaCount: 4,
-    poeWatts: 240,
-    color: '#c084fc',
-    badges: ['10 Gbps', '12× LAN', 'Dual 5G', 'PoE 240W', 'Redundant PSU'],
+    lanPorts: 12, has5G: true, dualFiber: true, maxThroughputMbps: 10_000, antennaCount: 4, poeWatts: 240,
+    color: '#ffb547', badges: ['10 Gbps', '12× LAN', 'Dual 5G', 'PoE 240W', 'Redundant PSU'],
+  },
+  {
+    id: 'CE-RG-5G', name: 'CE-RG-5G', tagline: 'Rugged / mobile',
+    description: 'Rugged 5G-first gateway for mobile, pop-up, or fiber-pending sites.',
+    lanPorts: 4, has5G: true, dualFiber: false, maxThroughputMbps: 1000, antennaCount: 4, poeWatts: 30,
+    color: '#fb7185', badges: ['5G-first', '4× LAN', 'Rugged', 'PoE 30W'],
   },
 ];
 
-/* ────────── Form state ────────── */
+const MODEL_BY_ID: Record<string, GatewayModel> = {};
+for (const m of GATEWAY_MODELS) MODEL_BY_ID[m.id] = m;
 
-interface OnboardingForm {
-  modelId: GatewayModel['id'];
-  serial: string;
-  activationCode: string;
-  branchName: string;
-  location: string;
-  timezone: string;
-  siteType: 'retail' | 'office' | 'warehouse' | 'factory' | 'datacenter';
-  expectedDevices: number;
-  firmwareTrack: 'stable' | 'edge' | 'pin-2.4.1';
-  adminEmail: string;
-  primaryWan: 'fiber' | '5g';
-  failoverWan: 'fiber' | '5g' | 'none';
-  fiberIpMode: 'dhcp' | 'static';
-  fiberStaticIp: string;
-  fiberGateway: string;
-  fiberSubnet: string;
-  dnsPrimary: string;
-  dnsSecondary: string;
-  fivegApn: string;
-  fivegBand: 'auto' | 'n78' | 'n41';
-  fivegSimSlot: '1' | '2';
-  mtu: number;
-  managementVlan: number;
-  ntpServer: string;
-  syslogDestination: string;
-  applyDefaultPolicies: boolean;
-  applyDefaultFirewall: boolean;
-  enrollOtVlan: boolean;
-}
-
-const DEFAULT_FORM: OnboardingForm = {
-  modelId: 'CE-GW-500',
-  serial: '',
-  activationCode: '',
-  branchName: '',
-  location: '',
-  timezone: 'America/Chicago',
-  siteType: 'office',
-  expectedDevices: 15,
-  firmwareTrack: 'stable',
-  adminEmail: '',
-  primaryWan: 'fiber',
-  failoverWan: '5g',
-  fiberIpMode: 'dhcp',
-  fiberStaticIp: '',
-  fiberGateway: '',
-  fiberSubnet: '255.255.255.0',
-  dnsPrimary: '1.1.1.1',
-  dnsSecondary: '8.8.8.8',
-  fivegApn: 'internet',
-  fivegBand: 'auto',
-  fivegSimSlot: '1',
-  mtu: 1500,
-  managementVlan: 99,
-  ntpServer: 'pool.ntp.org',
-  syslogDestination: 'logs.tenant.local:514',
-  applyDefaultPolicies: true,
-  applyDefaultFirewall: true,
-  enrollOtVlan: false,
+/* GMT offset (minutes) per US timezone, keyed by state — used to derive the
+   "From GMT" value from the selected site's location. */
+const STATE_GMT: Record<string, string> = {
+  WA: '-480', OR: '-480', CA: '-480', NV: '-480',            // Pacific
+  AZ: '-420', CO: '-420', UT: '-420', NM: '-420',            // Mountain
+  TX: '-360', IL: '-360', MN: '-360', MO: '-360', WI: '-360', // Central
+  NY: '-300', MA: '-300', FL: '-300', GA: '-300', PA: '-300', // Eastern
 };
 
-const STEPS = ['Claim device', 'Configure WAN', 'Test connectivity', 'Activate'] as const;
+function gmtForLocation(location: string): string {
+  const state = location.split(',').pop()?.trim() ?? '';
+  return STATE_GMT[state] ?? '-300';
+}
 
-/* ────────── Main page ────────── */
+/** Location-derived defaults for a given site (branch). */
+function siteDefaults(siteId: string) {
+  const b = branches.find((x) => x.id === siteId);
+  if (!b) return null;
+  return {
+    siteName: b.name,
+    fromGmt: gmtForLocation(b.location),
+    modelId: MODEL_BY_ID[b.gatewayModel] ? b.gatewayModel : 'Capgemini-U120',
+  };
+}
 
-export function OnboardingPage() {
-  const [step, setStep] = useState(0);
-  const [form, setForm] = useState<OnboardingForm>(DEFAULT_FORM);
+/* ────────── Onboarded gateways (per-location, session) ────────── */
 
-  const update = <K extends keyof OnboardingForm>(key: K, value: OnboardingForm[K]) =>
-    setForm((f) => ({ ...f, [key]: value }));
+interface OnboardedGateway {
+  id: string;
+  modelId: string;
+  name: string;
+  status: 'active' | 'inactive';
+  firmware: string;
+  serial: string;
+}
 
-  const model = useMemo(
-    () => GATEWAY_MODELS.find((m) => m.id === form.modelId) ?? GATEWAY_MODELS[1],
-    [form.modelId],
-  );
+/** Seed each location with the primary gateway it already runs (from branch data). */
+function seedGateways(): Record<string, OnboardedGateway[]> {
+  const map: Record<string, OnboardedGateway[]> = {};
+  for (const b of branches) {
+    const modelId = MODEL_BY_ID[b.gatewayModel] ? b.gatewayModel : 'Capgemini-U120';
+    map[b.id] = [{
+      id: `${b.id}-gw1`,
+      modelId,
+      name: b.name,
+      status: 'active',
+      firmware: b.firmware,
+      serial: `${modelId}-${b.id.slice(-4).toUpperCase()}01`,
+    }];
+  }
+  return map;
+}
+
+const throughputLabel = (m: GatewayModel) =>
+  m.maxThroughputMbps >= 1000 ? `${m.maxThroughputMbps / 1000} Gbps` : `${m.maxThroughputMbps} Mbps`;
+
+/* ────────── Parameter model ────────── */
+
+type Control =
+  | { t: 'toggle'; opts: string[] }
+  | { t: 'select'; opts: string[] }
+  | { t: 'text'; placeholder?: string }
+  | { t: 'action'; label: string }
+  | { t: 'locked' };
+
+interface Param {
+  key: string;
+  label: string;
+  cat: string;
+  ctrl: Control;
+  /** Pre-filled value for this gateway — editable. */
+  value: string;
+  /** Note shown for locked rows, e.g. "Multiple Tunnel Active". */
+  note?: string;
+  /** True for user-added fields (removable). */
+  custom?: boolean;
+}
+
+interface CategoryMeta {
+  id: string;
+  title: string;
+  hint: string;
+  icon: IconType;
+  color: string;
+}
+
+/** #rrggbb → rgba() with the given alpha. */
+function tint(hex: string, a: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+const ETH_SPEEDS = [
+  '1 - Automatic Negotiation',
+  '2 - 10 Mbps / Half',
+  '3 - 10 Mbps / Full',
+  '4 - 100 Mbps / Half',
+  '5 - 100 Mbps / Full',
+  '6 - 1 Gbps / Full',
+];
+
+const LOCKED = 'Multiple Tunnel Active';
+
+/* ── Basic Settings ── */
+const BASIC_CATS: CategoryMeta[] = [
+  { id: 'identity', title: 'Device Identity', hint: 'Status, make / model, keys & service offering', icon: Cpu, color: '#5fc1f5' },
+  { id: 'network', title: 'Network & Addressing', hint: 'LAN / WAN IP, VLAN ports & link speeds', icon: Network, color: '#7cffd4' },
+  { id: 'dns', title: 'DNS & Packet Handling', hint: 'Resolver, caching & low-level packet rules', icon: Globe2, color: '#c084fc' },
+  { id: 'firewall', title: 'Firewall & Crypto', hint: 'Memory pools for firewall & hardware crypto', icon: ShieldCheck, color: '#ffb547' },
+  { id: 'vpn', title: 'VPN & Tunnels', hint: 'Credentials, NAT-T & tunnel timers', icon: KeyRound, color: '#f472b6' },
+  { id: 'cellular', title: 'Cellular & Managed Backup', hint: 'ATS, MLAN & AT&T managed cellular', icon: Radio, color: '#60a5fa' },
+  { id: 'locale', title: 'Time & Locale', hint: 'GMT offset, DST & language', icon: Clock, color: '#a3e635' },
+  { id: 'health', title: 'Recovery & ARMT', hint: 'Reboot behaviour & ARMT monitoring', icon: Activity, color: '#fb7185' },
+];
+
+const BASIC_PARAMS: Param[] = [
+  { key: 'deviceStatus', cat: 'identity', label: 'Device Status', ctrl: { t: 'toggle', opts: ['Active', 'Inactive'] }, value: 'Active' },
+  { key: 'manufacturer', cat: 'identity', label: 'Manufacturer', ctrl: { t: 'select', opts: ['DIGI', 'MCAFEE', 'CISCO', 'JUNIPER'] }, value: 'DIGI' },
+  { key: 'partNumber', cat: 'identity', label: 'Part Number', ctrl: { t: 'text' }, value: '' },
+  { key: 'slaDetails', cat: 'identity', label: 'Device SLA Details', ctrl: { t: 'text' }, value: '' },
+  { key: 'siteName', cat: 'identity', label: 'Site Name', ctrl: { t: 'text' }, value: '' },
+  { key: 'portalId', cat: 'identity', label: 'Outsourcing Portal ID', ctrl: { t: 'text' }, value: '' },
+  { key: 'e2eCpeKey', cat: 'identity', label: 'E2E CPE Key', ctrl: { t: 'text' }, value: '' },
+  { key: 'e2eSiteKey', cat: 'identity', label: 'E2E Site Key', ctrl: { t: 'text' }, value: '' },
+  { key: 'usbPorts', cat: 'identity', label: 'USB Ports Active', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'serviceOffering', cat: 'identity', label: 'Service Offering', ctrl: { t: 'select', opts: ['1 - AVTS', '2 - ANIRA', '3 - NetBond', '4 - VPN Managed'] }, value: '2 - ANIRA' },
+
+  { key: 'lanIp', cat: 'network', label: 'LAN IP Address', ctrl: { t: 'text', placeholder: '10.10.10.1' }, value: '10.10.10.1' },
+  { key: 'lanSubnet', cat: 'network', label: 'LAN Subnet', ctrl: { t: 'text', placeholder: '255.255.255.0' }, value: '255.255.255.0' },
+  { key: 'allowInternet', cat: 'network', label: 'Allow Internet Access', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'Yes' },
+  { key: 'disableVlanPorts', cat: 'network', label: 'Disable Default VLAN Ports', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'lanSpeed', cat: 'network', label: 'LAN Ethernet Speed', ctrl: { t: 'select', opts: ETH_SPEEDS }, value: '1 - Automatic Negotiation' },
+  { key: 'wanSpeed', cat: 'network', label: 'WAN Ethernet Speed', ctrl: { t: 'select', opts: ETH_SPEEDS }, value: '1 - Automatic Negotiation' },
+  { key: 'wanMtu', cat: 'network', label: 'WAN MTU Size', ctrl: { t: 'text', placeholder: '1500' }, value: '' },
+
+  { key: 'dnsTcp', cat: 'dns', label: 'Support DNS via TCP', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'dnsCache', cat: 'dns', label: 'DNS Cache Size', ctrl: { t: 'text', placeholder: '01000' }, value: '01000' },
+  { key: 'ignoreDf', cat: 'dns', label: 'Ignore Do Not Fragment (DF) Settings', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'rpFilter', cat: 'dns', label: 'Reverse Path Filter', ctrl: { t: 'select', opts: ['0 - No validation', '1 - Strict mode', '2 - Loose mode'] }, value: '0 - No validation' },
+  { key: 'tcpTimestamps', cat: 'dns', label: 'Turn Off TCP Timestamps', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'arpIgnore', cat: 'dns', label: 'ARP Ignore', ctrl: { t: 'select', opts: ['0 - any IP Address on any Interface', '1 - reply only if target is local', '2 - reply only if sender on same subnet'] }, value: '0 - any IP Address on any Interface' },
+
+  { key: 'fwMemory', cat: 'firewall', label: 'Firewall Memory', ctrl: { t: 'text', placeholder: '8192' }, value: '8192' },
+  { key: 'cryptoBuffers', cat: 'firewall', label: 'Hardware Crypto Buffers', ctrl: { t: 'text', placeholder: '00500' }, value: '00500' },
+
+  { key: 'saveUserId', cat: 'vpn', label: 'Save Login User ID', ctrl: { t: 'locked' }, value: '', note: LOCKED },
+  { key: 'savePassword', cat: 'vpn', label: 'Save Login Password', ctrl: { t: 'locked' }, value: '', note: LOCKED },
+  { key: 'savePwrLoss', cat: 'vpn', label: 'Save Password on Power Loss', ctrl: { t: 'locked' }, value: '', note: LOCKED },
+  { key: 'initVpn', cat: 'vpn', label: 'Initiate VPN Connection', ctrl: { t: 'locked' }, value: '', note: LOCKED },
+  { key: 'idleTunnel', cat: 'vpn', label: 'Idle Tunnel Timeout', ctrl: { t: 'locked' }, value: '', note: LOCKED },
+  { key: 'tunnelReconnect', cat: 'vpn', label: 'Tunnel Reconnect Delay', ctrl: { t: 'locked' }, value: '', note: LOCKED },
+  { key: 'sendRouteDelete', cat: 'vpn', label: 'Send Route Delete', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'wanInitWait', cat: 'vpn', label: 'WAN Initial Wait Time', ctrl: { t: 'text', placeholder: '0030' }, value: '0030' },
+  { key: 'bteMaxTime', cat: 'vpn', label: 'Backup Tunnel Endpoint Maximum Time', ctrl: { t: 'text', placeholder: '0000' }, value: '0000' },
+  { key: 'bteIdleTime', cat: 'vpn', label: 'Backup Tunnel Endpoint Idle Time', ctrl: { t: 'text', placeholder: '0000' }, value: '0000' },
+  { key: 'reconnectReboot', cat: 'vpn', label: 'Reconnect Tunnel Endpoint in Reboot Window', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'nattKeepAlive', cat: 'vpn', label: 'NAT-T Keep Alive Int', ctrl: { t: 'text', placeholder: '0020' }, value: '0020' },
+  { key: 'nattNegotiation', cat: 'vpn', label: 'NAT-T Negotiation', ctrl: { t: 'select', opts: ['Yes', 'No'] }, value: 'Yes' },
+  { key: 'altFtpPorts', cat: 'vpn', label: 'Alternate FTP Ports', ctrl: { t: 'text' }, value: '' },
+
+  { key: 'atsService', cat: 'cellular', label: 'Used with the ATS Service', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'usedMlan', cat: 'cellular', label: 'Used with MLAN', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'cellBackup', cat: 'cellular', label: 'AT&T Managed Cellular Backup', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'cellRefresh', cat: 'cellular', label: 'Cell Data Refresh', ctrl: { t: 'text', placeholder: '1440' }, value: '1440' },
+  { key: 'sendCellData', cat: 'cellular', label: 'Send Cell Data to SM', ctrl: { t: 'toggle', opts: ['Yes', 'Both', 'No'] }, value: 'Yes' },
+
+  { key: 'fromGmt', cat: 'locale', label: 'From GMT', ctrl: { t: 'text', placeholder: '-300' }, value: '-300' },
+  { key: 'dst', cat: 'locale', label: 'Daylight Savings Time', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'Yes' },
+  { key: 'langId', cat: 'locale', label: 'Language ID', ctrl: { t: 'text', placeholder: 'EN' }, value: 'EN' },
+
+  { key: 'forceReboot', cat: 'health', label: 'Force Reboot After Query', ctrl: { t: 'select', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'notFoundAction', cat: 'health', label: 'Not Found Action', ctrl: { t: 'select', opts: ['Stop Functioning', 'Continue Functioning'] }, value: 'Stop Functioning' },
+  { key: 'armtEnabled', cat: 'health', label: 'ARMT Enabled', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'Yes' },
+  { key: 'armtRefProfile', cat: 'health', label: 'ARMT Reference Profile', ctrl: { t: 'text', placeholder: 'ARMT-CONFIG-REF' }, value: 'ARMT-CONFIG-REF' },
+  { key: 'armtResend', cat: 'health', label: 'ARMT Tunnel-Up Resend Interval', ctrl: { t: 'text', placeholder: '0020' }, value: '0020' },
+];
+
+/* ── Configuration Options ── */
+const CONFIG_CATS: CategoryMeta[] = [
+  { id: 'nat', title: 'NAT & Address Translation', hint: 'PAT and SA-negotiated NAT overrides', icon: Shuffle, color: '#5fc1f5' },
+  { id: 'qos', title: 'Class of Service (QoS)', hint: 'COS activation & bandwidth limits', icon: Gauge, color: '#ffb547' },
+  { id: 'routing', title: 'Routing & Broadcast', hint: 'Directed broadcast, PBR & DNS function', icon: Route, color: '#7cffd4' },
+  { id: 'tunnels', title: 'Tunnels & Authentication', hint: 'Auth type, multiple & inbound tunnels', icon: Lock, color: '#f472b6' },
+  { id: 'vlan', title: 'VLAN & Redundancy', hint: 'VLAN, data merge & VRRP', icon: Layers, color: '#c084fc' },
+  { id: 'wifi', title: 'Wi-Fi & WAN', hint: 'Wi-Fi AP & WAN connectivity checks', icon: Wifi, color: '#60a5fa' },
+  { id: 'provisioning', title: 'Provisioning & Policies', hint: 'Zero-touch & traffic policies', icon: Sparkles, color: '#a78bfa' },
+];
+
+const CONFIG_PARAMS: Param[] = [
+  { key: 'addrTranslation', cat: 'nat', label: 'Address Translation', ctrl: { t: 'locked' }, value: '', note: LOCKED },
+  { key: 'patIp', cat: 'nat', label: 'PAT IP Address for all other hosts', ctrl: { t: 'text' }, value: '' },
+  { key: 'saIpOverride', cat: 'nat', label: 'SA Negotiated IP Address Override for (1-1 + PAT) NAT List', ctrl: { t: 'text' }, value: '' },
+  { key: 'saMaskOverride', cat: 'nat', label: 'SA Negotiated Subnet Mask Override for (1-1 + PAT) NAT List', ctrl: { t: 'text' }, value: '' },
+
+  { key: 'cos', cat: 'qos', label: 'Class of Service', ctrl: { t: 'select', opts: ['0 - Not Active', '1 - Active'] }, value: '0 - Not Active' },
+  { key: 'cosPrimary', cat: 'qos', label: 'COS Limit Primary Support', ctrl: { t: 'select', opts: ['N - Not Limited', 'Y - Limited'] }, value: 'N - Not Limited' },
+  { key: 'cosBackup', cat: 'qos', label: 'COS Limit Backup Support', ctrl: { t: 'select', opts: ['N - Not Limited', 'Y - Limited'] }, value: 'N - Not Limited' },
+  { key: 'bwPrimary', cat: 'qos', label: 'B/W Testing without COS - Primary', ctrl: { t: 'text' }, value: '' },
+  { key: 'bwBackup', cat: 'qos', label: 'B/W Testing without COS - Backup', ctrl: { t: 'text' }, value: '' },
+
+  { key: 'directedBroadcast', cat: 'routing', label: 'Directed Broadcast', ctrl: { t: 'toggle', opts: ['Enabled', 'Disabled'] }, value: 'Disabled' },
+  { key: 'pbr', cat: 'routing', label: 'Performance Based Routing', ctrl: { t: 'toggle', opts: ['Enabled', 'Disabled'] }, value: 'Disabled' },
+  { key: 'performDns', cat: 'routing', label: 'Perform DNS Function', ctrl: { t: 'toggle', opts: ['Enabled', 'Disabled'] }, value: 'Enabled' },
+
+  { key: 'authType', cat: 'tunnels', label: 'Authentication Type', ctrl: { t: 'locked' }, value: '', note: LOCKED },
+  { key: 'multipleTunnel', cat: 'tunnels', label: 'Multiple Tunnel', ctrl: { t: 'toggle', opts: ['M=Enabled', 'Y=Enabled', 'Disabled'] }, value: 'Disabled' },
+  { key: 'maxInboundTunnels', cat: 'tunnels', label: 'Maximum Inbound Tunnels', ctrl: { t: 'text', placeholder: '010' }, value: '010' },
+  { key: 'standardIke', cat: 'tunnels', label: 'Use Standard IKE Ports', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'Yes' },
+
+  { key: 'vlan', cat: 'vlan', label: 'VLAN', ctrl: { t: 'toggle', opts: ['Enabled', 'Disabled'] }, value: 'Enabled' },
+  { key: 'mergeVlan', cat: 'vlan', label: 'Merge VLAN Data', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'vrrp', cat: 'vlan', label: 'VRRP', ctrl: { t: 'toggle', opts: ['Enabled', 'Disabled'] }, value: 'Disabled' },
+
+  { key: 'wifiAp', cat: 'wifi', label: 'Wifi Access Point on LAN', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'No' },
+  { key: 'checkWanAddr', cat: 'wifi', label: 'Check WAN Address', ctrl: { t: 'toggle', opts: ['Yes', 'No'] }, value: 'Yes' },
+  { key: 'wanTestMethod', cat: 'wifi', label: 'WAN Connectivity Test Method', ctrl: { t: 'select', opts: ['1 - Ping', '2 - SMx Health Check', '3 - DNS Probe'] }, value: '2 - SMx Health Check' },
+
+  { key: 'zeroTouch', cat: 'provisioning', label: 'Zero Touch', ctrl: { t: 'toggle', opts: ['Enabled', 'Disabled'] }, value: 'Enabled' },
+  { key: 'policies', cat: 'provisioning', label: 'Policies', ctrl: { t: 'action', label: 'Configure policies…' }, value: '' },
+];
+
+interface ParamGroup {
+  title: string;
+  sub: string;
+  cats: CategoryMeta[];
+  params: Param[];
+}
+
+const GROUPS: ParamGroup[] = [
+  {
+    title: 'Basic Settings',
+    sub: 'Device-level parameters. Pre-filled with sensible defaults — change anything this gateway needs.',
+    cats: BASIC_CATS,
+    params: BASIC_PARAMS,
+  },
+  {
+    title: 'Configuration Options',
+    sub: 'Feature areas — NAT, Class of Service, routing, tunnels, VLAN, VRRP, Wi-Fi and provisioning.',
+    cats: CONFIG_CATS,
+    params: CONFIG_PARAMS,
+  },
+];
+
+const EDITABLE = (c: Control) => c.t === 'toggle' || c.t === 'select' || c.t === 'text';
+
+function buildInitial(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const p of [...BASIC_PARAMS, ...CONFIG_PARAMS]) {
+    if (EDITABLE(p.ctrl)) out[p.key] = p.value;
+  }
+  return out;
+}
+
+/* ────────── Smart search ──────────
+   Tolerant matching: substring + prefix + edit-distance (typos) + a synonym
+   map so people can search by intent ("wireless" → Wi-Fi, "restart" → reboot,
+   "timezone" → GMT) without knowing the exact AT&T parameter name. When nothing
+   matches cleanly we surface "Did you mean" suggestions of the real names. */
+
+const TOKEN_RE = /[^a-z0-9]+/;
+const toTokens = (s: string) => s.toLowerCase().split(TOKEN_RE).filter(Boolean);
+
+const SYNONYMS: string[][] = [
+  ['ip', 'address', 'addressing', 'lan', 'subnet', 'gateway'],
+  ['wifi', 'wi-fi', 'wireless', 'access point', 'ap'],
+  ['password', 'passwd', 'credential', 'login', 'auth', 'authentication'],
+  ['vpn', 'tunnel', 'tunnels', 'ipsec', 'ike', 'nat-t'],
+  ['dns', 'resolver', 'domain', 'name', 'hostname'],
+  ['qos', 'cos', 'class of service', 'bandwidth', 'priority', 'b/w'],
+  ['reboot', 'restart', 'recovery', 'reset', 'power'],
+  ['time', 'timezone', 'gmt', 'clock', 'daylight', 'dst', 'locale', 'utc'],
+  ['firewall', 'security'],
+  ['crypto', 'encryption', 'cipher', 'buffers'],
+  ['cellular', 'cell', 'lte', '5g', 'sim', 'mobile', 'mlan', 'ats', 'backup'],
+  ['mtu', 'fragment', 'df'],
+  ['speed', 'ethernet', 'negotiation', 'duplex', 'link'],
+  ['vlan'],
+  ['nat', 'pat', 'translation'],
+  ['vrrp', 'redundancy', 'failover'],
+  ['language', 'lang', 'locale'],
+  ['model', 'manufacturer', 'make', 'part', 'identity', 'vendor'],
+  ['armt', 'monitoring', 'health', 'heartbeat'],
+  ['zero', 'touch', 'ztp', 'provisioning', 'onboarding'],
+  ['route', 'routing', 'pbr', 'broadcast', 'directed'],
+  ['policy', 'policies'],
+  ['sla'],
+  ['usb', 'ports'],
+];
+
+const SYN_MAP: Record<string, string[]> = (() => {
+  const m: Record<string, string[]> = {};
+  for (const group of SYNONYMS) {
+    const words = [...new Set(group.flatMap(toTokens))];
+    for (const w of words) m[w] = [...new Set([...(m[w] ?? []), ...words])];
+  }
+  return m;
+})();
+
+const expand = (t: string) => (SYN_MAP[t] ? [t, ...SYN_MAP[t]] : [t]);
+
+function lev(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  let cur = new Array<number>(n + 1).fill(0);
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    [prev, cur] = [cur, prev];
+  }
+  return prev[n];
+}
+
+const simil = (a: string, b: string) => {
+  const max = Math.max(a.length, b.length);
+  return max === 0 ? 1 : 1 - lev(a, b) / max;
+};
+
+const CAT_BY_ID: Record<string, CategoryMeta> = {};
+for (const c of [...BASIC_CATS, ...CONFIG_CATS]) CAT_BY_ID[c.id] = c;
+
+/** Searchable tokens for a parameter: its label + category title + hint. */
+function hayFor(p: Param): string[] {
+  const c = CAT_BY_ID[p.cat];
+  return [...new Set(toTokens(`${p.label}${c ? ` ${c.title} ${c.hint}` : ''}`))];
+}
+
+/** Best 0..1 match of one query token against a set of haystack tokens. */
+function tokenScore(qt: string, hay: string[]): number {
+  let best = 0;
+  for (const cand of expand(qt)) {
+    for (const ht of hay) {
+      if (ht === cand) return 1;
+      if (ht.startsWith(cand) || cand.startsWith(ht)) best = Math.max(best, 0.92);
+      else if (ht.includes(cand) || cand.includes(ht)) best = Math.max(best, 0.82);
+      else if (cand.length >= 4 && ht.length >= 4) {
+        const s = simil(cand, ht);
+        if (s >= 0.72) best = Math.max(best, s * 0.85);
+      }
+    }
+  }
+  return best;
+}
+
+/** All query tokens must match (AND); returns the averaged confidence. */
+function scoreParam(p: Param, qTokens: string[]): number {
+  const hay = hayFor(p);
+  let total = 0;
+  for (const qt of qTokens) {
+    const s = tokenScore(qt, hay);
+    if (s === 0) return 0;
+    total += s;
+  }
+  return total / qTokens.length;
+}
+
+/** Lenient label-only score used to rank "Did you mean" suggestions. */
+function suggestScore(label: string, qTokens: string[]): number {
+  const lt = toTokens(label);
+  let sum = 0;
+  for (const qt of qTokens) sum += tokenScore(qt, lt);
+  return sum / qTokens.length;
+}
+
+function computeSearch(cats: CategoryMeta[], params: Param[], rawQuery: string) {
+  const qRaw = rawQuery.trim().toLowerCase();
+  if (!qRaw) {
+    return {
+      suggestions: [] as string[],
+      visibleCats: cats
+        .map((meta) => ({ meta, params: params.filter((p) => p.cat === meta.id) }))
+        .filter((c) => c.params.length > 0),
+    };
+  }
+
+  const qTokens = toTokens(qRaw);
+  const score = new Map<string, number>();
+  for (const p of params) {
+    const s = scoreParam(p, qTokens);
+    if (s > 0) score.set(p.key, s);
+  }
+
+  const visibleCats = cats
+    .map((meta) => ({
+      meta,
+      params: params
+        .filter((p) => p.cat === meta.id && score.has(p.key))
+        .sort((a, b) => (score.get(b.key) ?? 0) - (score.get(a.key) ?? 0)),
+    }))
+    .filter((c) => c.params.length > 0);
+
+  // "Did you mean" only when the text doesn't already directly hit a name.
+  const directHit = params.some((p) => p.label.toLowerCase().includes(qRaw));
+  const suggestions = !directHit && qRaw.length >= 3
+    ? params
+        .map((p) => ({ label: p.label, s: suggestScore(p.label, qTokens) }))
+        .filter((x) => x.s >= 0.6 && !x.label.toLowerCase().includes(qRaw))
+        .sort((a, b) => b.s - a.s)
+        .slice(0, 3)
+        .map((x) => x.label)
+    : [];
+
+  return { visibleCats, suggestions };
+}
+
+/* ────────── Page container — gateway list ⇄ add-device form ────────── */
+
+export function OnboardingPage({ branchId }: { branchId: string }) {
+  const branch = branches.find((b) => b.id === branchId) ?? branches[0];
+  const [gateways, setGateways] = useState<Record<string, OnboardedGateway[]>>(() => seedGateways());
+  const [mode, setMode] = useState<'list' | 'form'>('list');
+
+  // Switching the global location (top bar) always returns to that site's list.
+  useEffect(() => { setMode('list'); }, [branchId]);
+
+  const list = gateways[branch.id] ?? [];
+
+  const addGateway = (gw: OnboardedGateway) => {
+    setGateways((m) => ({ ...m, [branch.id]: [...(m[branch.id] ?? []), gw] }));
+    setMode('list');
+  };
+  const removeGateway = (id: string) =>
+    setGateways((m) => ({ ...m, [branch.id]: (m[branch.id] ?? []).filter((g) => g.id !== id) }));
 
   return (
     <>
-      <PageHeader title="Gateway Onboarding" subtitle="Provision a new Enterprise Gateway end-to-end." />
+      <PageHeader
+        title="Gateway Onboarding"
+        subtitle={mode === 'list'
+          ? 'Gateways provisioned at the selected location.'
+          : 'Provision a new Enterprise Gateway end-to-end.'}
+        right={
+          <span className="badge" style={{ gap: 6 }}>
+            <MapPin size={12} />
+            {`${branch.name} · ${branch.location}`}
+          </span>
+        }
+      />
+
+      {mode === 'list'
+        ? <GatewayList branch={branch} gateways={list} onAdd={() => setMode('form')} onRemove={removeGateway} />
+        : <OnboardingForm branch={branch} onCancel={() => setMode('list')} onComplete={addGateway} />}
+    </>
+  );
+}
+
+/* ────────── Gateway list (landing) ────────── */
+
+function GatewayList({
+  branch, gateways, onAdd, onRemove,
+}: {
+  branch: Branch;
+  gateways: OnboardedGateway[];
+  onAdd: () => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <Card
+      title={`Gateways · ${branch.name}`}
+      sub={`${gateways.length} device${gateways.length === 1 ? '' : 's'} onboarded at ${branch.location}`}
+      right={<button className="primary" onClick={onAdd}><Plus size={14} />Add device</button>}
+    >
+      {gateways.length === 0 ? (
+        <div className="onb-gw-empty">
+          <span className="onb-gw-empty-icon"><PackagePlus size={26} /></span>
+          <div className="onb-gw-empty-title">No gateways onboarded here yet</div>
+          <div className="onb-gw-empty-sub">
+            {branch.name} — {branch.location} has no gateways provisioned. Add the first one to get started.
+          </div>
+          <button className="primary" onClick={onAdd}><Plus size={14} />Add device</button>
+        </div>
+      ) : (
+        <div className="onb-gw-list">
+          {gateways.map((gw) => <GatewayRow key={gw.id} gw={gw} onRemove={() => onRemove(gw.id)} />)}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function GatewayRow({ gw, onRemove }: { gw: OnboardedGateway; onRemove: () => void }) {
+  const model = MODEL_BY_ID[gw.modelId] ?? GATEWAY_MODELS[0];
+  const active = gw.status === 'active';
+  return (
+    <div className="onb-gw-card" style={{ ['--cat' as string]: model.color } as React.CSSProperties}>
+      <span
+        className="onb-gw-icon"
+        style={{ color: model.color, background: tint(model.color, 0.13), borderColor: tint(model.color, 0.32) }}
+      >
+        <Cpu size={18} />
+      </span>
+      <div className="onb-gw-main">
+        <div className="onb-gw-name">
+          {gw.name}
+          <span className="onb-gw-model">{model.name} · {model.tagline}</span>
+        </div>
+        <div className="onb-gw-meta">
+          <span className={`badge ${active ? 'ok' : ''}`}>
+            <span className={`dot ${active ? 'ok' : 'off'}`} />{active ? 'Active' : 'Inactive'}
+          </span>
+          <span className="onb-gw-chip">{throughputLabel(model)}</span>
+          <span className="onb-gw-chip">{model.lanPorts}× LAN</span>
+          <span className="onb-gw-chip">{model.has5G ? 'Fiber + 5G' : 'Fiber'}</span>
+          <span className="onb-gw-chip">fw {gw.firmware}</span>
+          <span className="onb-gw-chip">SN {gw.serial}</span>
+        </div>
+      </div>
+      <button type="button" className="onb-del-field" onClick={onRemove} title="Remove gateway"><Trash2 size={14} /></button>
+    </div>
+  );
+}
+
+/* ────────── Add-device form (the wizard) ────────── */
+
+function OnboardingForm({
+  branch, onCancel, onComplete,
+}: {
+  branch: Branch;
+  onCancel: () => void;
+  onComplete: (gw: OnboardedGateway) => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [modelId, setModelId] = useState(() => siteDefaults(branch.id)?.modelId ?? 'Capgemini-U120');
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const init = buildInitial();
+    const d = siteDefaults(branch.id);
+    if (d) { init.siteName = d.siteName; init.fromGmt = d.fromGmt; }
+    return init;
+  });
+  const [query, setQuery] = useState('');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [customParams, setCustomParams] = useState<Param[]>([]);
+  const [addingTo, setAddingTo] = useState<string | null>(null);
+  const [seq, setSeq] = useState(0);
+
+  const set = (key: string, value: string) => setValues((s) => ({ ...s, [key]: value }));
+
+  const model = MODEL_BY_ID[modelId] ?? GATEWAY_MODELS[0];
+  const group = GROUPS[step];
+  const searching = query.trim() !== '';
+
+  const effectiveParams = useMemo(() => {
+    const ids = new Set(group.cats.map((c) => c.id));
+    return [...group.params, ...customParams.filter((p) => ids.has(p.cat))];
+  }, [group, customParams]);
+
+  const { visibleCats, suggestions } = useMemo(
+    () => computeSearch(group.cats, effectiveParams, query),
+    [group, effectiveParams, query],
+  );
+
+  const setAll = (open: boolean) =>
+    setCollapsed((c) => {
+      const next = { ...c };
+      for (const cat of group.cats) next[cat.id] = !open;
+      return next;
+    });
+
+  const addField = (cat: string, label: string, type: 'text' | 'toggle' | 'select', opts: string[]) => {
+    const key = `custom-${seq}`;
+    setSeq((n) => n + 1);
+    let ctrl: Control;
+    let value: string;
+    if (type === 'toggle') { ctrl = { t: 'toggle', opts: ['Yes', 'No'] }; value = 'No'; }
+    else if (type === 'select') { const o = opts.length ? opts : ['Option 1']; ctrl = { t: 'select', opts: o }; value = o[0]; }
+    else { ctrl = { t: 'text' }; value = ''; }
+    setCustomParams((cp) => [...cp, { key, cat, label, ctrl, value, custom: true }]);
+    setValues((v) => ({ ...v, [key]: value }));
+    setAddingTo(null);
+  };
+
+  const deleteField = (key: string) => {
+    setCustomParams((cp) => cp.filter((p) => p.key !== key));
+    setValues((v) => {
+      const next = { ...v };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const finish = () => {
+    onComplete({
+      id: `gw-${branch.id}-${Date.now()}`,
+      modelId,
+      name: values.siteName?.trim() || branch.name,
+      status: values.deviceStatus === 'Inactive' ? 'inactive' : 'active',
+      firmware: branch.firmware,
+      serial: `${modelId}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
+    });
+  };
+
+  return (
+    <>
+      <div className="onb-form-top">
+        <button type="button" className="onb-back-link" onClick={onCancel}><ChevronDown size={14} style={{ transform: 'rotate(90deg)' }} />Back to gateways</button>
+      </div>
 
       <div className="wizard-steps">
-        {STEPS.map((s, i) => (
-          <div key={s} style={{ display: 'contents' }}>
+        {GROUPS.map((g, i) => (
+          <div key={g.title} style={{ display: 'contents' }}>
             <div className={`step ${i === step ? 'active' : i < step ? 'done' : ''}`}>
               {i < step ? <Check size={14} /> : <span style={{ width: 14, textAlign: 'center' }}>{i + 1}</span>}
-              {s}
+              {g.title}
             </div>
-            {i < STEPS.length - 1 && <div className="sep" />}
+            {i < GROUPS.length - 1 && <div className="sep" />}
           </div>
         ))}
       </div>
 
       <div className="grid">
         <div className="col-7">
-          <Card title={STEPS[step]} sub={STEP_SUB[step]}>
-            {step === 0 && <StepClaim form={form} update={update} />}
-            {step === 1 && <StepWan   form={form} update={update} model={model} />}
-            {step === 2 && <StepTest  form={form} model={model} />}
-            {step === 3 && <StepActivate form={form} update={update} model={model} />}
-            <div className="toolbar" style={{ marginTop: 12 }}>
-              <button disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>Back</button>
-              {step < STEPS.length - 1
+          <Card
+            title={group.title}
+            sub={group.sub}
+            right={<span className="badge">{effectiveParams.length} settings</span>}
+          >
+            <div className="onb-controls">
+              <div className="onb-search">
+                <Search size={14} />
+                <input placeholder="Search settings…" value={query} onChange={(e) => setQuery(e.target.value)} />
+                {query && (
+                  <button type="button" className="onb-search-clear" onClick={() => setQuery('')} title="Clear">×</button>
+                )}
+              </div>
+              <button type="button" onClick={() => setAll(true)}>Expand all</button>
+              <button type="button" onClick={() => setAll(false)}>Collapse all</button>
+            </div>
+
+            {suggestions.length > 0 && (
+              <div className="onb-suggest">
+                <span className="onb-suggest-label"><Sparkles size={12} />Did you mean</span>
+                {suggestions.map((s) => (
+                  <button key={s} type="button" className="onb-suggest-chip" onClick={() => setQuery(s)}>{s}</button>
+                ))}
+              </div>
+            )}
+
+            <div className="onb-param-scroll">
+              {visibleCats.length === 0 ? (
+                <div className="onb-empty">No settings match “{query}”.</div>
+              ) : (
+                visibleCats.map(({ meta, params }) => (
+                  <CategorySection
+                    key={meta.id}
+                    meta={meta}
+                    params={params}
+                    open={searching || !collapsed[meta.id]}
+                    onToggle={() => setCollapsed((c) => ({ ...c, [meta.id]: !c[meta.id] }))}
+                    values={values}
+                    query={query}
+                    onChange={set}
+                    canAdd={!searching}
+                    adding={addingTo === meta.id}
+                    onStartAdd={() => setAddingTo(meta.id)}
+                    onCancelAdd={() => setAddingTo(null)}
+                    onAddField={addField}
+                    onDeleteField={deleteField}
+                  />
+                ))
+              )}
+            </div>
+
+            <div className="toolbar" style={{ marginTop: 14 }}>
+              <button onClick={step === 0 ? onCancel : () => setStep((s) => Math.max(0, s - 1))}>
+                {step === 0 ? 'Cancel' : 'Back'}
+              </button>
+              {step < GROUPS.length - 1
                 ? <button className="primary" onClick={() => setStep((s) => s + 1)}>Continue</button>
-                : <button className="primary"><Sparkles size={14} />Activate gateway</button>}
+                : <button className="primary" onClick={finish}><Sparkles size={14} />Onboard gateway</button>}
             </div>
           </Card>
         </div>
 
-        <div className="col-5" style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(18px, 1.4vw, 28px)' }}>
+        <div className="col-5 onb-side" style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(18px, 1.4vw, 28px)' }}>
           <Card
-            title={`${model.name} · ${model.tagline}`}
-            sub={model.description}
-            right={<span className="badge" style={{ color: model.color, borderColor: model.color }}>{`${model.maxThroughputMbps >= 1000 ? `${model.maxThroughputMbps / 1000} Gbps` : `${model.maxThroughputMbps} Mbps`}`}</span>}
+            title="Provisioning target"
+            sub="This gateway will be onboarded to the location selected in the top bar."
+            right={<span className="badge" style={{ color: model.color, borderColor: model.color }}>{throughputLabel(model)}</span>}
           >
+            <div className="onb-target">
+              <label className="onb-mini-field">
+                <span><MapPin size={11} />Site / Location</span>
+                <div className="onb-target-site"><MapPin size={12} />{branch.name} — {branch.location}</div>
+              </label>
+              <label className="onb-mini-field">
+                <span><Cpu size={11} />Gateway model</span>
+                <div className="onb-select">
+                  <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
+                    {GATEWAY_MODELS.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name} · {m.tagline}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="onb-select-caret" />
+                </div>
+              </label>
+            </div>
+            <div className="onb-target-desc">{model.description}</div>
             <GatewayIllustration model={model} step={step} />
           </Card>
 
-          <Card title="Step tip" right={<Sparkles size={13} style={{ color: 'var(--accent)' }} />}>
-            <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.55 }}>
-              {STEP_TIPS[step]}
+          <Card title="About this form" right={<Info size={13} style={{ color: 'var(--accent)' }} />}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.55 }}>
+              <LegendRow swatch="value" title="Pre-filled values">
+                Every setting starts on a sensible default. Just change the ones this gateway needs.
+              </LegendRow>
+              <LegendRow swatch="locked" title={LOCKED}>
+                Rows managed automatically while Multiple Tunnel mode is active; not directly editable.
+              </LegendRow>
+              <div style={{ paddingTop: 4, borderTop: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
+                {STEP_TIPS[step]} Use the search box and category headers to jump straight to a setting.
+              </div>
             </div>
           </Card>
         </div>
@@ -200,352 +788,212 @@ export function OnboardingPage() {
   );
 }
 
-const STEP_SUB: Record<number, string> = {
-  0: 'Pick the hardware model and link it to your tenant.',
-  1: 'Set up primary + failover transport, IP plan, APN, and IP basics.',
-  2: 'Run automatic reachability tests across every transport and dependency.',
-  3: 'Review the configuration and bring the gateway live.',
-};
-
 const STEP_TIPS: Record<number, string> = {
-  0: 'Find the serial number printed on the bottom of the device. The activation code is sent to your tenant admin in the shipping email — re-issue from Settings → Tenant if missing.',
-  1: 'Pick Fiber as primary when you have a static plan; pick 5G when the site is mobile or the fiber install is pending. The failover transport will be probed every 5 s once the gateway is online.',
-  2: 'Tests run sequentially. A red mark on any required test will block activation. The 5G test will time out at 30 s if the antenna is unplugged.',
-  3: 'After activation, the gateway publishes itself under Overview within ~45 s. Default IT/OT policies can be re-applied at any time from Traffic Policy.',
+  0: 'Basic Settings cover identity, addressing, time, firewall and tunnel behaviour for the device.',
+  1: 'Configuration Options group the feature areas — NAT, COS, VLAN, VRRP, Wi-Fi and inbound tunnels.',
 };
 
-/* ────────── Step content blocks ────────── */
+/* ────────── Category accordion ────────── */
 
-function StepClaim({
-  form, update,
+function CategorySection({
+  meta, params, open, onToggle, values, query, onChange,
+  canAdd, adding, onStartAdd, onCancelAdd, onAddField, onDeleteField,
 }: {
-  form: OnboardingForm;
-  update: <K extends keyof OnboardingForm>(key: K, value: OnboardingForm[K]) => void;
+  meta: CategoryMeta;
+  params: Param[];
+  open: boolean;
+  onToggle: () => void;
+  values: Record<string, string>;
+  query: string;
+  onChange: (key: string, value: string) => void;
+  canAdd: boolean;
+  adding: boolean;
+  onStartAdd: () => void;
+  onCancelAdd: () => void;
+  onAddField: (cat: string, label: string, type: 'text' | 'toggle' | 'select', opts: string[]) => void;
+  onDeleteField: (key: string) => void;
 }) {
+  const Icon = meta.icon;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div>
-        <div className="onb-label">Gateway model</div>
-        <div className="onb-model-grid">
-          {GATEWAY_MODELS.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => update('modelId', m.id)}
-              className={`onb-model-card ${form.modelId === m.id ? 'is-selected' : ''}`}
-              style={form.modelId === m.id ? { borderColor: m.color, boxShadow: `0 0 0 1px ${m.color}55` } : undefined}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: m.color }} />
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{m.name}</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.tagline}</div>
-              <div style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>
-                {m.lanPorts}× LAN · {m.has5G ? 'Fiber + 5G' : 'Fiber'}
-              </div>
-            </button>
+    <div className={`onb-cat ${open ? 'is-open' : ''}`} style={{ ['--cat' as string]: meta.color } as React.CSSProperties}>
+      <button type="button" className="onb-cat-bar" onClick={onToggle} aria-expanded={open}>
+        <span
+          className="onb-cat-icon"
+          style={{ color: meta.color, background: tint(meta.color, 0.13), borderColor: tint(meta.color, 0.32) }}
+        >
+          <Icon size={15} />
+        </span>
+        <span className="onb-cat-titles">
+          <span className="onb-cat-title">{meta.title}</span>
+          <span className="onb-cat-hint">{meta.hint}</span>
+        </span>
+        <span className="onb-cat-meta">
+          <span className="onb-cat-count">{params.length}</span>
+          <ChevronDown size={16} className={`onb-chevron ${open ? 'is-open' : ''}`} />
+        </span>
+      </button>
+      {open && (
+        <div className="onb-cat-body">
+          {params.map((p) => (
+            <ParamRow
+              key={p.key}
+              p={p}
+              value={values[p.key] ?? ''}
+              query={query}
+              onChange={(v) => onChange(p.key, v)}
+              onDelete={p.custom ? () => onDeleteField(p.key) : undefined}
+            />
           ))}
-        </div>
-      </div>
-
-      <SectionLabel>Device identity</SectionLabel>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <FieldRow label="Serial number" hint="On the bottom sticker">
-          <input placeholder="CE-GW-XXXX-XXXX" value={form.serial}
-            onChange={(e) => update('serial', e.target.value)} style={{ width: '100%' }} />
-        </FieldRow>
-        <FieldRow label="Activation code" hint="From tenant admin email">
-          <input placeholder="8-digit code" value={form.activationCode}
-            onChange={(e) => update('activationCode', e.target.value)} style={{ width: '100%' }} />
-        </FieldRow>
-      </div>
-
-      <SectionLabel>Site</SectionLabel>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <FieldRow label="Branch name">
-          <input placeholder="Austin-04" value={form.branchName}
-            onChange={(e) => update('branchName', e.target.value)} style={{ width: '100%' }} />
-        </FieldRow>
-        <FieldRow label="Location" icon={MapPin}>
-          <input placeholder="City, State" value={form.location}
-            onChange={(e) => update('location', e.target.value)} style={{ width: '100%' }} />
-        </FieldRow>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-        <FieldRow label="Site type">
-          <select value={form.siteType} onChange={(e) => update('siteType', e.target.value as OnboardingForm['siteType'])} style={{ width: '100%' }}>
-            <option value="retail">Retail</option>
-            <option value="office">Office</option>
-            <option value="warehouse">Warehouse</option>
-            <option value="factory">Factory</option>
-            <option value="datacenter">Data centre</option>
-          </select>
-        </FieldRow>
-        <FieldRow label="Expected devices" hint="approx.">
-          <input type="number" min={1} max={500} value={form.expectedDevices}
-            onChange={(e) => update('expectedDevices', Number(e.target.value) || 0)} style={{ width: '100%' }} />
-        </FieldRow>
-        <FieldRow label="Time zone">
-          <select value={form.timezone} onChange={(e) => update('timezone', e.target.value)} style={{ width: '100%' }}>
-            <option value="America/New_York">America/New_York</option>
-            <option value="America/Chicago">America/Chicago</option>
-            <option value="America/Denver">America/Denver</option>
-            <option value="America/Los_Angeles">America/Los_Angeles</option>
-          </select>
-        </FieldRow>
-      </div>
-
-      <SectionLabel>Management plane</SectionLabel>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-        <FieldRow label="Firmware track">
-          <select value={form.firmwareTrack} onChange={(e) => update('firmwareTrack', e.target.value as OnboardingForm['firmwareTrack'])} style={{ width: '100%' }}>
-            <option value="stable">Stable (2.4.1)</option>
-            <option value="edge">Edge (2.5.0-rc.3)</option>
-            <option value="pin-2.4.1">Pin · 2.4.1</option>
-          </select>
-        </FieldRow>
-        <FieldRow label="Management VLAN">
-          <input type="number" min={1} max={4094} value={form.managementVlan}
-            onChange={(e) => update('managementVlan', Number(e.target.value) || 99)} style={{ width: '100%' }} />
-        </FieldRow>
-        <FieldRow label="Admin contact email" hint="for alerts">
-          <input placeholder="ops@tenant.com" type="email" value={form.adminEmail}
-            onChange={(e) => update('adminEmail', e.target.value)} style={{ width: '100%' }} />
-        </FieldRow>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <FieldRow label="NTP server">
-          <input placeholder="pool.ntp.org" value={form.ntpServer}
-            onChange={(e) => update('ntpServer', e.target.value)} style={{ width: '100%' }} />
-        </FieldRow>
-        <FieldRow label="Syslog destination">
-          <input placeholder="host:port" value={form.syslogDestination}
-            onChange={(e) => update('syslogDestination', e.target.value)} style={{ width: '100%' }} />
-        </FieldRow>
-      </div>
-    </div>
-  );
-}
-
-function StepWan({
-  form, update, model,
-}: {
-  form: OnboardingForm;
-  update: <K extends keyof OnboardingForm>(key: K, value: OnboardingForm[K]) => void;
-  model: GatewayModel;
-}) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <FieldRow label="Primary WAN" icon={Cable}>
-        <select value={form.primaryWan} onChange={(e) => update('primaryWan', e.target.value as 'fiber' | '5g')} style={{ width: '100%' }}>
-          <option value="fiber">Fiber (Ethernet)</option>
-          {model.has5G && <option value="5g">5G (cellular)</option>}
-        </select>
-      </FieldRow>
-      <FieldRow label="Failover WAN" icon={Radio}>
-        <select value={form.failoverWan} onChange={(e) => update('failoverWan', e.target.value as 'fiber' | '5g' | 'none')} style={{ width: '100%' }}>
-          {model.has5G && <option value="5g">5G (cellular)</option>}
-          <option value="fiber">Fiber (secondary)</option>
-          <option value="none">No failover</option>
-        </select>
-      </FieldRow>
-
-      <SectionLabel>Fiber settings</SectionLabel>
-      <FieldRow label="IP mode">
-        <select value={form.fiberIpMode} onChange={(e) => update('fiberIpMode', e.target.value as 'dhcp' | 'static')} style={{ width: '100%' }}>
-          <option value="dhcp">DHCP (automatic)</option>
-          <option value="static">Static IP</option>
-        </select>
-      </FieldRow>
-      {form.fiberIpMode === 'static' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-          <FieldRow label="Static IP">
-            <input placeholder="10.0.0.5" value={form.fiberStaticIp}
-              onChange={(e) => update('fiberStaticIp', e.target.value)} style={{ width: '100%' }} />
-          </FieldRow>
-          <FieldRow label="Gateway">
-            <input placeholder="10.0.0.1" value={form.fiberGateway}
-              onChange={(e) => update('fiberGateway', e.target.value)} style={{ width: '100%' }} />
-          </FieldRow>
-          <FieldRow label="Subnet mask">
-            <input placeholder="255.255.255.0" value={form.fiberSubnet}
-              onChange={(e) => update('fiberSubnet', e.target.value)} style={{ width: '100%' }} />
-          </FieldRow>
+          {canAdd && (
+            adding
+              ? <AddFieldForm color={meta.color} onAdd={(label, type, opts) => onAddField(meta.id, label, type, opts)} onCancel={onCancelAdd} />
+              : <button type="button" className="onb-add-field" onClick={onStartAdd}><Plus size={13} />Add field</button>
+          )}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <FieldRow label="DNS primary">
-          <input placeholder="1.1.1.1" value={form.dnsPrimary}
-            onChange={(e) => update('dnsPrimary', e.target.value)} style={{ width: '100%' }} />
-        </FieldRow>
-        <FieldRow label="DNS secondary">
-          <input placeholder="8.8.8.8" value={form.dnsSecondary}
-            onChange={(e) => update('dnsSecondary', e.target.value)} style={{ width: '100%' }} />
-        </FieldRow>
-      </div>
-
-      {model.has5G && (
-        <>
-          <SectionLabel>5G settings</SectionLabel>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
-            <FieldRow label="APN">
-              <input placeholder="internet" value={form.fivegApn}
-                onChange={(e) => update('fivegApn', e.target.value)} style={{ width: '100%' }} />
-            </FieldRow>
-            <FieldRow label="Band">
-              <select value={form.fivegBand} onChange={(e) => update('fivegBand', e.target.value as 'auto' | 'n78' | 'n41')} style={{ width: '100%' }}>
-                <option value="auto">Auto</option>
-                <option value="n78">n78</option>
-                <option value="n41">n41</option>
-              </select>
-            </FieldRow>
-            <FieldRow label="SIM slot">
-              <select value={form.fivegSimSlot} onChange={(e) => update('fivegSimSlot', e.target.value as '1' | '2')} style={{ width: '100%' }}>
-                <option value="1">SIM 1</option>
-                <option value="2">SIM 2</option>
-              </select>
-            </FieldRow>
-          </div>
-        </>
-      )}
-
-      <SectionLabel>Advanced</SectionLabel>
-      <FieldRow label="MTU" icon={Settings2}>
-        <input type="number" value={form.mtu} onChange={(e) => update('mtu', Number(e.target.value) || 1500)} style={{ width: '100%' }} />
-      </FieldRow>
     </div>
   );
 }
 
-/* ────────── Connectivity tests (with simulated sequential run) ────────── */
+/* ────────── Add-a-field inline editor ────────── */
 
-interface TestSpec {
-  id: string;
-  label: string;
-  detail: string;
-  icon: React.ComponentType<{ size?: number }>;
-  durationMs: number;
-  /** Override how to show the success state — defaults to "OK". */
-  result: string;
-  pass: boolean;
-}
+function AddFieldForm({
+  color, onAdd, onCancel,
+}: {
+  color: string;
+  onAdd: (label: string, type: 'text' | 'toggle' | 'select', opts: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [label, setLabel] = useState('');
+  const [type, setType] = useState<'text' | 'toggle' | 'select'>('text');
+  const [opts, setOpts] = useState('');
 
-function StepTest({ form, model }: { form: OnboardingForm; model: GatewayModel }) {
-  const tests: TestSpec[] = useMemo(() => {
-    const out: TestSpec[] = [
-      { id: 'power',    label: 'Power-on self-test',  detail: 'ROM, RAM, NVRAM, boot sector',                          icon: Cpu,         durationMs: 700,  result: 'PASS · 412 ms', pass: true },
-      { id: 'fiber',    label: 'Fiber link',          detail: form.fiberIpMode === 'dhcp' ? 'DHCP lease + carrier'      : 'Static IP + carrier', icon: Cable, durationMs: 900, result: 'UP · 1000 Mbps full-duplex', pass: true },
-    ];
-    if (model.has5G) {
-      out.push({ id: '5g', label: '5G modem', detail: `APN ${form.fivegApn} · band ${form.fivegBand}`, icon: Radio, durationMs: 1500, result: 'ATTACHED · RSSI -76 dBm', pass: true });
-    }
-    out.push(
-      { id: 'dns',      label: 'DNS resolution',      detail: `${form.dnsPrimary} & ${form.dnsSecondary}`,             icon: Globe2,      durationMs: 600,  result: 'OK · 6 ms avg',   pass: true },
-      { id: 'ipsec',    label: 'IPsec tunnel build',  detail: 'IKEv2 to controller · 4 tunnels',                       icon: ShieldCheck, durationMs: 1200, result: '4 / 4 tunnels up', pass: true },
-      { id: 'cloud',    label: 'Cloud heartbeat',     detail: 'Controller registration + telemetry stream',            icon: Cloud,       durationMs: 800,  result: 'Reached · 28 ms', pass: true },
-      { id: 'aws',      label: 'AWS Cloud OnRamp',    detail: 'Bedrock · S3 reachability',                              icon: Cloud,       durationMs: 900,  result: 'us-east-1 reachable', pass: true },
-      { id: 'tput',     label: 'Throughput baseline', detail: '5 s burst test, both directions',                       icon: Activity,    durationMs: 1100, result: '↓ 463 Mbps · ↑ 178 Mbps', pass: true },
-    );
-    return out;
-  }, [form.dnsPrimary, form.dnsSecondary, form.fiberIpMode, form.fivegApn, form.fivegBand, model.has5G]);
-
-  // Sequentially "run" tests: each test goes from queued → running → done.
-  const [completed, setCompleted] = useState(0);
-  useEffect(() => {
-    setCompleted(0);
-  }, [tests]);
-  useEffect(() => {
-    if (completed >= tests.length) return;
-    const t = window.setTimeout(() => setCompleted((n) => n + 1), tests[completed].durationMs);
-    return () => window.clearTimeout(t);
-  }, [completed, tests]);
+  const submit = () => {
+    const name = label.trim();
+    if (!name) return;
+    onAdd(name, type, opts.split(',').map((o) => o.trim()).filter(Boolean));
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {tests.map((t, i) => {
-        const state =
-          i < completed ? 'done' :
-          i === completed ? 'running' :
-          'queued';
-        const Icon = t.icon;
-        const dotClass = state === 'done' ? 'ok' : state === 'running' ? 'warn' : 'off';
-        const accent =
-          state === 'done'    ? 'var(--ok)' :
-          state === 'running' ? 'var(--warn)' : 'var(--text-muted)';
-        return (
-          <div key={t.id} className="onb-test-row" style={{ borderLeftColor: accent }}>
-            <span style={{ color: accent, display: 'inline-flex' }}><Icon size={14} /></span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600 }}>{t.label}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{t.detail}</div>
-            </div>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: accent }}>
-              {state === 'done' ? (
-                <><Check size={12} />{t.result}</>
-              ) : state === 'running' ? (
-                <><span className={`dot ${dotClass}`} />Running…</>
-              ) : (
-                <><span className={`dot ${dotClass}`} />Queued</>
-              )}
-            </span>
-          </div>
-        );
-      })}
-      <div style={{
-        marginTop: 8, fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic',
-      }}>
-        {completed >= tests.length
-          ? 'All checks passed — you can activate the gateway.'
-          : `${completed} / ${tests.length} checks complete · running…`}
+    <div className="onb-add-form" style={{ ['--cat' as string]: color } as React.CSSProperties}>
+      <div className="onb-add-form-row">
+        <input
+          autoFocus
+          placeholder="Field name (e.g. Asset Tag)"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
+          style={{ flex: '2 1 200px' }}
+        />
+        <div className="onb-select" style={{ flex: '1 1 130px' }}>
+          <select value={type} onChange={(e) => setType(e.target.value as 'text' | 'toggle' | 'select')}>
+            <option value="text">Text</option>
+            <option value="toggle">Yes / No</option>
+            <option value="select">Dropdown</option>
+          </select>
+          <ChevronDown size={13} className="onb-select-caret" />
+        </div>
+      </div>
+      {type === 'select' && (
+        <input
+          placeholder="Dropdown options, comma-separated (e.g. Low, Medium, High)"
+          value={opts}
+          onChange={(e) => setOpts(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }}
+        />
+      )}
+      <div className="onb-add-form-actions">
+        <button type="button" onClick={onCancel}><X size={13} />Cancel</button>
+        <button type="button" className="primary" onClick={submit} disabled={!label.trim()}><Plus size={13} />Add field</button>
       </div>
     </div>
   );
 }
 
-function StepActivate({
-  form, update, model,
+/* ────────── Parameter row + controls ────────── */
+
+function ParamRow({
+  p, value, query, onChange, onDelete,
 }: {
-  form: OnboardingForm;
-  update: <K extends keyof OnboardingForm>(key: K, value: OnboardingForm[K]) => void;
-  model: GatewayModel;
+  p: Param;
+  value: string;
+  query: string;
+  onChange: (v: string) => void;
+  onDelete?: () => void;
 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="onb-summary">
-        <SummaryRow label="Model"          value={`${model.name} (${model.tagline})`} />
-        <SummaryRow label="Serial / code"  value={`${form.serial || '—'} / ${form.activationCode || '—'}`} />
-        <SummaryRow label="Branch"         value={`${form.branchName || '—'} · ${form.location || '—'}`} />
-        <SummaryRow label="Site type"      value={`${form.siteType} · ~${form.expectedDevices} devices`} />
-        <SummaryRow label="Firmware"       value={form.firmwareTrack} />
-        <SummaryRow label="Primary WAN"    value={form.primaryWan === 'fiber' ? 'Fiber' : '5G'} />
-        <SummaryRow label="Failover WAN"   value={form.failoverWan === 'none' ? 'None' : form.failoverWan === '5g' ? '5G' : 'Fiber (secondary)'} />
-        <SummaryRow label="IP mode"        value={form.fiberIpMode === 'dhcp' ? 'DHCP' : `Static · ${form.fiberStaticIp || '—'}`} />
-        <SummaryRow label="DNS"            value={`${form.dnsPrimary} · ${form.dnsSecondary}`} />
-        {model.has5G && <SummaryRow label="5G APN / band" value={`${form.fivegApn} · ${form.fivegBand}`} />}
-        <SummaryRow label="Management"     value={`VLAN ${form.managementVlan} · NTP ${form.ntpServer}`} />
-        <SummaryRow label="Syslog"         value={form.syslogDestination} />
-        <SummaryRow label="Admin contact"  value={form.adminEmail || '—'} />
-        <SummaryRow label="MTU"            value={String(form.mtu)} />
+    <div className="onb-param-row">
+      <div className="onb-param-label">
+        <Highlight text={p.label} query={query} />
+        {p.custom && <span className="onb-custom-tag">Custom</span>}
       </div>
+      <div className="onb-param-ov">
+        {p.ctrl.t === 'locked'
+          ? <span className="onb-locked"><Lock size={12} />{p.note ?? 'Locked'}</span>
+          : <ParamControl ctrl={p.ctrl} value={value} onChange={onChange} />}
+        {onDelete && (
+          <button type="button" className="onb-del-field" onClick={onDelete} title="Remove field"><Trash2 size={12} /></button>
+        )}
+      </div>
+    </div>
+  );
+}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <CheckboxRow
-          label="Apply default IT/OT routing policies"
-          detail="Voice/Video high priority, OT VLAN segmented, idle traffic deprioritised."
-          checked={form.applyDefaultPolicies}
-          onChange={(v) => update('applyDefaultPolicies', v)}
-        />
-        <CheckboxRow
-          label="Apply default firewall ruleset"
-          detail="Block inbound except IPsec, deny OT→Internet, allow telemetry egress."
-          checked={form.applyDefaultFirewall}
-          onChange={(v) => update('applyDefaultFirewall', v)}
-        />
-        <CheckboxRow
-          label="Auto-enrol OT VLAN (VLAN 20)"
-          detail="Provisions DHCP scope 10.20.1.0/24 and the OT firewall zone."
-          checked={form.enrollOtVlan}
-          onChange={(v) => update('enrollOtVlan', v)}
-        />
+function ParamControl({ ctrl, value, onChange }: { ctrl: Control; value: string; onChange: (v: string) => void }) {
+  switch (ctrl.t) {
+    case 'toggle':
+      return <Seg options={ctrl.opts} value={value} onChange={onChange} />;
+    case 'select':
+      return (
+        <div className="onb-select">
+          <select value={value} onChange={(e) => onChange(e.target.value)}>
+            {ctrl.opts.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+          <ChevronDown size={13} className="onb-select-caret" />
+        </div>
+      );
+    case 'text':
+      return <input value={value} placeholder={ctrl.placeholder ?? 'Set value…'} onChange={(e) => onChange(e.target.value)} />;
+    case 'action':
+      return <button type="button" className="onb-action-btn"><SlidersHorizontal size={13} />{ctrl.label}</button>;
+    case 'locked':
+      return null;
+  }
+}
+
+function Seg({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="onb-seg" role="group">
+      {options.map((o) => (
+        <button key={o} type="button" className={o === value ? 'on' : ''} onClick={() => onChange(o)}>
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Highlight({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="onb-hl">{text.slice(idx, idx + q.length)}</mark>
+      {text.slice(idx + q.length)}
+    </>
+  );
+}
+
+function LegendRow({ swatch, title, children }: { swatch: 'value' | 'locked'; title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
+      <span className={`onb-legend-dot is-${swatch}`} />
+      <div>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{title}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 1 }}>{children}</div>
       </div>
     </div>
   );
@@ -555,11 +1003,10 @@ function StepActivate({
 
 function GatewayIllustration({ model, step }: { model: GatewayModel; step: number }) {
   // Each step lights up the device a little more, mimicking a real provisioning
-  // sequence: power-on → WAN sync → live tests → fully online.
-  const power     = step >= 0;         // device claimed
-  const wanLit    = step >= 1;         // WAN configured
-  const testing   = step === 2;        // tests running
-  const allOnline = step >= 3;         // activated
+  // sequence: power-on → configured → online.
+  const power = step >= 0;
+  const wanLit = step >= 1;
+  const allOnline = step >= 1;
 
   const W = 300;
   const VBH = 190;
@@ -609,8 +1056,8 @@ function GatewayIllustration({ model, step }: { model: GatewayModel; step: numbe
           </filter>
         </defs>
 
-        {/* Antenna signal waves — only visible when 5G testing or online */}
-        {model.has5G && (testing || allOnline) && (
+        {/* Antenna signal waves — only visible when 5G online */}
+        {model.has5G && allOnline && (
           <g>
             {antennaPositions.map((ax, i) => (
               <g key={`wave-${i}`}>
@@ -677,19 +1124,13 @@ function GatewayIllustration({ model, step }: { model: GatewayModel; step: numbe
         <g transform={`translate(${bodyX + 12} ${bodyY + 18})`}>
           {[
             { label: 'PWR', on: power,   color: okColor },
-            { label: 'WAN', on: wanLit,  color: testing ? warnColor : (wanLit ? okColor : offColor) },
-            { label: '5G',  on: model.has5G && (testing || allOnline), color: testing ? warnColor : okColor, hidden: !model.has5G },
+            { label: 'WAN', on: wanLit,  color: wanLit ? okColor : offColor },
+            { label: '5G',  on: model.has5G && allOnline, color: okColor, hidden: !model.has5G },
             { label: 'CLD', on: allOnline, color: okColor },
-            { label: 'OK',  on: allOnline, color: okColor },
+            { label: 'OK',  on: allOnline, color: allOnline ? okColor : warnColor },
           ].filter((l) => !l.hidden).map((led, i) => (
             <g key={led.label} transform={`translate(${i * 22} 0)`}>
               <circle r={3} fill={led.on ? led.color : offColor}>
-                {(testing && led.label === 'WAN') && (
-                  <animate attributeName="opacity" values="1;0.3;1" dur="0.7s" repeatCount="indefinite" />
-                )}
-                {(testing && led.label === '5G') && (
-                  <animate attributeName="opacity" values="1;0.3;1" dur="0.9s" repeatCount="indefinite" />
-                )}
                 {(allOnline && led.label === 'OK') && (
                   <animate attributeName="opacity" values="1;0.55;1" dur="1.4s" repeatCount="indefinite" />
                 )}
@@ -703,11 +1144,8 @@ function GatewayIllustration({ model, step }: { model: GatewayModel; step: numbe
             siblings on the page. */}
         <g transform={`translate(${bodyX + 15} ${bodyY + bodyH - 28})`}>
           {Array.from({ length: portCount }).map((_, i) => {
+            const lit = allOnline && i < 3;
             const x = i * (portW + portGap);
-            // Light up some ports during testing to suggest link-train activity.
-            const lit = testing
-              ? (i + Math.floor(Date.now() / 500)) % 3 === 0
-              : allOnline && i < 3;
             return (
               <g key={i} transform={`translate(${x} 0)`}>
                 <rect x={0} y={0} width={portW} height={11} rx={1.5}
@@ -715,34 +1153,19 @@ function GatewayIllustration({ model, step }: { model: GatewayModel; step: numbe
                   stroke={lit ? okColor : 'rgba(255,255,255,0.22)'}
                   strokeWidth={1}
                 />
-                <circle cx={portW / 2} cy={-4} r={1.4}
-                  fill={lit ? okColor : offColor}>
-                  {testing && (
-                    <animate attributeName="opacity" values="0;1;0" dur={`${0.5 + (i % 5) * 0.15}s`} repeatCount="indefinite" />
-                  )}
-                </circle>
+                <circle cx={portW / 2} cy={-4} r={1.4} fill={lit ? okColor : offColor} />
               </g>
             );
           })}
           {/* "LAN" label underneath the port row, still inside the body */}
           <text x={0} y={20} fontSize="6.5" fill="rgba(255,255,255,0.45)" letterSpacing="0.08em">LAN PORTS</text>
         </g>
-
-        {/* "Booting" sweep across body when in step 0 */}
-        {step === 0 && (
-          <rect x={bodyX} y={bodyY + bodyH - 1} width={bodyW} height={1.5} fill={model.color} opacity={0.7}>
-            <animate attributeName="x" values={`${bodyX};${bodyX + bodyW};${bodyX}`} dur="2.2s" repeatCount="indefinite" />
-            <animate attributeName="width" values="40;0;40" dur="2.2s" repeatCount="indefinite" />
-          </rect>
-        )}
       </svg>
 
       {/* Caption under the illustration */}
       <div className="onb-caption">
-        {step === 0 && 'Powering on · provisioning controller link…'}
-        {step === 1 && 'WAN profile configured · port LEDs synced'}
-        {step === 2 && 'Live link tests in progress · ports negotiating speed'}
-        {step === 3 && 'Online · publishing to fleet'}
+        {step === 0 && 'Powering on · applying Basic Settings…'}
+        {step === 1 && 'Configuration Options applied · publishing to fleet'}
       </div>
 
       {/* Badge strip — capability summary, framed with the device */}
@@ -751,71 +1174,6 @@ function GatewayIllustration({ model, step }: { model: GatewayModel; step: numbe
           <span key={b} className="onb-cap-pill" style={{ borderColor: model.color, color: model.color }}>{b}</span>
         ))}
       </div>
-    </div>
-  );
-}
-
-/* ────────── Tiny shared primitives ────────── */
-
-function FieldRow({
-  label, hint, icon: Icon, children,
-}: {
-  label: string;
-  hint?: string;
-  icon?: React.ComponentType<{ size?: number }>;
-  children: React.ReactNode;
-}) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
-        {Icon && <Icon size={11} />}
-        {label}
-        {hint && <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-dim)', textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>{hint}</span>}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center', gap: 8,
-      fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-      color: 'var(--accent)',
-      paddingTop: 4,
-    }}>
-      <Network size={12} />
-      {children}
-      <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-    </div>
-  );
-}
-
-function CheckboxRow({
-  label, detail, checked, onChange,
-}: {
-  label: string;
-  detail: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="onb-checkbox">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
-        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{detail}</div>
-      </div>
-    </label>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="kv">
-      <span className="k">{label}</span>
-      <span className="v" style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{value}</span>
     </div>
   );
 }

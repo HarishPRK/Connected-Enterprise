@@ -1,0 +1,42 @@
+{
+  "RecipeFormatVersion": "2020-01-25",
+  "ComponentName": "com.rdk.matter.devicelist",
+  "ComponentVersion": "1.0.0",
+  "ComponentType": "aws.greengrass.generic",
+  "ComponentDescription": "Polls the Matter hub (GET_DEVICES_LIST) and publishes the device list to rdk/matter/devices/list via the AWS IoT HTTPS data endpoint using the Nucleus certs.",
+  "ComponentPublisher": "Connected Enterprise",
+  "ComponentConfiguration": {
+    "DefaultConfiguration": {
+      "hubApi": "http://192.168.1.201:8089/cgi-bin/matterapi.ha",
+      "awsEndpoint": "https://alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com:8443",
+      "listTopic": "rdk/matter/devices/list",
+      "intervalSeconds": "30",
+      "rootCa": "/greengrass/AmazonRootCA1.pem",
+      "certPath": "/greengrass/368dc30029adf5ab982329db91f4b356368c7109a3c06ad00fbe9534451c3a7f-certificate.pem.crt",
+      "keyPath": "/greengrass/368dc30029adf5ab982329db91f4b356368c7109a3c06ad00fbe9534451c3a7f-private.pem.key"
+    }
+  },
+  "Manifests": [
+    {
+      "Platform": {
+        "os": "linux"
+      },
+      "Lifecycle": {
+        "Run": {
+          "RequiresPrivilege": true,
+          "Setenv": {
+            "HUB_API": "{configuration:/hubApi}",
+            "AWS_ENDPOINT": "{configuration:/awsEndpoint}",
+            "LIST_TOPIC": "{configuration:/listTopic}",
+            "INTERVAL_SECONDS": "{configuration:/intervalSeconds}",
+            "ROOT_CA": "{configuration:/rootCa}",
+            "CERT_PATH": "{configuration:/certPath}",
+            "KEY_PATH": "{configuration:/keyPath}"
+          },
+          "Script": "echo \"[matter-devicelist] started: hub=$HUB_API topic=$LIST_TOPIC interval=${INTERVAL_SECONDS}s\"\nwhile true; do\n  rm -f /tmp/rdk_matter_devices.json\n  curl -s -g --connect-timeout 5 --max-time 30 \"$HUB_API?GET_DEVICES_LIST\" -o /tmp/rdk_matter_devices.json\n  if [ -s /tmp/rdk_matter_devices.json ]; then\n    curl -s --tlsv1.2 --cacert \"$ROOT_CA\" --cert \"$CERT_PATH\" --key \"$KEY_PATH\" -X POST -H \"Content-Type: application/json\" --data-binary @/tmp/rdk_matter_devices.json \"$AWS_ENDPOINT/topics/$LIST_TOPIC?qos=1\" > /dev/null\n    echo \"[matter-devicelist] published to $LIST_TOPIC\"\n  else\n    echo \"[matter-devicelist] hub unreachable or empty response\"\n  fi\n  sleep \"$INTERVAL_SECONDS\"\ndone\n"
+        }
+      },
+      "Artifacts": []
+    }
+  ]
+}

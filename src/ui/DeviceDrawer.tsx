@@ -1,10 +1,11 @@
 import { Drawer } from './Drawer';
 import { StatusBadge } from '../components/StatusBadge';
-import type { Device, HealthSignal } from '../types';
+import type { Device, DeviceTelemetry, HealthSignal } from '../types';
 import { getDeviceHealth } from '../data/mock';
-import { Activity, Cable, Wifi, Plug, Stethoscope, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { telemetryHealth, meteringTiles, formatConnectedFor } from './deviceTelemetry';
+import { Activity, Cable, Wifi, Plug, Radio, Stethoscope, CheckCircle2, AlertTriangle, XCircle, Zap } from 'lucide-react';
 
-const connIcon = { wired: Cable, wifi: Wifi, poe: Plug } as const;
+const connIcon = { wired: Cable, wifi: Wifi, poe: Plug, thread: Radio } as const;
 
 export function DeviceDrawer({
   device, onClose, onAction,
@@ -16,7 +17,7 @@ export function DeviceDrawer({
   const open = device != null;
   if (!device) return null;
   const Icon = connIcon[device.conn];
-  const health = getDeviceHealth(device);
+  const health = telemetryHealth(device) ?? getDeviceHealth(device);
 
   return (
     <Drawer open={open} onClose={onClose} title={device.name} width={520}>
@@ -30,8 +31,10 @@ export function DeviceDrawer({
         <Stat label="IP Address"     value={<span className="mono">{device.ip}</span>} />
         <Stat label="MAC Address"    value={<span className="mono">{device.mac}</span>} />
         <Stat label="Type"           value={<span style={{ textTransform: 'capitalize' }}>{device.kind.replace('_', ' ')}</span>} />
-        <Stat label="Connected for"  value={`${device.connectedForHours} h`} />
+        <Stat label="Connected for"  value={formatConnectedFor(device.connectedForHours)} />
       </div>
+
+      {device.telemetry && <MeteringCard t={device.telemetry} />}
 
       {/* ── Diagnostics panel — justifies the status with concrete signals ── */}
       <div className="card" style={{ marginTop: 16, padding: 14, gap: 10 }}>
@@ -77,6 +80,32 @@ export function DeviceDrawer({
         <button onClick={() => onAction?.('disable', device)}>Disable</button>
       </div>
     </Drawer>
+  );
+}
+
+/** Live power metering — prominent stat tiles from the device's own readings. */
+function MeteringCard({ t }: { t: DeviceTelemetry }) {
+  const tiles = meteringTiles(t);
+  if (tiles.length === 0) return null;
+  return (
+    <div className="card" style={{ marginTop: 16, padding: 14, gap: 12 }}>
+      <div className="card-title"><Zap size={13} /> Live power metering</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {tiles.map((m) => (
+          <div className="stat" key={m.label}>
+            <div className="label">{m.label}</div>
+            <div style={{ fontSize: 19, fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
+              {m.value}
+            </div>
+          </div>
+        ))}
+      </div>
+      {t.tempC != null && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingTop: 4, borderTop: '1px dashed var(--border)' }}>
+          Device temperature {t.tempC.toFixed(1)} °C · readings stream live from the device over MQTT
+        </div>
+      )}
+    </div>
   );
 }
 

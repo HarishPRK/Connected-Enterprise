@@ -6,6 +6,7 @@ const labelMap: Record<Device['kind'], string> = {
   laptop: 'Laptops', desktop: 'Desktops', printer: 'Printers',
   payment: 'Payment', server: 'Servers', confphone: 'Conf phones',
   fire_sensor: 'Fire', smoke_sensor: 'Smoke', door_lock: 'Door locks',
+  phone: 'Phones', tablet: 'Tablets', matter: 'Matter', shelly: 'Shelly', generic: 'Other',
 };
 
 const palette = ['#10b981', '#ec4899', '#a855f7', '#84cc16', '#f59e0b', '#ef4444', '#06b6d4', '#6366f1', '#f43f5e'];

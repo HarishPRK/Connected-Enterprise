@@ -1,0 +1,40 @@
+{
+  "RecipeFormatVersion": "2020-01-25",
+  "ComponentName": "com.rdk.matter.devicelist",
+  "ComponentVersion": "2.0.0",
+  "ComponentType": "aws.greengrass.generic",
+  "ComponentDescription": "Long-running: publishes the Matter hub device list to rdk/matter/devices/list on startup and whenever poked on rdk/matter/devices/refresh. Local broker + clientdevices.mqtt.Bridge transport (same as devicecontrol/pathcontrol). Deps pinned for the gateway's Node 10 runtime.",
+  "ComponentPublisher": "Connected Enterprise",
+  "ComponentConfiguration": {
+    "DefaultConfiguration": {
+      "hubApi": "http://192.168.1.201:8089/cgi-bin/matterapi.ha",
+      "localBrokerUri": "tcp://192.168.10.1:1883",
+      "refreshTopic": "rdk/matter/devices/refresh",
+      "listTopic": "rdk/matter/devices/list"
+    }
+  },
+  "Manifests": [
+    {
+      "Platform": {
+        "os": "linux"
+      },
+      "Lifecycle": {
+        "Install": {
+          "RequiresPrivilege": false,
+          "Script": "#!/bin/bash\nset -e\necho '[matterlist] install: writing project files'\n\ncat > package.json << 'EOF'\n{\n  \"name\": \"rdk-matter-device-list\",\n  \"version\": \"2.0.0\",\n  \"description\": \"Matter device list: on-demand + startup publish via local broker + bridge\",\n  \"main\": \"index.js\",\n  \"license\": \"ISC\"\n}\nEOF\n\ncat > index.js << 'EOF'\nconst axios = require('axios');\nconst mqtt = require('mqtt');\n\nconst BROKER        = process.env.MATTERLIST_BROKER_URI   || 'tcp://192.168.10.1:1883';\nconst HUB_API       = process.env.MATTERLIST_HUB_API      || 'http://192.168.1.201:8089/cgi-bin/matterapi.ha';\nconst REFRESH_TOPIC = process.env.MATTERLIST_REFRESH_TOPIC || 'rdk/matter/devices/refresh';\nconst LIST_TOPIC    = process.env.MATTERLIST_LIST_TOPIC    || 'rdk/matter/devices/list';\n\nconsole.log('[matterlist] connecting to local broker ' + BROKER);\nconst client = mqtt.connect(BROKER, {\n  clientId: 'matterlist-' + Math.random().toString(36).slice(2, 10),\n  reconnectPeriod: 3000,\n  keepalive: 30,\n});\n\n// Fetch the hub device list (GET path, no jq dependency) and publish it. Runs\n// on startup and whenever a refresh poke arrives, so the cloud gets a fresh\n// inventory on demand instead of needing a redeploy.\nfunction refreshDeviceList() {\n  const url = HUB_API + '?GET_DEVICES_LIST';\n  console.log('[matterlist] fetching device list -> ' + url);\n  axios.get(url, { timeout: 15000 })\n    .then(function (res) {\n      var body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);\n      client.publish(LIST_TOPIC, body, { qos: 1 });\n      console.log('[matterlist] published device list to ' + LIST_TOPIC);\n    })\n    .catch(function (e) {\n      console.error('[matterlist] device list fetch failed:', e && e.message);\n    });\n}\n\nclient.on('connect', function () {\n  console.log('[matterlist] connected; refresh=' + REFRESH_TOPIC + ' list=' + LIST_TOPIC);\n  client.subscribe(REFRESH_TOPIC, { qos: 1 }, function (err) {\n    if (err) console.error('[matterlist] subscribe failed:', err.message);\n    else console.log('[matterlist] subscribed; waiting for refresh pokes');\n  });\n  refreshDeviceList();\n});\nclient.on('error', function (e) { console.error('[matterlist] mqtt error:', e && e.message); });\nclient.on('reconnect', function () { console.log('[matterlist] reconnecting...'); });\nclient.on('close', function () { console.log('[matterlist] connection closed'); });\n\nclient.on('message', function (topic) {\n  console.log('[matterlist] refresh poke on ' + topic);\n  refreshDeviceList();\n});\n\n// Keep the event loop alive for the lifetime of the component.\nsetInterval(function () {}, 1 << 30);\nEOF\n\necho '[matterlist] install: npm install (Node-10-safe pins)'\nnpm install mqtt@4.3.7 axios@0.27.2 --cache /tmp/npm-cache --omit=dev\necho '[matterlist] install: done'\n"
+        },
+        "Run": {
+          "RequiresPrivilege": false,
+          "Setenv": {
+            "MATTERLIST_BROKER_URI": "{configuration:/localBrokerUri}",
+            "MATTERLIST_HUB_API": "{configuration:/hubApi}",
+            "MATTERLIST_REFRESH_TOPIC": "{configuration:/refreshTopic}",
+            "MATTERLIST_LIST_TOPIC": "{configuration:/listTopic}"
+          },
+          "Script": "node index.js"
+        }
+      },
+      "Artifacts": []
+    }
+  ]
+}
