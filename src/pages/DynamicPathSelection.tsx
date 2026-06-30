@@ -653,6 +653,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   const [activeSimulatedApps, setActiveSimulatedApps] = useState<ApplicationTraffic[]>([]);
   const c = useThemeColors();
   const ipsec = useIpsecMetrics();
+  const { push } = useToast();
 
   // Scope the live list to the current branch's MQTT source — Plano sees
   // `rdk/...` gateways, McKinney sees `prpl/...` gateways. Branches without
