@@ -84,9 +84,7 @@ function inferUnderlay(ifname: string): Underlay {
 /** Order tunnels by the numeric part of their ifname, ascending — so the WAN
  *  list and probe table read vti1, vti2, vti3, vti4 regardless of the order
  *  the gateway happens to report them in. Non-numeric names sort to the front. */
-function orderTunnelsByName(
-  tunnels: IpsecTunnelMetric[],
-): IpsecTunnelMetric[] {
+function orderTunnelsByName(tunnels: IpsecTunnelMetric[]): IpsecTunnelMetric[] {
   const numOf = (s: string) => {
     const match = (s || "").match(/\d+/);
     return match ? parseInt(match[0], 10) : 0;
@@ -171,14 +169,15 @@ const APPLICATION_CATALOG: ApplicationTraffic[] = [
     id: "zoom",
     name: "Zoom Video Call",
     domain: "IT",
-    description: "HD video conferencing - requires low latency, steady bandwidth",
+    description:
+      "HD video conferencing - requires low latency, steady bandwidth",
     icon: Monitor,
     trafficProfile: {
       bandwidth: "3-5 Mbps",
       latencySensitivity: "high",
-      priority: "high"
+      priority: "high",
     },
-    active: false
+    active: false,
   },
   {
     id: "teams",
@@ -189,9 +188,9 @@ const APPLICATION_CATALOG: ApplicationTraffic[] = [
     trafficProfile: {
       bandwidth: "2-4 Mbps",
       latencySensitivity: "high",
-      priority: "high"
+      priority: "high",
     },
-    active: false
+    active: false,
   },
   {
     id: "salesforce",
@@ -202,22 +201,23 @@ const APPLICATION_CATALOG: ApplicationTraffic[] = [
     trafficProfile: {
       bandwidth: "0.5-2 Mbps",
       latencySensitivity: "medium",
-      priority: "standard"
+      priority: "standard",
     },
-    active: false
+    active: false,
   },
   {
     id: "file-transfer",
     name: "File Transfer",
     domain: "IT",
-    description: "Large file upload/download - high bandwidth, latency tolerant",
+    description:
+      "Large file upload/download - high bandwidth, latency tolerant",
     icon: Server,
     trafficProfile: {
       bandwidth: "20-50 Mbps",
       latencySensitivity: "low",
-      priority: "standard"
+      priority: "standard",
     },
-    active: false
+    active: false,
   },
   {
     id: "voip",
@@ -228,9 +228,9 @@ const APPLICATION_CATALOG: ApplicationTraffic[] = [
     trafficProfile: {
       bandwidth: "0.1-0.3 Mbps",
       latencySensitivity: "high",
-      priority: "critical"
+      priority: "critical",
     },
-    active: false
+    active: false,
   },
   {
     id: "smoke-sensor",
@@ -241,9 +241,9 @@ const APPLICATION_CATALOG: ApplicationTraffic[] = [
     trafficProfile: {
       bandwidth: "< 0.1 Mbps",
       latencySensitivity: "high",
-      priority: "critical"
+      priority: "critical",
     },
-    active: false
+    active: false,
   },
   {
     id: "temp-sensors",
@@ -254,9 +254,9 @@ const APPLICATION_CATALOG: ApplicationTraffic[] = [
     trafficProfile: {
       bandwidth: "< 0.1 Mbps",
       latencySensitivity: "low",
-      priority: "standard"
+      priority: "standard",
     },
-    active: false
+    active: false,
   },
   {
     id: "door-locks",
@@ -267,9 +267,9 @@ const APPLICATION_CATALOG: ApplicationTraffic[] = [
     trafficProfile: {
       bandwidth: "< 0.1 Mbps",
       latencySensitivity: "medium",
-      priority: "high"
+      priority: "high",
     },
-    active: false
+    active: false,
   },
   {
     id: "payment-terminal",
@@ -280,9 +280,9 @@ const APPLICATION_CATALOG: ApplicationTraffic[] = [
     trafficProfile: {
       bandwidth: "0.1-0.5 Mbps",
       latencySensitivity: "high",
-      priority: "critical"
+      priority: "critical",
     },
-    active: false
+    active: false,
   },
   {
     id: "security-camera",
@@ -293,10 +293,10 @@ const APPLICATION_CATALOG: ApplicationTraffic[] = [
     trafficProfile: {
       bandwidth: "2-8 Mbps",
       latencySensitivity: "medium",
-      priority: "high"
+      priority: "high",
     },
-    active: false
-  }
+    active: false,
+  },
 ];
 
 function SimulationModal({
@@ -313,47 +313,58 @@ function SimulationModal({
   isSimulating: boolean;
 }) {
   const c = useThemeColors();
-  const [applications, setApplications] = useState<ApplicationTraffic[]>(APPLICATION_CATALOG);
+  const [applications, setApplications] =
+    useState<ApplicationTraffic[]>(APPLICATION_CATALOG);
   const IT_COLOR = "#34d399";
   const OT_COLOR = "#ec4899";
 
-  const activeApps = applications.filter(a => a.active);
-  const itApps = activeApps.filter(a => a.domain === "IT");
-  const otApps = activeApps.filter(a => a.domain === "OT");
+  const activeApps = applications.filter((a) => a.active);
+  const itApps = activeApps.filter((a) => a.domain === "IT");
+  const otApps = activeApps.filter((a) => a.domain === "OT");
 
   const totalBandwidth = (apps: ApplicationTraffic[]) => {
-    return apps.map(a => {
-      const bw = a.trafficProfile.bandwidth;
-      if (bw.includes("-")) {
-        const avg = bw.split("-").map(s => parseFloat(s.replace(/[^\d.]/g, "")));
-        return (avg[0] + avg[1]) / 2;
-      }
-      if (bw.includes("<")) {
-        return 0.05;
-      }
-      return parseFloat(bw.replace(/[^\d.]/g, ""));
-    }).reduce((sum, bw) => sum + bw, 0);
+    return apps
+      .map((a) => {
+        const bw = a.trafficProfile.bandwidth;
+        if (bw.includes("-")) {
+          const avg = bw
+            .split("-")
+            .map((s) => parseFloat(s.replace(/[^\d.]/g, "")));
+          return (avg[0] + avg[1]) / 2;
+        }
+        if (bw.includes("<")) {
+          return 0.05;
+        }
+        return parseFloat(bw.replace(/[^\d.]/g, ""));
+      })
+      .reduce((sum, bw) => sum + bw, 0);
   };
 
   const toggleApp = (id: string) => {
-    setApplications(apps => apps.map(a =>
-      a.id === id ? { ...a, active: !a.active } : a
-    ));
+    setApplications((apps) =>
+      apps.map((a) => (a.id === id ? { ...a, active: !a.active } : a)),
+    );
   };
 
   const priorityColor = (priority: string) => {
-    switch(priority) {
-      case "critical": return c.err;
-      case "high": return c.warn;
-      default: return c.textDim;
+    switch (priority) {
+      case "critical":
+        return c.err;
+      case "high":
+        return c.warn;
+      default:
+        return c.textDim;
     }
   };
 
   const latencyIcon = (sensitivity: string) => {
-    switch(sensitivity) {
-      case "high": return "⚡";
-      case "medium": return "⚪";
-      default: return "○";
+    switch (sensitivity) {
+      case "high":
+        return "⚡";
+      case "medium":
+        return "⚪";
+      default:
+        return "○";
     }
   };
 
@@ -389,7 +400,8 @@ function SimulationModal({
               }}
             >
               <Loader2 size={14} className="spin" />
-              Simulating {activeApps.length} active application{activeApps.length !== 1 ? "s" : ""}
+              Simulating {activeApps.length} active application
+              {activeApps.length !== 1 ? "s" : ""}
             </span>
             <button
               onClick={() => {
@@ -407,10 +419,13 @@ function SimulationModal({
           </div>
         )}
 
-        <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5 }}>
-          Select applications to simulate their traffic flows. Watch how the system intelligently
-          routes IT applications through Fiber (Tunnel 1) and OT applications through 5G (Tunnel 3),
-          or adapts based on Force Fiber/5G modes.
+        <div
+          style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5 }}
+        >
+          Select applications to simulate their traffic flows. Watch how the
+          system intelligently routes IT applications through Fiber (Tunnel 1)
+          and OT applications through 5G (Tunnel 3), or adapts based on Force
+          Fiber/5G modes.
         </div>
 
         {/* Traffic Summary */}
@@ -427,7 +442,14 @@ function SimulationModal({
             }}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: IT_COLOR }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  color: IT_COLOR,
+                }}
+              >
                 IT TRAFFIC
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, color: IT_COLOR }}>
@@ -438,7 +460,14 @@ function SimulationModal({
               </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: OT_COLOR }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  color: OT_COLOR,
+                }}
+              >
                 OT TRAFFIC
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, color: OT_COLOR }}>
@@ -478,7 +507,9 @@ function SimulationModal({
                 }}
                 style={{
                   padding: "12px",
-                  background: app.active ? `${domainColor}15` : "var(--panel-2)",
+                  background: app.active
+                    ? `${domainColor}15`
+                    : "var(--panel-2)",
                   border: `2px solid ${app.active ? domainColor : "var(--border)"}`,
                   borderRadius: 10,
                   cursor: "pointer",
@@ -497,14 +528,19 @@ function SimulationModal({
                   <div
                     style={{
                       padding: 8,
-                      background: app.active ? `${domainColor}25` : "var(--panel-2)",
+                      background: app.active
+                        ? `${domainColor}25`
+                        : "var(--panel-2)",
                       borderRadius: 8,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                     }}
                   >
-                    <Icon size={18} color={app.active ? domainColor : c.textDim} />
+                    <Icon
+                      size={18}
+                      color={app.active ? domainColor : c.textDim}
+                    />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div
@@ -593,7 +629,8 @@ function SimulationModal({
                     }}
                     title={`${app.trafficProfile.latencySensitivity} latency sensitivity`}
                   >
-                    {latencyIcon(app.trafficProfile.latencySensitivity)} {app.trafficProfile.latencySensitivity} lat
+                    {latencyIcon(app.trafficProfile.latencySensitivity)}{" "}
+                    {app.trafficProfile.latencySensitivity} lat
                   </span>
                 </div>
               </div>
@@ -627,12 +664,14 @@ function SimulationModal({
               disabled={activeApps.length === 0 || isSimulating}
               className="primary"
               style={{
-                background: activeApps.length > 0 && !isSimulating
-                  ? "var(--grad-accent-soft)"
-                  : undefined,
-                borderColor: activeApps.length > 0 && !isSimulating
-                  ? "var(--accent)"
-                  : undefined,
+                background:
+                  activeApps.length > 0 && !isSimulating
+                    ? "var(--grad-accent-soft)"
+                    : undefined,
+                borderColor:
+                  activeApps.length > 0 && !isSimulating
+                    ? "var(--accent)"
+                    : undefined,
               }}
             >
               <Sparkles size={14} />
@@ -650,7 +689,9 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   const [showSample, setShowSample] = useState(false);
   const [simulationMode, setSimulationMode] = useState(false);
   const [simulationOpen, setSimulationOpen] = useState(false);
-  const [activeSimulatedApps, setActiveSimulatedApps] = useState<ApplicationTraffic[]>([]);
+  const [activeSimulatedApps, setActiveSimulatedApps] = useState<
+    ApplicationTraffic[]
+  >([]);
   const c = useThemeColors();
   const ipsec = useIpsecMetrics();
   const { push } = useToast();
@@ -761,7 +802,9 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
             <button
               onClick={() => setSimulationOpen(true)}
               style={{
-                background: simulationMode ? "var(--grad-accent-soft)" : undefined,
+                background: simulationMode
+                  ? "var(--grad-accent-soft)"
+                  : undefined,
                 borderColor: simulationMode ? "var(--accent)" : undefined,
               }}
               title="Simulate scenarios to demonstrate application-aware routing"
@@ -1073,12 +1116,20 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                       <input
                         defaultValue={`${vals.warn}${t.unit}`}
                         className="mono"
-                        style={{ padding: "6px 8px", width: "100%", minWidth: 0 }}
+                        style={{
+                          padding: "6px 8px",
+                          width: "100%",
+                          minWidth: 0,
+                        }}
                       />
                       <input
                         defaultValue={`${vals.fail}${t.unit}`}
                         className="mono"
-                        style={{ padding: "6px 8px", width: "100%", minWidth: 0 }}
+                        style={{
+                          padding: "6px 8px",
+                          width: "100%",
+                          minWidth: 0,
+                        }}
                       />
                     </div>
                   ))}
@@ -1102,7 +1153,9 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
         <div className="col-12">
           <Card
             title={
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              >
                 <Sparkles size={13} style={{ color: c.accent3 }} />
                 Active Application Simulation
               </span>
@@ -1149,7 +1202,9 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                 >
                   IT APPLICATIONS → FIBER TUNNEL 1
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                >
                   {activeSimulatedApps
                     .filter((a) => a.domain === "IT")
                     .map((app) => {
@@ -1190,7 +1245,8 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                         </div>
                       );
                     })}
-                  {activeSimulatedApps.filter((a) => a.domain === "IT").length === 0 && (
+                  {activeSimulatedApps.filter((a) => a.domain === "IT")
+                    .length === 0 && (
                     <div
                       style={{
                         fontSize: 12,
@@ -1217,7 +1273,9 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                 >
                   OT APPLICATIONS → 5G TUNNEL 3
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                >
                   {activeSimulatedApps
                     .filter((a) => a.domain === "OT")
                     .map((app) => {
@@ -1258,7 +1316,8 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                         </div>
                       );
                     })}
-                  {activeSimulatedApps.filter((a) => a.domain === "OT").length === 0 && (
+                  {activeSimulatedApps.filter((a) => a.domain === "OT")
+                    .length === 0 && (
                     <div
                       style={{
                         fontSize: 12,
@@ -1285,8 +1344,14 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           setActiveSimulatedApps(apps);
           setSimulationOpen(false);
           // Show which applications are being simulated
-          const itApps = apps.filter(a => a.domain === "IT").map(a => a.name).join(", ");
-          const otApps = apps.filter(a => a.domain === "OT").map(a => a.name).join(", ");
+          const itApps = apps
+            .filter((a) => a.domain === "IT")
+            .map((a) => a.name)
+            .join(", ");
+          const otApps = apps
+            .filter((a) => a.domain === "OT")
+            .map((a) => a.name)
+            .join(", ");
           console.log("Simulating Application-Aware Routing:");
           console.log("  IT Applications → Fiber Tunnel 1:", itApps);
           console.log("  OT Applications → 5G Tunnel 3:", otApps);
@@ -1455,9 +1520,8 @@ function EnterpriseOpsCard({
           lineHeight: 1.5,
         }}
       >
-        All values derive from the live{" "}
-        <span className="mono">rdk/ipsec/metrics</span> protobuf — no synthetic
-        data. SLA thresholds match the path-selector defaults above.
+        All values derive from the live protobuf — no synthetic data. SLA
+        thresholds match the path-selector defaults above.
       </div>
     </Card>
   );
@@ -1565,9 +1629,14 @@ function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
         }
       },
       onError: (msg) => {
-        if (myRun === runIdRef.current) { setError(msg); setLoading(false); }
+        if (myRun === runIdRef.current) {
+          setError(msg);
+          setLoading(false);
+        }
       },
-      onDone: () => { if (myRun === runIdRef.current) setLoading(false); },
+      onDone: () => {
+        if (myRun === runIdRef.current) setLoading(false);
+      },
     });
   }, []);
 
@@ -1782,7 +1851,8 @@ function RssiCard({ clients }: { clients: IpsecWifiClient[] }) {
   const avg = count
     ? Math.round(valid.reduce((s, x) => s + x.rssi, 0) / count)
     : 0;
-  const qcol = (dbm: number) => (dbm >= -55 ? c.ok : dbm >= -67 ? c.warn : c.err);
+  const qcol = (dbm: number) =>
+    dbm >= -55 ? c.ok : dbm >= -67 ? c.warn : c.err;
   // Bucket the fleet by signal quality — constant-size display for any N clients
   // (5 or 50), instead of a per-client list that would overflow the card.
   const strong = valid.filter((cl) => cl.rssi >= -55).length;
@@ -1796,259 +1866,267 @@ function RssiCard({ clients }: { clients: IpsecWifiClient[] }) {
   // Full list (weakest first) for the click-through modal.
   const sorted = [...valid].sort((a, b) => a.rssi - b.rssi);
   // Map -90…-30 dBm → 0…100% for the signal bars.
-  const pct = (dbm: number) => Math.max(4, Math.min(100, ((dbm + 90) / 60) * 100));
+  const pct = (dbm: number) =>
+    Math.max(4, Math.min(100, ((dbm + 90) / 60) * 100));
   return (
     <>
-    <div
-      className="kpi-card"
-      onClick={() => count > 0 && setOpen(true)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if ((e.key === "Enter" || e.key === " ") && count > 0) setOpen(true);
-      }}
-      style={{ cursor: count > 0 ? "pointer" : "default" }}
-      title={count > 0 ? "View all connected devices" : undefined}
-    >
-      <div className="kpi-top">
+      <div
+        className="kpi-card"
+        onClick={() => count > 0 && setOpen(true)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if ((e.key === "Enter" || e.key === " ") && count > 0) setOpen(true);
+        }}
+        style={{ cursor: count > 0 ? "pointer" : "default" }}
+        title={count > 0 ? "View all connected devices" : undefined}
+      >
+        <div className="kpi-top">
+          <div
+            className="kpi-icon"
+            style={{
+              background:
+                "linear-gradient(135deg, rgba(var(--accent-rgb) / 0.22), transparent)",
+              color: "var(--accent)",
+            }}
+          >
+            <Wifi size={16} />
+          </div>
+          <div className="kpi-label">Wi-Fi RSSI</div>
+        </div>
         <div
-          className="kpi-icon"
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                color: c.textMuted,
+                fontWeight: 600,
+                letterSpacing: "0.06em",
+              }}
+            >
+              AVERAGE
+            </div>
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 600,
+                color: count ? qcol(avg) : c.textMuted,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {count ? `${avg} dBm` : "—"}
+            </div>
+          </div>
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                color: c.textMuted,
+                fontWeight: 600,
+                letterSpacing: "0.06em",
+              }}
+            >
+              CLIENTS
+            </div>
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 600,
+                color: c.text,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {count}
+            </div>
+          </div>
+        </div>
+        <div
           style={{
-            background:
-              "linear-gradient(135deg, rgba(var(--accent-rgb) / 0.22), transparent)",
-            color: "var(--accent)",
+            marginTop: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
           }}
         >
-          <Wifi size={16} />
-        </div>
-        <div className="kpi-label">Wi-Fi RSSI</div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              color: c.textMuted,
-              fontWeight: 600,
-              letterSpacing: "0.06em",
-            }}
-          >
-            AVERAGE
-          </div>
-          <div
-            style={{
-              fontSize: 18,
-              fontWeight: 600,
-              color: count ? qcol(avg) : c.textMuted,
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {count ? `${avg} dBm` : "—"}
-          </div>
-        </div>
-        <div>
-          <div
-            style={{
-              fontSize: 10,
-              color: c.textMuted,
-              fontWeight: 600,
-              letterSpacing: "0.06em",
-            }}
-          >
-            CLIENTS
-          </div>
-          <div
-            style={{
-              fontSize: 18,
-              fontWeight: 600,
-              color: c.text,
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {count}
-          </div>
-        </div>
-      </div>
-      <div
-        style={{
-          marginTop: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 6,
-        }}
-      >
-        {count === 0 ? (
-          <div style={{ fontSize: 11, color: c.textMuted }}>
-            No Wi-Fi clients connected
-          </div>
-        ) : (
-          <>
-            {/* Signal-quality distribution — proportional, so it stays one row
+          {count === 0 ? (
+            <div style={{ fontSize: 11, color: c.textMuted }}>
+              No Wi-Fi clients connected
+            </div>
+          ) : (
+            <>
+              {/* Signal-quality distribution — proportional, so it stays one row
                 whether there are 2 clients or 50. */}
-            <div
-              style={{
-                display: "flex",
-                height: 6,
-                borderRadius: 3,
-                overflow: "hidden",
-                background: "rgba(255,255,255,0.08)",
-              }}
-            >
-              {[
-                { n: strong, color: c.ok },
-                { n: fair, color: c.warn },
-                { n: weak, color: c.err },
-              ].map((seg, i) =>
-                seg.n > 0 ? (
-                  <span
-                    key={i}
-                    style={{ width: `${(seg.n / count) * 100}%`, background: seg.color }}
-                  />
-                ) : null,
-              )}
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                fontSize: 10,
-                flexWrap: "wrap",
-              }}
-            >
-              <span style={{ color: c.ok }}>● {strong} strong</span>
-              <span style={{ color: c.warn }}>● {fair} fair</span>
-              <span style={{ color: c.err }}>● {weak} weak</span>
-            </div>
-            {worst && (
               <div
                 style={{
                   display: "flex",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  fontSize: 10.5,
+                  height: 6,
+                  borderRadius: 3,
+                  overflow: "hidden",
+                  background: "rgba(255,255,255,0.08)",
                 }}
               >
-                <span
+                {[
+                  { n: strong, color: c.ok },
+                  { n: fair, color: c.warn },
+                  { n: weak, color: c.err },
+                ].map((seg, i) =>
+                  seg.n > 0 ? (
+                    <span
+                      key={i}
+                      style={{
+                        width: `${(seg.n / count) * 100}%`,
+                        background: seg.color,
+                      }}
+                    />
+                  ) : null,
+                )}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  fontSize: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span style={{ color: c.ok }}>● {strong} strong</span>
+                <span style={{ color: c.warn }}>● {fair} fair</span>
+                <span style={{ color: c.err }}>● {weak} weak</span>
+              </div>
+              {worst && (
+                <div
                   style={{
-                    color: c.textMuted,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    minWidth: 0,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    fontSize: 10.5,
                   }}
                 >
-                  Weakest · {worst.hostname || worst.mac}
-                </span>
-                <span
-                  className="mono"
-                  style={{ color: qcol(worst.rssi), fontWeight: 600 }}
-                >
-                  {worst.rssi} dBm
-                </span>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-
-    {/* Click-through: full RSSI list for every connected Wi-Fi client. */}
-    <Modal
-      open={open}
-      onClose={() => setOpen(false)}
-      title={`Wi-Fi RSSI · ${count} connected ${count === 1 ? "device" : "devices"}`}
-      width={480}
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          maxHeight: 380,
-          overflowY: "auto",
-        }}
-      >
-        {sorted.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: "var(--text-muted)", padding: 8 }}>
-            No Wi-Fi clients connected to the gateway.
-          </div>
-        ) : (
-          sorted.map((cl) => {
-            const col = qcol(cl.rssi);
-            return (
-              <div
-                key={cl.mac}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "8px 10px",
-                  background: "var(--panel-2)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
+                  <span
                     style={{
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      color: "var(--text)",
+                      color: c.textMuted,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
+                      minWidth: 0,
                     }}
                   >
-                    {cl.hostname || cl.mac}
-                  </div>
-                  <div
+                    Weakest · {worst.hostname || worst.mac}
+                  </span>
+                  <span
                     className="mono"
-                    style={{ fontSize: 10.5, color: "var(--text-muted)" }}
+                    style={{ color: qcol(worst.rssi), fontWeight: 600 }}
                   >
-                    {[
-                      cl.mac,
-                      cl.ip || null,
-                      cl.standard ? `802.11${cl.standard}` : null,
-                      cl.snr ? `SNR ${cl.snr} dB` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
+                    {worst.rssi} dBm
+                  </span>
                 </div>
-                <div style={{ textAlign: "right", minWidth: 96 }}>
-                  <div
-                    className="mono"
-                    style={{ fontSize: 14, fontWeight: 700, color: col }}
-                  >
-                    {cl.rssi} dBm
-                  </div>
-                  <div
-                    style={{
-                      width: 80,
-                      height: 4,
-                      borderRadius: 2,
-                      background: "rgba(255,255,255,0.08)",
-                      overflow: "hidden",
-                      marginTop: 3,
-                      marginLeft: "auto",
-                    }}
-                  >
-                    <span
-                      style={{
-                        display: "block",
-                        width: `${pct(cl.rssi)}%`,
-                        height: "100%",
-                        background: col,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        )}
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </Modal>
+
+      {/* Click-through: full RSSI list for every connected Wi-Fi client. */}
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`Wi-Fi RSSI · ${count} connected ${count === 1 ? "device" : "devices"}`}
+        width={480}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            maxHeight: 380,
+            overflowY: "auto",
+          }}
+        >
+          {sorted.length === 0 ? (
+            <div
+              style={{ fontSize: 12.5, color: "var(--text-muted)", padding: 8 }}
+            >
+              No Wi-Fi clients connected to the gateway.
+            </div>
+          ) : (
+            sorted.map((cl) => {
+              const col = qcol(cl.rssi);
+              return (
+                <div
+                  key={cl.mac}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "8px 10px",
+                    background: "var(--panel-2)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        color: "var(--text)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {cl.hostname || cl.mac}
+                    </div>
+                    <div
+                      className="mono"
+                      style={{ fontSize: 10.5, color: "var(--text-muted)" }}
+                    >
+                      {[
+                        cl.mac,
+                        cl.ip || null,
+                        cl.standard ? `802.11${cl.standard}` : null,
+                        cl.snr ? `SNR ${cl.snr} dB` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", minWidth: 96 }}>
+                    <div
+                      className="mono"
+                      style={{ fontSize: 14, fontWeight: 700, color: col }}
+                    >
+                      {cl.rssi} dBm
+                    </div>
+                    <div
+                      style={{
+                        width: 80,
+                        height: 4,
+                        borderRadius: 2,
+                        background: "rgba(255,255,255,0.08)",
+                        overflow: "hidden",
+                        marginTop: 3,
+                        marginLeft: "auto",
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: "block",
+                          width: `${pct(cl.rssi)}%`,
+                          height: "100%",
+                          background: col,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </Modal>
     </>
   );
 }
@@ -2305,9 +2383,21 @@ function routeClassFor(
   idx: number,
 ): "it" | "ot" | null {
   if (mode === "fiber")
-    return underlay === "fiber" ? (idx === 0 ? "it" : idx === 1 ? "ot" : null) : null;
+    return underlay === "fiber"
+      ? idx === 0
+        ? "it"
+        : idx === 1
+          ? "ot"
+          : null
+      : null;
   if (mode === "5g")
-    return underlay === "5g" ? (idx === 0 ? "it" : idx === 1 ? "ot" : null) : null;
+    return underlay === "5g"
+      ? idx === 0
+        ? "it"
+        : idx === 1
+          ? "ot"
+          : null
+      : null;
   // auto: IT on the first Fiber tunnel, OT on the first 5G tunnel.
   if (underlay === "fiber") return idx === 0 ? "it" : null;
   return idx === 0 ? "ot" : null;
@@ -2486,7 +2576,9 @@ function GatewayBlock({
   // ── Per-tunnel time-series: live throughput (Mbps), rolling latency history
   //    (for sparklines + jitter), and active-tunnel failover events. All from
   //    successive real payloads; keyed by ifname so they survive re-renders. ──
-  const lastTunnelRef = useRef<Record<string, { bytes: number; ts: number }>>({});
+  const lastTunnelRef = useRef<Record<string, { bytes: number; ts: number }>>(
+    {},
+  );
   const prevActiveRef = useRef<string>("");
   const [tunnelRates, setTunnelRates] = useState<Record<string, number>>({});
   const [tunnelHist, setTunnelHist] = useState<Record<string, number[]>>({});
@@ -2523,13 +2615,22 @@ function GatewayBlock({
     });
     // Failover events — record active-tunnel flips + SLA breaches this session.
     const a = (m.active_tunnel ?? "").trim();
-    const newEvents: { ts: number; kind: "flip" | "breach"; text: string }[] = [];
+    const newEvents: { ts: number; kind: "flip" | "breach"; text: string }[] =
+      [];
     if (prevActiveRef.current && a && prevActiveRef.current !== a) {
-      newEvents.push({ ts, kind: "flip", text: `${prevActiveRef.current} → ${a}` });
+      newEvents.push({
+        ts,
+        kind: "flip",
+        text: `${prevActiveRef.current} → ${a}`,
+      });
     }
     prevActiveRef.current = a;
     const act = m.tunnels.find((t) => t.ifname === a);
-    if (act && act.reachable && (act.latency_ms > 150 || act.loss_percent > 3)) {
+    if (
+      act &&
+      act.reachable &&
+      (act.latency_ms > 150 || act.loss_percent > 3)
+    ) {
       newEvents.push({
         ts,
         kind: "breach",
@@ -2722,7 +2823,14 @@ function GatewayBlock({
             </span>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            flexWrap: "wrap",
+          }}
+        >
           {/* View toggle — Live (device truth) vs Target policy (app-aware) */}
           <div className="toolbar">
             {(
@@ -2868,7 +2976,6 @@ function GatewayBlock({
           ))
         )}
       </div>
-
     </div>
   );
 }
@@ -2927,13 +3034,16 @@ function IpsecFlowSvg({
 
   // Hover tooltip — which tunnel is hovered + pointer position within the wrap.
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<
-    { t: IpsecTunnelMetric; x: number; y: number } | null
-  >(null);
-  const onTunnelHover = (t: IpsecTunnelMetric) => (e: { clientX: number; clientY: number }) => {
-    const r = wrapRef.current?.getBoundingClientRect();
-    if (r) setHover({ t, x: e.clientX - r.left, y: e.clientY - r.top });
-  };
+  const [hover, setHover] = useState<{
+    t: IpsecTunnelMetric;
+    x: number;
+    y: number;
+  } | null>(null);
+  const onTunnelHover =
+    (t: IpsecTunnelMetric) => (e: { clientX: number; clientY: number }) => {
+      const r = wrapRef.current?.getBoundingClientRect();
+      if (r) setHover({ t, x: e.clientX - r.left, y: e.clientY - r.top });
+    };
 
   // Column positions — left-to-right physical flow. The IT/OT endpoints sit at
   // the far left and feed the gateway; everything downstream is shifted right to
@@ -3067,14 +3177,20 @@ function IpsecFlowSvg({
 
   // Carrier tunnels for the gateway badge (target = IT/OT carriers, only when
   // that class has devices; live = the single active tunnel).
-  const itCarrierTunnel = isTarget && hasIT
-    ? (fiberTunnels.find((_t, i) => routeClassFor(forceMode, "fiber", i) === "it") ??
-       cellTunnels.find((_t, i) => routeClassFor(forceMode, "5g", i) === "it"))
-    : undefined;
-  const otCarrierTunnel = isTarget && hasOT
-    ? (fiberTunnels.find((_t, i) => routeClassFor(forceMode, "fiber", i) === "ot") ??
-       cellTunnels.find((_t, i) => routeClassFor(forceMode, "5g", i) === "ot"))
-    : undefined;
+  const itCarrierTunnel =
+    isTarget && hasIT
+      ? (fiberTunnels.find(
+          (_t, i) => routeClassFor(forceMode, "fiber", i) === "it",
+        ) ??
+        cellTunnels.find((_t, i) => routeClassFor(forceMode, "5g", i) === "it"))
+      : undefined;
+  const otCarrierTunnel =
+    isTarget && hasOT
+      ? (fiberTunnels.find(
+          (_t, i) => routeClassFor(forceMode, "fiber", i) === "ot",
+        ) ??
+        cellTunnels.find((_t, i) => routeClassFor(forceMode, "5g", i) === "ot"))
+      : undefined;
   const liveActiveTunnel = isTarget
     ? undefined
     : m.tunnels.find((t) => t.ifname === activeIfname);
@@ -3090,11 +3206,15 @@ function IpsecFlowSvg({
   // Which underlay each device class is steered into, for the gateway→underlay
   // leg. Target: mode-based split. Live: both classes ride the active underlay.
   const itUnderlay: Underlay = isTarget
-    ? forceMode === "5g" ? "5g" : "fiber"
-    : activeUnderlayOf ?? "fiber";
+    ? forceMode === "5g"
+      ? "5g"
+      : "fiber"
+    : (activeUnderlayOf ?? "fiber");
   const otUnderlay: Underlay = isTarget
-    ? forceMode === "fiber" ? "fiber" : "5g"
-    : activeUnderlayOf ?? "fiber";
+    ? forceMode === "fiber"
+      ? "fiber"
+      : "5g"
+    : (activeUnderlayOf ?? "fiber");
 
   // ── Live throughput → reactive flow speed + rate labels ──
   const rateOf = (ifname: string) => tunnelRates[ifname] ?? 0;
@@ -3113,7 +3233,13 @@ function IpsecFlowSvg({
   const fmtRate = (mbps: number) =>
     mbps >= 1 ? `${mbps.toFixed(1)} Mbps` : `${Math.round(mbps * 1000)} Kbps`;
   // Build a tiny sparkline path inside a box for the latency history.
-  const sparkPath = (vals: number[], x: number, y: number, w: number, h: number) => {
+  const sparkPath = (
+    vals: number[],
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ) => {
     if (vals.length < 2) return "";
     const min = Math.min(...vals);
     const max = Math.max(...vals);
@@ -3155,7 +3281,11 @@ function IpsecFlowSvg({
   }
 
   return (
-    <div className="ipsec-flow-wrap" ref={wrapRef} style={{ position: "relative" }}>
+    <div
+      className="ipsec-flow-wrap"
+      ref={wrapRef}
+      style={{ position: "relative" }}
+    >
       {/* App-aware routing legend — colour key for the two concurrent flows */}
       <div
         style={{
@@ -3353,10 +3483,26 @@ function IpsecFlowSvg({
         {(() => {
           // Dim standby links use each underlay's own colour (not alarm-orange).
           const standbyFiber = (
-            <NodeConnector a={gwRight} b={fiberLeft} state="ok" c={c} beziD={beziD} accent={FIBER_COLOR} flowing={false} />
+            <NodeConnector
+              a={gwRight}
+              b={fiberLeft}
+              state="ok"
+              c={c}
+              beziD={beziD}
+              accent={FIBER_COLOR}
+              flowing={false}
+            />
           );
           const standbyCell = (
-            <NodeConnector a={gwRight} b={cellLeft} state="ok" c={c} beziD={beziD} accent={CELL_COLOR} flowing={false} />
+            <NodeConnector
+              a={gwRight}
+              b={cellLeft}
+              state="ok"
+              c={c}
+              beziD={beziD}
+              accent={CELL_COLOR}
+              flowing={false}
+            />
           );
 
           if (!isTarget) {
@@ -3445,7 +3591,8 @@ function IpsecFlowSvg({
           const flowColor = cls ? carryColorOf(cls) : FIBER_COLOR;
           // Live single-active flow shows IT+OT combined (emerald→pink); target
           // class flows stay solid in their own class colour.
-          const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
+          const flowStroke =
+            cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
           const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
           const pid = `ipsec-fiber-in-${i}`;
           const target = { x: PILL_X, y: fiberPillY(i) + PILL_H / 2 };
@@ -3457,7 +3604,9 @@ function IpsecFlowSvg({
                 d={d}
                 fill="none"
                 stroke={carrying ? flowStroke : col}
-                strokeWidth={carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9}
+                strokeWidth={
+                  carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9
+                }
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
                 strokeLinecap="round"
@@ -3474,7 +3623,10 @@ function IpsecFlowSvg({
               {carrying && (
                 <>
                   <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
-                    <animateMotion dur={`${flowDur(t.ifname)}s`} repeatCount="indefinite">
+                    <animateMotion
+                      dur={`${flowDur(t.ifname)}s`}
+                      repeatCount="indefinite"
+                    >
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
@@ -3501,7 +3653,8 @@ function IpsecFlowSvg({
           const flowColor = cls ? carryColorOf(cls) : CELL_COLOR;
           // Live single-active flow shows IT+OT combined (emerald→pink); target
           // class flows stay solid in their own class colour.
-          const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
+          const flowStroke =
+            cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
           const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
           const pid = `ipsec-cell-in-${i}`;
           const target = { x: PILL_X, y: cellPillY(i) + PILL_H / 2 };
@@ -3513,7 +3666,9 @@ function IpsecFlowSvg({
                 d={d}
                 fill="none"
                 stroke={carrying ? flowStroke : col}
-                strokeWidth={carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9}
+                strokeWidth={
+                  carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9
+                }
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
                 strokeLinecap="round"
@@ -3530,7 +3685,10 @@ function IpsecFlowSvg({
               {carrying && (
                 <>
                   <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
-                    <animateMotion dur={`${flowDur(t.ifname)}s`} repeatCount="indefinite">
+                    <animateMotion
+                      dur={`${flowDur(t.ifname)}s`}
+                      repeatCount="indefinite"
+                    >
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
@@ -3568,10 +3726,15 @@ function IpsecFlowSvg({
           const reachable = t.reachable;
           // Same carrier mapping as the inbound leg, colour-matched to what the
           // tunnel carries (IT = emerald, OT = pink, both = IT+OT emerald→pink).
-          const cls = tunnelCarry(kind === "fiber" ? "fiber" : "5g", i, t.ifname);
+          const cls = tunnelCarry(
+            kind === "fiber" ? "fiber" : "5g",
+            i,
+            t.ifname,
+          );
           const carrying = cls != null && reachable;
           const flowColor = cls ? carryColorOf(cls) : col;
-          const flowStroke = cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
+          const flowStroke =
+            cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
           const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
           const pid = `ipsec-${kind}-out-${i}`;
           const total = Math.max(1, m.tunnels.length - 1);
@@ -3588,7 +3751,9 @@ function IpsecFlowSvg({
                 d={d}
                 fill="none"
                 stroke={carrying ? flowStroke : col}
-                strokeWidth={carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9}
+                strokeWidth={
+                  carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9
+                }
                 strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
                 opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
                 strokeLinecap="round"
@@ -3605,7 +3770,10 @@ function IpsecFlowSvg({
               {carrying && (
                 <>
                   <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
-                    <animateMotion dur={`${flowDur(t.ifname)}s`} repeatCount="indefinite">
+                    <animateMotion
+                      dur={`${flowDur(t.ifname)}s`}
+                      repeatCount="indefinite"
+                    >
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
@@ -3823,7 +3991,13 @@ function IpsecFlowSvg({
               {/* Faint latency-trend sparkline behind the pill text. */}
               {spark.length > 1 && (
                 <path
-                  d={sparkPath(spark, PILL_X + 60, py + 8, PILL_W - 120, PILL_H - 16)}
+                  d={sparkPath(
+                    spark,
+                    PILL_X + 60,
+                    py + 8,
+                    PILL_W - 120,
+                    PILL_H - 16,
+                  )}
                   fill="none"
                   stroke={col}
                   strokeWidth={1.4}
@@ -4108,7 +4282,14 @@ function IpsecFlowSvg({
           const rate = rateOf(ht.ifname);
           const rows: [string, string][] = [
             ["Underlay", u === "fiber" ? "Fiber" : "5G"],
-            ["State", ht.reachable ? "reachable" : ht.present ? "unreachable" : "absent"],
+            [
+              "State",
+              ht.reachable
+                ? "reachable"
+                : ht.present
+                  ? "unreachable"
+                  : "absent",
+            ],
             ["Latency", ht.reachable ? `${ht.latency_ms.toFixed(1)} ms` : "—"],
             ["Jitter", ht.reachable ? `${jit.toFixed(1)} ms` : "—"],
             ["Loss", ht.reachable ? `${ht.loss_percent.toFixed(2)} %` : "—"],
@@ -4226,7 +4407,11 @@ function DeviceColumn({
   const PAD = 9;
   const GROUP_GAP = 24;
   const groupH = (n: number) =>
-    HEADER_H + PAD + Math.max(n, 1) * ROW_H + (Math.max(n, 1) - 1) * ROW_GAP + PAD;
+    HEADER_H +
+    PAD +
+    Math.max(n, 1) * ROW_H +
+    (Math.max(n, 1) - 1) * ROW_GAP +
+    PAD;
 
   const itH = groupH(it.length);
   const otH = groupH(ot.length);
@@ -4241,7 +4426,13 @@ function DeviceColumn({
   const stateOf = (s: DeviceView["status"]): "ok" | "warn" | "err" =>
     s === "ok" ? "ok" : s === "warn" ? "warn" : "err";
   const dotColor = (s: DeviceView["status"]) =>
-    s === "ok" ? c.ok : s === "warn" ? c.warn : s === "err" ? c.err : c.textMuted;
+    s === "ok"
+      ? c.ok
+      : s === "warn"
+        ? c.warn
+        : s === "err"
+          ? c.err
+          : c.textMuted;
 
   const renderGroup = (
     devices: DeviceView[],
@@ -4265,7 +4456,15 @@ function DeviceColumn({
         strokeWidth={1.2}
       />
       {/* header: domain chip + count */}
-      <rect x={x + PAD} y={groupY + 6} width={26} height={16} rx={4} fill={accent} opacity={0.9} />
+      <rect
+        x={x + PAD}
+        y={groupY + 6}
+        width={26}
+        height={16}
+        rx={4}
+        fill={accent}
+        opacity={0.9}
+      />
       <text
         x={x + PAD + 13}
         y={groupY + 18}
@@ -4296,7 +4495,9 @@ function DeviceColumn({
           const top = rowTop(groupY, i);
           const Icon = DEVICE_KIND_ICON[d.kind] ?? HelpCircle;
           const highlight = d.status !== "ok";
-          const border = highlight ? dotColor(d.status) : "rgba(255,255,255,0.10)";
+          const border = highlight
+            ? dotColor(d.status)
+            : "rgba(255,255,255,0.10)";
           const name = d.name.length > 16 ? `${d.name.slice(0, 15)}…` : d.name;
           return (
             <g key={d.id}>
@@ -4326,7 +4527,12 @@ function DeviceColumn({
               >
                 {name}
               </text>
-              <circle cx={x + w - PAD - 10} cy={top + ROW_H / 2} r={3.5} fill={dotColor(d.status)} />
+              <circle
+                cx={x + w - PAD - 10}
+                cy={top + ROW_H / 2}
+                r={3.5}
+                fill={dotColor(d.status)}
+              />
             </g>
           );
         })
@@ -4366,8 +4572,22 @@ function DeviceColumn({
           />
         ),
       )}
-      {renderGroup(it, itY, itH, "IT", `${it.length} endpoint${it.length === 1 ? "" : "s"}`, itColor)}
-      {renderGroup(ot, otY, otH, "OT", `${ot.length} sensor${ot.length === 1 ? "" : "s"} / locks`, otColor)}
+      {renderGroup(
+        it,
+        itY,
+        itH,
+        "IT",
+        `${it.length} endpoint${it.length === 1 ? "" : "s"}`,
+        itColor,
+      )}
+      {renderGroup(
+        ot,
+        otY,
+        otH,
+        "OT",
+        `${ot.length} sensor${ot.length === 1 ? "" : "s"} / locks`,
+        otColor,
+      )}
     </g>
   );
 }
@@ -4465,13 +4685,7 @@ function SysNodeBox({
       {/* Illustration slot — centred between title and sub */}
       <g transform={`translate(${cx} ${illY})`}>{illustration}</g>
       {/* Sub-label */}
-      <text
-        x={cx}
-        y={subY}
-        textAnchor="middle"
-        fontSize={12}
-        fill={c.textDim}
-      >
+      <text x={cx} y={subY} textAnchor="middle" fontSize={12} fill={c.textDim}>
         {sub}
       </text>
       {/* Status pulse dot top-right when not ok */}
@@ -4986,7 +5200,9 @@ function FlowEventRibbon({
           Path events
         </span>
         <span style={{ display: "inline-flex", gap: 14, fontSize: 11 }}>
-          <span style={{ color: c.accent3 }}>{flips} failover{flips === 1 ? "" : "s"}</span>
+          <span style={{ color: c.accent3 }}>
+            {flips} failover{flips === 1 ? "" : "s"}
+          </span>
           <span style={{ color: breaches ? c.warn : "var(--text-muted)" }}>
             {breaches} SLA breach{breaches === 1 ? "" : "es"}
           </span>
@@ -5149,11 +5365,20 @@ function TunnelRow({
               const sc = score >= 80 ? c.ok : score >= 60 ? c.warn : c.err;
               return (
                 <span
-                  style={{ display: "inline-flex", flexDirection: "column", gap: 3 }}
+                  style={{
+                    display: "inline-flex",
+                    flexDirection: "column",
+                    gap: 3,
+                  }}
                 >
                   <span
                     className="mono"
-                    style={{ fontSize: 13, fontWeight: 700, color: sc, lineHeight: 1 }}
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: sc,
+                      lineHeight: 1,
+                    }}
                   >
                     {score}
                   </span>
@@ -5179,7 +5404,10 @@ function TunnelRow({
               );
             })()
           ) : (
-            <span className="ipsec-metric-value mono" style={{ color: c.textMuted }}>
+            <span
+              className="ipsec-metric-value mono"
+              style={{ color: c.textMuted }}
+            >
               —
             </span>
           )}
