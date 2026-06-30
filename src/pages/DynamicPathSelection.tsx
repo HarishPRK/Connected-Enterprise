@@ -95,12 +95,14 @@ function orderTunnelsByName(
 }
 
 /** Turn a raw device hostname (`rdk-bpi4-gateway`) into a friendly title
- *  (`RDK BPI4 Gateway`). Tokens that look like acronyms or model codes — three
+ *  (`Edge Gateway`). Tokens that look like acronyms or model codes — three
  *  letters or fewer, or containing a digit — are upper-cased; the rest are
  *  title-cased. Display-only; the raw hostname is still shown as sub-text. */
 function displayGatewayName(raw: string): string {
   const name = (raw || "").trim();
   if (!name) return "";
+  // Special case: rdk-bpi4-gateway always displays as "Edge Gateway"
+  if (name === "rdk-bpi4-gateway") return "Edge Gateway";
   return name
     .split(/[-_\s]+/)
     .filter(Boolean)
@@ -149,9 +151,506 @@ interface SlaSample {
   fiveg_mos: number;
 }
 
+/** Application traffic simulation for demonstrating application-aware routing */
+type ApplicationTraffic = {
+  id: string;
+  name: string;
+  domain: "IT" | "OT";
+  description: string;
+  icon: typeof Laptop;
+  trafficProfile: {
+    bandwidth: string;
+    latencySensitivity: "low" | "medium" | "high";
+    priority: "standard" | "high" | "critical";
+  };
+  active: boolean;
+};
+
+const APPLICATION_CATALOG: ApplicationTraffic[] = [
+  {
+    id: "zoom",
+    name: "Zoom Video Call",
+    domain: "IT",
+    description: "HD video conferencing - requires low latency, steady bandwidth",
+    icon: Monitor,
+    trafficProfile: {
+      bandwidth: "3-5 Mbps",
+      latencySensitivity: "high",
+      priority: "high"
+    },
+    active: false
+  },
+  {
+    id: "teams",
+    name: "Microsoft Teams",
+    domain: "IT",
+    description: "Collaboration & screen sharing - latency sensitive",
+    icon: Laptop,
+    trafficProfile: {
+      bandwidth: "2-4 Mbps",
+      latencySensitivity: "high",
+      priority: "high"
+    },
+    active: false
+  },
+  {
+    id: "salesforce",
+    name: "Salesforce CRM",
+    domain: "IT",
+    description: "Cloud database sync - moderate bandwidth, transactional",
+    icon: Server,
+    trafficProfile: {
+      bandwidth: "0.5-2 Mbps",
+      latencySensitivity: "medium",
+      priority: "standard"
+    },
+    active: false
+  },
+  {
+    id: "file-transfer",
+    name: "File Transfer",
+    domain: "IT",
+    description: "Large file upload/download - high bandwidth, latency tolerant",
+    icon: Server,
+    trafficProfile: {
+      bandwidth: "20-50 Mbps",
+      latencySensitivity: "low",
+      priority: "standard"
+    },
+    active: false
+  },
+  {
+    id: "voip",
+    name: "VoIP Phone",
+    domain: "IT",
+    description: "Voice call - very latency sensitive, low bandwidth",
+    icon: PhoneCall,
+    trafficProfile: {
+      bandwidth: "0.1-0.3 Mbps",
+      latencySensitivity: "high",
+      priority: "critical"
+    },
+    active: false
+  },
+  {
+    id: "smoke-sensor",
+    name: "Smoke Detectors",
+    domain: "OT",
+    description: "Life safety alerts - critical priority, low bandwidth",
+    icon: Flame,
+    trafficProfile: {
+      bandwidth: "< 0.1 Mbps",
+      latencySensitivity: "high",
+      priority: "critical"
+    },
+    active: false
+  },
+  {
+    id: "temp-sensors",
+    name: "Temperature Sensors",
+    domain: "OT",
+    description: "Environmental monitoring - periodic updates",
+    icon: Cpu,
+    trafficProfile: {
+      bandwidth: "< 0.1 Mbps",
+      latencySensitivity: "low",
+      priority: "standard"
+    },
+    active: false
+  },
+  {
+    id: "door-locks",
+    name: "Smart Door Locks",
+    domain: "OT",
+    description: "Access control - low latency for user experience",
+    icon: DoorClosed,
+    trafficProfile: {
+      bandwidth: "< 0.1 Mbps",
+      latencySensitivity: "medium",
+      priority: "high"
+    },
+    active: false
+  },
+  {
+    id: "payment-terminal",
+    name: "Payment Terminal",
+    domain: "OT",
+    description: "POS transactions - critical for business, latency sensitive",
+    icon: CreditCard,
+    trafficProfile: {
+      bandwidth: "0.1-0.5 Mbps",
+      latencySensitivity: "high",
+      priority: "critical"
+    },
+    active: false
+  },
+  {
+    id: "security-camera",
+    name: "Security Camera",
+    domain: "OT",
+    description: "Video surveillance - high bandwidth, continuous stream",
+    icon: Monitor,
+    trafficProfile: {
+      bandwidth: "2-8 Mbps",
+      latencySensitivity: "medium",
+      priority: "high"
+    },
+    active: false
+  }
+];
+
+function SimulationModal({
+  open,
+  onClose,
+  onRunSimulation,
+  onStopSimulation,
+  isSimulating,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onRunSimulation: (apps: ApplicationTraffic[]) => void;
+  onStopSimulation: () => void;
+  isSimulating: boolean;
+}) {
+  const c = useThemeColors();
+  const [applications, setApplications] = useState<ApplicationTraffic[]>(APPLICATION_CATALOG);
+  const IT_COLOR = "#34d399";
+  const OT_COLOR = "#ec4899";
+
+  const activeApps = applications.filter(a => a.active);
+  const itApps = activeApps.filter(a => a.domain === "IT");
+  const otApps = activeApps.filter(a => a.domain === "OT");
+
+  const totalBandwidth = (apps: ApplicationTraffic[]) => {
+    return apps.map(a => {
+      const bw = a.trafficProfile.bandwidth;
+      if (bw.includes("-")) {
+        const avg = bw.split("-").map(s => parseFloat(s.replace(/[^\d.]/g, "")));
+        return (avg[0] + avg[1]) / 2;
+      }
+      if (bw.includes("<")) {
+        return 0.05;
+      }
+      return parseFloat(bw.replace(/[^\d.]/g, ""));
+    }).reduce((sum, bw) => sum + bw, 0);
+  };
+
+  const toggleApp = (id: string) => {
+    setApplications(apps => apps.map(a =>
+      a.id === id ? { ...a, active: !a.active } : a
+    ));
+  };
+
+  const priorityColor = (priority: string) => {
+    switch(priority) {
+      case "critical": return c.err;
+      case "high": return c.warn;
+      default: return c.textDim;
+    }
+  };
+
+  const latencyIcon = (sensitivity: string) => {
+    switch(sensitivity) {
+      case "high": return "⚡";
+      case "medium": return "⚪";
+      default: return "○";
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Application-Aware Routing Simulator"
+      width={880}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {isSimulating && (
+          <div
+            style={{
+              padding: "12px 16px",
+              background: "var(--grad-accent-soft)",
+              border: "1px solid var(--accent)",
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--text)",
+              }}
+            >
+              <Loader2 size={14} className="spin" />
+              Simulating {activeApps.length} active application{activeApps.length !== 1 ? "s" : ""}
+            </span>
+            <button
+              onClick={() => {
+                onStopSimulation();
+                onClose();
+              }}
+              style={{
+                background: "var(--err)",
+                borderColor: "var(--err)",
+                color: "#fff",
+              }}
+            >
+              Stop Simulation
+            </button>
+          </div>
+        )}
+
+        <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5 }}>
+          Select applications to simulate their traffic flows. Watch how the system intelligently
+          routes IT applications through Fiber (Tunnel 1) and OT applications through 5G (Tunnel 3),
+          or adapts based on Force Fiber/5G modes.
+        </div>
+
+        {/* Traffic Summary */}
+        {activeApps.length > 0 && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+              padding: "12px",
+              background: "var(--panel-2)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: IT_COLOR }}>
+                IT TRAFFIC
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: IT_COLOR }}>
+                {itApps.length} app{itApps.length !== 1 ? "s" : ""}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                ~{totalBandwidth(itApps).toFixed(1)} Mbps → Fiber Tunnel 1
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: OT_COLOR }}>
+                OT TRAFFIC
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: OT_COLOR }}>
+                {otApps.length} app{otApps.length !== 1 ? "s" : ""}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                ~{totalBandwidth(otApps).toFixed(1)} Mbps → 5G Tunnel 3
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Application Grid */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, 1fr)",
+            gap: 10,
+            maxHeight: 420,
+            overflowY: "auto",
+            padding: "2px",
+          }}
+        >
+          {applications.map((app) => {
+            const Icon = app.icon;
+            const domainColor = app.domain === "IT" ? IT_COLOR : OT_COLOR;
+            return (
+              <div
+                key={app.id}
+                onClick={() => toggleApp(app.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    toggleApp(app.id);
+                  }
+                }}
+                style={{
+                  padding: "12px",
+                  background: app.active ? `${domainColor}15` : "var(--panel-2)",
+                  border: `2px solid ${app.active ? domainColor : "var(--border)"}`,
+                  borderRadius: 10,
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                  opacity: app.active ? 1 : 0.75,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "start",
+                    gap: 10,
+                    marginBottom: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: 8,
+                      background: app.active ? `${domainColor}25` : "var(--panel-2)",
+                      borderRadius: 8,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Icon size={18} color={app.active ? domainColor : c.textDim} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div
+                      style={{
+                        fontSize: 13.5,
+                        fontWeight: 700,
+                        color: "var(--text)",
+                        marginBottom: 2,
+                      }}
+                    >
+                      {app.name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: "0.06em",
+                        color: domainColor,
+                      }}
+                    >
+                      {app.domain} DOMAIN
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={app.active}
+                    onChange={() => toggleApp(app.id)}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      cursor: "pointer",
+                      accentColor: domainColor,
+                    }}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    fontSize: 11.5,
+                    color: "var(--text-dim)",
+                    marginBottom: 8,
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {app.description}
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    fontSize: 10,
+                  }}
+                >
+                  <span
+                    className="badge"
+                    style={{
+                      background: "var(--panel-2)",
+                      borderColor: "var(--border)",
+                      color: "var(--text-dim)",
+                      padding: "2px 6px",
+                    }}
+                  >
+                    {app.trafficProfile.bandwidth}
+                  </span>
+                  <span
+                    className="badge"
+                    style={{
+                      background: "var(--panel-2)",
+                      borderColor: priorityColor(app.trafficProfile.priority),
+                      color: priorityColor(app.trafficProfile.priority),
+                      padding: "2px 6px",
+                    }}
+                    title={`${app.trafficProfile.priority} priority`}
+                  >
+                    {app.trafficProfile.priority}
+                  </span>
+                  <span
+                    className="badge"
+                    style={{
+                      background: "var(--panel-2)",
+                      borderColor: "var(--border)",
+                      color: "var(--text-dim)",
+                      padding: "2px 6px",
+                    }}
+                    title={`${app.trafficProfile.latencySensitivity} latency sensitivity`}
+                  >
+                    {latencyIcon(app.trafficProfile.latencySensitivity)} {app.trafficProfile.latencySensitivity} lat
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            paddingTop: 8,
+            borderTop: "1px solid var(--border)",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            {activeApps.length === 0
+              ? "Select at least one application to run simulation"
+              : "Simulation shows real-time traffic routing through tunnels"}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose}>Cancel</button>
+            <button
+              onClick={() => {
+                if (activeApps.length > 0) {
+                  onRunSimulation(activeApps);
+                }
+              }}
+              disabled={activeApps.length === 0 || isSimulating}
+              className="primary"
+              style={{
+                background: activeApps.length > 0 && !isSimulating
+                  ? "var(--grad-accent-soft)"
+                  : undefined,
+                borderColor: activeApps.length > 0 && !isSimulating
+                  ? "var(--accent)"
+                  : undefined,
+              }}
+            >
+              <Sparkles size={14} />
+              Run Simulation
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   const [metric, setMetric] = useState<Metric>("latency");
   const [showSample, setShowSample] = useState(false);
+  const [simulationMode, setSimulationMode] = useState(false);
+  const [simulationOpen, setSimulationOpen] = useState(false);
+  const [activeSimulatedApps, setActiveSimulatedApps] = useState<ApplicationTraffic[]>([]);
   const c = useThemeColors();
   const ipsec = useIpsecMetrics();
 
@@ -257,6 +756,17 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
             <button className="primary">
               <Settings2 size={14} />
               Tune SLA
+            </button>
+            <button
+              onClick={() => setSimulationOpen(true)}
+              style={{
+                background: simulationMode ? "var(--grad-accent-soft)" : undefined,
+                borderColor: simulationMode ? "var(--accent)" : undefined,
+              }}
+              title="Simulate scenarios to demonstrate application-aware routing"
+            >
+              <Sparkles size={14} />
+              Simulate
             </button>
           </div>
         }
@@ -585,6 +1095,217 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           </Card>
         </div>
       </div>
+
+      {/* Active simulation indicator */}
+      {simulationMode && activeSimulatedApps.length > 0 && (
+        <div className="col-12">
+          <Card
+            title={
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <Sparkles size={13} style={{ color: c.accent3 }} />
+                Active Application Simulation
+              </span>
+            }
+            sub={`${activeSimulatedApps.length} application${activeSimulatedApps.length !== 1 ? "s" : ""} generating traffic flows`}
+            right={
+              <button
+                onClick={() => {
+                  setSimulationMode(false);
+                  setActiveSimulatedApps([]);
+                  push({
+                    kind: "info",
+                    title: "Simulation Stopped",
+                    detail: "Returning to live telemetry data",
+                  });
+                }}
+                style={{
+                  background: "var(--err)",
+                  borderColor: "var(--err)",
+                  color: "#fff",
+                }}
+              >
+                Stop Simulation
+              </button>
+            }
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 16,
+              }}
+            >
+              {/* IT Applications */}
+              <div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    color: "#34d399",
+                    marginBottom: 10,
+                  }}
+                >
+                  IT APPLICATIONS → FIBER TUNNEL 1
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {activeSimulatedApps
+                    .filter((a) => a.domain === "IT")
+                    .map((app) => {
+                      const Icon = app.icon;
+                      return (
+                        <div
+                          key={app.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "8px 10px",
+                            background: "rgba(52, 211, 153, 0.08)",
+                            border: "1px solid rgba(52, 211, 153, 0.25)",
+                            borderRadius: 8,
+                          }}
+                        >
+                          <Icon size={14} color="#34d399" />
+                          <span
+                            style={{
+                              flex: 1,
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              color: "var(--text)",
+                            }}
+                          >
+                            {app.name}
+                          </span>
+                          <span
+                            className="mono"
+                            style={{
+                              fontSize: 10.5,
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {app.trafficProfile.bandwidth}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  {activeSimulatedApps.filter((a) => a.domain === "IT").length === 0 && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "var(--text-muted)",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      No IT applications selected
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* OT Applications */}
+              <div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    color: "#ec4899",
+                    marginBottom: 10,
+                  }}
+                >
+                  OT APPLICATIONS → 5G TUNNEL 3
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {activeSimulatedApps
+                    .filter((a) => a.domain === "OT")
+                    .map((app) => {
+                      const Icon = app.icon;
+                      return (
+                        <div
+                          key={app.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "8px 10px",
+                            background: "rgba(236, 72, 153, 0.08)",
+                            border: "1px solid rgba(236, 72, 153, 0.25)",
+                            borderRadius: 8,
+                          }}
+                        >
+                          <Icon size={14} color="#ec4899" />
+                          <span
+                            style={{
+                              flex: 1,
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              color: "var(--text)",
+                            }}
+                          >
+                            {app.name}
+                          </span>
+                          <span
+                            className="mono"
+                            style={{
+                              fontSize: 10.5,
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {app.trafficProfile.bandwidth}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  {activeSimulatedApps.filter((a) => a.domain === "OT").length === 0 && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "var(--text-muted)",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      No OT applications selected
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Simulation modal */}
+      <SimulationModal
+        open={simulationOpen}
+        onClose={() => setSimulationOpen(false)}
+        onRunSimulation={(apps) => {
+          setSimulationMode(true);
+          setActiveSimulatedApps(apps);
+          setSimulationOpen(false);
+          // Show which applications are being simulated
+          const itApps = apps.filter(a => a.domain === "IT").map(a => a.name).join(", ");
+          const otApps = apps.filter(a => a.domain === "OT").map(a => a.name).join(", ");
+          console.log("Simulating Application-Aware Routing:");
+          console.log("  IT Applications → Fiber Tunnel 1:", itApps);
+          console.log("  OT Applications → 5G Tunnel 3:", otApps);
+          push({
+            kind: "success",
+            title: "Application Simulation Started",
+            detail: `${apps.length} application${apps.length !== 1 ? "s" : ""} active - watch traffic routing through tunnels`,
+          });
+        }}
+        onStopSimulation={() => {
+          setSimulationMode(false);
+          setActiveSimulatedApps([]);
+          push({
+            kind: "info",
+            title: "Simulation Stopped",
+            detail: "Returning to live telemetry data",
+          });
+        }}
+        isSimulating={simulationMode}
+      />
     </div>
   );
 }
