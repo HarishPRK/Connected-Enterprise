@@ -2636,7 +2636,6 @@ function GatewayBlock({
           </div>
           <div className="ipsec-gw-sub mono">
             {[
-              m.gateway.name,
               m.gateway.mac,
               m.gateway.prim_wan_ip && `primary ${m.gateway.prim_wan_ip}`,
               m.gateway.sec_wan_ip &&
