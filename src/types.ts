@@ -163,6 +163,105 @@ export interface IpsecWifiMetrics {
   clients: IpsecWifiClient[];
 }
 
+/* ─── Cellular metrics (field 8 in the proto) ─── */
+
+export interface CellularInterfaceMetric {
+  ifname: string;
+  present: boolean;
+  link_up: boolean;
+  mac: string;
+  ipv4_address: string;
+  ipv6_address: string;
+  mtu: number;
+  rx_bytes: number;
+  tx_bytes: number;
+  rx_packets: number;
+  tx_packets: number;
+  rx_errors: number;
+  tx_errors: number;
+  rx_dropped: number;
+  tx_dropped: number;
+}
+
+export interface CellularModemMetric {
+  modem_path: string;
+  modem_index: number;
+  manufacturer: string;
+  model: string;
+  firmware_revision: string;
+  hardware_revision: string;
+  device_id: string;
+  imei: string;
+  driver: string;
+  plugin: string;
+  primary_port: string;
+  ports: string[];
+  state: string;
+  power_state: string;
+  lock: string;
+  signal_quality_percent: number;
+  access_technology: string;
+  allowed_modes: string;
+  preferred_mode: string;
+  current_bands: string;
+  supported_bands: string;
+  operator_name: string;
+  operator_code: string;
+  registration_state: string;
+}
+
+export interface CellularSimMetric {
+  sim_path: string;
+  sim_slot: string;
+  active: boolean;
+  iccid: string;
+  imsi: string;
+  eid: string;
+}
+
+export interface CellularBearerMetric {
+  bearer_path: string;
+  connected: boolean;
+  apn: string;
+  ip_type: string;
+  interface: string;
+  ipv4_address: string;
+  ipv4_gateway: string;
+  ipv4_dns1: string;
+  ipv4_dns2: string;
+  ipv6_address: string;
+  ipv6_gateway: string;
+  ipv6_dns1: string;
+  ipv6_dns2: string;
+  mtu: number;
+}
+
+export interface CellularRadioMetric {
+  rssi_dbm: number;
+  rsrp_dbm: number;
+  rsrq_db: number;
+  snr_db: number;
+  serving_cell_info: string;
+  lte_band: string;
+  nr5g_band: string;
+  cell_id: number;
+  tac: number;
+  pci: number;
+  earfcn: number;
+  nrarfcn: number;
+}
+
+export interface CellularMetrics {
+  available: boolean;
+  modem_count: number;
+  interface?: CellularInterfaceMetric;
+  modem?: CellularModemMetric;
+  sim?: CellularSimMetric;
+  bearer?: CellularBearerMetric;
+  radio?: CellularRadioMetric;
+  health: string;
+}
+
 export interface IpsecMetrics {
   timestamp_ms: number;
   active_tunnel: string;
@@ -171,6 +270,7 @@ export interface IpsecMetrics {
   wan: IpsecWanMetric;
   gateway: IpsecGatewayMetric;
   wifi?: IpsecWifiMetrics;
+  cellular?: CellularMetrics;
 }
 
 /** Server snapshot wrapper — adds when the message was received locally so the

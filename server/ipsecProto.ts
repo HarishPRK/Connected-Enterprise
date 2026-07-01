@@ -20,6 +20,12 @@
  */
 
 import type {
+  CellularBearerMetric,
+  CellularInterfaceMetric,
+  CellularMetrics,
+  CellularModemMetric,
+  CellularRadioMetric,
+  CellularSimMetric,
   IpsecGatewayMetric,
   IpsecMetrics,
   IpsecTunnelMetric,
@@ -197,6 +203,156 @@ function decodeWifi(buf: Uint8Array): IpsecWifiMetrics {
   return out;
 }
 
+function decodeCellularInterface(buf: Uint8Array): CellularInterfaceMetric {
+  const out: CellularInterfaceMetric = {
+    ifname: '', present: false, link_up: false, mac: '',
+    ipv4_address: '', ipv6_address: '', mtu: 0,
+    rx_bytes: 0, tx_bytes: 0, rx_packets: 0, tx_packets: 0,
+    rx_errors: 0, tx_errors: 0, rx_dropped: 0, tx_dropped: 0,
+  };
+  for (const { field, wire, r } of fields(buf)) {
+    if      (field === 1  && wire === 2) out.ifname = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 2  && wire === 0) out.present = readVarint(r) !== 0n;
+    else if (field === 3  && wire === 0) out.link_up = readVarint(r) !== 0n;
+    else if (field === 4  && wire === 2) out.mac = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 5  && wire === 2) out.ipv4_address = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 6  && wire === 2) out.ipv6_address = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 7  && wire === 0) out.mtu = Number(readVarint(r));
+    else if (field === 8  && wire === 0) out.rx_bytes = Number(readVarint(r));
+    else if (field === 9  && wire === 0) out.tx_bytes = Number(readVarint(r));
+    else if (field === 10 && wire === 0) out.rx_packets = Number(readVarint(r));
+    else if (field === 11 && wire === 0) out.tx_packets = Number(readVarint(r));
+    else if (field === 12 && wire === 0) out.rx_errors = Number(readVarint(r));
+    else if (field === 13 && wire === 0) out.tx_errors = Number(readVarint(r));
+    else if (field === 14 && wire === 0) out.rx_dropped = Number(readVarint(r));
+    else if (field === 15 && wire === 0) out.tx_dropped = Number(readVarint(r));
+    else skipField(r, wire);
+  }
+  return out;
+}
+
+function decodeCellularModem(buf: Uint8Array): CellularModemMetric {
+  const out: CellularModemMetric = {
+    modem_path: '', modem_index: 0, manufacturer: '', model: '',
+    firmware_revision: '', hardware_revision: '', device_id: '', imei: '',
+    driver: '', plugin: '', primary_port: '', ports: [],
+    state: '', power_state: '', lock: '', signal_quality_percent: 0,
+    access_technology: '', allowed_modes: '', preferred_mode: '',
+    current_bands: '', supported_bands: '',
+    operator_name: '', operator_code: '', registration_state: '',
+  };
+  for (const { field, wire, r } of fields(buf)) {
+    if      (field === 1  && wire === 2) out.modem_path = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 2  && wire === 0) out.modem_index = Number(readVarint(r));
+    else if (field === 3  && wire === 2) out.manufacturer = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 4  && wire === 2) out.model = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 5  && wire === 2) out.firmware_revision = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 6  && wire === 2) out.hardware_revision = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 7  && wire === 2) out.device_id = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 8  && wire === 2) out.imei = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 9  && wire === 2) out.driver = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 10 && wire === 2) out.plugin = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 11 && wire === 2) out.primary_port = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 12 && wire === 2) out.ports.push(new TextDecoder().decode(readLengthDelimited(r)));
+    else if (field === 13 && wire === 2) out.state = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 14 && wire === 2) out.power_state = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 15 && wire === 2) out.lock = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 16 && wire === 0) out.signal_quality_percent = Number(readVarint(r));
+    else if (field === 17 && wire === 2) out.access_technology = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 18 && wire === 2) out.allowed_modes = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 19 && wire === 2) out.preferred_mode = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 20 && wire === 2) out.current_bands = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 21 && wire === 2) out.supported_bands = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 22 && wire === 2) out.operator_name = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 23 && wire === 2) out.operator_code = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 24 && wire === 2) out.registration_state = new TextDecoder().decode(readLengthDelimited(r));
+    else skipField(r, wire);
+  }
+  return out;
+}
+
+function decodeCellularSim(buf: Uint8Array): CellularSimMetric {
+  const out: CellularSimMetric = {
+    sim_path: '', sim_slot: '', active: false, iccid: '', imsi: '', eid: '',
+  };
+  for (const { field, wire, r } of fields(buf)) {
+    if      (field === 1 && wire === 2) out.sim_path = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 2 && wire === 2) out.sim_slot = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 3 && wire === 0) out.active = readVarint(r) !== 0n;
+    else if (field === 4 && wire === 2) out.iccid = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 5 && wire === 2) out.imsi = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 6 && wire === 2) out.eid = new TextDecoder().decode(readLengthDelimited(r));
+    else skipField(r, wire);
+  }
+  return out;
+}
+
+function decodeCellularBearer(buf: Uint8Array): CellularBearerMetric {
+  const out: CellularBearerMetric = {
+    bearer_path: '', connected: false, apn: '', ip_type: '', interface: '',
+    ipv4_address: '', ipv4_gateway: '', ipv4_dns1: '', ipv4_dns2: '',
+    ipv6_address: '', ipv6_gateway: '', ipv6_dns1: '', ipv6_dns2: '', mtu: 0,
+  };
+  for (const { field, wire, r } of fields(buf)) {
+    if      (field === 1  && wire === 2) out.bearer_path = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 2  && wire === 0) out.connected = readVarint(r) !== 0n;
+    else if (field === 3  && wire === 2) out.apn = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 4  && wire === 2) out.ip_type = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 5  && wire === 2) out.interface = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 6  && wire === 2) out.ipv4_address = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 7  && wire === 2) out.ipv4_gateway = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 8  && wire === 2) out.ipv4_dns1 = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 9  && wire === 2) out.ipv4_dns2 = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 10 && wire === 2) out.ipv6_address = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 11 && wire === 2) out.ipv6_gateway = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 12 && wire === 2) out.ipv6_dns1 = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 13 && wire === 2) out.ipv6_dns2 = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 14 && wire === 0) out.mtu = Number(readVarint(r));
+    else skipField(r, wire);
+  }
+  return out;
+}
+
+function decodeCellularRadio(buf: Uint8Array): CellularRadioMetric {
+  const out: CellularRadioMetric = {
+    rssi_dbm: 0, rsrp_dbm: 0, rsrq_db: 0, snr_db: 0,
+    serving_cell_info: '', lte_band: '', nr5g_band: '',
+    cell_id: 0, tac: 0, pci: 0, earfcn: 0, nrarfcn: 0,
+  };
+  for (const { field, wire, r } of fields(buf)) {
+    if      (field === 1  && wire === 0) out.rssi_dbm = readInt32(r);
+    else if (field === 2  && wire === 0) out.rsrp_dbm = readInt32(r);
+    else if (field === 3  && wire === 0) out.rsrq_db = readInt32(r);
+    else if (field === 4  && wire === 0) out.snr_db = readInt32(r);
+    else if (field === 5  && wire === 2) out.serving_cell_info = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 6  && wire === 2) out.lte_band = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 7  && wire === 2) out.nr5g_band = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 8  && wire === 0) out.cell_id = Number(readVarint(r));
+    else if (field === 9  && wire === 0) out.tac = Number(readVarint(r));
+    else if (field === 10 && wire === 0) out.pci = Number(readVarint(r));
+    else if (field === 11 && wire === 0) out.earfcn = Number(readVarint(r));
+    else if (field === 12 && wire === 0) out.nrarfcn = Number(readVarint(r));
+    else skipField(r, wire);
+  }
+  return out;
+}
+
+function decodeCellular(buf: Uint8Array): CellularMetrics {
+  const out: CellularMetrics = { available: false, modem_count: 0, health: '' };
+  for (const { field, wire, r } of fields(buf)) {
+    if      (field === 1 && wire === 0) out.available = readVarint(r) !== 0n;
+    else if (field === 2 && wire === 0) out.modem_count = Number(readVarint(r));
+    else if (field === 3 && wire === 2) out.interface = decodeCellularInterface(readLengthDelimited(r));
+    else if (field === 4 && wire === 2) out.modem = decodeCellularModem(readLengthDelimited(r));
+    else if (field === 5 && wire === 2) out.sim = decodeCellularSim(readLengthDelimited(r));
+    else if (field === 6 && wire === 2) out.bearer = decodeCellularBearer(readLengthDelimited(r));
+    else if (field === 7 && wire === 2) out.radio = decodeCellularRadio(readLengthDelimited(r));
+    else if (field === 8 && wire === 2) out.health = new TextDecoder().decode(readLengthDelimited(r));
+    else skipField(r, wire);
+  }
+  return out;
+}
+
 export function decodeIpsecMetrics(buf: Uint8Array): IpsecMetrics {
   const out: IpsecMetrics = {
     timestamp_ms: 0,
@@ -214,6 +370,7 @@ export function decodeIpsecMetrics(buf: Uint8Array): IpsecMetrics {
     else if (field === 5 && wire === 2) out.wan = decodeWan(readLengthDelimited(r));
     else if (field === 6 && wire === 2) out.gateway = decodeGateway(readLengthDelimited(r));
     else if (field === 7 && wire === 2) out.wifi = decodeWifi(readLengthDelimited(r));
+    else if (field === 8 && wire === 2) out.cellular = decodeCellular(readLengthDelimited(r));
     else skipField(r, wire);
   }
   return out;

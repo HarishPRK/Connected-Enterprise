@@ -448,6 +448,7 @@ class IpsecSource extends EventEmitter {
           high_retrans_clients: Number(metrics.wifi.high_retrans_clients ?? 0),
           clients: Array.isArray(metrics.wifi.clients) ? metrics.wifi.clients : [],
         } : undefined,
+        cellular: metrics.cellular ?? undefined,
       };
 
       const source = topicToSource(topic);

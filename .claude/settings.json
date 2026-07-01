@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npx tsc *)",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash(curl -s http://localhost:3001/api/ipsec/snapshot)",
+      "Bash(npx -y json)",
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\)\\); const prpl=Object.entries\\(d.gateways\\).find\\(\\([k]\\)=>k.startsWith\\('prpl'\\)\\); if\\(prpl\\) { const c=prpl[1].metrics.cellular; console.log\\(JSON.stringify\\(c,null,2\\)\\); } else console.log\\('no prpl gateway'\\)\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);const prpl=Object.entries\\(j.gateways\\).find\\(\\([k]\\)=>k.startsWith\\('prpl'\\)\\);if\\(prpl\\){console.log\\(JSON.stringify\\(prpl[1].metrics.cellular,null,2\\)\\)}else{console.log\\('no prpl gateway'\\)}}\\)\")"
     ]
   }
 }

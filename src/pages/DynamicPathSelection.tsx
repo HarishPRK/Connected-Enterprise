@@ -40,9 +40,12 @@ import {
   Tablet,
   Plug,
   HelpCircle,
+  Radio,
+  Signal,
 } from "lucide-react";
 import { pathThresholds, BRANCH_TO_IPSEC_SOURCE } from "../data/mock";
 import type {
+  CellularMetrics,
   IpsecGatewayState,
   IpsecTunnelMetric,
   IpsecWifiClient,
@@ -2951,6 +2954,11 @@ function GatewayBlock({
         </span>
       </div>
 
+      {/* Cellular stats — shown when the payload carries cellular telemetry */}
+      {m.cellular?.available && (
+        <CellularStatsBar cellular={m.cellular} c={c} />
+      )}
+
       {/* Tunnels — one row per */}
       <div className="ipsec-tunnels">
         {m.tunnels.length === 0 ? (
@@ -5165,6 +5173,212 @@ function InternetIllustration({ tint }: { tint: string }) {
         opacity={0.45}
       />
     </g>
+  );
+}
+
+/** Cellular modem panel — unified tile mosaic with color-grouped zones. */
+function CellularStatsBar({
+  cellular,
+  c,
+}: {
+  cellular: CellularMetrics;
+  c: ThemeColors;
+}) {
+  const radio = cellular.radio;
+  const modem = cellular.modem;
+  const bearer = cellular.bearer;
+  const iface = cellular.interface;
+
+  const signalPct = modem?.signal_quality_percent ?? 0;
+  const signalColor =
+    signalPct >= 60 ? c.ok : signalPct >= 30 ? c.warn : signalPct > 0 ? c.err : "var(--text-muted)";
+  const isConnected = modem?.state === "connected" || bearer?.connected;
+
+  const CELL_ACCENT = "#ffa07c";
+  const ZONE_RADIO = "rgba(255,200,150,0.05)";
+  const ZONE_NET = "rgba(150,180,255,0.05)";
+  const ZONE_IFACE = "rgba(150,255,200,0.05)";
+
+  return (
+    <div
+      style={{
+        margin: "8px 0",
+        background: "rgba(255,160,124,0.02)",
+        border: "1px solid rgba(255,160,124,0.18)",
+        borderRadius: 12,
+        overflow: "hidden",
+      }}
+    >
+      {/* ── Header ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 16px",
+          background: "rgba(255,160,124,0.05)",
+          borderBottom: "1px solid rgba(255,160,124,0.1)",
+        }}
+      >
+        <div
+          style={{
+            width: 32, height: 32, borderRadius: 8,
+            background: "linear-gradient(135deg, rgba(255,160,124,0.22), rgba(255,160,124,0.06))",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: CELL_ACCENT, flexShrink: 0,
+          }}
+        >
+          <Radio size={16} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>
+            5G / Cellular Modem
+          </div>
+          <div style={{ fontSize: 10.5, color: "var(--text-muted)", marginTop: 1 }}>
+            {modem?.manufacturer || "Unknown"}{" "}
+            <strong style={{ color: "var(--text-dim)" }}>{modem?.model || "—"}</strong>
+            {modem?.firmware_revision && <span style={{ marginLeft: 6, opacity: 0.7 }}>FW {modem.firmware_revision}</span>}
+          </div>
+        </div>
+        <span
+          style={{
+            fontSize: 9.5, padding: "3px 10px", fontWeight: 700, letterSpacing: "0.04em",
+            borderRadius: 999,
+            color: isConnected ? c.ok : c.err,
+            border: `1px solid ${isConnected ? "rgba(124,255,212,0.35)" : "rgba(255,107,107,0.35)"}`,
+            background: isConnected ? "rgba(124,255,212,0.08)" : "rgba(255,107,107,0.08)",
+            display: "inline-flex", alignItems: "center", gap: 5,
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: isConnected ? c.ok : c.err }} />
+          {isConnected ? "CONNECTED" : (modem?.state?.toUpperCase() || "OFFLINE")}
+        </span>
+        {cellular.health && (
+          <span style={{ fontSize: 10.5, color: cellular.health === "ok" ? c.ok : c.warn, fontWeight: 600 }}>
+            {cellular.health === "ok" ? "Healthy" : cellular.health}
+          </span>
+        )}
+      </div>
+
+      {/* ── Tile mosaic: 4-col uniform grid ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1, background: "rgba(255,255,255,0.03)" }}>
+
+        {/* Row 1: Radio — signal hero (2-wide) + RSSI + RSRP */}
+        <CellTile
+          icon={<Signal size={14} />}
+          label="Signal Quality"
+          value={`${signalPct}%`}
+          hint="Modem-reported signal strength percentage"
+          valueColor={signalColor}
+          bg={ZONE_RADIO}
+          span={2}
+          hero={
+            <div style={{ position: "relative", width: 40, height: 40, flexShrink: 0 }}>
+              <svg viewBox="0 0 40 40" width={40} height={40}>
+                <circle cx={20} cy={20} r={16} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={3.5} />
+                <circle cx={20} cy={20} r={16} fill="none" stroke={signalColor} strokeWidth={3.5}
+                  strokeDasharray={`${(signalPct / 100) * 100.5} 100.5`}
+                  strokeLinecap="round" transform="rotate(-90 20 20)"
+                  style={{ transition: "stroke-dasharray 0.5s ease" }}
+                />
+              </svg>
+            </div>
+          }
+        />
+        <CellTile icon={<span>📡</span>} label="RSSI" value={`${radio?.rssi_dbm ?? 0} dBm`} hint="Received signal strength indicator" bg={ZONE_RADIO} />
+        <CellTile icon={<span>📶</span>} label="RSRP" value={`${radio?.rsrp_dbm ?? 0} dBm`} hint="Reference signal received power" bg={ZONE_RADIO} />
+
+        {/* Row 2: Radio continued */}
+        <CellTile icon={<span>📊</span>} label="RSRQ" value={`${radio?.rsrq_db ?? 0} dB`} hint="Reference signal received quality" bg={ZONE_RADIO} />
+        <CellTile icon={<span>⚡</span>} label="SNR" value={`${radio?.snr_db ?? 0} dB`} hint="Signal-to-noise ratio" bg={ZONE_RADIO} />
+        <CellTile icon={<span>🗼</span>} label="Cell ID" value={`${radio?.cell_id ?? 0}`} hint="Serving cell tower identifier" bg={ZONE_RADIO} />
+        <CellTile icon={<span>🎯</span>} label="PCI" value={`${radio?.pci ?? 0}`} hint="Physical cell ID for handover" bg={ZONE_RADIO} />
+
+        {/* Row 3: Network */}
+        <CellTile icon={<span>🌐</span>} label="IPv4 Address" value={bearer?.ipv4_address || "—"} hint="Public IP assigned by carrier" bg={ZONE_NET} />
+        <CellTile icon={<span>🚪</span>} label="Gateway" value={bearer?.ipv4_gateway || "—"} hint="Next hop router for outbound traffic" bg={ZONE_NET} />
+        <CellTile icon={<span>🔍</span>} label="DNS Server" value={bearer?.ipv4_dns1 || "—"} hint="Domain name resolution server" bg={ZONE_NET} />
+        <CellTile icon={<span>📋</span>} label="IP Type" value={bearer?.ip_type || "—"} hint="IPv4, IPv6, or dual-stack" bg={ZONE_NET} />
+
+        {/* Row 4: Network + Interface */}
+        <CellTile icon={<span>📦</span>} label="MTU" value={`${bearer?.mtu ?? 0} bytes`} hint="Maximum transmission unit size" bg={ZONE_NET} />
+        <CellTile icon={<span>📱</span>} label="APN" value={bearer?.apn || "auto"} hint="Access point name for carrier" bg={ZONE_NET} />
+        <CellTile icon={<span>🔌</span>} label="Interface" value={iface?.ifname || "—"} hint="Linux network device name" bg={ZONE_IFACE} />
+        <CellTile
+          icon={<span>🔗</span>}
+          label="Link Status"
+          value={iface?.link_up ? "UP" : "DOWN"}
+          hint="Physical link state of the interface"
+          valueColor={iface?.link_up ? c.ok : c.err}
+          bg={ZONE_IFACE}
+        />
+
+        {/* Row 5: Interface traffic */}
+        <CellTile icon={<ArrowDown size={13} color={c.ok} />} label="Received (RX)" value={fmtBytes(iface?.rx_bytes ?? 0)} hint="Total bytes downloaded" bg={ZONE_IFACE} sub={`${(iface?.rx_packets ?? 0).toLocaleString()} packets`} />
+        <CellTile icon={<ArrowUp size={13} color={c.accent} />} label="Sent (TX)" value={fmtBytes(iface?.tx_bytes ?? 0)} hint="Total bytes uploaded" bg={ZONE_IFACE} sub={`${(iface?.tx_packets ?? 0).toLocaleString()} packets`} />
+        <CellTile icon={<span>⚠️</span>} label="RX Errors" value={`${iface?.rx_errors ?? 0}`} hint="Receive-side errors" bg={ZONE_IFACE} valueColor={(iface?.rx_errors ?? 0) > 0 ? c.err : undefined} />
+        <CellTile icon={<span>⚠️</span>} label="TX Errors" value={`${iface?.tx_errors ?? 0}`} hint="Transmit-side errors" bg={ZONE_IFACE} valueColor={(iface?.tx_errors ?? 0) > 0 ? c.err : undefined} />
+      </div>
+
+      {/* ── IPv6 footer ── */}
+      {(bearer?.ipv6_address || iface?.ipv6_address) && (
+        <div style={{ padding: "7px 16px", borderTop: "1px solid rgba(255,160,124,0.08)", display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 9.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            IPv6
+          </span>
+          <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>
+            {bearer?.ipv6_address || iface?.ipv6_address || "—"}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A single tile in the cellular mosaic — fixed height, uniform anatomy. */
+function CellTile({
+  icon, label, value, hint, valueColor, bg, span, hero, sub,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  hint: string;
+  valueColor?: string;
+  bg?: string;
+  span?: number;
+  hero?: React.ReactNode;
+  sub?: string;
+}) {
+  return (
+    <div
+      title={hint}
+      style={{
+        gridColumn: span ? `span ${span}` : undefined,
+        background: bg ?? "transparent",
+        padding: "10px 14px",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        minHeight: 54,
+        cursor: "default",
+      }}
+    >
+      {hero}
+      <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 18, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {icon}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 10.5, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.03em", lineHeight: 1.3 }}>
+          {label}
+        </div>
+        <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: valueColor ?? "var(--text)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {value}
+        </div>
+        {sub && (
+          <div style={{ fontSize: 9.5, color: "var(--text-muted)", marginTop: 1 }}>{sub}</div>
+        )}
+      </div>
+    </div>
   );
 }
 
