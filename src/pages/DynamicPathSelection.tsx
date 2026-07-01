@@ -3175,11 +3175,12 @@ function IpsecFlowSvg({
   ): "it" | "ot" | "both" | null => {
     if (isTarget) return presentClass(routeClassFor(forceMode, underlay, idx));
     // Live: the single active tunnel carries whichever classes are connected.
+    // When no devices are discovered yet, still show traffic on the active path.
     if (!ifname || ifname !== activeIfname) return null;
     if (hasIT && hasOT) return "both";
     if (hasIT) return "it";
     if (hasOT) return "ot";
-    return null;
+    return "both";
   };
   // "both" (live single active tunnel) leads with IT emerald; its trailing
   // particle is OT pink (set per-leg) so one tunnel shows IT+OT together.
