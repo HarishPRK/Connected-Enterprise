@@ -3175,12 +3175,11 @@ function IpsecFlowSvg({
   ): "it" | "ot" | "both" | null => {
     if (isTarget) return presentClass(routeClassFor(forceMode, underlay, idx));
     // Live: the single active tunnel carries whichever classes are connected.
-    // When no devices are discovered yet, still show traffic on the active path.
     if (!ifname || ifname !== activeIfname) return null;
     if (hasIT && hasOT) return "both";
     if (hasIT) return "it";
     if (hasOT) return "ot";
-    return "both";
+    return null;
   };
   // "both" (live single active tunnel) leads with IT emerald; its trailing
   // particle is OT pink (set per-leg) so one tunnel shows IT+OT together.
@@ -3523,6 +3522,7 @@ function IpsecFlowSvg({
             // both are present they run parallel, otherwise the one runs centred.
             const end = activeUnderlayOf === "fiber" ? fiberLeft : cellLeft;
             const both = hasIT && hasOT;
+            const noDevices = !hasIT && !hasOT;
             return (
               <>
                 {activeUnderlayOf && hasIT && (
@@ -3547,8 +3547,10 @@ function IpsecFlowSvg({
                     flowing
                   />
                 )}
-                {activeUnderlayOf !== "fiber" && standbyFiber}
-                {activeUnderlayOf !== "5g" && standbyCell}
+                {/* Always show both underlay links as dashed connectors when
+                    no devices are discovered — the gateway still has paths. */}
+                {(activeUnderlayOf !== "fiber" || noDevices) && standbyFiber}
+                {(activeUnderlayOf !== "5g" || noDevices) && standbyCell}
               </>
             );
           }
