@@ -1,0 +1,9 @@
+Resource,Role,Allocation %,Current Tasks,July Tasks,August Tasks,September+ Tasks,Utilization,Bottleneck Risk
+Frontend Developer 1,Senior Frontend,100%,Mobile responsive (P1-003),Bulk ops (P2-002) Keyboard shortcuts (P2-006),Fuzzy search (P3-003) Dynamic topology (P3-008),Dark theme (P4-006) Historical UI (P4-010),High,Low
+Frontend Developer 2,Frontend Engineer,100%,Error boundaries (P1-002) Loading skeletons (P1-005),Component splits (P2-004 P2-005),Badge colors (P3-001) Branch map (P3-005),Animation polish (P4-007),High,Low
+Backend Developer 1,Senior Backend,100%,Device discovery (P1-004),Historical API (P2-007) Device actions (P2-008),Export APIs (P3-004) Alert rules (P3-006),RBAC (P4-002) Multi-tenant (P4-003),Very High,High
+Backend Developer 2,Backend Engineer,80%,AWS IoT fix (P1-001),Firmware updates (P2-009),Escalation webhooks (P3-009),Prometheus (P4-004) ML predictions (P4-011),High,Medium
+DevOps Engineer,DevOps Lead,60%,Credential rotation (P1-001),Health checks (P3-007),CI/CD (P3-011) Secrets Manager (P3-010),E2E infrastructure (P4-005),Medium,Low
+QA Engineer,Quality Assurance,40%,Manual testing,Regression testing,E2E test design (P3-011),Test automation (P4-005),Low,High - Need hire
+Product Manager,Product Lead,50%,Requirements refinement,Feature prioritization,Roadmap planning,Enterprise tier design,Medium,Low
+UX/UI Designer,Design Lead,30%,Mobile mockups,Accessibility review,Advanced feature design,Native app design,Low,Medium - Need more capacity

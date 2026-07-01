@@ -1,0 +1,16 @@
+Task ID,Task Name,Description,Priority,Status,Owner,Start Date,Deadline,Effort (Days),Business Value,Dependencies,Risk Level
+P4-001,Multi-Branch Incident Correlation,Agent analyzes patterns across all sites,P4 - Future,Not Started,Backend,2026-09-01,2026-10-15,10,Very High - $300K/year proactive maintenance savings,Enhanced AI agent,High
+P4-002,Role-Based Access Control,Per-branch user permissions and teams,P4 - Future,Not Started,Backend,2026-10-01,2026-11-30,15,Very High - Unlocks enterprise tier ($500K ARR),Auth service design,High
+P4-003,Multi-Tenant Isolation,Separate customer data and branding,P4 - Future,Not Started,Backend,2026-11-01,2026-12-31,20,Very High - Enables SaaS model ($2M+ ARR),RBAC complete,Very High
+P4-004,Prometheus Metrics Export,Observability and alerting integration,P4 - Future,Not Started,DevOps,2026-09-15,2026-10-15,5,High - Required for enterprise customers,Metrics design,Medium
+P4-005,E2E Testing Suite,Automated tests for agent device-control path-switching,P4 - Future,Not Started,QA,2026-10-01,2026-11-15,10,High - 70% reduction in production bugs,Cypress/Playwright setup,Medium
+P4-006,Dark Theme Refinements,Better contrast accessible colors,P4 - Future,Not Started,Frontend,2026-09-01,2026-09-05,1,Low - User preference enhancement,None,Low
+P4-007,Animation Polish,Smoother page transitions micro-interactions,P4 - Future,Not Started,Frontend,2026-09-05,2026-09-08,1,Low - Premium feel for demos,None,Low
+P4-008,Chart Library Evaluation,Replace Recharts (200KB) with lighter option,P4 - Future,Not Started,Frontend,2026-09-10,2026-09-15,2,Medium - 15% faster page loads,None,Medium
+P4-009,Image Lazy Loading,Optimize Fleet page map rendering,P4 - Future,Not Started,Frontend,2026-09-15,2026-09-16,0.5,Low - Marginal performance gain,None,Low
+P4-010,Historical Playback UI,Time-range picker for bandwidth charts,P4 - Future,Not Started,Frontend,2026-10-01,2026-10-05,3,High - $100K analytics upsell,Historical API complete,Low
+P4-011,Device Health Predictions,ML model for predictive maintenance,P4 - Future,Not Started,Backend,2026-11-01,2026-12-15,12,Very High - $400K/year preventative savings,ML infrastructure,Very High
+P4-012,Mobile Native App,iOS/Android native experience,P4 - Future,Not Started,Mobile,2027-01-01,2027-06-30,90,Very High - $800K/year field technician value,React Native setup,Very High
+P4-013,Advanced Reporting Engine,Custom dashboards scheduled reports,P4 - Future,Not Started,Backend,2026-10-15,2026-11-30,12,High - $150K/year business intelligence value,Database optimization,Medium
+P4-014,Voice Command Integration,Alexa/Google Assistant control,P4 - Future,Not Started,Backend,2027-01-01,2027-03-31,15,Medium - $50K/year innovation value,Voice API access,High
+P4-015,Blockchain Audit Trail,Immutable audit log with smart contracts,P4 - Future,Not Started,Backend,2027-04-01,2027-09-30,30,High - $200K/year compliance premium,Blockchain platform,Very High

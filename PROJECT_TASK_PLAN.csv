@@ -1,0 +1,173 @@
+Task ID,Section,Task Name,Type,Description,Backend Data Expected (API / Payload),Priority,Complexity,Estimated Days,Start Date,End Date,Status,Dependencies
+
+,,,,,,,,,,,,
+,,"=== DYNAMIC FAILOVER (Path Selection) ===",,,,,,,,,,,
+
+DF-001,Dynamic Failover,SLA Threshold Editor - Save Functionality,UI + Backend,"Wire onChange handlers to threshold inputs and POST updated values to backend","PATCH /api/path/thresholds — Body: { thresholds: [{metric: 'latency'|'jitter'|'loss'|'mos', fiber: {warn: number, fail: number}, fiveg: {warn: number, fail: number}}] } — Response: {ok: boolean}",High,Medium,3,2025-07-07,2025-07-09,Pending,None
+
+DF-002,Dynamic Failover,Re-probe Button Implementation,UI + Backend,"Trigger gateway re-probe and show pending state until fresh metrics arrive","POST /api/gateway/probe — Body: {gateway_id: string, branch_id: string} — Response: {pending: boolean, eta_seconds: number, message: string}",High,Low,2,2025-07-07,2025-07-08,Pending,None
+
+DF-003,Dynamic Failover,Tune SLA Button - Modal & Logic,UI,"Open modal with SLA tuning recommendations based on current traffic patterns. Pre-fill optimal thresholds from AI analysis","GET /api/path/thresholds/recommendations — Response: {recommended: PathThreshold[], reasoning: string, confidence: number}",Medium,Medium,3,2025-07-09,2025-07-11,Pending,DF-001
+
+DF-004,Dynamic Failover,Application Simulation - Real Traffic Generation,Backend,"Connect simulation to gateway so it generates synthetic traffic matching app profiles instead of UI-only state","POST /api/gateway/simulate — Body: {apps: [{id: string, domain: 'IT'|'OT', bandwidth_mbps: number, priority: string}], duration_sec: number} — Response: {session_id: string, status: 'running'}",Low,High,5,2025-07-14,2025-07-18,Pending,DF-001
+
+DF-005,Dynamic Failover,Failover Event History Log,UI + Backend,"Add a scrollable event log showing all failover events with timestamp and reason and affected flows","GET /api/failover/events?branch_id={id}&limit=50 — Response: {events: [{timestamp: ISO, from_path: string, to_path: string, reason: string, affected_flows: number, duration_ms: number}]}",Medium,Medium,3,2025-07-10,2025-07-14,Pending,None
+
+DF-006,Dynamic Failover,Per-Tunnel Bandwidth Utilization Chart,UI,"Add stacked area chart showing per-tunnel bandwidth utilization over time (already have live data from SSE just need visualization)","Uses existing IpsecTunnelMetric[].txBytes/rxBytes from live SSE stream — no new API needed",Medium,Low,2,2025-07-10,2025-07-11,Pending,None
+
+,,,,,,,,,,,,
+,,"=== APPLICATION-AWARE ROUTING ===",,,,,,,,,,,
+
+AR-001,App-Aware Routing,Connect Policies to Backend API,UI + Backend,"Replace mock appPolicies with real API fetch. Add loading/error states","GET /api/policies/app-routing?branch_id={id} — Response: {policies: AppPolicy[], categories: AppCategory[], stats: {total_apps: number, enabled: number, realtime: number, flows_per_min: number, throughput_mbps: number}}",High,Medium,4,2025-07-07,2025-07-10,Pending,None
+
+AR-002,App-Aware Routing,Policy CRUD - Create New Policy,UI + Backend,"Wire 'New policy' modal form to POST endpoint with validation","POST /api/policies/app-routing — Body: {app: string, category: string, match: string, slaClass: string, preferredPath: string, backupPath: string} — Response: AppPolicy (with generated id)",High,Medium,3,2025-07-10,2025-07-14,Pending,AR-001
+
+AR-003,App-Aware Routing,Policy CRUD - Edit Existing Policy,UI + Backend,"Wire edit modal save to PATCH endpoint","PATCH /api/policies/app-routing/{id} — Body: Partial<AppPolicy> — Response: AppPolicy (updated)",High,Low,2,2025-07-14,2025-07-15,Pending,AR-001
+
+AR-004,App-Aware Routing,Policy CRUD - Delete Policy,UI + Backend,"Add delete confirmation dialog and wire to DELETE endpoint","DELETE /api/policies/app-routing/{id} — Response: {ok: boolean}",High,Low,1,2025-07-15,2025-07-15,Pending,AR-001
+
+AR-005,App-Aware Routing,Policy Toggle - Persist Enable/Disable,UI + Backend,"Wire toggle button to backend instead of just showing toast","POST /api/policies/app-routing/{id}/toggle — Body: {enabled: boolean} — Response: {id: string, enabled: boolean, applied_at: ISO}",High,Low,1,2025-07-15,2025-07-16,Pending,AR-001
+
+AR-006,App-Aware Routing,Real-time Hits/Min & Throughput Updates,UI + Backend,"Stream live policy hit counts and throughput per app from gateway telemetry","SSE /api/policies/app-routing/live?branch_id={id} — Event data: {policy_id: string, hits_per_min: number, throughput_mbps: number, timestamp: ISO}[] (pushed every 10s)",Medium,High,4,2025-07-16,2025-07-21,Pending,AR-001
+
+AR-007,App-Aware Routing,Policy Template Library,UI + Backend,"Allow importing pre-built policy sets (e.g. 'Enterprise Voice' or 'Retail OT')","GET /api/policies/app-routing/templates — Response: {templates: [{id: string, name: string, description: string, policies: AppPolicy[]}]} | POST /api/policies/app-routing/import-template — Body: {template_id: string}",Low,Medium,3,2025-07-21,2025-07-23,Pending,AR-001
+
+,,,,,,,,,,,,
+,,"=== TRAFFIC POLICY ===",,,,,,,,,,,
+
+TP-001,Traffic Policy,Connect Policies to Backend API,UI + Backend,"Replace mock trafficPolicies with real API fetch","GET /api/policies/traffic?branch_id={id} — Response: {policies: [{id: string, app: string, priority: 'high'|'med'|'low', preferredPath: 'Fiber'|'5G'|'Auto', enabled: boolean}]}",High,Medium,3,2025-07-07,2025-07-09,Pending,None
+
+TP-002,Traffic Policy,Policy CRUD - Create New Policy,UI + Backend,"Build 'New policy' form modal with app name autocomplete and priority/path selection","POST /api/policies/traffic — Body: {app: string, priority: string, preferredPath: string, enabled: boolean} — Response: TrafficPolicy",High,Medium,3,2025-07-09,2025-07-11,Pending,TP-001
+
+TP-003,Traffic Policy,Policy CRUD - Edit Policy,UI + Backend,"Add inline edit or modal edit for existing policies","PATCH /api/policies/traffic/{id} — Body: Partial<TrafficPolicy> — Response: TrafficPolicy",High,Low,2,2025-07-11,2025-07-14,Pending,TP-001
+
+TP-004,Traffic Policy,Policy CRUD - Delete Policy,UI + Backend,"Add delete with confirmation","DELETE /api/policies/traffic/{id} — Response: {ok: boolean}",High,Low,1,2025-07-14,2025-07-14,Pending,TP-001
+
+TP-005,Traffic Policy,Policy Toggle - Persist State,UI + Backend,"Wire toggle to real API call instead of toast-only","POST /api/policies/traffic/{id}/toggle — Body: {enabled: boolean} — Response: {id: string, enabled: boolean, applied_at: ISO}",High,Low,1,2025-07-14,2025-07-15,Pending,TP-001
+
+TP-006,Traffic Policy,Drag-and-Drop Priority Reorder,UI + Backend,"Enable drag handle to reorder policies (priority order matters for gateway)","PATCH /api/policies/traffic/reorder — Body: {order: string[]} (array of policy IDs in new order) — Response: {ok: boolean}",Medium,Medium,3,2025-07-15,2025-07-17,Pending,TP-001
+
+,,,,,,,,,,,,
+,,"=== OVERVIEW / DASHBOARD ===",,,,,,,,,,,
+
+OV-001,Overview,Branch Data from Backend,UI + Backend,"Replace mock branch info with real API (name location gateway firmware uptime)","GET /api/branches/{id} — Response: {id: string, name: string, location: {city, state, lat, lng}, gatewayModel: string, firmware: string, uptime: string, wanLinks: WanLink[]}",High,Medium,3,2025-07-07,2025-07-09,Pending,None
+
+OV-002,Overview,WAN Link Status from Backend,UI + Backend,"Replace mock WAN data with real link state","GET /api/wan/status/{branch_id} — Response: {links: [{id: string, type: 'Fiber'|'5G', state: 'up'|'down'|'degraded', speed_mbps: number, signal?: {rssi: number, sinr: number}}]}",High,Medium,2,2025-07-09,2025-07-10,Pending,OV-001
+
+OV-003,Overview,Refresh Button Implementation,UI,"Wire refresh button to re-fetch all dashboard data","No new API — calls existing endpoints with cache-bust",Low,Low,1,2025-07-10,2025-07-10,Pending,OV-001
+
+OV-004,Overview,Export Dashboard Button,UI,"Export current dashboard state as PDF or PNG","Client-side: html2canvas + jsPDF or similar — no backend API needed",Low,Medium,2,2025-07-21,2025-07-22,Pending,None
+
+,,,,,,,,,,,,
+,,"=== FLEET ===",,,,,,,,,,,
+
+FL-001,Fleet,Fleet Stats from Backend,UI + Backend,"Replace mock fleetStats with real aggregated data","GET /api/fleet/stats — Response: {total_branches: number, healthy: number, degraded: number, offline: number, total_devices: number, avg_uptime_pct: number, total_throughput_mbps: number, branches: [{id, name, health_score, uptime_pct, device_count, throughput_mbps, alert_count, sparkline_24h: number[]}]}",High,Medium,4,2025-07-10,2025-07-15,Pending,OV-001
+
+FL-002,Fleet,Branch Row Click Navigation,UI,"Navigate to branch-specific overview (pass branch ID to overview page)","No API — use React Router params: /overview/{branch_id}",Low,Low,1,2025-07-15,2025-07-15,Pending,FL-001
+
+,,,,,,,,,,,,
+,,"=== CONNECTIVITY ===",,,,,,,,,,,
+
+CN-001,Connectivity,Fiber Link Metrics from Backend,UI + Backend,"Replace hardcoded fiber stats with live data","GET /api/wan/fiber/metrics?branch_id={id} — Response: {optical_rx_dbm: number, attenuation_db: number, fcs_errors: number, uptime_days: number, link_speed_gbps: number, sfp_temp_c: number}",High,Medium,3,2025-07-14,2025-07-16,Pending,None
+
+CN-002,Connectivity,5G Link Metrics from Backend,UI + Backend,"Replace hardcoded 5G stats with live data","GET /api/wan/5g/metrics?branch_id={id} — Response: {rssi_dbm: number, sinr_db: number, band: string, cell_id: string, neighbors: number, connection_type: string, imei: string}",High,Medium,3,2025-07-14,2025-07-16,Pending,None
+
+CN-003,Connectivity,Reachability Probes from Backend,UI + Backend,"Replace mock probes with real ping/traceroute results","GET /api/network/reachability?branch_id={id} — Response: {probes: [{target: string, category: string, rtt_ms: number, success_pct: number, last_check: ISO}]}",High,Medium,3,2025-07-16,2025-07-18,Pending,None
+
+CN-004,Connectivity,Connection Event Log from Backend,UI + Backend,"Replace mock events with real gateway event stream","GET /api/network/events?branch_id={id}&limit=50 — Response: {events: [{timestamp: ISO, type: string, severity: string, message: string, details?: object}]}",Medium,Medium,3,2025-07-18,2025-07-22,Pending,None
+
+CN-005,Connectivity,RX/TX Bandwidth Chart - Live Data,UI + Backend,"Replace static 24h chart with rolling live data","GET /api/network/throughput/rxtx?branch_id={id}&hours=24 — Response: {series: [{time: ISO, rx_mbps: number, tx_mbps: number}]} (30-min bins)",Medium,Medium,2,2025-07-22,2025-07-23,Pending,None
+
+,,,,,,,,,,,,
+,,"=== DEVICES (IT & OT) ===",,,,,,,,,,,
+
+DV-001,Devices,Add Device Form,UI + Backend,"Implement 'Add device' modal with fields for name type MAC IP and domain classification","POST /api/devices — Body: {name: string, kind: string, mac: string, ip: string, domain: 'IT'|'OT', location?: string} — Response: Device",Medium,Medium,3,2025-07-14,2025-07-16,Pending,None
+
+DV-002,Devices,Export Device Inventory,UI,"Export filtered device list as CSV","Client-side CSV generation from current filtered list — no API needed",Low,Low,1,2025-07-16,2025-07-16,Pending,None
+
+DV-003,Devices,Device Telemetry History Charts,UI + Backend,"Show per-device telemetry graphs (CPU temp power WiFi RSSI) over time in device drawer","GET /api/devices/{mac}/telemetry?hours=24 — Response: {series: [{timestamp: ISO, cpu_pct?: number, temp_c?: number, power_w?: number, rssi_dbm?: number}]}",Medium,High,4,2025-07-16,2025-07-21,Pending,None
+
+DV-004,Devices,Bulk Device Actions,UI + Backend,"Select multiple devices and perform bulk actions (reboot disable classify)","POST /api/devices/bulk-action — Body: {device_ids: string[], action: 'reboot'|'disable'|'classify', params?: {domain?: string}} — Response: {results: [{id: string, success: boolean, error?: string}]}",Low,Medium,3,2025-07-21,2025-07-23,Pending,None
+
+,,,,,,,,,,,,
+,,"=== NAAS (Network-as-a-Service) ===",,,,,,,,,,,
+
+NS-001,NaaS,Service Catalog from Backend,UI + Backend,"Replace mock service data with real catalog and usage","GET /api/naas/services?branch_id={id} — Response: {services: [{id: string, name: string, category: string, tier: string, capacity: string, usage_pct: number, cost_monthly: number, sla_target: number, sla_actual: number}]}",High,Medium,3,2025-07-21,2025-07-23,Pending,None
+
+NS-002,NaaS,Add Service Flow,UI + Backend,"Implement service provisioning wizard","POST /api/naas/services/provision — Body: {service_id: string, tier: string, branch_id: string} — Response: {provisioning_id: string, eta_minutes: number, status: 'pending'}",Medium,High,4,2025-07-23,2025-07-28,Pending,NS-001
+
+NS-003,NaaS,Add-on Enable/Disable,UI + Backend,"Wire add-on enable buttons to real provisioning","POST /api/naas/addons/{id}/toggle — Body: {enabled: boolean, branch_id: string} — Response: {addon_id: string, enabled: boolean, billing_start?: ISO}",Medium,Medium,2,2025-07-28,2025-07-29,Pending,NS-001
+
+,,,,,,,,,,,,
+,,"=== COST INSIGHTS ===",,,,,,,,,,,
+
+CI-001,Cost Insights,Cost Data from Backend,UI + Backend,"Replace hardcoded 12-month savings data with real calculations","GET /api/cost-insights/{branch_id} — Response: {monthly_savings: [{month: string, energy: number, efficiency: number, safety: number, uptime: number, routing: number, bandwidth: number, storage: number}], total_annual_savings: number, roi_pct: number}",High,Medium,3,2025-07-28,2025-07-30,Pending,None
+
+CI-002,Cost Insights,Cost Warnings from Backend,UI + Backend,"Replace mock warnings with real anomaly detection","GET /api/cost-insights/{branch_id}/warnings — Response: {warnings: [{id: string, severity: 'high'|'med'|'low', title: string, monthly_cost: number, recommendation: string, fix_route: string}]}",Medium,Medium,2,2025-07-30,2025-07-31,Pending,CI-001
+
+CI-003,Cost Insights,Export PDF Report,UI,"Generate PDF cost report with charts and summary","Client-side: jsPDF + chart snapshots — no backend needed",Low,Medium,3,2025-08-01,2025-08-05,Pending,CI-001
+
+,,,,,,,,,,,,
+,,"=== INCIDENTS ===",,,,,,,,,,,
+
+IN-001,Incidents,Incident List from Backend,UI + Backend,"Replace seed incidents with paginated API fetch","GET /api/incidents?branch_id={id}&status={status}&page={n} — Response: {incidents: Incident[], total: number, page: number, per_page: number}",High,Medium,3,2025-07-14,2025-07-16,Pending,None
+
+IN-002,Incidents,Create Manual Incident,UI + Backend,"Add form to create incident manually","POST /api/incidents — Body: {title: string, severity: string, branch_id: string, description: string} — Response: Incident",Medium,Medium,2,2025-07-16,2025-07-17,Pending,IN-001
+
+IN-003,Incidents,Incident Trend Chart - Real Data,UI + Backend,"Replace synthetic 14-day trend with real aggregation","GET /api/incidents/trend?days=14 — Response: {trend: [{date: string, critical: number, high: number, medium: number, low: number}]}",Medium,Medium,2,2025-07-17,2025-07-18,Pending,IN-001
+
+IN-004,Incidents,Saved Filters,UI,"Implement saved filter presets (by severity status assignee)","GET /api/incidents/filters — Response: {filters: [{id: string, name: string, criteria: object}]} | POST /api/incidents/filters — Body: {name: string, criteria: object}",Low,Medium,2,2025-07-18,2025-07-21,Pending,IN-001
+
+,,,,,,,,,,,,
+,,"=== SECURITY ===",,,,,,,,,,,
+
+SC-001,Security,Threat Events from Backend,UI + Backend,"Replace mock threats with real security telemetry","GET /api/security/threats?branch_id={id}&hours=24 — Response: {events: [{id: string, timestamp: ISO, category: string, severity: string, source_ip: string, source_country: string, action: string, rule: string, details: string}]}",High,Medium,3,2025-07-21,2025-07-23,Pending,None
+
+SC-002,Security,Threat Trend Chart - Real Data,UI + Backend,"Replace mock 24h trend with real aggregation","GET /api/security/threats/trend?hours=24 — Response: {hourly: [{hour: string, bruteforce: number, recon: number, malware: number, phishing: number, c2: number, ddos: number}]}",Medium,Medium,2,2025-07-23,2025-07-24,Pending,SC-001
+
+SC-003,Security,Compliance Checks from Backend,UI + Backend,"Replace mock compliance with real scan results","GET /api/security/compliance?branch_id={id} — Response: {checks: [{framework: string, control: string, status: 'pass'|'fail'|'warning', detail: string, last_scan: ISO}]}",Medium,Medium,3,2025-07-24,2025-07-28,Pending,None
+
+,,,,,,,,,,,,
+,,"=== AUDIT LOG ===",,,,,,,,,,,
+
+AL-001,Audit Log,Audit Entries from Backend,UI + Backend,"Replace 300+ mock entries with paginated API fetch with filtering","GET /api/audit?page={n}&per_page=50&actor={actor}&action={action}&from={ISO}&to={ISO} — Response: {entries: AuditEntry[], total: number, page: number}",High,Medium,3,2025-07-28,2025-07-30,Pending,None
+
+AL-002,Audit Log,Date Range Picker,UI,"Add date range filter component to narrow audit log results","No new API — adds from/to query params to existing endpoint",Medium,Low,2,2025-07-30,2025-07-31,Pending,AL-001
+
+AL-003,Audit Log,Export CSV,UI,"Export filtered audit entries as CSV download","Client-side CSV generation from current filtered data — no API needed",Low,Low,1,2025-07-31,2025-07-31,Pending,AL-001
+
+,,,,,,,,,,,,
+,,"=== ONBOARDING ===",,,,,,,,,,,
+
+OB-001,Onboarding,Persist Gateway Config to Backend,UI + Backend,"Wire onboard button to POST gateway config instead of local-only state","POST /api/gateways/onboard — Body: {model: string, branch_id: string, config: {identity: object, network: object, dns: object, firewall: object, vpn: object, cellular: object}} — Response: {gateway_id: string, status: 'provisioning', eta_minutes: number}",High,High,5,2025-07-21,2025-07-25,Pending,None
+
+OB-002,Onboarding,Gateway Model Catalog from Backend,UI + Backend,"Fetch available gateway models dynamically instead of hardcoded list","GET /api/gateways/models — Response: {models: [{id: string, name: string, specs: {throughput: string, ports: number, has_5g: boolean, has_poe: boolean, poe_budget_w: number}}]}",Medium,Low,2,2025-07-25,2025-07-28,Pending,OB-001
+
+OB-003,Onboarding,Provisioning Status Tracking,UI + Backend,"Show real-time provisioning progress after onboarding (connecting downloading configuring ready)","SSE /api/gateways/{id}/provision-status — Events: {step: string, progress_pct: number, message: string, status: 'in_progress'|'complete'|'error'}",Medium,High,4,2025-07-28,2025-07-31,Pending,OB-001
+
+,,,,,,,,,,,,
+,,"=== SETTINGS ===",,,,,,,,,,,
+
+ST-001,Settings,Persist User Settings,UI + Backend,"Wire save button to backend instead of toast-only","PATCH /api/user/settings — Body: {timezone?: string, theme?: string, density?: string, notifications?: boolean, model?: string} — Response: {ok: boolean, settings: UserSettings}",Medium,Low,2,2025-07-31,2025-08-01,Pending,None
+
+ST-002,Settings,Integration OAuth Flows,UI + Backend,"Implement PagerDuty/Slack connect buttons with OAuth redirect","POST /api/integrations/{service}/connect — Response: {redirect_url: string} | GET /api/integrations/{service}/callback — handles OAuth callback",Low,High,5,2025-08-01,2025-08-07,Pending,ST-001
+
+,,,,,,,,,,,,
+,,"=== VIDEO ANALYTICS ===",,,,,,,,,,,
+
+VA-001,Video Analytics,Pipeline Catalog from Backend,UI + Backend,"Fetch available video pipelines dynamically instead of hardcoded list","GET /api/video/pipelines — Response: {pipelines: [{id: string, name: string, type: 'nvidia'|'hailo', resolution: string, fps: number, model: string, upstream_url: string}]}",Medium,Low,2,2025-08-04,2025-08-05,Pending,None
+
+VA-002,Video Analytics,Stream Health Monitoring,UI + Backend,"Show FPS drop alerts and pipeline health status","GET /api/video/{id}/health — Response: {fps_current: number, fps_target: number, dropped_frames: number, inference_ms: number, status: 'healthy'|'degraded'|'error'}",Medium,Medium,3,2025-08-05,2025-08-07,Pending,VA-001
+
+,,,,,,,,,,,,
+,,"=== CROSS-CUTTING / INFRASTRUCTURE ===",,,,,,,,,,,
+
+XC-001,Infrastructure,Backend API Layer Setup,Backend,"Create Express route handlers for all new endpoints with proper auth middleware and error handling","All endpoints above — Express router files per domain: routes/policies.ts routes/fleet.ts routes/connectivity.ts routes/devices.ts routes/naas.ts routes/cost.ts routes/security.ts routes/audit.ts routes/gateways.ts routes/settings.ts",Critical,High,5,2025-07-01,2025-07-07,Pending,None
+
+XC-002,Infrastructure,Database Schema Design,Backend,"Design and implement database schema for policies settings audit and branch config","PostgreSQL or DynamoDB schema for: traffic_policies app_policies branches devices incidents audit_entries user_settings gateway_configs",Critical,High,5,2025-07-01,2025-07-07,Pending,None
+
+XC-003,Infrastructure,Authentication & Authorization,Backend,"Implement user auth (JWT or session) and role-based access control","POST /api/auth/login — POST /api/auth/refresh — middleware validates token on all protected routes",Critical,High,5,2025-07-07,2025-07-11,Pending,XC-001
+
+XC-004,Infrastructure,API Error Handling & Loading States,UI,"Add consistent loading skeletons and error boundaries across all pages","No API — UI pattern: each page shows skeleton on fetch and error card on failure",Medium,Medium,3,2025-07-11,2025-07-15,Pending,XC-001
+
+XC-005,Infrastructure,Branch Context Provider,UI,"Create React context that holds selected branch_id and passes it to all API calls","No API — wraps existing branch selector in TopBar with context provider",High,Low,2,2025-07-07,2025-07-08,Pending,None

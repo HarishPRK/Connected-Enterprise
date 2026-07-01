@@ -45,6 +45,9 @@ type Kind = Device['kind'];
 export interface DeviceView extends Device {
   autoDomain: Domain;
   overridden: boolean;
+  /** Which gateway location this device was discovered from ('rdk' for Plano,
+   *  'prpl' for McKinney). Undefined for seed devices (pre-live-discovery). */
+  locationSource?: 'rdk' | 'prpl';
 }
 
 export interface DeviceSnapshot {
@@ -441,15 +444,19 @@ class DeviceSource extends EventEmitter {
   }
 
   /** The active base inventory (live once received, else seed), each paired with
-   *  its auto domain. Live devices are de-duped by MAC across sources. */
-  private activeBase(): { device: Device; autoDomain: Domain }[] {
+   *  its auto domain and the location source it was discovered from. Live
+   *  devices are de-duped by MAC across sources. */
+  private activeBase(): { device: Device; autoDomain: Domain; locationSource?: 'rdk' | 'prpl' }[] {
     if (!this.receivedInventory) {
-      return SEED.map((d) => ({ device: d, autoDomain: d.domain }));
+      return SEED.map((d) => ({ device: d, autoDomain: d.domain, locationSource: undefined }));
     }
     // Merge raw records by MAC across sources, THEN map — so a device seen by
     // more than one source (e.g. the Shelly via MQTT power + the gateway's
     // Wi-Fi block) becomes one row carrying both sets of telemetry.
     const rawByMac = new Map<string, RawDevice>();
+    // Track which location (rdk/prpl) each MAC belongs to. A device source like
+    // "rdk:wifi" or "rdk:matter" or "rdk:shelly" → location 'rdk'; "prpl:wifi" → 'prpl'.
+    const macLocation = new Map<string, 'rdk' | 'prpl'>();
     // While the only live data is partial (Matter lists are OT-only), keep the
     // seed's IT side so the IT page stays populated until real LAN discovery.
     const onlyPartial = [...this.liveBySource.keys()].every((k) => this.partialSources.has(k));
@@ -458,21 +465,27 @@ class DeviceSource extends EventEmitter {
         if (d.domain === 'IT') rawByMac.set(normalizeMac(d.mac), seedToRaw(d));
       }
     }
-    for (const list of this.liveBySource.values()) {
+    for (const [source, list] of this.liveBySource.entries()) {
+      const loc: 'rdk' | 'prpl' | undefined = source.startsWith('rdk') ? 'rdk'
+        : source.startsWith('prpl') ? 'prpl' : undefined;
       for (const raw of list) {
         const key = normalizeMac(raw.mac);
         const existing = rawByMac.get(key);
         rawByMac.set(key, existing ? mergeRaw(existing, raw) : raw);
+        if (loc) macLocation.set(key, loc);
       }
     }
-    return [...rawByMac.values()].map(toDevice);
+    return [...rawByMac.entries()].map(([mac, raw]) => {
+      const { device, autoDomain } = toDevice(raw);
+      return { device, autoDomain, locationSource: macLocation.get(mac) };
+    });
   }
 
   getSnapshot(): DeviceSnapshot {
-    const devices: DeviceView[] = this.activeBase().map(({ device, autoDomain }) => {
+    const devices: DeviceView[] = this.activeBase().map(({ device, autoDomain, locationSource }) => {
       const override = this.overrides.get(device.mac);
       const domain = override ?? autoDomain;
-      return { ...device, domain, autoDomain, overridden: override != null && override !== autoDomain };
+      return { ...device, domain, autoDomain, overridden: override != null && override !== autoDomain, locationSource };
     });
     return {
       devices,

@@ -63,6 +63,7 @@ export const appTraffic: AppTraffic[] = [
   { app: 'OT', sharePct: 7, via: 'Fiber' },
 ];
 
+/** Plano (rdk) device fleet — the canonical 15 devices for the Plano location. */
 export const devices: Device[] = [
   // IT
   { id: 'd1',  name: 'Lap-John',    kind: 'laptop',     domain: 'IT', ip: '10.10.1.12', mac: 'AA:11:22:33:44:55', status: 'ok',  connectedForHours: 32, conn: 'wifi' },
@@ -81,6 +82,27 @@ export const devices: Device[] = [
   { id: 'o5',  name: 'DL-1-MainGate', kind: 'door_lock',  domain: 'OT', ip: '10.20.1.31', mac: 'BB:11:22:33:44:05', status: 'ok',  connectedForHours: 1500, conn: 'wifi' },
   { id: 'o6',  name: 'DL-2-Server',   kind: 'door_lock',  domain: 'OT', ip: '10.20.1.32', mac: 'BB:11:22:33:44:06', status: 'err', connectedForHours: 0,    conn: 'wifi' },
   { id: 'o7',  name: 'DL-3-Backdoor', kind: 'door_lock',  domain: 'OT', ip: '10.20.1.33', mac: 'BB:11:22:33:44:07', status: 'ok',  connectedForHours: 1500, conn: 'wifi' },
+];
+
+/** McKinney (prpl) device fleet — distinct devices for the McKinney location.
+ *  Completely separate MACs/IPs from Plano so the two locations never collide. */
+export const mckinneyDevices: Device[] = [
+  // IT
+  { id: 'mck-d1', name: 'Lap-Carlos',    kind: 'laptop',    domain: 'IT', ip: '10.30.1.12', mac: 'CC:22:33:44:55:01', status: 'ok',  connectedForHours: 48, conn: 'wifi' },
+  { id: 'mck-d2', name: 'Lap-Sarah',     kind: 'laptop',    domain: 'IT', ip: '10.30.1.13', mac: 'CC:22:33:44:55:02', status: 'ok',  connectedForHours: 12, conn: 'wifi' },
+  { id: 'mck-d3', name: 'Desk-FrontDesk',kind: 'desktop',   domain: 'IT', ip: '10.30.1.20', mac: 'CC:22:33:44:55:03', status: 'ok',  connectedForHours: 320, conn: 'wired' },
+  { id: 'mck-d4', name: 'Canon-Printer', kind: 'printer',   domain: 'IT', ip: '10.30.1.30', mac: 'CC:22:33:44:55:04', status: 'ok',  connectedForHours: 510, conn: 'wired' },
+  { id: 'mck-d5', name: 'POS-MCK-01',   kind: 'payment',   domain: 'IT', ip: '10.30.1.41', mac: 'CC:22:33:44:55:05', status: 'ok',  connectedForHours: 88,  conn: 'wifi' },
+  { id: 'mck-d6', name: 'Srv-MCK',      kind: 'server',    domain: 'IT', ip: '10.30.1.50', mac: 'CC:22:33:44:55:06', status: 'ok',  connectedForHours: 845, conn: 'wired' },
+  { id: 'mck-d7', name: 'Conf-Phone-MCK',kind: 'confphone', domain: 'IT', ip: '10.30.1.60', mac: 'CC:22:33:44:55:07', status: 'ok',  connectedForHours: 310, conn: 'poe' },
+  // OT
+  { id: 'mck-o1', name: 'Fire-MCK-01',    kind: 'fire_sensor',  domain: 'OT', ip: '10.40.1.11', mac: 'DD:22:33:44:55:01', status: 'ok',  connectedForHours: 1800, conn: 'wifi' },
+  { id: 'mck-o2', name: 'Fire-MCK-02',    kind: 'fire_sensor',  domain: 'OT', ip: '10.40.1.12', mac: 'DD:22:33:44:55:02', status: 'ok',  connectedForHours: 1800, conn: 'wifi' },
+  { id: 'mck-o3', name: 'Smoke-MCK-01',   kind: 'smoke_sensor', domain: 'OT', ip: '10.40.1.21', mac: 'DD:22:33:44:55:03', status: 'ok',  connectedForHours: 1800, conn: 'wifi' },
+  { id: 'mck-o4', name: 'Smoke-MCK-02',   kind: 'smoke_sensor', domain: 'OT', ip: '10.40.1.22', mac: 'DD:22:33:44:55:04', status: 'ok',  connectedForHours: 1800, conn: 'wifi' },
+  { id: 'mck-o5', name: 'DL-MCK-Entry',   kind: 'door_lock',    domain: 'OT', ip: '10.40.1.31', mac: 'DD:22:33:44:55:05', status: 'ok',  connectedForHours: 1200, conn: 'wifi' },
+  { id: 'mck-o6', name: 'DL-MCK-Warehouse',kind: 'door_lock',   domain: 'OT', ip: '10.40.1.32', mac: 'DD:22:33:44:55:06', status: 'ok',  connectedForHours: 1200, conn: 'wifi' },
+  { id: 'mck-o7', name: 'DL-MCK-Office',  kind: 'door_lock',    domain: 'OT', ip: '10.40.1.33', mac: 'DD:22:33:44:55:07', status: 'ok',  connectedForHours: 1200, conn: 'wifi' },
 ];
 
 export const alerts: Alert[] = [
@@ -681,6 +703,12 @@ function synthesizeDevice(branchId: string, index: number): Device {
 export function getDevicesForBranch(branchId: string): Device[] {
   const stats = fleetStats[branchId];
   if (!stats) return devices;
+
+  // McKinney uses its own distinct device fleet (different MACs/IPs from Plano).
+  if (branchId === 'b-mck-03') return mckinneyDevices;
+
+  // Plano keeps the canonical authored devices (POS-02 warn, DL-2-Server err).
+  if (branchId === 'b-pln-01') return devices;
 
   // Dallas-HQ keeps the canonical authored devices verbatim (POS-02 warn,
   // DL-2-Server err) so the demo's "anchor" branch matches its mock data.

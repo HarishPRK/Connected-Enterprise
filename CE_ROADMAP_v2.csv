@@ -1,0 +1,40 @@
+S No,Section,Task,Type,Backend Data Needed,Start Date,End Date,Est. Days
+,,,,,,,
+,CURRENT AVAILABLE PLATFORM,,,,,,
+,,,,,,,
+1,Dynamic Failover,SLA editor save + Re-probe + Tune recommendations,UI + Backend,Threshold values per metric with warn/fail limits plus gateway probe trigger,01 July 2026,03 July 2026,3
+2,Dynamic Failover,Failover history log + Per-tunnel bandwidth chart,UI + Backend,Past failover events with timestamps/reasons plus live tunnel bandwidth (already streaming),03 July 2026,04 July 2026,2
+3,App-Aware Routing,Full policy management (create/edit/delete/toggle),UI + Backend,Policy CRUD: app name/category/match rule/preferred path/SLA class per branch,01 July 2026,04 July 2026,4
+4,App-Aware Routing,Live traffic stats per policy,UI + Backend,Real-time hits/min and throughput per policy pushed every 10 seconds,04 July 2026,07 July 2026,2
+5,Traffic Policy,Full policy management (create/edit/delete/toggle/reorder),UI + Backend,Policy CRUD: app name/priority/preferred path/enabled status plus ordering,01 July 2026,04 July 2026,4
+6,Overview + Fleet,Live branch data and fleet-wide stats,UI + Backend,Branch details (name/location/gateway/firmware/uptime) plus per-branch health scores and KPIs,01 July 2026,04 July 2026,4
+7,Connectivity,Live link metrics and reachability probes,UI + Backend,Fiber and 5G deep metrics plus probe results (target/RTT/success rate) plus event log,07 July 2026,10 July 2026,4
+8,Devices,Add device form + telemetry history charts,UI + Backend,Device registration (name/type/MAC/IP/domain) plus 24h per-device telemetry readings,07 July 2026,10 July 2026,3
+9,NaaS,Service catalog + provisioning wizard,UI + Backend,Active services with usage/cost/SLA plus provisioning request with activation time,10 July 2026,14 July 2026,3
+10,Cost Insights,Real savings data + cost warnings,UI + Backend,Monthly savings by category with ROI % plus active cost warnings with recommendations,14 July 2026,16 July 2026,2
+11,Incidents,Real incident list + manual creation + trend chart,UI + Backend,Paginated incidents with filtering plus daily counts by severity for 14 days,07 July 2026,10 July 2026,3
+12,Security,Threat events + compliance checks,UI + Backend,Recent threats (category/severity/source/action) plus compliance scan results per framework,10 July 2026,14 July 2026,3
+13,Audit Log,Real audit data + date filter + CSV export,UI + Backend,Paginated audit entries with filtering by actor/action/date range,14 July 2026,16 July 2026,2
+14,Onboarding,Save gateway config + provisioning progress,UI + Backend,Full gateway config submission plus live provisioning status stream,14 July 2026,18 July 2026,5
+15,Settings + Integrations,Persist preferences + Slack/PagerDuty connect,UI + Backend,User settings save/retrieve plus OAuth flow for integrations,16 July 2026,18 July 2026,3
+16,AI,Integrate available GenAI endpoints to the CE App,UI + Backend,Require Backend Endpoints here to integrate with UI,16 July 2026,18 July 2026,3
+,,,,,,,
+,NEW CAPABILITIES,,,,,,
+,,,,,,,
+17,Predictive Analytics,AI outage prediction + anomaly detection,UI + Backend,Outage probability per branch for next 24h plus real-time anomaly flags with suggested actions,18 July 2026,22 July 2026,3
+18,Digital Twin,Live 3D network twin + what-if simulator,UI + Backend,Full topology state in real-time plus simulated impact of link failures/traffic spikes,18 July 2026,25 July 2026,6
+19,Executive Command Center,Branch comparison + scheduled reports + custom KPIs,UI + Backend,Side-by-side branch KPIs plus scheduled PDF delivery plus user-defined metric cards,18 July 2026,23 July 2026,4
+20,Self-Healing Network,Auto-remediation playbooks + one-click rollback,UI + Backend,Playbook library (trigger/action/approval/rollback) plus config snapshots with instant revert,21 July 2026,25 July 2026,4
+21,Smart Alerts,Intelligent grouping + business-impact scoring,UI + Backend,Clustered alert notifications plus revenue/customer impact tags per alert,21 July 2026,24 July 2026,3
+22,Energy & Sustainability,Carbon tracking + green routing + ESG reports,UI + Backend,CO2 per branch from power data plus energy-optimized routing plus monthly ESG report,22 July 2026,25 July 2026,4
+23,Conversational Ops,Natural language policy creation + AI daily summaries,UI + Backend,AI interprets plain-English commands into policies for review plus daily change digest,24 July 2026,28 July 2026,3
+24,SLA & Compliance,Auto breach alerts + compliance evidence collection,UI + Backend,Real-time SLA threshold alerts with auto-ticket plus continuous audit evidence gathering,25 July 2026,29 July 2026,3
+25,Firmware & Lifecycle,Staged firmware rollouts + config drift detection,UI + Backend,Canary > staged deployment with health gates plus baseline comparison and drift flags,25 July 2026,30 July 2026,4
+26,Multi-Tenant & RBAC,Role-based views + approval workflows,UI + Backend,Different dashboards per role (NOC/manager/exec) plus two-person approval for critical changes,28 July 2026,31 July 2026,4
+,,,,,,,
+,,,,,,,
+,--- SUMMARY ---,,,,,,
+,,,,,,,
+,,Phase 1: 15 items | Jul 1 - Jul 18 2026,,,,,
+,,Phase 2: 10 items | Jul 18 - Jul 31 2026,,,,,
+,,Total: 25 actionable items | All complete by July 31 2026,,,,,

@@ -1,0 +1,15 @@
+Risk ID,Risk Description,Category,Probability,Impact,Risk Score,Mitigation Strategy,Owner,Status,Target Resolution
+RISK-001,AWS IoT credential rotation failure causes production outage,Technical,High,Very High,9,Implement automated rotation + monitoring alerts,DevOps,Active,2026-07-08
+RISK-002,Device discovery component deployment delayed,Dependency,Medium,High,6,Parallel work on UI while awaiting backend,Backend,Monitoring,2026-07-10
+RISK-003,Backend Developer 1 overallocated (bottleneck),Resource,High,High,8,Hire additional backend engineer or reprioritize,PM,Active,2026-07-20
+RISK-004,Mobile responsive design underestimated effort,Estimation,Medium,Medium,4,Add buffer time allocate Frontend Dev 2 support,Frontend,Monitoring,2026-07-12
+RISK-005,No QA engineer causes production bugs,Quality,High,High,8,Contract QA consultant or train developer for testing,PM,Active,2026-08-01
+RISK-006,Multi-tenant architecture complexity,Technical,Medium,Very High,8,Phased approach: RBAC first then data isolation,Backend,Planning,2026-10-01
+RISK-007,Historical data storage costs exceed budget,Cost,Low,Medium,3,Implement data retention policy compress old data,Backend,Monitoring,2026-08-15
+RISK-008,Third-party API rate limits (Bedrock Claude),Dependency,Medium,Medium,4,Implement caching + fallback to Anthropic direct,Backend,Monitoring,Ongoing
+RISK-009,Scope creep from stakeholder requests,Process,High,Medium,6,Formal change request process with PM approval,PM,Active,Ongoing
+RISK-010,Technical debt slows feature velocity,Technical,High,Medium,6,Allocate 20% time for refactoring each sprint,All,Active,Ongoing
+RISK-011,Browser compatibility issues on mobile,Quality,Medium,Low,2,Cross-browser testing in QA phase,Frontend,Monitoring,2026-07-12
+RISK-012,AWS service outage impacts real-time features,External,Low,Very High,5,Implement graceful degradation + status page,DevOps,Planning,2026-08-31
+RISK-013,Security vulnerability in device control,Security,Low,Very High,5,Security audit + penetration testing,Backend,Planning,2026-09-30
+RISK-014,Team burnout from aggressive deadlines,People,Medium,High,6,Adjust P3/P4 timelines prioritize work-life balance,PM,Monitoring,Ongoing

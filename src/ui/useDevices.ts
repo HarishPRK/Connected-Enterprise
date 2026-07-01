@@ -21,6 +21,9 @@ export type Domain = 'IT' | 'OT';
 export interface DeviceView extends Device {
   autoDomain: Domain;
   overridden: boolean;
+  /** Which gateway location this device was discovered from ('rdk' for Plano,
+   *  'prpl' for McKinney). Undefined for seed devices (pre-live-discovery). */
+  locationSource?: 'rdk' | 'prpl';
 }
 
 interface DeviceSnapshot {

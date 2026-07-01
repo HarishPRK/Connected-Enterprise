@@ -1,0 +1,193 @@
+Task ID,Section,Task Name,Type,What Needs To Be Done,What Data Is Needed From Backend Team,Priority,Complexity,Estimated Days,Start Date,End Date,Status,Depends On
+
+,,,,,,,,,,,,
+,,"--- INFRASTRUCTURE (Must Complete First) ---",,,,,,,,,,
+
+XC-001,Infrastructure,Backend API Layer Setup,Backend,Set up the server-side foundation so all pages can fetch real data instead of showing demo content,Backend team needs to create API endpoints for each section - policies and fleet and connectivity and devices and costs and security and audit and gateways and settings,Critical,High,5,2025-07-01,2025-07-07,Not Started,None
+
+XC-002,Infrastructure,Database Design,Backend,Design the database tables to store all application data permanently,Need database tables for: traffic policies - app routing policies - branch configs - device inventory - incidents - audit trail - user settings - gateway configurations,Critical,High,5,2025-07-01,2025-07-07,Not Started,None
+
+XC-003,Infrastructure,User Login and Permissions,Backend,Add user authentication so only authorized staff can access the dashboard and make changes,Need login endpoint - token refresh endpoint - role-based access (admin vs viewer vs operator),Critical,High,5,2025-07-07,2025-07-11,Not Started,XC-001
+
+XC-004,Infrastructure,Loading and Error States,UI,Show loading spinners and friendly error messages across all pages when data is being fetched or something goes wrong,No backend data needed - purely visual improvement on the frontend,Medium,Medium,3,2025-07-11,2025-07-15,Not Started,XC-001
+
+XC-005,Infrastructure,Branch Selector Context,UI,Make the branch selector in the top bar pass the selected branch to every page so data is filtered correctly,No backend data needed - wiring up existing UI component,High,Low,2,2025-07-07,2025-07-08,Not Started,None
+
+,,,,,,,,,,,,
+,,"--- DYNAMIC FAILOVER ---",,,,,,,,,,
+
+DF-001,Dynamic Failover,SLA Threshold Editor - Make Editable,UI + Backend,The SLA threshold inputs (latency jitter loss) currently display values but cannot be saved. Need to make them editable and persist changes.,Need an endpoint that accepts updated threshold values per metric (latency jitter loss MOS) with separate warn and fail limits for Fiber and 5G,High,Medium,3,2025-07-07,2025-07-09,Not Started,None
+
+DF-002,Dynamic Failover,Re-probe Button,UI + Backend,The Re-probe button does nothing currently. It should trigger the gateway to re-measure link quality and return fresh results.,Need an endpoint that tells the gateway to run a fresh probe and returns a status (pending or complete),High,Low,2,2025-07-07,2025-07-08,Not Started,None
+
+DF-003,Dynamic Failover,Tune SLA Recommendations,UI + Backend,Add a modal that shows AI-recommended optimal SLA thresholds based on current traffic patterns,Need an endpoint that returns recommended threshold values with a plain-English explanation of why those values are optimal,Medium,Medium,3,2025-07-09,2025-07-11,Not Started,DF-001
+
+DF-004,Dynamic Failover,Application Simulation - Connect to Gateway,Backend,The simulation currently only updates the UI. It should actually tell the gateway to generate test traffic matching the selected app profiles.,Need an endpoint that starts a simulation session on the gateway with specified apps and bandwidth profiles and returns a session ID,Low,High,5,2025-07-14,2025-07-18,Not Started,DF-001
+
+DF-005,Dynamic Failover,Failover Event History,UI + Backend,Add a scrollable log showing every time traffic switched between Fiber and 5G with timestamps and reasons,Need an endpoint that returns a list of past failover events including: when it happened - which path it switched from/to - why it switched - how many sessions were affected,Medium,Medium,3,2025-07-10,2025-07-14,Not Started,None
+
+DF-006,Dynamic Failover,Per-Tunnel Bandwidth Chart,UI,Add a visual chart showing how much bandwidth each tunnel is using over time. Data already exists from live feed - just needs visualization.,No new backend data needed - uses existing live tunnel metrics already streaming to the UI,Medium,Low,2,2025-07-10,2025-07-11,Not Started,None
+
+,,,,,,,,,,,,
+,,"--- APPLICATION-AWARE ROUTING ---",,,,,,,,,,
+
+AR-001,App-Aware Routing,Connect to Real Data,UI + Backend,Currently showing demo data. Need to pull real routing policies from the backend.,Need an endpoint that returns: list of app routing policies - traffic categories with usage percentages - summary stats (total apps - enabled count - realtime apps - total throughput),High,Medium,4,2025-07-07,2025-07-10,Not Started,None
+
+AR-002,App-Aware Routing,Create New Policy,UI + Backend,The New Policy button opens a form but saving does nothing. Need to actually create policies on the backend.,Need an endpoint that accepts a new policy (app name - category - match rule - preferred/backup path - SLA class) and returns the created policy with an ID,High,Medium,3,2025-07-10,2025-07-14,Not Started,AR-001
+
+AR-003,App-Aware Routing,Edit Existing Policy,UI + Backend,The edit modal pre-fills data but saving only shows a notification without actually updating anything.,Need an endpoint that accepts partial policy updates and returns the updated policy,High,Low,2,2025-07-14,2025-07-15,Not Started,AR-001
+
+AR-004,App-Aware Routing,Delete Policy,UI + Backend,Add a delete button with confirmation dialog that actually removes the policy from the system.,Need an endpoint that deletes a policy by ID and confirms success,High,Low,1,2025-07-15,2025-07-15,Not Started,AR-001
+
+AR-005,App-Aware Routing,Enable/Disable Toggle - Persist,UI + Backend,The toggle switch shows a toast message but does not actually enable or disable the policy on the gateway.,Need an endpoint that toggles a policy on/off and confirms the change was applied,High,Low,1,2025-07-15,2025-07-16,Not Started,AR-001
+
+AR-006,App-Aware Routing,Live Traffic Stats per Policy,UI + Backend,Show real-time hits per minute and throughput per application policy instead of static numbers.,Need a live data stream that pushes per-policy traffic stats (hits per minute and throughput) every 10 seconds,Medium,High,4,2025-07-16,2025-07-21,Not Started,AR-001
+
+AR-007,App-Aware Routing,Policy Templates Library,UI + Backend,Allow importing pre-built policy sets (e.g. Enterprise Voice or Retail OT) so operators dont have to create every policy manually.,Need an endpoint that returns available templates and another that imports a template as a batch of policies,Low,Medium,3,2025-07-21,2025-07-23,Not Started,AR-001
+
+,,,,,,,,,,,,
+,,"--- TRAFFIC POLICY ---",,,,,,,,,,
+
+TP-001,Traffic Policy,Connect to Real Data,UI + Backend,Currently showing 5 hardcoded demo policies. Need to pull real traffic policies from backend.,Need an endpoint that returns all traffic policies for a branch (app name - priority level - preferred path - enabled status),High,Medium,3,2025-07-07,2025-07-09,Not Started,None
+
+TP-002,Traffic Policy,Create New Policy,UI + Backend,The New Policy button exists but no form is built. Need a form to create traffic prioritization rules.,Need an endpoint that accepts a new traffic policy (app name - priority - preferred path) and returns the created policy,High,Medium,3,2025-07-09,2025-07-11,Not Started,TP-001
+
+TP-003,Traffic Policy,Edit Policy,UI + Backend,No edit functionality exists. Need to allow operators to modify existing policies.,Need an endpoint that accepts policy updates and returns the modified policy,High,Low,2,2025-07-11,2025-07-14,Not Started,TP-001
+
+TP-004,Traffic Policy,Delete Policy,UI + Backend,No delete functionality exists. Need confirmation dialog and actual removal.,Need an endpoint that deletes a policy by ID,High,Low,1,2025-07-14,2025-07-14,Not Started,TP-001
+
+TP-005,Traffic Policy,Enable/Disable Toggle - Persist,UI + Backend,Toggle shows a toast but doesnt save. Need to actually apply changes to the gateway.,Need an endpoint that toggles policy on/off and confirms it was pushed to the gateway,High,Low,1,2025-07-14,2025-07-15,Not Started,TP-001
+
+TP-006,Traffic Policy,Drag-and-Drop Priority Reorder,UI + Backend,The table has grip handles suggesting drag-to-reorder but it doesnt work. Priority order matters for how the gateway processes traffic.,Need an endpoint that accepts a new ordering of policy IDs and applies it to the gateway,Medium,Medium,3,2025-07-15,2025-07-17,Not Started,TP-001
+
+,,,,,,,,,,,,
+,,"--- OVERVIEW DASHBOARD ---",,,,,,,,,,
+
+OV-001,Overview,Branch Info from Real Data,UI + Backend,Branch name - location - gateway model - firmware version are all hardcoded demo values.,Need an endpoint that returns branch details: name - location - gateway model - firmware - uptime - WAN link summary,High,Medium,3,2025-07-07,2025-07-09,Not Started,None
+
+OV-002,Overview,WAN Link Status - Live,UI + Backend,Fiber and 5G link cards show mock states. Need real link health from the gateway.,Need an endpoint that returns current WAN link status: type (Fiber/5G) - state (up/down/degraded) - speed - signal quality,High,Medium,2,2025-07-09,2025-07-10,Not Started,OV-001
+
+OV-003,Overview,Refresh Button,UI,Refresh button in the header does nothing. Should re-fetch all dashboard data.,No new backend data - just re-calls existing endpoints,Low,Low,1,2025-07-10,2025-07-10,Not Started,OV-001
+
+OV-004,Overview,Export Dashboard as PDF,UI,Export button does nothing. Should generate a PDF snapshot of the current dashboard view.,No backend needed - handled entirely in the browser,Low,Medium,2,2025-07-21,2025-07-22,Not Started,None
+
+,,,,,,,,,,,,
+,,"--- FLEET ---",,,,,,,,,,
+
+FL-001,Fleet,Fleet Statistics from Real Data,UI + Backend,All branch health scores and device counts and throughput numbers are demo data.,Need an endpoint that returns aggregated fleet health: per-branch stats (health score - uptime - device count - throughput - alerts) plus fleet-wide totals,High,Medium,4,2025-07-10,2025-07-15,Not Started,OV-001
+
+FL-002,Fleet,Branch Row Click Navigation,UI,Clicking a branch row goes to the generic home page. Should navigate to that specific branchs overview.,No backend data needed - just pass the branch ID in the URL,Low,Low,1,2025-07-15,2025-07-15,Not Started,FL-001
+
+,,,,,,,,,,,,
+,,"--- CONNECTIVITY ---",,,,,,,,,,
+
+CN-001,Connectivity,Fiber Link Deep Metrics,UI + Backend,Fiber stats (optical power - attenuation - errors - uptime) are hardcoded demo numbers.,Need an endpoint that returns detailed fiber link metrics: optical receive power - attenuation - FCS errors - uptime - SFP temperature,High,Medium,3,2025-07-14,2025-07-16,Not Started,None
+
+CN-002,Connectivity,5G Link Deep Metrics,UI + Backend,5G stats (RSSI - SINR - band - cell ID) are hardcoded demo numbers.,Need an endpoint that returns detailed 5G metrics: signal strength - signal quality - band - cell ID - neighbor count,High,Medium,3,2025-07-14,2025-07-16,Not Started,None
+
+CN-003,Connectivity,Reachability Probes,UI + Backend,Reachability test results (pings to internet - AWS - SaaS - DNS) are all fake.,Need an endpoint that returns probe results: target name - category - round-trip time - success rate - last check time,High,Medium,3,2025-07-16,2025-07-18,Not Started,None
+
+CN-004,Connectivity,Connection Event Log,UI + Backend,Event log (link flaps - failovers - DHCP - DNS failures) is static demo data.,Need an endpoint that returns recent network events: timestamp - event type - severity - description,Medium,Medium,3,2025-07-18,2025-07-22,Not Started,None
+
+CN-005,Connectivity,RX/TX Bandwidth Chart - Live,UI + Backend,The 24-hour bandwidth chart shows static numbers. Need rolling real data.,Need an endpoint that returns receive and transmit bandwidth over the last 24 hours in 30-minute intervals,Medium,Medium,2,2025-07-22,2025-07-23,Not Started,None
+
+,,,,,,,,,,,,
+,,"--- DEVICES (IT and OT) ---",,,,,,,,,,
+
+DV-001,Devices,Add Device Form,UI + Backend,The Add Device button exists but has no form behind it. Need a way to manually register devices.,Need an endpoint that accepts new device info (name - type - MAC address - IP - domain IT/OT) and adds it to inventory,Medium,Medium,3,2025-07-14,2025-07-16,Not Started,None
+
+DV-002,Devices,Export Device Inventory,UI,Export button does nothing. Should download the current device list as a spreadsheet.,No backend needed - generates file in the browser from existing data,Low,Low,1,2025-07-16,2025-07-16,Not Started,None
+
+DV-003,Devices,Device Telemetry History,UI + Backend,Device drawer shows current stats but no historical trends. Need charts showing CPU - temperature - power - signal over time.,Need an endpoint that returns 24-hour telemetry history for a specific device: timestamped readings of CPU usage - temperature - power draw - WiFi signal,Medium,High,4,2025-07-16,2025-07-21,Not Started,None
+
+DV-004,Devices,Bulk Device Actions,UI + Backend,Can only act on one device at a time. Need multi-select for bulk reboot - disable - reclassify.,Need an endpoint that accepts a list of device IDs and an action (reboot/disable/reclassify) and returns success/failure per device,Low,Medium,3,2025-07-21,2025-07-23,Not Started,None
+
+,,,,,,,,,,,,
+,,"--- NAAS (Network-as-a-Service) ---",,,,,,,,,,
+
+NS-001,NaaS,Service Catalog from Real Data,UI + Backend,Service list (names - tiers - capacity - usage - costs) is all demo content.,Need an endpoint that returns active services with: name - category - tier - capacity - current usage percentage - monthly cost - SLA target vs actual,High,Medium,3,2025-07-21,2025-07-23,Not Started,None
+
+NS-002,NaaS,Provision New Service,UI + Backend,The Add Service button has no form. Need a wizard to request and activate new services.,Need an endpoint that submits a service provisioning request (service type - tier - branch) and returns estimated activation time,Medium,High,4,2025-07-23,2025-07-28,Not Started,NS-001
+
+NS-003,NaaS,Enable/Disable Add-ons,UI + Backend,Add-on enable buttons are non-functional. Need to actually toggle add-on services.,Need an endpoint that toggles an add-on on/off for a branch and confirms billing changes,Medium,Medium,2,2025-07-28,2025-07-29,Not Started,NS-001
+
+,,,,,,,,,,,,
+,,"--- COST INSIGHTS ---",,,,,,,,,,
+
+CI-001,Cost Insights,Savings Data from Real Calculations,UI + Backend,12-month savings chart and ROI numbers are all hardcoded demo values.,Need an endpoint that returns monthly savings broken down by category (energy - efficiency - safety - uptime - routing - bandwidth - storage) plus annual total and ROI percentage,High,Medium,3,2025-07-28,2025-07-30,Not Started,None
+
+CI-002,Cost Insights,Cost Warnings from Real Detection,UI + Backend,Cost waste warnings (overspend alerts - recommendations) are demo content.,Need an endpoint that returns active cost warnings: severity - title - estimated monthly cost impact - actionable recommendation,Medium,Medium,2,2025-07-30,2025-07-31,Not Started,CI-001
+
+CI-003,Cost Insights,Export PDF Report,UI,Export PDF button does nothing. Should generate a cost report with charts for management review.,No backend needed - generates PDF in the browser,Low,Medium,3,2025-08-01,2025-08-05,Not Started,CI-001
+
+,,,,,,,,,,,,
+,,"--- INCIDENTS ---",,,,,,,,,,
+
+IN-001,Incidents,Incident List from Real Data,UI + Backend,Incident list is seeded with demo data. Need real incidents with pagination.,Need an endpoint that returns paginated incidents with filtering by status and severity: incident ID - title - severity - status - assignee - created time,High,Medium,3,2025-07-14,2025-07-16,Not Started,None
+
+IN-002,Incidents,Create Manual Incident,UI + Backend,No way to manually create an incident. Need a form for operators to log issues.,Need an endpoint that accepts new incident details (title - severity - branch - description) and creates it in the system,Medium,Medium,2,2025-07-16,2025-07-17,Not Started,IN-001
+
+IN-003,Incidents,Incident Trend Chart - Real Data,UI + Backend,14-day trend chart uses synthetic random numbers. Need real incident counts.,Need an endpoint that returns daily incident counts by severity for the past 14 days,Medium,Medium,2,2025-07-17,2025-07-18,Not Started,IN-001
+
+IN-004,Incidents,Saved Filter Presets,UI + Backend,Saved Filters button does nothing. Operators want to save common filter combinations.,Need an endpoint to save and retrieve filter presets (name plus filter criteria like severity - status - assignee),Low,Medium,2,2025-07-18,2025-07-21,Not Started,IN-001
+
+,,,,,,,,,,,,
+,,"--- SECURITY ---",,,,,,,,,,
+
+SC-001,Security,Threat Events from Real Telemetry,UI + Backend,All threat data (IPs - countries - attack types) is hardcoded demo content.,Need an endpoint that returns recent threat events: timestamp - category (malware/phishing/bruteforce) - severity - source IP - source country - action taken - matched rule,High,Medium,3,2025-07-21,2025-07-23,Not Started,None
+
+SC-002,Security,Threat Trend Chart - Real Data,UI + Backend,24-hour threat trend chart uses static demo numbers.,Need an endpoint that returns hourly threat counts grouped by category for the last 24 hours,Medium,Medium,2,2025-07-23,2025-07-24,Not Started,SC-001
+
+SC-003,Security,Compliance Check Results,UI + Backend,Compliance scan results (PCI-DSS - HIPAA - SOC2) are all fake pass/fail values.,Need an endpoint that returns compliance check results: framework - control name - pass/fail/warning status - detail - last scan timestamp,Medium,Medium,3,2025-07-24,2025-07-28,Not Started,None
+
+,,,,,,,,,,,,
+,,"--- AUDIT LOG ---",,,,,,,,,,
+
+AL-001,Audit Log,Audit Entries from Real Data,UI + Backend,300+ audit entries are all demo content. Need real paginated log from backend.,Need an endpoint that returns paginated audit entries with filtering: actor - action type - target - result - timestamp - details,High,Medium,3,2025-07-28,2025-07-30,Not Started,None
+
+AL-002,Audit Log,Date Range Picker,UI,Date range button does nothing. Need a calendar picker to filter audit entries by time period.,No new backend data - adds date filtering to existing audit endpoint,Medium,Low,2,2025-07-30,2025-07-31,Not Started,AL-001
+
+AL-003,Audit Log,Export as CSV,UI,Export CSV button does nothing. Should download filtered audit data as a spreadsheet.,No backend needed - generates CSV in the browser from current data,Low,Low,1,2025-07-31,2025-07-31,Not Started,AL-001
+
+,,,,,,,,,,,,
+,,"--- ONBOARDING ---",,,,,,,,,,
+
+OB-001,Onboarding,Save Gateway Configuration,UI + Backend,The Onboard button adds to a local list but nothing is actually saved or sent to the gateway.,Need an endpoint that accepts the full gateway configuration (identity - network - DNS - firewall - VPN - cellular settings) and initiates provisioning,High,High,5,2025-07-21,2025-07-25,Not Started,None
+
+OB-002,Onboarding,Gateway Model Catalog,UI + Backend,Gateway models and specs are hardcoded. Should come from a managed catalog.,Need an endpoint that returns available gateway models with specs: name - throughput - port count - 5G support - PoE budget,Medium,Low,2,2025-07-25,2025-07-28,Not Started,OB-001
+
+OB-003,Onboarding,Provisioning Progress Tracking,UI + Backend,After onboarding there is no visibility into whether the gateway is actually being configured.,Need a live status stream showing provisioning steps: connecting - downloading config - applying - verifying - ready,Medium,High,4,2025-07-28,2025-07-31,Not Started,OB-001
+
+,,,,,,,,,,,,
+,,"--- SETTINGS ---",,,,,,,,,,
+
+ST-001,Settings,Save User Preferences,UI + Backend,Save button shows a toast notification but preferences are lost on page refresh.,Need an endpoint that saves and retrieves user settings: timezone - theme - display density - notification preferences,Medium,Low,2,2025-07-31,2025-08-01,Not Started,None
+
+ST-002,Settings,Integration Connections (Slack and PagerDuty),UI + Backend,Connect buttons for Slack and PagerDuty are non-functional placeholders.,Need OAuth integration flow: endpoint to initiate connection and callback handler to complete it,Low,High,5,2025-08-01,2025-08-07,Not Started,ST-001
+
+,,,,,,,,,,,,
+,,"--- VIDEO ANALYTICS ---",,,,,,,,,,
+
+VA-001,Video Analytics,Pipeline Catalog from Backend,UI + Backend,Video pipeline list (Nvidia and Hailo streams) is hardcoded in the UI.,Need an endpoint that returns available video analytics pipelines: name - hardware type - resolution - frame rate - AI model used,Medium,Low,2,2025-08-04,2025-08-05,Not Started,None
+
+VA-002,Video Analytics,Stream Health Monitoring,UI + Backend,No visibility into whether video streams are healthy or dropping frames.,Need an endpoint that returns per-stream health: current FPS - target FPS - dropped frames - inference time - overall status,Medium,Medium,3,2025-08-05,2025-08-07,Not Started,VA-001
+
+,,,,,,,,,,,,
+,,"--- SUMMARY ---",,,,,,,,,,
+,,,,,,,,,,,,,
+,,Total Tasks: 62,,,,,,,,,,
+,,Critical Priority: 3 tasks (Infrastructure foundation - must be done first),,,,,,,,,,
+,,High Priority: 25 tasks (Core functionality that makes the product usable),,,,,,,,,,
+,,Medium Priority: 24 tasks (Feature completeness for full product value),,,,,,,,,,
+,,Low Priority: 10 tasks (Nice-to-haves and polish),,,,,,,,,,
+,,Overall Timeline: July 1 2025 to August 7 2025 (5.5 weeks),,,,,,,,,,
+,,Estimated Total Effort: ~165 person-days,,,,,,,,,,
+,,,,,,,,,,,,,
+,,"--- KEY NOTES FOR MANAGEMENT ---",,,,,,,,,,
+,,,,,,,,,,,,,
+,,1. The UI is fully built for all 17 pages but most show demo/placeholder data,,,,,,,,,,
+,,2. The frontend team is BLOCKED on backend APIs for 48 of 62 tasks,,,,,,,,,,
+,,3. Only 2 features currently work end-to-end with real data: Live IPsec metrics (Dynamic Failover) and Device discovery (IT/OT Devices),,,,,,,,,,
+,,4. Infrastructure (database + API layer + auth) must ship first - everything else depends on it,,,,,,,,,,
+,,5. Dates assume 1 frontend developer working full-time. Add parallel resources to compress timeline.,,,,,,,,,,
+,,6. Backend team needs to deliver APIs in the order shown to unblock UI work progressively,,,,,,,,,,

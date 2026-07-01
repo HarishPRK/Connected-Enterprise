@@ -1,0 +1,12 @@
+Task ID,Task Name,Description,Priority,Status,Owner,Start Date,Deadline,Effort (Days),Business Value,Dependencies,Risk Level
+P3-001,Unified Badge Color System,Consistent red/yellow/green shades across all components,P3 - Medium,Not Started,Frontend,2026-08-01,2026-08-03,0.5,Low - Brand consistency,None,Low
+P3-002,Device Drawer Longer History,Show 1-hour telemetry instead of 5-min charts,P3 - Medium,Not Started,Frontend,2026-08-03,2026-08-05,0.5,Medium - Better diagnostics for network team,Historical data API,Low
+P3-003,Fuzzy Search Implementation,Add typo-tolerant search using Fuse.js,P3 - Medium,Not Started,Frontend,2026-08-05,2026-08-08,1,Medium - 20% faster device lookup,None,Low
+P3-004,Export CSV/JSON APIs,Enable download of devices audit-log incidents,P3 - Medium,Not Started,Backend,2026-08-08,2026-08-10,2,High - Required for compliance audits ($100K contract),None,Low
+P3-005,Branch Map Geo-Lookup,Support non-Texas branch locations,P3 - Medium,Not Started,Frontend,2026-08-10,2026-08-12,1,Medium - Enables national expansion (50+ branches),Geo API access,Medium
+P3-006,Custom Alert Rules API,User-defined thresholds instead of hardcoded values,P3 - Medium,Not Started,Backend,2026-08-12,2026-08-15,3,High - $75K/year value (custom SLA monitoring),Database design,Medium
+P3-007,Health Check Endpoint,Add /health for PM2 monitoring,P3 - Medium,Not Started,Backend,2026-08-13,2026-08-15,0.5,Medium - 99.9% uptime SLA,None,Low
+P3-008,Dynamic Topology Layout,Auto-position SVG nodes based on device count,P3 - Medium,Not Started,Frontend,2026-08-16,2026-08-18,2,Medium - Scales to 200+ device branches,None,Medium
+P3-009,Incident Escalation Webhooks,Auto-notify Slack/PagerDuty on critical incidents,P3 - Medium,Not Started,Backend,2026-08-18,2026-08-20,2,High - Reduces MTTR by 45% ($120K/year value),Webhook service,Low
+P3-010,Secrets Manager Migration,Move .env keys to AWS Secrets Manager,P3 - Medium,Not Started,DevOps,2026-08-18,2026-08-20,1,Medium - Security compliance requirement,AWS Secrets Manager setup,Medium
+P3-011,CI/CD Pipeline,Automate deploys via GitHub Actions,P3 - Medium,Not Started,DevOps,2026-08-20,2026-08-31,3,High - 80% faster releases 50% fewer bugs,GitHub runner setup,Medium

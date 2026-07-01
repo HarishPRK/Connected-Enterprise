@@ -1,0 +1,136 @@
+Section,Task,Type,Backend Data Needed,Start Date,End Date,Est. Days
+,,,,,,
+--- PHASE 1: CURRENT PLATFORM (Pending Work) ---,,,,,,
+,,,,,,
+Dynamic Failover,Make SLA threshold inputs saveable,UI + Backend,Threshold values (latency/jitter/loss/MOS warn and fail limits for Fiber and 5G),2026-07-07,2026-07-09,3
+Dynamic Failover,Re-probe button functionality,UI + Backend,Gateway probe trigger and result status,2026-07-07,2026-07-08,2
+Dynamic Failover,Tune SLA recommendation modal,UI + Backend,AI-recommended threshold values with reasoning,2026-07-09,2026-07-11,3
+Dynamic Failover,Failover event history log,UI + Backend,List of past failover events with timestamps and reasons,2026-07-10,2026-07-14,3
+Dynamic Failover,Per-tunnel bandwidth chart,UI Only,N/A - data already available from live stream,2026-07-10,2026-07-11,2
+Dynamic Failover,Connect simulation to real gateway,UI + Backend,Simulation session start/stop with app profiles,2026-07-14,2026-07-18,5
+App-Aware Routing,Replace demo data with real policies,UI + Backend,List of routing policies with categories and stats per branch,2026-07-07,2026-07-10,4
+App-Aware Routing,Create new policy,UI + Backend,Accept new policy details and return created record,2026-07-10,2026-07-14,3
+App-Aware Routing,Edit existing policy,UI + Backend,Accept policy updates and return modified record,2026-07-14,2026-07-15,2
+App-Aware Routing,Delete policy,UI + Backend,Delete by ID and confirm removal,2026-07-15,2026-07-15,1
+App-Aware Routing,Enable/disable toggle persist,UI + Backend,Toggle state and confirm applied to gateway,2026-07-15,2026-07-16,1
+App-Aware Routing,Live traffic stats per policy,UI + Backend,Real-time hits/min and throughput per policy pushed every 10s,2026-07-16,2026-07-21,4
+App-Aware Routing,Policy templates library,UI + Backend,Pre-built policy sets available for import,2026-07-21,2026-07-23,3
+Traffic Policy,Replace demo data with real policies,UI + Backend,List of traffic policies per branch (app/priority/path/enabled),2026-07-07,2026-07-09,3
+Traffic Policy,Create new policy form,UI + Backend,Accept new policy and return created record,2026-07-09,2026-07-11,3
+Traffic Policy,Edit existing policy,UI + Backend,Accept updates and return modified record,2026-07-11,2026-07-14,2
+Traffic Policy,Delete policy,UI + Backend,Delete by ID and confirm,2026-07-14,2026-07-14,1
+Traffic Policy,Enable/disable toggle persist,UI + Backend,Toggle state and confirm pushed to gateway,2026-07-14,2026-07-15,1
+Traffic Policy,Drag-and-drop priority reorder,UI + Backend,New ordering of policy IDs applied to gateway,2026-07-15,2026-07-17,3
+Overview,Branch info from real data,UI + Backend,Branch details: name/location/gateway model/firmware/uptime,2026-07-07,2026-07-09,3
+Overview,WAN link status live,UI + Backend,Current Fiber and 5G link state/speed/signal quality,2026-07-09,2026-07-10,2
+Overview,Refresh button,UI Only,N/A - re-fetches existing data,2026-07-10,2026-07-10,1
+Overview,Export dashboard as PDF,UI Only,N/A - generated in browser,2026-07-21,2026-07-22,2
+Fleet,Fleet stats from real data,UI + Backend,Per-branch health score/uptime/device count/throughput/alerts,2026-07-10,2026-07-15,4
+Fleet,Branch row click navigation,UI Only,N/A - routing fix,2026-07-15,2026-07-15,1
+Connectivity,Fiber link deep metrics,UI + Backend,Optical power/attenuation/FCS errors/uptime/SFP temp,2026-07-14,2026-07-16,3
+Connectivity,5G link deep metrics,UI + Backend,RSSI/SINR/band/cell ID/neighbor count,2026-07-14,2026-07-16,3
+Connectivity,Reachability probes,UI + Backend,Probe results: target/category/RTT/success rate/last check,2026-07-16,2026-07-18,3
+Connectivity,Connection event log,UI + Backend,Recent network events: timestamp/type/severity/description,2026-07-18,2026-07-22,3
+Connectivity,RX/TX bandwidth chart live,UI + Backend,Receive and transmit bandwidth in 30-min intervals for 24h,2026-07-22,2026-07-23,2
+Devices,Add device form,UI + Backend,Accept new device info (name/type/MAC/IP/domain),2026-07-14,2026-07-16,3
+Devices,Export device inventory,UI Only,N/A - CSV generated in browser,2026-07-16,2026-07-16,1
+Devices,Device telemetry history charts,UI + Backend,24h history per device: CPU/temp/power/WiFi signal readings,2026-07-16,2026-07-21,4
+Devices,Bulk device actions,UI + Backend,Accept list of device IDs + action and return results per device,2026-07-21,2026-07-23,3
+NaaS,Service catalog from real data,UI + Backend,Active services: name/tier/capacity/usage %/cost/SLA,2026-07-21,2026-07-23,3
+NaaS,Provision new service wizard,UI + Backend,Provisioning request with estimated activation time,2026-07-23,2026-07-28,4
+NaaS,Enable/disable add-ons,UI + Backend,Toggle add-on and confirm billing change,2026-07-28,2026-07-29,2
+Cost Insights,Savings data from real calculations,UI + Backend,Monthly savings by category + annual total + ROI %,2026-07-28,2026-07-30,3
+Cost Insights,Cost warnings from real detection,UI + Backend,Active warnings: severity/title/cost impact/recommendation,2026-07-30,2026-07-31,2
+Cost Insights,Export PDF report,UI Only,N/A - generated in browser,2026-08-01,2026-08-05,3
+Incidents,Incident list from real data,UI + Backend,Paginated incidents: ID/title/severity/status/assignee/time,2026-07-14,2026-07-16,3
+Incidents,Create manual incident,UI + Backend,Accept incident details and create in system,2026-07-16,2026-07-17,2
+Incidents,Incident trend chart real data,UI + Backend,Daily incident counts by severity for past 14 days,2026-07-17,2026-07-18,2
+Incidents,Saved filter presets,UI + Backend,Save and retrieve named filter combinations,2026-07-18,2026-07-21,2
+Security,Threat events from real telemetry,UI + Backend,Recent threats: time/category/severity/source/country/action/rule,2026-07-21,2026-07-23,3
+Security,Threat trend chart real data,UI + Backend,Hourly threat counts by category for last 24h,2026-07-23,2026-07-24,2
+Security,Compliance check results,UI + Backend,Framework/control/status/detail/last scan time,2026-07-24,2026-07-28,3
+Audit Log,Audit entries from real data,UI + Backend,Paginated entries: actor/action/target/result/timestamp,2026-07-28,2026-07-30,3
+Audit Log,Date range picker,UI Only,N/A - filters existing data,2026-07-30,2026-07-31,2
+Audit Log,Export as CSV,UI Only,N/A - generated in browser,2026-07-31,2026-07-31,1
+Onboarding,Save gateway configuration,UI + Backend,Accept full gateway config and start provisioning,2026-07-21,2026-07-25,5
+Onboarding,Gateway model catalog,UI + Backend,Available models with specs: throughput/ports/5G/PoE,2026-07-25,2026-07-28,2
+Onboarding,Provisioning progress tracking,UI + Backend,Live provisioning steps: connecting/downloading/applying/ready,2026-07-28,2026-07-31,4
+Settings,Save user preferences,UI + Backend,Save/retrieve: timezone/theme/density/notifications,2026-07-31,2026-08-01,2
+Settings,Integration connections (Slack/PagerDuty),UI + Backend,OAuth flow to connect and disconnect services,2026-08-01,2026-08-07,5
+Video Analytics,Pipeline catalog from backend,UI + Backend,Available pipelines: name/hardware/resolution/FPS/AI model,2026-08-04,2026-08-05,2
+Video Analytics,Stream health monitoring,UI + Backend,Per-stream: current FPS/dropped frames/inference time/status,2026-08-05,2026-08-07,3
+,,,,,,
+,,,,,,
+--- PHASE 2: PREDICTIVE INTELLIGENCE ---,,,,,,
+,,,,,,
+Predictive Analytics,AI-powered outage prediction,UI + Backend,Predicted outage probability per branch for next 24h with confidence % and contributing factors,2026-08-11,2026-08-15,5
+Predictive Analytics,Capacity planning forecasts,UI + Backend,Bandwidth demand projections for next 30/60/90 days per branch with growth trends,2026-08-15,2026-08-20,4
+Predictive Analytics,Anomaly detection alerts,UI + Backend,Unusual traffic patterns flagged in real-time with what changed and suggested action,2026-08-20,2026-08-25,4
+Predictive Analytics,Predictive maintenance scheduling,UI + Backend,Device failure probability based on age/temp/usage with recommended replacement windows,2026-08-25,2026-08-29,4
+,,,,,,
+,,,,,,
+--- PHASE 2: DIGITAL TWIN ---,,,,,,
+,,,,,,
+Digital Twin,Live network digital twin visualization,UI + Backend,Full network topology state in real-time: every link/device/tunnel rendered as interactive 3D map,2026-08-11,2026-08-22,10
+Digital Twin,What-if scenario simulator,UI + Backend,Simulate link failures or traffic spikes and see predicted impact before it happens,2026-08-22,2026-08-29,6
+Digital Twin,Historical replay mode,UI Only,N/A - replays stored telemetry snapshots in the twin view,2026-08-29,2026-09-03,4
+,,,,,,
+,,,,,,
+--- PHASE 2: EXECUTIVE COMMAND CENTER ---,,,,,,
+,,,,,,
+Executive Command Center,Multi-branch comparison dashboard,UI + Backend,Side-by-side KPIs for any 2-5 branches: uptime/cost/incidents/throughput/health,2026-08-11,2026-08-15,4
+Executive Command Center,Scheduled PDF reports via email,UI + Backend,Report generation on a schedule (daily/weekly/monthly) delivered to configured emails,2026-08-15,2026-08-20,4
+Executive Command Center,Custom KPI builder,UI + Backend,Managers define their own KPI cards by picking metrics and thresholds,2026-08-20,2026-08-25,4
+Executive Command Center,ROI calculator with scenario modeling,UI + Backend,Input branch count / device count / traffic volume and see projected savings and payback,2026-08-25,2026-08-29,4
+,,,,,,
+,,,,,,
+--- PHASE 2: SELF-HEALING NETWORK ---,,,,,,
+,,,,,,
+Self-Healing Network,Auto-remediation playbooks,UI + Backend,Playbook library: trigger condition + action steps + approval rules + rollback plan,2026-08-11,2026-08-18,6
+Self-Healing Network,One-click rollback on failed changes,UI + Backend,Config snapshot before every change with instant rollback if health degrades,2026-08-18,2026-08-22,4
+Self-Healing Network,Incident auto-escalation rules,UI + Backend,Rule engine: if severity X unresolved after Y minutes then notify Z team,2026-08-22,2026-08-27,4
+Self-Healing Network,Root cause analysis timeline,UI + Backend,Correlated event timeline showing what happened leading up to an incident,2026-08-27,2026-09-03,5
+,,,,,,
+,,,,,,
+--- PHASE 2: SMART ALERTS ---,,,,,,
+,,,,,,
+Smart Alerts,Intelligent alert grouping,UI + Backend,Related alerts clustered into a single actionable notification instead of alert storms,2026-08-11,2026-08-15,4
+Smart Alerts,Alert fatigue score per operator,UI + Backend,Track alert volume per person and flag overload or ignored alerts,2026-08-15,2026-08-19,3
+Smart Alerts,Business-impact scoring on alerts,UI + Backend,Each alert tagged with estimated revenue/customer impact and cost per minute of downtime,2026-08-19,2026-08-22,3
+Smart Alerts,Multi-channel notifications (SMS/Teams/WhatsApp),UI + Backend,Alert delivery across multiple channels with per-user preferences and escalation chains,2026-08-22,2026-08-27,4
+,,,,,,
+,,,,,,
+--- PHASE 2: ENERGY & SUSTAINABILITY ---,,,,,,
+,,,,,,
+Energy & Sustainability,Carbon footprint per branch,UI + Backend,CO2 emissions estimated from power usage per branch with monthly trend and reduction targets,2026-08-11,2026-08-14,3
+Energy & Sustainability,Green routing mode,UI + Backend,Route traffic to minimize energy consumption during low-demand hours,2026-08-14,2026-08-19,4
+Energy & Sustainability,Power-down scheduling for idle devices,UI + Backend,Schedule devices to power down during non-business hours with auto wake-on-LAN,2026-08-19,2026-08-22,3
+Energy & Sustainability,Sustainability compliance report (ESG),UI + Backend,Monthly report: total kWh / CO2 saved / devices powered down / green routing hours,2026-08-22,2026-08-26,3
+,,,,,,
+,,,,,,
+--- PHASE 2: MULTI-TENANT & ACCESS CONTROL ---,,,,,,
+,,,,,,
+Multi-Tenant & RBAC,Role-based dashboard views,UI + Backend,Different views for NOC operator vs branch manager vs executive vs auditor,2026-08-11,2026-08-18,6
+Multi-Tenant & RBAC,Tenant isolation for managed service providers,UI + Backend,MSPs see only their assigned branches with white-label branding,2026-08-18,2026-08-25,6
+Multi-Tenant & RBAC,Approval workflows for critical changes,UI + Backend,Two-person approval for policy changes / firmware upgrades / device power-off,2026-08-25,2026-09-01,5
+,,,,,,
+,,,,,,
+--- PHASE 2: CONVERSATIONAL OPERATIONS ---,,,,,,
+,,,,,,
+Conversational Ops,Natural language policy creation,UI + Backend,"Type ""block TikTok on all branches"" and AI creates the policy for review",2026-08-11,2026-08-18,6
+Conversational Ops,Voice-activated NOC commands,UI + Backend,"Speak commands like ""failover Plano to 5G"" with voice recognition",2026-08-18,2026-08-27,7
+Conversational Ops,AI-generated daily change summaries,UI + Backend,Daily digest: what changed / who changed it / what impact it had,2026-08-27,2026-09-01,4
+,,,,,,
+,,,,,,
+--- PHASE 2: SLA & COMPLIANCE AUTOMATION ---,,,,,,
+,,,,,,
+SLA & Compliance,Automated SLA breach notifications,UI + Backend,Real-time alerts when SLA metrics cross threshold with auto-ticket creation,2026-08-11,2026-08-15,4
+SLA & Compliance,Compliance evidence auto-collection,UI + Backend,Continuously gather evidence for PCI-DSS/HIPAA/SOC2 audits without manual effort,2026-08-15,2026-08-22,6
+SLA & Compliance,Customer-facing SLA portal,UI + Backend,Read-only branded portal for end-customers showing their uptime and SLA performance,2026-08-22,2026-08-29,6
+,,,,,,
+,,,,,,
+--- PHASE 2: FIRMWARE & LIFECYCLE ---,,,,,,
+,,,,,,
+Firmware & Lifecycle,Firmware upgrade scheduler,UI + Backend,Staged rollouts across branches (canary > 10% > 50% > 100%) with health gates,2026-08-11,2026-08-18,6
+Firmware & Lifecycle,Device lifecycle tracking,UI + Backend,Device age/warranty/EOL dates with proactive replacement recommendations,2026-08-18,2026-08-22,4
+Firmware & Lifecycle,Configuration drift detection,UI + Backend,Compare live device config against golden baseline and flag unauthorized changes,2026-08-22,2026-08-28,5

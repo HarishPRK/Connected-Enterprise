@@ -1,0 +1,58 @@
+Section,Task,Type,Backend Data Needed,Start Date,End Date,Est. Days
+Dynamic Failover,Make SLA threshold inputs saveable,UI + Backend,Threshold values (latency/jitter/loss/MOS warn and fail limits for Fiber and 5G),2025-07-07,2025-07-09,3
+Dynamic Failover,Re-probe button functionality,UI + Backend,Gateway probe trigger and result status,2025-07-07,2025-07-08,2
+Dynamic Failover,Tune SLA recommendation modal,UI + Backend,AI-recommended threshold values with reasoning,2025-07-09,2025-07-11,3
+Dynamic Failover,Failover event history log,UI + Backend,List of past failover events with timestamps and reasons,2025-07-10,2025-07-14,3
+Dynamic Failover,Per-tunnel bandwidth chart,UI Only,N/A - data already available from live stream,2025-07-10,2025-07-11,2
+Dynamic Failover,Connect simulation to real gateway,UI + Backend,Simulation session start/stop with app profiles,2025-07-14,2025-07-18,5
+App-Aware Routing,Replace demo data with real policies,UI + Backend,List of routing policies with categories and stats per branch,2025-07-07,2025-07-10,4
+App-Aware Routing,Create new policy,UI + Backend,Accept new policy details and return created record,2025-07-10,2025-07-14,3
+App-Aware Routing,Edit existing policy,UI + Backend,Accept policy updates and return modified record,2025-07-14,2025-07-15,2
+App-Aware Routing,Delete policy,UI + Backend,Delete by ID and confirm removal,2025-07-15,2025-07-15,1
+App-Aware Routing,Enable/disable toggle persist,UI + Backend,Toggle state and confirm applied to gateway,2025-07-15,2025-07-16,1
+App-Aware Routing,Live traffic stats per policy,UI + Backend,Real-time hits/min and throughput per policy pushed every 10s,2025-07-16,2025-07-21,4
+App-Aware Routing,Policy templates library,UI + Backend,Pre-built policy sets available for import,2025-07-21,2025-07-23,3
+Traffic Policy,Replace demo data with real policies,UI + Backend,List of traffic policies per branch (app/priority/path/enabled),2025-07-07,2025-07-09,3
+Traffic Policy,Create new policy form,UI + Backend,Accept new policy and return created record,2025-07-09,2025-07-11,3
+Traffic Policy,Edit existing policy,UI + Backend,Accept updates and return modified record,2025-07-11,2025-07-14,2
+Traffic Policy,Delete policy,UI + Backend,Delete by ID and confirm,2025-07-14,2025-07-14,1
+Traffic Policy,Enable/disable toggle persist,UI + Backend,Toggle state and confirm pushed to gateway,2025-07-14,2025-07-15,1
+Traffic Policy,Drag-and-drop priority reorder,UI + Backend,New ordering of policy IDs applied to gateway,2025-07-15,2025-07-17,3
+Overview,Branch info from real data,UI + Backend,Branch details: name/location/gateway model/firmware/uptime,2025-07-07,2025-07-09,3
+Overview,WAN link status live,UI + Backend,Current Fiber and 5G link state/speed/signal quality,2025-07-09,2025-07-10,2
+Overview,Refresh button,UI Only,N/A - re-fetches existing data,2025-07-10,2025-07-10,1
+Overview,Export dashboard as PDF,UI Only,N/A - generated in browser,2025-07-21,2025-07-22,2
+Fleet,Fleet stats from real data,UI + Backend,Per-branch health score/uptime/device count/throughput/alerts,2025-07-10,2025-07-15,4
+Fleet,Branch row click navigation,UI Only,N/A - routing fix,2025-07-15,2025-07-15,1
+Connectivity,Fiber link deep metrics,UI + Backend,Optical power/attenuation/FCS errors/uptime/SFP temp,2025-07-14,2025-07-16,3
+Connectivity,5G link deep metrics,UI + Backend,RSSI/SINR/band/cell ID/neighbor count,2025-07-14,2025-07-16,3
+Connectivity,Reachability probes,UI + Backend,Probe results: target/category/RTT/success rate/last check,2025-07-16,2025-07-18,3
+Connectivity,Connection event log,UI + Backend,Recent network events: timestamp/type/severity/description,2025-07-18,2025-07-22,3
+Connectivity,RX/TX bandwidth chart live,UI + Backend,Receive and transmit bandwidth in 30-min intervals for 24h,2025-07-22,2025-07-23,2
+Devices,Add device form,UI + Backend,Accept new device info (name/type/MAC/IP/domain),2025-07-14,2025-07-16,3
+Devices,Export device inventory,UI Only,N/A - CSV generated in browser,2025-07-16,2025-07-16,1
+Devices,Device telemetry history charts,UI + Backend,24h history per device: CPU/temp/power/WiFi signal readings,2025-07-16,2025-07-21,4
+Devices,Bulk device actions,UI + Backend,Accept list of device IDs + action and return results per device,2025-07-21,2025-07-23,3
+NaaS,Service catalog from real data,UI + Backend,Active services: name/tier/capacity/usage %/cost/SLA,2025-07-21,2025-07-23,3
+NaaS,Provision new service wizard,UI + Backend,Provisioning request with estimated activation time,2025-07-23,2025-07-28,4
+NaaS,Enable/disable add-ons,UI + Backend,Toggle add-on and confirm billing change,2025-07-28,2025-07-29,2
+Cost Insights,Savings data from real calculations,UI + Backend,Monthly savings by category + annual total + ROI %,2025-07-28,2025-07-30,3
+Cost Insights,Cost warnings from real detection,UI + Backend,Active warnings: severity/title/cost impact/recommendation,2025-07-30,2025-07-31,2
+Cost Insights,Export PDF report,UI Only,N/A - generated in browser,2025-08-01,2025-08-05,3
+Incidents,Incident list from real data,UI + Backend,Paginated incidents: ID/title/severity/status/assignee/time,2025-07-14,2025-07-16,3
+Incidents,Create manual incident,UI + Backend,Accept incident details and create in system,2025-07-16,2025-07-17,2
+Incidents,Incident trend chart real data,UI + Backend,Daily incident counts by severity for past 14 days,2025-07-17,2025-07-18,2
+Incidents,Saved filter presets,UI + Backend,Save and retrieve named filter combinations,2025-07-18,2025-07-21,2
+Security,Threat events from real telemetry,UI + Backend,Recent threats: time/category/severity/source/country/action/rule,2025-07-21,2025-07-23,3
+Security,Threat trend chart real data,UI + Backend,Hourly threat counts by category for last 24h,2025-07-23,2025-07-24,2
+Security,Compliance check results,UI + Backend,Framework/control/status/detail/last scan time,2025-07-24,2025-07-28,3
+Audit Log,Audit entries from real data,UI + Backend,Paginated entries: actor/action/target/result/timestamp,2025-07-28,2025-07-30,3
+Audit Log,Date range picker,UI Only,N/A - filters existing data,2025-07-30,2025-07-31,2
+Audit Log,Export as CSV,UI Only,N/A - generated in browser,2025-07-31,2025-07-31,1
+Onboarding,Save gateway configuration,UI + Backend,Accept full gateway config and start provisioning,2025-07-21,2025-07-25,5
+Onboarding,Gateway model catalog,UI + Backend,Available models with specs: throughput/ports/5G/PoE,2025-07-25,2025-07-28,2
+Onboarding,Provisioning progress tracking,UI + Backend,Live provisioning steps: connecting/downloading/applying/ready,2025-07-28,2025-07-31,4
+Settings,Save user preferences,UI + Backend,Save/retrieve: timezone/theme/density/notifications,2025-07-31,2025-08-01,2
+Settings,Integration connections (Slack/PagerDuty),UI + Backend,OAuth flow to connect and disconnect services,2025-08-01,2025-08-07,5
+Video Analytics,Pipeline catalog from backend,UI + Backend,Available pipelines: name/hardware/resolution/FPS/AI model,2025-08-04,2025-08-05,2
+Video Analytics,Stream health monitoring,UI + Backend,Per-stream: current FPS/dropped frames/inference time/status,2025-08-05,2025-08-07,3

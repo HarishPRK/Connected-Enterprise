@@ -15,6 +15,7 @@ import {
 import type { BandwidthPoint, Device, WanLink, Status } from '../types';
 import { useLiveData } from '../ui/LiveData';
 import { useIpsecMetrics } from '../ui/useIpsecMetrics';
+import { useDevices } from '../ui/useDevices';
 import {
   Download, RefreshCcw, X, Search, CheckCircle2, AlertCircle, Cpu,
   Laptop, CreditCard, PhoneCall, DoorClosed, Flame, AlertTriangle,
@@ -35,7 +36,19 @@ function inferUnderlay(ifname: string): 'fiber' | '5g' {
 export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const branch = branches.find((b) => b.id === branchId) ?? branches[0];
   const { bandwidthSeries } = useLiveData();
-  const branchDevices = useMemo(() => getDevicesForBranch(branchId), [branchId]);
+  const { devices: liveDevicesAll, loaded: devicesLoaded } = useDevices();
+  const mockDevices = useMemo(() => getDevicesForBranch(branchId), [branchId]);
+  // Filter live devices by location source so Plano (rdk) and McKinney (prpl)
+  // device fleets never mix. Devices without a locationSource (seed) pass through.
+  const branchIpsecSource = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
+  const liveDevices = useMemo(
+    () => branchIpsecSource
+      ? liveDevicesAll.filter((d) => !d.locationSource || d.locationSource === branchIpsecSource)
+      : liveDevicesAll,
+    [liveDevicesAll, branchIpsecSource],
+  );
+  // Use real devices if loaded, otherwise fall back to mock data
+  const branchDevices = devicesLoaded && liveDevices.length > 0 ? liveDevices : mockDevices;
   const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
   // ── Live IPsec overlay (Plano = rdk topic, McKinney = prpl topic) ──

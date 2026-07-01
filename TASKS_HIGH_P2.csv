@@ -1,0 +1,11 @@
+Task ID,Task Name,Description,Priority,Status,Owner,Start Date,Deadline,Effort (Days),Business Value,Dependencies,Risk Level
+P2-001,Toast Notification Persistence,Add option to pin critical alerts - prevents missed incidents,P2 - High,Not Started,Frontend,2026-07-16,2026-07-17,0.5,Medium - Reduces incident response time by 20%,None,Low
+P2-002,Bulk Device Operations,Multi-select devices for batch IT/OT classification - saves admin time,P2 - High,Not Started,Frontend,2026-07-17,2026-07-18,1,High - Saves 10 hours/week admin time ($25K/year),None,Low
+P2-003,Table Sorting All Columns,Enable sorting by IP uptime latency - improves troubleshooting workflow,P2 - High,Not Started,Frontend,2026-07-18,2026-07-19,1,Medium - 15% faster troubleshooting,None,Low
+P2-004,Split DynamicPathSelection Component,Refactor 1140-line file into sub-components - improves maintainability,P2 - High,Not Started,Frontend,2026-07-19,2026-07-20,1,Medium - 40% faster feature development,None,Low
+P2-005,Split VideoAnalytics Component,Extract StreamPlayer from 2115-line file - enables code reuse,P2 - High,Not Started,Frontend,2026-07-21,2026-07-22,1,Medium - Accelerates video feature roadmap,None,Low
+P2-006,Keyboard Shortcuts (Cmd+K),Add command palette for power users - boosts productivity,P2 - High,Not Started,Frontend,2026-07-23,2026-07-25,2,High - 30% faster workflows for 50+ daily users,None,Low
+P2-007,Historical Bandwidth API,Implement /api/bandwidth/history endpoint - enables trend analysis,P2 - High,Not Started,Backend,2026-07-20,2026-07-25,3,Very High - Unlocks $150K capacity planning upsell,Database schema design,Medium
+P2-008,Device Reboot/Disable Actions,Complete device lifecycle management - remote troubleshooting,P2 - High,Not Started,Backend,2026-07-25,2026-07-28,2,High - Reduces truck rolls by 35% ($80K/year savings),Gateway component API,Medium
+P2-009,Firmware Update Workflow,Enable OTA updates from UI - automates maintenance,P2 - High,Not Started,Backend,2026-07-28,2026-07-30,2,Very High - $200K/year operational savings,File storage backend,High
+P2-010,Split Topology Component,Extract SVG logic from 1532-line file - improves testing,P2 - High,Not Started,Frontend,2026-07-26,2026-07-27,1,Low - Code quality improvement,None,Low

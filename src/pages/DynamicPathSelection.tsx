@@ -99,8 +99,8 @@ function orderTunnelsByName(tunnels: IpsecTunnelMetric[]): IpsecTunnelMetric[] {
 function displayGatewayName(raw: string): string {
   const name = (raw || "").trim();
   if (!name) return "";
-  // Special case: rdk-bpi4-gateway always displays as "Edge Gateway"
   if (name === "rdk-bpi4-gateway") return "Edge Gateway";
+  if (name === "prpl-bpi4-gateway") return "Edge Gateway";
   return name
     .split(/[-_\s]+/)
     .filter(Boolean)
@@ -2467,15 +2467,18 @@ function GatewayBlock({
   // the underlay. Null in auto mode (the device decides).
   const [forcedTunnel, setForcedTunnel] = useState<string | null>(null);
   const { push } = useToast();
-  // Device presence — gate the per-tunnel rows' IT/OT tags so they match the
-  // topology (no IT devices ⇒ no IT tag, same as no IT flow in the diagram).
-  const { devices: blockDevices } = useDevices();
-  const hasIT = blockDevices.some((d) => d.domain === "IT");
-  const hasOT = blockDevices.some((d) => d.domain === "OT");
 
   // The gateway's topic family — drives which IoT Core topic the command is
   // published to. Falls back to 'rdk' for the captured-sample / unknown case.
   const source: "rdk" | "prpl" = g.source === "prpl" ? "prpl" : "rdk";
+
+  // Device presence — gate the per-tunnel rows' IT/OT tags so they match the
+  // topology (no IT devices ⇒ no IT tag, same as no IT flow in the diagram).
+  // Filter by gateway source so Plano (rdk) and McKinney (prpl) never mix.
+  const { devices: blockDevicesAll } = useDevices();
+  const blockDevices = blockDevicesAll.filter((d) => !d.locationSource || d.locationSource === source);
+  const hasIT = blockDevices.some((d) => d.domain === "IT");
+  const hasOT = blockDevices.some((d) => d.domain === "OT");
 
   const commandTitle = (cmd: PathCommand) =>
     cmd === "auto"
@@ -2910,6 +2913,7 @@ function GatewayBlock({
         viewMode={viewMode}
         tunnelRates={tunnelRates}
         tunnelHist={tunnelHist}
+        locationSource={source}
       />
 
       {/* Failover / SLA event ribbon — flips + breaches over the live session */}
@@ -2997,6 +3001,7 @@ function IpsecFlowSvg({
   viewMode,
   tunnelRates,
   tunnelHist,
+  locationSource,
 }: {
   m: IpsecGatewayState["metrics"];
   c: ThemeColors;
@@ -3014,6 +3019,8 @@ function IpsecFlowSvg({
   /** `live` mirrors the device (single active tunnel carries IT+OT); `target`
    *  shows the application-aware routing policy (IT/OT split across tunnels). */
   viewMode: ViewMode;
+  /** Filter devices to this location ('rdk' for Plano, 'prpl' for McKinney). */
+  locationSource?: 'rdk' | 'prpl';
 }) {
   // Keep the canvas tight: less dead space = a larger render scale when the
   // SVG is fit to the card width, i.e. bigger, readable labels.
@@ -3022,7 +3029,11 @@ function IpsecFlowSvg({
 
   // Live IT/OT device inventory (same feed as the Devices page). Show up to 3
   // per domain as the on-prem endpoints originating traffic into the gateway.
-  const { devices: allDevices } = useDevices();
+  // Filter by location so Plano (rdk) and McKinney (prpl) devices never mix.
+  const { devices: allDevicesRaw } = useDevices();
+  const allDevices = locationSource
+    ? allDevicesRaw.filter((d) => !d.locationSource || d.locationSource === locationSource)
+    : allDevicesRaw;
   const itAll = allDevices.filter((d) => d.domain === "IT");
   const otAll = allDevices.filter((d) => d.domain === "OT");
   const itDevices = itAll.slice(0, 3);

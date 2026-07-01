@@ -1,0 +1,27 @@
+Feature ID,Feature Name,Description,Completion Date,Business Value Delivered,Lines of Code,Team,Status
+COMP-001,Live IPsec Metrics Integration,Real-time gateway telemetry via AWS IoT Core (rdk/prpl topics),2026-06-15,Very High - $500K/year network monitoring value,2800,Backend,Production
+COMP-002,Device Inventory System,Real-time Matter + Shelly device discovery and classification,2026-06-20,Very High - Manages $2M+ in device assets,3200,Backend,Production
+COMP-003,IT/OT Device Classification,Persistent overrides with cloud sync and SSE streaming,2026-06-22,High - $150K/year asset management efficiency,1500,Full Stack,Production
+COMP-004,Matter Device Control,OnOff cluster control for smart home devices,2026-06-18,High - $80K/year home automation integration,800,Backend,Production
+COMP-005,Shelly Relay Control,Switch.Set API for Gen2+ devices,2026-06-19,Medium - $40K/year industrial control,600,Backend,Production
+COMP-006,WAN Path Control,Force Fiber/5G/Auto mode with gateway ack,2026-06-25,Very High - $300K/year network optimization,1200,Full Stack,Production
+COMP-007,AI Agent (Bedrock/Anthropic),8-tool agent with SSE streaming and human approval,2026-06-28,Very High - $600K/year incident automation,2400,Backend,Production
+COMP-008,Device Telemetry Charts,5-minute rolling window for latency/throughput,2026-06-21,High - $100K/year diagnostics value,900,Frontend,Production
+COMP-009,Video Analytics Proxy,MJPEG stream gallery with Nvidia/Hailo inference,2026-06-24,High - $200K/year surveillance integration,1800,Full Stack,Production
+COMP-010,Overview Page,Branch KPIs topology bandwidth AI insight,2026-06-10,High - Executive dashboard for C-suite,3500,Frontend,Production
+COMP-011,Fleet Management Page,Multi-branch map with health sparklines,2026-06-11,High - $180K/year multi-site monitoring,2200,Frontend,Production
+COMP-012,Connectivity Page,WAN metrics DNS stats event log,2026-06-12,High - $120K/year network troubleshooting,2800,Frontend,Production
+COMP-013,IT/OT Devices Pages,Full CRUD live status control actions,2026-06-14,Very High - $250K/year device management,4200,Frontend,Production
+COMP-014,Dynamic Path Selection,SLA charts auto-failover force modes,2026-06-26,Very High - $400K/year intelligent routing,5200,Frontend,Production
+COMP-015,App-Aware Routing,Traffic policies DPI rules,2026-06-16,High - $150K/year QoS management,2400,Frontend,Production
+COMP-016,Incidents Page,AI investigation workflow with agent trace,2026-06-29,Very High - $500K/year incident resolution,3800,Frontend,Production
+COMP-017,Audit Log Page,Immutable event stream with filtering,2026-06-13,High - $100K/year compliance value,1800,Frontend,Production
+COMP-018,Cost Insights Page,ROI calculator 7-category breakdown,2026-06-17,High - $200K/year FinOps visibility,2600,Frontend,Production
+COMP-019,Security Page,Threat events DNS blocks compliance,2026-06-23,High - $180K/year security monitoring,2200,Frontend,Production
+COMP-020,Onboarding Wizard,Multi-step gateway setup flow,2026-06-08,Medium - $60K/year faster deployments,1600,Frontend,Production
+COMP-021,Ask AI / Agentic AI,Chat interface with reasoning steps,2026-06-27,High - $120K/year knowledge automation,2000,Frontend,Production
+COMP-022,Settings Page,Theme preferences telemetry config,2026-06-09,Low - User experience enhancement,800,Frontend,Production
+COMP-023,SSE Streaming Architecture,EventSource pattern for all real-time data,2026-06-05,High - Scalable foundation,1200,Backend,Production
+COMP-024,Protobuf Decoding,Server-side proto3 parsing for IoT messages,2026-06-06,High - Efficient data transfer,600,Backend,Production
+COMP-025,AWS IoT Core Integration,MQTT subscription and message routing,2026-06-07,Very High - Cloud-native IoT backbone,1800,Backend,Production
+TOTAL,,,,"Total Value: $5.28M/year",54000,,
