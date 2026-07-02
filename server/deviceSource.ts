@@ -212,6 +212,33 @@ const OVERRIDES_PATH =
 
 const normalizeMac = (mac: string) => mac.trim().toUpperCase();
 
+/**
+ * Friendly display names for known devices, keyed by normalized MAC. The
+ * McKinney (prpl) Shelly appliances are discovered via the gateway's Wi-Fi feed
+ * carrying only their raw hostname (e.g. `shellyplus1pm-c049ef8ce640`); a
+ * Shelly's id suffix IS its MAC (c049ef8ce640 → C0:49:EF:8C:E6:40), so we map
+ * that MAC to the human name. The names live in the smart-home DynamoDB
+ * `Devices` table (a separate backend the dashboard doesn't read), mirrored
+ * here. Extend/override WITHOUT a code change via
+ * IOT_DEVICE_NAMES="AA:BB:..=Name,CC:DD:..=Name".
+ */
+const DEVICE_NAME_ALIASES: Record<string, string> = Object.fromEntries(
+  (process.env.IOT_DEVICE_NAMES ??
+    [
+      'C0:49:EF:8C:E6:40=Grinder',
+      'C0:49:EF:8C:B0:F4=Air Fryer',
+      'C0:49:EF:8C:B7:5C=Mixer',
+      '90:38:0C:34:CD:74=Instant Pot',
+      'C0:49:EF:8C:93:24=Coffee Brewer',
+      '90:38:0C:36:95:A8=Exhaust',
+      'C0:49:EF:8C:E5:C4=Kettle',
+    ].join(','))
+    .split(',')
+    .map((pair) => pair.split('=').map((x) => x.trim()))
+    .filter((kv): kv is [string, string] => kv.length === 2 && !!kv[0] && !!kv[1])
+    .map(([mac, name]) => [normalizeMac(mac), name]),
+);
+
 const KNOWN_KINDS = new Set<Kind>([
   'laptop', 'desktop', 'printer', 'payment', 'server', 'confphone',
   'fire_sensor', 'smoke_sensor', 'door_lock',
@@ -353,7 +380,8 @@ function toDevice(r: RawDevice): { device: Device; autoDomain: Domain } {
   const autoDomain = classifyDomain(r, kind);
   const device: Device = {
     id: aliasNodeId ? `matter-${aliasNodeId}` : (wifiShellyId ?? r.id ?? `gw-${mac}`),
-    name: r.name ?? r.hostname ?? r.vendor ?? mac,
+    // A friendly-name alias (keyed by MAC) wins over the gateway's raw hostname.
+    name: DEVICE_NAME_ALIASES[mac] ?? r.name ?? r.hostname ?? r.vendor ?? mac,
     kind,
     domain: autoDomain, // effective override is applied later
     ip: r.ip ?? '—',
