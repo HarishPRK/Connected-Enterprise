@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { StatusBadge } from '../components/StatusBadge';
-import { devices as mockDevices, getDeviceHealth } from '../data/mock';
+import { getDeviceHealth, getDevicesForBranch, BRANCH_TO_IPSEC_SOURCE } from '../data/mock';
 import type { Device } from '../types';
 import { useDevices, classifyDevice, controlMatterDevice, controlShellyDevice, refreshMatterDevices, type DeviceView } from '../ui/useDevices';
 import {
@@ -26,7 +26,7 @@ const iconFor: Record<Device['kind'], React.ComponentType<{ size?: number }>> = 
 
 const fmtFor = formatConnectedFor;
 
-export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
+export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchId: string }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'warn' | 'err'>('all');
   const [selected, setSelected] = useState<Device | null>(null);
@@ -51,14 +51,29 @@ export function DevicesPage({ domain }: { domain: 'IT' | 'OT' }) {
     }
   }
 
+  // Strictly scope live devices to THIS branch's location so Plano (rdk) and
+  // McKinney (prpl) fleets never mix. A device from rdk/ipsec/metrics carries
+  // locationSource 'rdk' and must only ever appear on the Plano branch (and
+  // vice-versa). Devices with no locationSource (pure seed, before real LAN
+  // discovery) are intentionally excluded from the live view — the
+  // branch-specific mock below backs the empty state instead.
+  const branchSource = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
+  const liveForBranch = useMemo(
+    () => (branchSource
+      ? liveDevices.filter((d) => d.locationSource === branchSource)
+      : liveDevices),
+    [liveDevices, branchSource],
+  );
+
   // Live inventory from the gateway feed (Phase 0: server seed + persisted
-  // IT/OT overrides). Fall back to the bundled mock until the first snapshot
-  // lands or if the server is unreachable, so the page never renders empty.
+  // IT/OT overrides). Fall back to this branch's mock fleet until the first
+  // live inventory for this location lands or if the server is unreachable, so
+  // the page never renders empty — and never borrows another branch's devices.
   const allDevices: DeviceView[] = useMemo(
-    () => (loaded && liveDevices.length
-      ? liveDevices
-      : mockDevices.map((d) => ({ ...d, autoDomain: d.domain, overridden: false }))),
-    [loaded, liveDevices],
+    () => (loaded && liveForBranch.length
+      ? liveForBranch
+      : getDevicesForBranch(branchId).map((d) => ({ ...d, autoDomain: d.domain, overridden: false }))),
+    [loaded, liveForBranch, branchId],
   );
 
   // The drawer is position: fixed at top: 0, so its content sits at the top of

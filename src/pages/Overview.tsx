@@ -38,12 +38,14 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const { bandwidthSeries } = useLiveData();
   const { devices: liveDevicesAll, loaded: devicesLoaded } = useDevices();
   const mockDevices = useMemo(() => getDevicesForBranch(branchId), [branchId]);
-  // Filter live devices by location source so Plano (rdk) and McKinney (prpl)
-  // device fleets never mix. Devices without a locationSource (seed) pass through.
+  // Strictly filter live devices by location source so Plano (rdk) and McKinney
+  // (prpl) device fleets never mix. A device is shown only if its locationSource
+  // exactly matches this branch — devices with no locationSource (pure seed) are
+  // excluded here; the branch-specific mock fallback below covers the empty state.
   const branchIpsecSource = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
   const liveDevices = useMemo(
     () => branchIpsecSource
-      ? liveDevicesAll.filter((d) => !d.locationSource || d.locationSource === branchIpsecSource)
+      ? liveDevicesAll.filter((d) => d.locationSource === branchIpsecSource)
       : liveDevicesAll,
     [liveDevicesAll, branchIpsecSource],
   );

@@ -74,8 +74,8 @@ export default function App() {
               <Route path="/"               element={<Overview branchId={branchId} onSelectBranch={setBranchId} />} />
               <Route path="/fleet"          element={<FleetPage />} />
               <Route path="/connectivity"   element={<Connectivity />} />
-              <Route path="/it-devices"     element={<DevicesPage domain="IT" />} />
-              <Route path="/ot-devices"     element={<DevicesPage domain="OT" />} />
+              <Route path="/it-devices"     element={<DevicesPage domain="IT" branchId={branchId} />} />
+              <Route path="/ot-devices"     element={<DevicesPage domain="OT" branchId={branchId} />} />
               <Route path="/naas"           element={<NaasPage />} />
               <Route path="/cost-insights" element={<CostInsightsPage branchId={branchId} />} />
               <Route path="/incidents"      element={<IncidentsPage />} />

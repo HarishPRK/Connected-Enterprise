@@ -1,9 +1,20 @@
 {
-  "model": "us.anthropic.claude-opus-4-7",
   "permissions": {
     "allow": [
       "Bash(npm run *)",
-      "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")"
+      "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")",
+      "PowerShell(Get-Process | Where-Object { $_.ProcessName -match 'claude|node' } | Select-Object Id, ProcessName, StartTime, Path | Format-Table -AutoSize)",
+      "mcp__scheduled-tasks__list_scheduled_tasks",
+      "PowerShell(Get-ScheduledTask | Where-Object {$_.TaskName -match 'claude|anthropic|node'} | Select TaskName, State, TaskPath | Format-List; '---ACTIONS---'; Get-ScheduledTask | ForEach-Object { $t=$_; $_.Actions | ForEach-Object { $exe = \"$\\($_.Execute\\) $\\($_.Arguments\\)\"; if \\($exe -match 'claude|anthropic|node'\\) { \"$\\($t.TaskPath\\)$\\($t.TaskName\\) [$\\($t.State\\)] -> $exe\" } } })",
+      "PowerShell('--HKCU Run--'; Get-ItemProperty 'HKCU:\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run' | Format-List; '--HKLM Run--'; Get-ItemProperty 'HKLM:\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run' | Format-List; '--HKCU RunOnce--'; try { Get-ItemProperty 'HKCU:\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\RunOnce' -ErrorAction Stop | Format-List } catch { 'none' }; '--Startup folder--'; Get-ChildItem \"$env:APPDATA\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup\" -Force | Select Name; '--Common startup--'; Get-ChildItem \"$env:ProgramData\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\StartUp\" -Force | Select Name)",
+      "PowerShell(Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'claude|node' } | Select-Object ProcessId, ParentProcessId, Name, CreationDate, CommandLine | Format-List)",
+      "PowerShell('--pm2--'; try { pm2 ls 2>$null } catch { 'pm2 not installed or not on PATH' }; '--pm2 dir--'; if \\(Test-Path \"$env:USERPROFILE\\\\.pm2\"\\) { Get-ChildItem \"$env:USERPROFILE\\\\.pm2\" | Select Name } else { 'no .pm2 dir' }; '--nssm/forever--'; foreach \\($c in 'nssm','forever','node','pm2'\\) { $g = Get-Command $c -ErrorAction SilentlyContinue; if \\($g\\) { \"$c -> $\\($g.Source\\)\" } else { \"$c not found\" } }; '--services matching node/claude/pm2--'; Get-CimInstance Win32_Service | Where-Object { $_.PathName -match 'node|claude|pm2|nssm' } | Select Name, State, StartMode, PathName | Format-List)",
+      "PowerShell('--repo settings.local.json--')",
+      "PowerShell('--repo settings.json--')",
+      "PowerShell('--repo .claude listing--')",
+      "PowerShell(Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'claude|node' } | Select-Object ProcessId, Name, CreationDate, @{N='CmdLine';E={ if\\($_.CommandLine\\){ $_.CommandLine.Substring\\(0,[Math]::Min\\(200,$_.CommandLine.Length\\)\\) } }} | Format-List)",
+      "WebSearch",
+      "WebFetch(domain:support.claude.com)"
     ]
   }
 }
