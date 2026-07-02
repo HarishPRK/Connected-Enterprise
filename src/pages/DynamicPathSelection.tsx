@@ -41,7 +41,6 @@ import {
   Plug,
   HelpCircle,
   Radio,
-  Signal,
 } from "lucide-react";
 import { pathThresholds, BRANCH_TO_IPSEC_SOURCE } from "../data/mock";
 import type {
