@@ -8,6 +8,7 @@ import { BandwidthChart } from '../components/widgets/BandwidthChart';
 import { AppTrafficWidget } from '../components/widgets/AppTrafficWidget';
 import { KpiStrip } from '../components/widgets/KpiStrip';
 import { Topology } from '../components/widgets/Topology';
+import { FailoverTopology } from '../components/widgets/FailoverTopology';
 import { BranchOverviewCard } from '../components/widgets/BranchOverviewCard';
 import {
   appTraffic, branches, BRANCH_TO_IPSEC_SOURCE, getDevicesForBranch, lanPorts, poePorts, wanLinks,
@@ -201,10 +202,15 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
           />
         </div>
 
-        {/* Row 2 — full-width network topology.
-            The Topology widget honours `autoScenarioId` when its "Auto" chip
-            is selected (default); a manual scenario chip still overrides. */}
-        <div className="col-12"><Topology autoScenarioId={autoScenarioId} /></div>
+        {/* Row 2 — full-width topology. Branches backed by a live MQTT feed
+            (Plano → rdk/ipsec/metrics, McKinney → prpl/ipsec/metrics) render
+            the Dynamic Failover diagram driven by that branch's telemetry;
+            branches without a feed keep the illustrative static Topology. */}
+        <div className="col-12">
+          {branchSource
+            ? <FailoverTopology branchId={branchId} ipsec={ipsec} />
+            : <Topology autoScenarioId={autoScenarioId} />}
+        </div>
 
         {/* Row 3 — WAN + LAN + PoE.
             The WAN card uses live Fiber/5G state when we're on Plano AND a

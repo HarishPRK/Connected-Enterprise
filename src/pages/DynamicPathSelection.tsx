@@ -2155,7 +2155,7 @@ function fmtBytes(n: number) {
  *  the "Load sample" preview button so you can see the UI even without AWS
  *  credentials locally. Values are exact (latency=-1 sentinel, loss=100,
  *  active_tunnel=vti-fiber not matching any physical interface, etc.). */
-const SAMPLE_IPSEC_GATEWAY: IpsecGatewayState = {
+export const SAMPLE_IPSEC_GATEWAY: IpsecGatewayState = {
   receivedAt: Date.now(),
   metrics: {
     timestamp_ms: 1778815945164,
@@ -2228,7 +2228,7 @@ function fmtAgo(ms: number) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function LiveIpsecCard({
+export function LiveIpsecCard({
   ipsec,
   showSample,
   onToggleSample,
