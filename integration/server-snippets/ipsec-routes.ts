@@ -19,7 +19,7 @@
 import type { Express } from 'express';
 import { ipsecSource } from './ipsecSource.js';
 
-const GATEWAY_PATH_HOST = process.env.GATEWAY_PATH_HOST ?? 'http://192.168.1.201:8090';
+const GATEWAY_PATH_HOST = process.env.GATEWAY_PATH_HOST ?? 'http://192.168.10.254:8090';
 
 export function registerIpsecRoutes(app: Express): void {
   /** Current cached snapshot (hydrate-on-mount). */

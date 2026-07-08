@@ -1411,8 +1411,6 @@ function EnterpriseOpsCard({
     : 1;
   const flipsPerHour = flipCount / sessionHrs;
 
-  // ── SLA compliance — % of slaSeries samples where the active underlay
-  //    satisfied all three thresholds (latency < 80 ms, loss < 1 %, jitter < 30 ms).
   const compliantSamples = slaSeries.filter((s) => {
     // Use whichever underlay has data > 0 (the carrying one).
     const lat = s.fiber_latency > 0 ? s.fiber_latency : s.fiveg_latency;
@@ -1423,13 +1421,10 @@ function EnterpriseOpsCard({
   const slaPct =
     slaSeries.length > 0 ? (compliantSamples / slaSeries.length) * 100 : 0;
 
-  // ── Avg packet size on the WAN — operational signal: large = bulk traffic,
-  //    small = lots of interactive / control-plane chatter.
   const totalPkts = m.wan.rx_packets + m.wan.tx_packets;
   const totalBytes = m.wan.rx_bytes + m.wan.tx_bytes;
   const avgPktBytes = totalPkts > 0 ? totalBytes / totalPkts : 0;
 
-  // ── Traffic mix — per-underlay share of cumulative tunnel bytes.
   const fiberBytes = m.tunnels
     .filter((t) => inferUnderlay(t.ifname) === "fiber")
     .reduce((s, t) => s + t.rx_bytes + t.tx_bytes, 0);
@@ -1440,7 +1435,6 @@ function EnterpriseOpsCard({
   const fiberSharePct = tunnelTotal > 0 ? (fiberBytes / tunnelTotal) * 100 : 0;
   const cellSharePct = tunnelTotal > 0 ? (cellBytes / tunnelTotal) * 100 : 0;
 
-  // Session cumulative — show off the audit-ready "every byte logged" angle.
   const fmtSessionBytes =
     totalBytes >= 1e9
       ? `${(totalBytes / 1e9).toFixed(2)} GB`
@@ -2479,7 +2473,9 @@ function GatewayBlock({
   // Strictly filter by gateway source so Plano (rdk) and McKinney (prpl) never
   // mix — only devices whose locationSource matches this gateway are counted.
   const { devices: blockDevicesAll } = useDevices();
-  const blockDevices = blockDevicesAll.filter((d) => d.locationSource === source);
+  const blockDevices = blockDevicesAll.filter(
+    (d) => d.locationSource === source,
+  );
   const hasIT = blockDevices.some((d) => d.domain === "IT");
   const hasOT = blockDevices.some((d) => d.domain === "OT");
 
@@ -3028,7 +3024,7 @@ function IpsecFlowSvg({
    *  shows the application-aware routing policy (IT/OT split across tunnels). */
   viewMode: ViewMode;
   /** Filter devices to this location ('rdk' for Plano, 'prpl' for McKinney). */
-  locationSource?: 'rdk' | 'prpl';
+  locationSource?: "rdk" | "prpl";
 }) {
   // Keep the canvas tight: less dead space = a larger render scale when the
   // SVG is fit to the card width, i.e. bigger, readable labels.
@@ -5192,158 +5188,501 @@ function CellularStatsBar({
 
   const signalPct = modem?.signal_quality_percent ?? 0;
   const signalColor =
-    signalPct >= 60 ? c.ok : signalPct >= 30 ? c.warn : signalPct > 0 ? c.err : "var(--text-muted)";
+    signalPct >= 60
+      ? c.ok
+      : signalPct >= 30
+        ? c.warn
+        : signalPct > 0
+          ? c.err
+          : "var(--text-muted)";
   const isConnected = modem?.state === "connected" || bearer?.connected;
 
   const ACCENT = "#ffa07c";
 
   return (
-    <div style={{ margin: "8px 0", border: "1px solid rgba(255,160,124,0.18)", borderRadius: 14, overflow: "hidden", background: "var(--panel-1)" }}>
-
+    <div
+      style={{
+        margin: "8px 0",
+        border: "1px solid rgba(255,160,124,0.18)",
+        borderRadius: 14,
+        overflow: "hidden",
+        background: "var(--panel-1)",
+      }}
+    >
       {/* ── Header ── */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 12, padding: "12px 18px",
-        background: "linear-gradient(135deg, rgba(255,160,124,0.08), rgba(255,160,124,0.02))",
-        borderBottom: "1px solid rgba(255,160,124,0.1)",
-      }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 10,
-          background: "linear-gradient(135deg, rgba(255,160,124,0.28), rgba(255,160,124,0.08))",
-          display: "flex", alignItems: "center", justifyContent: "center", color: ACCENT, flexShrink: 0,
-        }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "12px 18px",
+          background:
+            "linear-gradient(135deg, rgba(255,160,124,0.08), rgba(255,160,124,0.02))",
+          borderBottom: "1px solid rgba(255,160,124,0.1)",
+        }}
+      >
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 10,
+            background:
+              "linear-gradient(135deg, rgba(255,160,124,0.28), rgba(255,160,124,0.08))",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: ACCENT,
+            flexShrink: 0,
+          }}
+        >
           <Radio size={18} />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>
+          <div
+            style={{
+              fontSize: 14,
+              fontWeight: 800,
+              color: "var(--text)",
+              letterSpacing: "-0.01em",
+            }}
+          >
             5G / Cellular Modem
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+          <div
+            style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}
+          >
             {modem?.manufacturer || "Unknown"}{" "}
-            <strong style={{ color: "var(--text-dim)" }}>{modem?.model || "—"}</strong>
-            {modem?.firmware_revision && <span style={{ opacity: 0.6, marginLeft: 6 }}>· FW {modem.firmware_revision}</span>}
+            <strong style={{ color: "var(--text-dim)" }}>
+              {modem?.model || "—"}
+            </strong>
+            {modem?.firmware_revision && (
+              <span style={{ opacity: 0.6, marginLeft: 6 }}>
+                · FW {modem.firmware_revision}
+              </span>
+            )}
           </div>
         </div>
-        <span style={{
-          fontSize: 10, padding: "4px 12px", fontWeight: 700, letterSpacing: "0.05em", borderRadius: 999,
-          color: isConnected ? c.ok : c.err,
-          border: `1px solid ${isConnected ? "rgba(124,255,212,0.4)" : "rgba(255,107,107,0.4)"}`,
-          background: isConnected ? "rgba(124,255,212,0.1)" : "rgba(255,107,107,0.1)",
-          display: "inline-flex", alignItems: "center", gap: 6,
-        }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: isConnected ? c.ok : c.err }} />
-          {isConnected ? "CONNECTED" : (modem?.state?.toUpperCase() || "OFFLINE")}
+        <span
+          style={{
+            fontSize: 10,
+            padding: "4px 12px",
+            fontWeight: 700,
+            letterSpacing: "0.05em",
+            borderRadius: 999,
+            color: isConnected ? c.ok : c.err,
+            border: `1px solid ${isConnected ? "rgba(124,255,212,0.4)" : "rgba(255,107,107,0.4)"}`,
+            background: isConnected
+              ? "rgba(124,255,212,0.1)"
+              : "rgba(255,107,107,0.1)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <span
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: isConnected ? c.ok : c.err,
+            }}
+          />
+          {isConnected ? "CONNECTED" : modem?.state?.toUpperCase() || "OFFLINE"}
         </span>
         {cellular.health && (
-          <span style={{ fontSize: 11, color: cellular.health === "ok" ? c.ok : c.warn, fontWeight: 600 }}>
+          <span
+            style={{
+              fontSize: 11,
+              color: cellular.health === "ok" ? c.ok : c.warn,
+              fontWeight: 600,
+            }}
+          >
             {cellular.health === "ok" ? "Healthy" : cellular.health}
           </span>
         )}
       </div>
 
       {/* ── Body: three categorised sections ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0 }}>
-
+      <div
+        style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0 }}
+      >
         {/* ─── SECTION 1: Radio Signal ─── */}
-        <div style={{ padding: "16px 18px", borderRight: "1px solid rgba(255,255,255,0.04)" }}>
-          <CellSectionHeader icon={<CellIconSignal />} title="Radio Signal" color={ACCENT} />
+        <div
+          style={{
+            padding: "16px 18px",
+            borderRight: "1px solid rgba(255,255,255,0.04)",
+          }}
+        >
+          <CellSectionHeader
+            icon={<CellIconSignal />}
+            title="Radio Signal"
+            color={ACCENT}
+          />
 
           {/* Hero gauge */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "14px 0" }}>
-            <div style={{ position: "relative", width: 56, height: 56, flexShrink: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              margin: "14px 0",
+            }}
+          >
+            <div
+              style={{
+                position: "relative",
+                width: 56,
+                height: 56,
+                flexShrink: 0,
+              }}
+            >
               <svg viewBox="0 0 56 56" width={56} height={56}>
-                <circle cx={28} cy={28} r={22} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={5} />
-                <circle cx={28} cy={28} r={22} fill="none" stroke={signalColor} strokeWidth={5}
+                <circle
+                  cx={28}
+                  cy={28}
+                  r={22}
+                  fill="none"
+                  stroke="rgba(255,255,255,0.05)"
+                  strokeWidth={5}
+                />
+                <circle
+                  cx={28}
+                  cy={28}
+                  r={22}
+                  fill="none"
+                  stroke={signalColor}
+                  strokeWidth={5}
                   strokeDasharray={`${(signalPct / 100) * 138.2} 138.2`}
-                  strokeLinecap="round" transform="rotate(-90 28 28)"
+                  strokeLinecap="round"
+                  transform="rotate(-90 28 28)"
                   style={{ transition: "stroke-dasharray 0.6s ease" }}
                 />
               </svg>
-              <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: signalColor }}>
+              <span
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 13,
+                  fontWeight: 800,
+                  color: signalColor,
+                }}
+              >
                 {signalPct}%
               </span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600 }}>Signal Quality</span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: signalColor, fontVariantNumeric: "tabular-nums" }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  fontWeight: 600,
+                }}
+              >
+                Signal Quality
+              </span>
+              <span
+                style={{
+                  fontSize: 18,
+                  fontWeight: 800,
+                  color: signalColor,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
                 {signalPct}%
               </span>
             </div>
           </div>
 
           {/* Radio metrics grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
-            <CellMetric icon={<CellIconRssi />} label="RSSI" value={`${radio?.rssi_dbm ?? 0}`} unit="dBm" hint="Received signal strength" />
-            <CellMetric icon={<CellIconRsrp />} label="RSRP" value={`${radio?.rsrp_dbm ?? 0}`} unit="dBm" hint="Reference signal power" />
-            <CellMetric icon={<CellIconRsrq />} label="RSRQ" value={`${radio?.rsrq_db ?? 0}`} unit="dB" hint="Signal quality metric" />
-            <CellMetric icon={<CellIconSnr />} label="SNR" value={`${radio?.snr_db ?? 0}`} unit="dB" hint="Signal-to-noise ratio" />
-            <CellMetric icon={<CellIconTower />} label="Cell ID" value={`${radio?.cell_id ?? 0}`} hint="Serving cell tower" />
-            <CellMetric icon={<CellIconPci />} label="PCI" value={`${radio?.pci ?? 0}`} hint="Physical cell identity" />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "12px 16px",
+            }}
+          >
+            <CellMetric
+              icon={<CellIconRssi />}
+              label="RSSI"
+              value={`${radio?.rssi_dbm ?? 0}`}
+              unit="dBm"
+              hint="Received signal strength"
+            />
+            <CellMetric
+              icon={<CellIconRsrp />}
+              label="RSRP"
+              value={`${radio?.rsrp_dbm ?? 0}`}
+              unit="dBm"
+              hint="Reference signal power"
+            />
+            <CellMetric
+              icon={<CellIconRsrq />}
+              label="RSRQ"
+              value={`${radio?.rsrq_db ?? 0}`}
+              unit="dB"
+              hint="Signal quality metric"
+            />
+            <CellMetric
+              icon={<CellIconSnr />}
+              label="SNR"
+              value={`${radio?.snr_db ?? 0}`}
+              unit="dB"
+              hint="Signal-to-noise ratio"
+            />
+            <CellMetric
+              icon={<CellIconTower />}
+              label="Cell ID"
+              value={`${radio?.cell_id ?? 0}`}
+              hint="Serving cell tower"
+            />
+            <CellMetric
+              icon={<CellIconPci />}
+              label="PCI"
+              value={`${radio?.pci ?? 0}`}
+              hint="Physical cell identity"
+            />
           </div>
         </div>
 
         {/* ─── SECTION 2: Network & Bearer ─── */}
-        <div style={{ padding: "16px 18px", borderRight: "1px solid rgba(255,255,255,0.04)" }}>
-          <CellSectionHeader icon={<CellIconNetwork />} title="Network & Bearer" color="#7c9aff" />
+        <div
+          style={{
+            padding: "16px 18px",
+            borderRight: "1px solid rgba(255,255,255,0.04)",
+          }}
+        >
+          <CellSectionHeader
+            icon={<CellIconNetwork />}
+            title="Network & Bearer"
+            color="#7c9aff"
+          />
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", marginTop: 14 }}>
-            <CellMetric icon={<CellIconIp />} label="IPv4 Address" value={bearer?.ipv4_address || "—"} hint="Public IP from carrier" span />
-            <CellMetric icon={<CellIconGateway />} label="Gateway" value={bearer?.ipv4_gateway || "—"} hint="Next hop router" span />
-            <CellMetric icon={<CellIconDns />} label="DNS Server" value={bearer?.ipv4_dns1 || "—"} hint="Name resolver" />
-            <CellMetric icon={<CellIconType />} label="IP Type" value={bearer?.ip_type || "—"} hint="Stack type" />
-            <CellMetric icon={<CellIconMtu />} label="MTU" value={`${bearer?.mtu ?? 0}`} unit="bytes" hint="Max packet size" />
-            <CellMetric icon={<CellIconApn />} label="APN" value={bearer?.apn || "auto"} hint="Access point name" />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "12px 16px",
+              marginTop: 14,
+            }}
+          >
+            <CellMetric
+              icon={<CellIconIp />}
+              label="IPv4 Address"
+              value={bearer?.ipv4_address || "—"}
+              hint="Public IP from carrier"
+              span
+            />
+            <CellMetric
+              icon={<CellIconGateway />}
+              label="Gateway"
+              value={bearer?.ipv4_gateway || "—"}
+              hint="Next hop router"
+              span
+            />
+            <CellMetric
+              icon={<CellIconDns />}
+              label="DNS Server"
+              value={bearer?.ipv4_dns1 || "—"}
+              hint="Name resolver"
+            />
+            <CellMetric
+              icon={<CellIconType />}
+              label="IP Type"
+              value={bearer?.ip_type || "—"}
+              hint="Stack type"
+            />
+            <CellMetric
+              icon={<CellIconMtu />}
+              label="MTU"
+              value={`${bearer?.mtu ?? 0}`}
+              unit="bytes"
+              hint="Max packet size"
+            />
+            <CellMetric
+              icon={<CellIconApn />}
+              label="APN"
+              value={bearer?.apn || "auto"}
+              hint="Access point name"
+            />
           </div>
         </div>
 
         {/* ─── SECTION 3: Interface & Traffic ─── */}
         <div style={{ padding: "16px 18px" }}>
-          <CellSectionHeader icon={<CellIconTraffic />} title="Interface & Traffic" color="#7cffd4" />
+          <CellSectionHeader
+            icon={<CellIconTraffic />}
+            title="Interface & Traffic"
+            color="#7cffd4"
+          />
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", marginTop: 14 }}>
-            <CellMetric icon={<CellIconPlug />} label="Interface" value={iface?.ifname || "—"} hint="Network device" />
-            <CellMetric icon={<CellIconLink />} label="Link" value={iface?.link_up ? "UP" : "DOWN"} hint="Physical state" valueColor={iface?.link_up ? c.ok : c.err} />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "12px 16px",
+              marginTop: 14,
+            }}
+          >
+            <CellMetric
+              icon={<CellIconPlug />}
+              label="Interface"
+              value={iface?.ifname || "—"}
+              hint="Network device"
+            />
+            <CellMetric
+              icon={<CellIconLink />}
+              label="Link"
+              value={iface?.link_up ? "UP" : "DOWN"}
+              hint="Physical state"
+              valueColor={iface?.link_up ? c.ok : c.err}
+            />
           </div>
 
           {/* Traffic cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 14 }}>
-            <div style={{
-              padding: "12px", borderRadius: 10,
-              background: "linear-gradient(135deg, rgba(124,255,212,0.08), rgba(124,255,212,0.02))",
-              border: "1px solid rgba(124,255,212,0.15)",
-              textAlign: "center",
-            }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 10,
+              marginTop: 14,
+            }}
+          >
+            <div
+              style={{
+                padding: "12px",
+                borderRadius: 10,
+                background:
+                  "linear-gradient(135deg, rgba(124,255,212,0.08), rgba(124,255,212,0.02))",
+                border: "1px solid rgba(124,255,212,0.15)",
+                textAlign: "center",
+              }}
+            >
               <ArrowDown size={14} color={c.ok} style={{ marginBottom: 4 }} />
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em", marginBottom: 4 }}>RECEIVED</div>
-              <div className="mono" style={{ fontSize: 16, fontWeight: 800, color: c.ok }}>{fmtBytes(iface?.rx_bytes ?? 0)}</div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3 }}>{(iface?.rx_packets ?? 0).toLocaleString()} packets</div>
+              <div
+                style={{
+                  fontSize: 9.5,
+                  fontWeight: 700,
+                  color: "var(--text-muted)",
+                  letterSpacing: "0.06em",
+                  marginBottom: 4,
+                }}
+              >
+                RECEIVED
+              </div>
+              <div
+                className="mono"
+                style={{ fontSize: 16, fontWeight: 800, color: c.ok }}
+              >
+                {fmtBytes(iface?.rx_bytes ?? 0)}
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  marginTop: 3,
+                }}
+              >
+                {(iface?.rx_packets ?? 0).toLocaleString()} packets
+              </div>
             </div>
-            <div style={{
-              padding: "12px", borderRadius: 10,
-              background: "linear-gradient(135deg, rgba(124,140,255,0.08), rgba(124,140,255,0.02))",
-              border: "1px solid rgba(124,140,255,0.15)",
-              textAlign: "center",
-            }}>
+            <div
+              style={{
+                padding: "12px",
+                borderRadius: 10,
+                background:
+                  "linear-gradient(135deg, rgba(124,140,255,0.08), rgba(124,140,255,0.02))",
+                border: "1px solid rgba(124,140,255,0.15)",
+                textAlign: "center",
+              }}
+            >
               <ArrowUp size={14} color={c.accent} style={{ marginBottom: 4 }} />
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em", marginBottom: 4 }}>SENT</div>
-              <div className="mono" style={{ fontSize: 16, fontWeight: 800, color: c.accent }}>{fmtBytes(iface?.tx_bytes ?? 0)}</div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3 }}>{(iface?.tx_packets ?? 0).toLocaleString()} packets</div>
+              <div
+                style={{
+                  fontSize: 9.5,
+                  fontWeight: 700,
+                  color: "var(--text-muted)",
+                  letterSpacing: "0.06em",
+                  marginBottom: 4,
+                }}
+              >
+                SENT
+              </div>
+              <div
+                className="mono"
+                style={{ fontSize: 16, fontWeight: 800, color: c.accent }}
+              >
+                {fmtBytes(iface?.tx_bytes ?? 0)}
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  marginTop: 3,
+                }}
+              >
+                {(iface?.tx_packets ?? 0).toLocaleString()} packets
+              </div>
             </div>
           </div>
 
           {/* Errors */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px", marginTop: 12 }}>
-            <CellMetric icon={<CellIconError />} label="RX Errors" value={`${iface?.rx_errors ?? 0}`} hint="Receive errors" valueColor={(iface?.rx_errors ?? 0) > 0 ? c.err : undefined} />
-            <CellMetric icon={<CellIconError />} label="TX Errors" value={`${iface?.tx_errors ?? 0}`} hint="Transmit errors" valueColor={(iface?.tx_errors ?? 0) > 0 ? c.err : undefined} />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "12px 16px",
+              marginTop: 12,
+            }}
+          >
+            <CellMetric
+              icon={<CellIconError />}
+              label="RX Errors"
+              value={`${iface?.rx_errors ?? 0}`}
+              hint="Receive errors"
+              valueColor={(iface?.rx_errors ?? 0) > 0 ? c.err : undefined}
+            />
+            <CellMetric
+              icon={<CellIconError />}
+              label="TX Errors"
+              value={`${iface?.tx_errors ?? 0}`}
+              hint="Transmit errors"
+              valueColor={(iface?.tx_errors ?? 0) > 0 ? c.err : undefined}
+            />
           </div>
         </div>
       </div>
 
       {/* ── IPv6 footer ── */}
       {(bearer?.ipv6_address || iface?.ipv6_address) && (
-        <div style={{ padding: "8px 18px", borderTop: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          style={{
+            padding: "8px 18px",
+            borderTop: "1px solid rgba(255,255,255,0.04)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
           <CellIconIpv6 />
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.06em" }}>IPv6</span>
-          <span className="mono" style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{bearer?.ipv6_address || iface?.ipv6_address}</span>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: "var(--text-muted)",
+              letterSpacing: "0.06em",
+            }}
+          >
+            IPv6
+          </span>
+          <span
+            className="mono"
+            style={{ fontSize: 11.5, color: "var(--text-dim)" }}
+          >
+            {bearer?.ipv6_address || iface?.ipv6_address}
+          </span>
         </div>
       )}
     </div>
@@ -5352,27 +5691,107 @@ function CellularStatsBar({
 
 /* ── Cellular sub-components ── */
 
-function CellSectionHeader({ icon, title, color }: { icon: React.ReactNode; title: string; color: string }) {
+function CellSectionHeader({
+  icon,
+  title,
+  color,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  color: string;
+}) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       <span style={{ color, display: "flex" }}>{icon}</span>
-      <span style={{ fontSize: 10.5, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.08em" }}>{title}</span>
+      <span
+        style={{
+          fontSize: 10.5,
+          fontWeight: 700,
+          color,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+        }}
+      >
+        {title}
+      </span>
     </div>
   );
 }
 
-function CellMetric({ icon, label, value, unit, hint, valueColor, span: _span }: {
-  icon: React.ReactNode; label: string; value: string; unit?: string;
-  hint: string; valueColor?: string; span?: boolean;
+function CellMetric({
+  icon,
+  label,
+  value,
+  unit,
+  hint,
+  valueColor,
+  span: _span,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  unit?: string;
+  hint: string;
+  valueColor?: string;
+  span?: boolean;
 }) {
   return (
-    <div title={hint} style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "default" }}>
-      <span style={{ color: "var(--text-muted)", display: "flex", marginTop: 1, flexShrink: 0 }}>{icon}</span>
+    <div
+      title={hint}
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8,
+        cursor: "default",
+      }}
+    >
+      <span
+        style={{
+          color: "var(--text-muted)",
+          display: "flex",
+          marginTop: 1,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.03em", lineHeight: 1.4 }}>{label}</div>
-        <div className="mono" style={{ fontSize: 13.5, fontWeight: 700, color: valueColor ?? "var(--text)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div
+          style={{
+            fontSize: 10,
+            color: "var(--text-muted)",
+            fontWeight: 600,
+            letterSpacing: "0.03em",
+            lineHeight: 1.4,
+          }}
+        >
+          {label}
+        </div>
+        <div
+          className="mono"
+          style={{
+            fontSize: 13.5,
+            fontWeight: 700,
+            color: valueColor ?? "var(--text)",
+            lineHeight: 1.3,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
           {value}
-          {unit && <span style={{ fontSize: 10, fontWeight: 500, color: "var(--text-muted)", marginLeft: 3 }}>{unit}</span>}
+          {unit && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 500,
+                color: "var(--text-muted)",
+                marginLeft: 3,
+              }}
+            >
+              {unit}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -5384,9 +5803,33 @@ function CellMetric({ icon, label, value, unit, hint, valueColor, span: _span }:
 function CellIconSignal() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <rect x={1} y={10} width={2} height={3} rx={0.5} fill="currentColor" opacity={0.5} />
-      <rect x={4} y={7} width={2} height={6} rx={0.5} fill="currentColor" opacity={0.7} />
-      <rect x={7} y={4} width={2} height={9} rx={0.5} fill="currentColor" opacity={0.85} />
+      <rect
+        x={1}
+        y={10}
+        width={2}
+        height={3}
+        rx={0.5}
+        fill="currentColor"
+        opacity={0.5}
+      />
+      <rect
+        x={4}
+        y={7}
+        width={2}
+        height={6}
+        rx={0.5}
+        fill="currentColor"
+        opacity={0.7}
+      />
+      <rect
+        x={7}
+        y={4}
+        width={2}
+        height={9}
+        rx={0.5}
+        fill="currentColor"
+        opacity={0.85}
+      />
       <rect x={10} y={1} width={2} height={12} rx={0.5} fill="currentColor" />
     </svg>
   );
@@ -5396,8 +5839,18 @@ function CellIconRssi() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
       <path d="M7 11.5a1 1 0 100-2 1 1 0 000 2z" fill="currentColor" />
-      <path d="M4.5 8.5a3.5 3.5 0 015 0" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" />
-      <path d="M2.5 6a6 6 0 019 0" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" />
+      <path
+        d="M4.5 8.5a3.5 3.5 0 015 0"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+      />
+      <path
+        d="M2.5 6a6 6 0 019 0"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -5405,7 +5858,13 @@ function CellIconRssi() {
 function CellIconRsrp() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <path d="M7 2v10M4 4l3-2 3 2M4 10l3 2 3-2" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M7 2v10M4 4l3-2 3 2M4 10l3 2 3-2"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -5413,8 +5872,21 @@ function CellIconRsrp() {
 function CellIconRsrq() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <rect x={2} y={2} width={10} height={10} rx={2} stroke="currentColor" strokeWidth={1.2} />
-      <path d="M5 7h4M7 5v4" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" />
+      <rect
+        x={2}
+        y={2}
+        width={10}
+        height={10}
+        rx={2}
+        stroke="currentColor"
+        strokeWidth={1.2}
+      />
+      <path
+        d="M5 7h4M7 5v4"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -5422,7 +5894,13 @@ function CellIconRsrq() {
 function CellIconSnr() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <path d="M2 9l2-4 2 2 2-5 2 3 2-1" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M2 9l2-4 2 2 2-5 2 3 2-1"
+        stroke="currentColor"
+        strokeWidth={1.3}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -5430,7 +5908,13 @@ function CellIconSnr() {
 function CellIconTower() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <path d="M7 3v9M5 12h4M4 6l3-3 3 3" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M7 3v9M5 12h4M4 6l3-3 3 3"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <circle cx={7} cy={2.5} r={1} fill="currentColor" />
     </svg>
   );
@@ -5441,7 +5925,12 @@ function CellIconPci() {
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
       <circle cx={7} cy={7} r={5} stroke="currentColor" strokeWidth={1.2} />
       <circle cx={7} cy={7} r={1.5} fill="currentColor" />
-      <path d="M7 2v2M7 10v2M2 7h2M10 7h2" stroke="currentColor" strokeWidth={1} strokeLinecap="round" />
+      <path
+        d="M7 2v2M7 10v2M2 7h2M10 7h2"
+        stroke="currentColor"
+        strokeWidth={1}
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -5450,7 +5939,14 @@ function CellIconNetwork() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
       <circle cx={7} cy={7} r={5.5} stroke="currentColor" strokeWidth={1.2} />
-      <ellipse cx={7} cy={7} rx={2.5} ry={5.5} stroke="currentColor" strokeWidth={1} />
+      <ellipse
+        cx={7}
+        cy={7}
+        rx={2.5}
+        ry={5.5}
+        stroke="currentColor"
+        strokeWidth={1}
+      />
       <path d="M2 7h10" stroke="currentColor" strokeWidth={1} />
     </svg>
   );
@@ -5459,7 +5955,15 @@ function CellIconNetwork() {
 function CellIconIp() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <rect x={2} y={4} width={10} height={6} rx={1.5} stroke="currentColor" strokeWidth={1.2} />
+      <rect
+        x={2}
+        y={4}
+        width={10}
+        height={6}
+        rx={1.5}
+        stroke="currentColor"
+        strokeWidth={1.2}
+      />
       <circle cx={4.5} cy={7} r={0.8} fill="currentColor" />
       <circle cx={7} cy={7} r={0.8} fill="currentColor" />
       <circle cx={9.5} cy={7} r={0.8} fill="currentColor" />
@@ -5470,8 +5974,21 @@ function CellIconIp() {
 function CellIconGateway() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <rect x={3} y={2} width={8} height={5} rx={1} stroke="currentColor" strokeWidth={1.2} />
-      <path d="M7 7v4M4 11h6" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" />
+      <rect
+        x={3}
+        y={2}
+        width={8}
+        height={5}
+        rx={1}
+        stroke="currentColor"
+        strokeWidth={1.2}
+      />
+      <path
+        d="M7 7v4M4 11h6"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -5480,7 +5997,12 @@ function CellIconDns() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
       <circle cx={7} cy={4} r={2.5} stroke="currentColor" strokeWidth={1.2} />
-      <path d="M7 6.5v3M5 12h4M7 9.5l-2 2.5M7 9.5l2 2.5" stroke="currentColor" strokeWidth={1.1} strokeLinecap="round" />
+      <path
+        d="M7 6.5v3M5 12h4M7 9.5l-2 2.5M7 9.5l2 2.5"
+        stroke="currentColor"
+        strokeWidth={1.1}
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -5488,8 +6010,19 @@ function CellIconDns() {
 function CellIconType() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <path d="M3 7h8M7 3v8" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" />
-      <path d="M5 5l2-2 2 2M5 9l2 2 2-2" stroke="currentColor" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M3 7h8M7 3v8"
+        stroke="currentColor"
+        strokeWidth={1.3}
+        strokeLinecap="round"
+      />
+      <path
+        d="M5 5l2-2 2 2M5 9l2 2 2-2"
+        stroke="currentColor"
+        strokeWidth={1.1}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -5497,8 +6030,22 @@ function CellIconType() {
 function CellIconMtu() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <rect x={2} y={5} width={10} height={4} rx={1} stroke="currentColor" strokeWidth={1.2} />
-      <path d="M4 7h6" stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeDasharray="1.5 1" />
+      <rect
+        x={2}
+        y={5}
+        width={10}
+        height={4}
+        rx={1}
+        stroke="currentColor"
+        strokeWidth={1.2}
+      />
+      <path
+        d="M4 7h6"
+        stroke="currentColor"
+        strokeWidth={1}
+        strokeLinecap="round"
+        strokeDasharray="1.5 1"
+      />
     </svg>
   );
 }
@@ -5506,8 +6053,19 @@ function CellIconMtu() {
 function CellIconApn() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <path d="M2 10V5a2 2 0 012-2h6a2 2 0 012 2v5" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" />
-      <circle cx={7} cy={10.5} r={1.5} stroke="currentColor" strokeWidth={1.1} />
+      <path
+        d="M2 10V5a2 2 0 012-2h6a2 2 0 012 2v5"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+      />
+      <circle
+        cx={7}
+        cy={10.5}
+        r={1.5}
+        stroke="currentColor"
+        strokeWidth={1.1}
+      />
     </svg>
   );
 }
@@ -5515,8 +6073,19 @@ function CellIconApn() {
 function CellIconTraffic() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <path d="M4 3v8M10 3v8" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" />
-      <path d="M4 5l-2 2 2 2M10 5l2 2-2 2" stroke="currentColor" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M4 3v8M10 3v8"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+      />
+      <path
+        d="M4 5l-2 2 2 2M10 5l2 2-2 2"
+        stroke="currentColor"
+        strokeWidth={1.1}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -5524,8 +6093,19 @@ function CellIconTraffic() {
 function CellIconPlug() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <path d="M5 2v3M9 2v3M4 5h6v3a3 3 0 01-6 0V5z" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M7 11v2" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" />
+      <path
+        d="M5 2v3M9 2v3M4 5h6v3a3 3 0 01-6 0V5z"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7 11v2"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -5533,7 +6113,12 @@ function CellIconPlug() {
 function CellIconLink() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <path d="M6 8l-1.5 1.5a2 2 0 002.8 2.8L9 11M8 6l1.5-1.5a2 2 0 00-2.8-2.8L5 3" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" />
+      <path
+        d="M6 8l-1.5 1.5a2 2 0 002.8 2.8L9 11M8 6l1.5-1.5a2 2 0 00-2.8-2.8L5 3"
+        stroke="currentColor"
+        strokeWidth={1.3}
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -5541,8 +6126,18 @@ function CellIconLink() {
 function CellIconError() {
   return (
     <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-      <path d="M7 2L1.5 12h11L7 2z" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" />
-      <path d="M7 6v3" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" />
+      <path
+        d="M7 2L1.5 12h11L7 2z"
+        stroke="currentColor"
+        strokeWidth={1.2}
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7 6v3"
+        stroke="currentColor"
+        strokeWidth={1.3}
+        strokeLinecap="round"
+      />
       <circle cx={7} cy={10.5} r={0.6} fill="currentColor" />
     </svg>
   );
@@ -5550,9 +6145,29 @@ function CellIconError() {
 
 function CellIconIpv6() {
   return (
-    <svg width={14} height={14} viewBox="0 0 14 14" fill="none" style={{ color: "var(--text-muted)" }}>
-      <rect x={2} y={4} width={10} height={6} rx={1.5} stroke="currentColor" strokeWidth={1.1} />
-      <path d="M5 6v2.5h1M8 6l1 2.5L10 6" stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 14 14"
+      fill="none"
+      style={{ color: "var(--text-muted)" }}
+    >
+      <rect
+        x={2}
+        y={4}
+        width={10}
+        height={6}
+        rx={1.5}
+        stroke="currentColor"
+        strokeWidth={1.1}
+      />
+      <path
+        d="M5 6v2.5h1M8 6l1 2.5L10 6"
+        stroke="currentColor"
+        strokeWidth={1}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
