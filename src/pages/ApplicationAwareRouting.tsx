@@ -12,6 +12,7 @@ import { appCategories, appPolicies } from '../data/mock';
 import type { AppCategory, AppCategoryId, AppPolicy } from '../types';
 import { useTheme, useThemeColors } from '../ui/Theme';
 import { AiInsightCard } from '../components/widgets/AiInsightCard';
+import { ClientTunnelConstellation } from '../components/widgets/ClientTunnelConstellation';
 
 const catIcon: Record<AppCategoryId, React.ComponentType<{ size?: number }>> = {
   voice: Mic, video: Video, business: Briefcase, web: Globe, bulk: Cloud, iot: Cpu,
@@ -23,7 +24,7 @@ const slaBadge = {
   'best-effort': '',
 } as const;
 
-export function ApplicationAwareRoutingPage() {
+export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) {
   const [query, setQuery] = useState('');
   const [catFilter, setCatFilter] = useState<AppCategoryId | 'all'>('all');
   const [editing, setEditing] = useState<AppPolicy | null>(null);
@@ -98,6 +99,16 @@ export function ApplicationAwareRoutingPage() {
               })),
             }}
           />
+        </div>
+
+        {/* Traffic Constellation — live clients → gateway → IPsec tunnels */}
+        <div className="col-12">
+          <Card
+            title="Traffic Constellation"
+            sub="Live clients orbiting this branch's gateway — each comet is a client's traffic riding its assigned IPsec tunnel"
+          >
+            <ClientTunnelConstellation branchId={branchId} />
+          </Card>
         </div>
 
         {/* App flow Sankey-ish diagram */}

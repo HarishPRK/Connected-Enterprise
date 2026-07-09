@@ -83,7 +83,7 @@ export default function App() {
               <Route path="/video-analytics" element={<VideoAnalyticsPage />} />
               <Route path="/audit"          element={<AuditLogPage />} />
               <Route path="/path-selection" element={<DynamicPathSelectionPage branchId={branchId} />} />
-              <Route path="/app-routing"    element={<ApplicationAwareRoutingPage />} />
+              <Route path="/app-routing"    element={<ApplicationAwareRoutingPage branchId={branchId} />} />
               <Route path="/traffic-policy" element={<TrafficPolicyPage />} />
               <Route path="/onboarding"     element={<OnboardingPage branchId={branchId} />} />
               <Route path="/ask-ai"         element={<AskAiPage />} />
