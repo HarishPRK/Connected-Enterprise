@@ -83,15 +83,20 @@ function inferUnderlay(ifname: string): Underlay {
   return "fiber";
 }
 
-/** Order tunnels by the numeric part of their ifname, ascending — so the WAN
- *  list and probe table read vti1, vti2, vti3, vti4 regardless of the order
- *  the gateway happens to report them in. Non-numeric names sort to the front. */
+/** Order tunnels fiber-first, then by the numeric part of their ifname — so a
+ *  mixed list always reads fiber1, fiber2, cell1, cell2 regardless of the order
+ *  the gateway happens to report them in. Non-numeric names sort to the front
+ *  within their underlay. */
 function orderTunnelsByName(tunnels: IpsecTunnelMetric[]): IpsecTunnelMetric[] {
   const numOf = (s: string) => {
     const match = (s || "").match(/\d+/);
     return match ? parseInt(match[0], 10) : 0;
   };
-  return [...tunnels].sort((a, b) => numOf(a.ifname) - numOf(b.ifname));
+  const underlayRank = (t: IpsecTunnelMetric) =>
+    inferUnderlay(t.ifname) === "fiber" ? 0 : 1;
+  return [...tunnels].sort(
+    (a, b) => underlayRank(a) - underlayRank(b) || numOf(a.ifname) - numOf(b.ifname),
+  );
 }
 
 /** Turn a raw device hostname (`rdk-bpi4-gateway`) into a friendly title
