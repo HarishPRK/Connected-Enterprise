@@ -4,7 +4,7 @@ import { useEscape } from './Toast';
 import {
   LayoutDashboard, Router, Laptop, Siren, Shuffle, PackagePlus,
   Sparkles, Settings, Search, ArrowRight, MapPin, Building2,
-  AlertOctagon, FileSearch, GitBranch, Layers, TrendingUp, CloudCog, ShieldCheck,
+  AlertOctagon, FileSearch, GitBranch, Layers, TrendingUp, CloudCog, ShieldCheck, Gauge,
 } from 'lucide-react';
 import { branches } from '../data/mock';
 
@@ -38,6 +38,7 @@ export function CommandPalette({ open, onClose, onBranchChange }: CommandPalette
     { id: 'go-ot',           group: 'Navigate', label: 'Open OT Devices',                icon: Siren,           run: () => nav('/ot-devices') },
     { id: 'go-naas',         group: 'Insights', label: 'Open Network as a Service',      icon: CloudCog,        run: () => nav('/naas') },
     { id: 'go-costinsights', group: 'Insights', label: 'Open Cost Insights',             icon: TrendingUp,      run: () => nav('/cost-insights') },
+    { id: 'go-cmdcenter',    group: 'Insights', label: 'Open Command Center',            icon: Gauge,           run: () => nav('/command-center') },
     { id: 'go-incidents',    group: 'Operate',  label: 'Open Incidents',                 icon: AlertOctagon,    run: () => nav('/incidents') },
     { id: 'go-security',     group: 'Operate',  label: 'Open Security',                  icon: ShieldCheck,     run: () => nav('/security') },
     { id: 'go-audit',        group: 'Operate',  label: 'Open Audit Log',                 icon: FileSearch,      run: () => nav('/audit') },

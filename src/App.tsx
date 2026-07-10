@@ -15,6 +15,7 @@ import { FleetPage } from './pages/Fleet';
 import { IncidentsPage } from './pages/Incidents';
 import { AuditLogPage } from './pages/AuditLog';
 import { CostInsightsPage } from './pages/CostInsights';
+import { CommandCenterPage } from './pages/CommandCenter';
 import { NaasPage } from './pages/Naas';
 import { SecurityPage } from './pages/Security';
 import { VideoAnalyticsPage } from './pages/VideoAnalytics';
@@ -78,6 +79,7 @@ export default function App() {
               <Route path="/ot-devices"     element={<DevicesPage domain="OT" branchId={branchId} />} />
               <Route path="/naas"           element={<NaasPage />} />
               <Route path="/cost-insights" element={<CostInsightsPage branchId={branchId} />} />
+              <Route path="/command-center" element={<CommandCenterPage />} />
               <Route path="/incidents"      element={<IncidentsPage />} />
               <Route path="/security"       element={<SecurityPage />} />
               <Route path="/video-analytics" element={<VideoAnalyticsPage />} />
