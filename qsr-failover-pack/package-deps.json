@@ -1,0 +1,31 @@
+{
+  "comment": "Exact versions this pack was built and typechecked against (source repo package.json, 2026-07-12).",
+  "frontend": {
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "lucide-react": "^1.9.0",
+    "recharts": "^3.8.1"
+  },
+  "server": {
+    "express": "^5.2.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "aws-iot-device-sdk-v2": "^1.26.0"
+  },
+  "optionalAiInsight": {
+    "@anthropic-ai/sdk": "^0.95.0",
+    "@anthropic-ai/bedrock-sdk": "^0.29.1"
+  },
+  "dev": {
+    "tsx": "^4.21.0",
+    "typescript": "~6.0.2",
+    "@types/express": "^5.0.6",
+    "@types/cors": "^2.8.19",
+    "@types/node": "^24.12.2"
+  },
+  "notes": [
+    "react-router-dom is NOT required — the feature has zero router coupling.",
+    "recharts is only used by the DevicesDashboard analytics band.",
+    "The server slice is ESM (NodeNext): target package.json needs \"type\": \"module\", run with tsx or compile with a NodeNext tsconfig."
+  ]
+}
