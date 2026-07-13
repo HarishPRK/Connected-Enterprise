@@ -16,7 +16,7 @@ import { IncidentsPage } from './pages/Incidents';
 import { AuditLogPage } from './pages/AuditLog';
 import { CostInsightsPage } from './pages/CostInsights';
 import { CommandCenterPage } from './pages/CommandCenter';
-import { NaasPage } from './pages/Naas';
+import { ServiceOfferingsPage } from './pages/ServiceOfferings';
 import { SecurityPage } from './pages/Security';
 import { VideoAnalyticsPage } from './pages/VideoAnalytics';
 import { AgenticAIPage } from './pages/AgenticAI';
@@ -77,7 +77,7 @@ export default function App() {
               <Route path="/connectivity"   element={<Connectivity />} />
               <Route path="/it-devices"     element={<DevicesPage domain="IT" branchId={branchId} />} />
               <Route path="/ot-devices"     element={<DevicesPage domain="OT" branchId={branchId} />} />
-              <Route path="/naas"           element={<NaasPage />} />
+              <Route path="/service-offerings" element={<ServiceOfferingsPage />} />
               <Route path="/cost-insights" element={<CostInsightsPage branchId={branchId} />} />
               <Route path="/command-center" element={<CommandCenterPage />} />
               <Route path="/incidents"      element={<IncidentsPage />} />

@@ -459,13 +459,10 @@ export interface FleetStat {
 /* ───── Business value (Insights tab) ───── */
 
 export type ValueCategoryId =
-  | 'energy'      // HVAC, lights, idle PoE
   | 'efficiency'  // IT/OT Opex — auto-triage, agent resolutions
-  | 'safety'      // OT alerts answered within SLA
+  | 'storage'     // telemetry DB cost reduction (compression / retention)
   | 'uptime'      // dynamic path selection avoided outages
-  | 'routing'     // policy-based traffic routing — wasted bandwidth recovered
-  | 'bandwidth'   // overall network traffic reduction (caching, dedup)
-  | 'storage';    // telemetry DB cost reduction (compression / retention)
+  | 'energy';     // HVAC, lights, idle PoE + predictive maintenance
 
 export interface ValueCategory {
   id: ValueCategoryId;
@@ -496,13 +493,10 @@ export interface CostWarning {
 
 export interface SavingsTrendPoint {
   month: string;
-  energy: number;
   efficiency: number;
-  safety: number;
-  uptime: number;
-  routing: number;
-  bandwidth: number;
   storage: number;
+  uptime: number;
+  energy: number;
 }
 
 export interface ROISummary {

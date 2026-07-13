@@ -7,7 +7,7 @@ import { useThemeColors } from '../ui/Theme';
 import { branches, getCostInsightsForBranch } from '../data/mock';
 import type { CostWarning, ROISummary, SavingsTrendPoint, ValueCategory, ValueCategoryId } from '../types';
 import {
-  AlertTriangle, ArrowRight, Bot, DollarSign, Download, Lightbulb, Shield, Shuffle,
+  AlertTriangle, ArrowRight, Bot, DollarSign, Download, Lightbulb, Shield,
   Sparkles, TrendingUp, TrendingDown, Zap, Database, Activity, Cpu, ShieldAlert,
 } from 'lucide-react';
 
@@ -16,23 +16,17 @@ const fmtUsd = (n: number) =>
 const fmtUsdFull = (n: number) => `$${n.toLocaleString()}`;
 
 const categoryIcon: Record<ValueCategoryId, React.ComponentType<{ size?: number }>> = {
-  energy:     Zap,
   efficiency: Cpu,
-  safety:     Shield,
-  uptime:     Activity,
-  routing:    Shuffle,
-  bandwidth:  Sparkles,
   storage:    Database,
+  uptime:     Activity,
+  energy:     Zap,
 };
 
 const categoryAccentKey: Record<ValueCategoryId, 'accent' | 'accent2' | 'accent3' | 'ok' | 'warn' | 'err'> = {
-  energy:     'warn',     // amber for power
   efficiency: 'accent',   // mint
-  safety:     'err',      // red — safety-critical
+  storage:    'accent3',  // purple (data)
   uptime:     'ok',       // green
-  routing:    'accent2',  // pink
-  bandwidth:  'accent3',  // purple
-  storage:    'accent',   // mint (data)
+  energy:     'warn',     // amber for power
 };
 
 export function CostInsightsPage({ branchId }: { branchId: string }) {
@@ -73,7 +67,7 @@ export function CostInsightsPage({ branchId }: { branchId: string }) {
     }
     const monthTotals = trend.map((p) => ({
       month: p.month,
-      v: p.energy + p.efficiency + p.safety + p.uptime + p.routing + p.bandwidth + p.storage,
+      v: p.efficiency + p.storage + p.uptime + p.energy,
     }));
     const total = monthTotals.reduce((s, m) => s + m.v, 0);
     const best = monthTotals.reduce((b, m) => (m.v > b.v ? m : b), monthTotals[0]);
@@ -188,7 +182,7 @@ export function CostInsightsPage({ branchId }: { branchId: string }) {
                 ? 'No cost waste detected on this branch — clean ledger'
                 : wasteThisMonth > 0
                   ? `${warnings.length} issue${warnings.length > 1 ? 's' : ''} open · ${fmtUsdFull(wasteThisMonth)}/mo leaking → ${fmtUsdFull(wasteAnnualised)}/yr if left unaddressed`
-                  : `${warnings.length} advisory note${warnings.length > 1 ? 's' : ''} · no direct \$ impact yet`
+                  : `${warnings.length} advisory note${warnings.length > 1 ? 's' : ''} · no direct $ impact yet`
             }
             right={
               warnings.length > 0
@@ -333,20 +327,17 @@ function SavingsTrendChart({
   // Total per month for the headline tooltip line
   const data = input.map((p) => ({
     ...p,
-    total: p.energy + p.efficiency + p.safety + p.uptime + p.routing + p.bandwidth + p.storage,
+    total: p.efficiency + p.storage + p.uptime + p.energy,
   }));
 
   const allSeries: { key: keyof typeof data[number]; name: string; color: string }[] = [
-    { key: 'efficiency', name: 'IT/OT efficiency',  color: c.accent  },
+    { key: 'efficiency', name: 'IT/OT operational', color: c.accent  },
+    { key: 'storage',    name: 'DB storage',        color: c.accent3 },
     { key: 'uptime',     name: 'Uptime via DPS',    color: c.ok      },
-    { key: 'energy',     name: 'Energy savings',    color: c.warn    },
-    { key: 'routing',    name: 'Policy routing',    color: c.accent2 },
-    { key: 'safety',     name: 'Safety SLA',        color: c.err     },
-    { key: 'bandwidth',  name: 'Bandwidth reduce',  color: c.accent3 },
-    { key: 'storage',    name: 'Storage reduce',    color: '#67e8f9' },
+    { key: 'energy',     name: 'Energy & predictive', color: c.warn  },
   ];
   // When a category is selected, show only that one series — single-colour
-  // bars are much easier to read than a 7-stack.
+  // bars are much easier to read than a 4-stack.
   const series = selected ? allSeries.filter((s) => s.key === selected) : allSeries;
 
   return (

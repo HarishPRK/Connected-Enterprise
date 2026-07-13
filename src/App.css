@@ -3666,3 +3666,92 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
   .ecc-print-header { display: block !important; margin-bottom: 16px; }
   .ecc-table { font-size: 12px; }
 }
+
+/* ─────────────────────────── Service Offerings (so-) ─────────────────────────── */
+
+/* The architecture "sandwich": consumer APIs above the container grid, the
+ * prplLCM runtime band below it — mirrors the source architecture slide. */
+.so-arch-band {
+  text-align: center;
+  font-size: 11.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--text-dim);
+  padding: 8px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: rgba(var(--accent-rgb) / 0.05);
+  margin-bottom: 14px;
+}
+.so-arch-band-bottom { margin-bottom: 0; margin-top: 14px; }
+
+.so-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 1500px) { .so-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .so-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px)  { .so-grid { grid-template-columns: 1fr; } }
+
+.so-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  min-height: 150px;
+  transition: transform 0.18s cubic-bezier(0.22, 1.4, 0.36, 1), border-color 0.18s ease;
+}
+.so-card:hover { transform: translateY(-2px); border-color: rgba(var(--accent-rgb) / 0.45); }
+.so-card-head { display: flex; align-items: center; gap: 9px; }
+.so-icon {
+  width: 30px; height: 30px; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.so-name { font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 1.25; }
+.so-container-tag { font-size: 10.5px; color: var(--text-muted); letter-spacing: 0.04em; }
+.so-caps {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.so-caps li {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 12px; line-height: 1.45; color: var(--text-dim);
+}
+.so-cap-dot {
+  width: 5px; height: 5px; border-radius: 999px;
+  margin-top: 6px; flex-shrink: 0;
+}
+
+.so-stack-row { display: flex; align-items: baseline; gap: 12px; }
+.so-stack-label {
+  flex: 0 0 220px;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.so-stack-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.so-chip {
+  font-size: 11.5px; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(var(--accent-rgb) / 0.04);
+  color: var(--text-dim);
+}
+
+/* ── Video Analytics — camera fleet chips ── */
+.va-cam-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.va-cam-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(var(--accent-rgb) / 0.04);
+}
+.va-cam-chip .dot { width: 7px; height: 7px; }
+.va-cam-model { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.va-cam-count { font-size: 11px; color: var(--text-muted); }
+@media (max-width: 900px) {
+  .so-stack-row { flex-direction: column; gap: 6px; }
+  .so-stack-label { flex: none; }
+}

@@ -389,22 +389,8 @@ export const auditEntries: AuditEntry[] = [
 
 export const valueCategories: ValueCategory[] = [
   {
-    id: 'energy',
-    name: 'Energy & Cost Savings',
-    description: 'HVAC scheduling, smart lighting, and idle-PoE shutdown across the fleet.',
-    monthSavedUsd: 1_420,
-    yearSavedUsd: 17_040,
-    trendPct: 6.2,
-    details: [
-      'HVAC tied to occupancy sensors — $720/mo',
-      'Smart lighting (motion + dusk) — $480/mo',
-      'Idle PoE auto-shutdown — $140/mo',
-      'OT load balancing — $80/mo',
-    ],
-  },
-  {
     id: 'efficiency',
-    name: 'IT/OT Operational Efficiency',
+    name: 'IT/OT Operational Costs',
     description: 'Hours of NetEng / NOC time reclaimed by the agent and automation.',
     monthSavedUsd: 2_800,
     yearSavedUsd: 33_600,
@@ -417,16 +403,16 @@ export const valueCategories: ValueCategory[] = [
     ],
   },
   {
-    id: 'safety',
-    name: 'Safety SLA Compliance',
-    description: 'Critical OT alerts (door, fire, smoke) triaged within SLA — avoided liability.',
-    monthSavedUsd: 480,
-    yearSavedUsd: 5_760,
-    trendPct: 2.1,
+    id: 'storage',
+    name: 'Database Storage Cost',
+    description: 'Telemetry retention + compression policy keeping the time-series DB lean.',
+    monthSavedUsd: 180,
+    yearSavedUsd: 2_160,
+    trendPct: 14.2,
     details: [
-      '14 OT alerts triaged in <5 min',
-      '0 missed fire/smoke heartbeats',
-      '2 emergency unlock events logged + audited',
+      'Downsampled metrics older than 30 days — 5.8x compression',
+      'Audit log archived to cold storage after 90d',
+      'Bedrock prompt-cache hit rate: 76%',
     ],
   },
   {
@@ -443,42 +429,17 @@ export const valueCategories: ValueCategory[] = [
     ],
   },
   {
-    id: 'routing',
-    name: 'Policy-Based Traffic Routing',
-    description: 'App-aware routing kept real-time traffic on the best path, freed up cheaper egress.',
-    monthSavedUsd: 640,
-    yearSavedUsd: 7_680,
-    trendPct: 3.4,
+    id: 'energy',
+    name: 'Energy & Predictive Maintenance',
+    description: 'HVAC scheduling, smart lighting, idle-PoE shutdown, and ML-driven predictive maintenance of energy appliances.',
+    monthSavedUsd: 1_420,
+    yearSavedUsd: 17_040,
+    trendPct: 6.2,
     details: [
-      'Bulk traffic shifted to 5G — $380/mo on Fiber bandwidth',
-      'Teams/Meet pinned to Fiber — quality + opex balanced',
-      'Cloud backup off-peak window — $90/mo egress',
-    ],
-  },
-  {
-    id: 'bandwidth',
-    name: 'Network Traffic Reduction',
-    description: 'Caching, DPI compression, and dedup reducing ISP bills.',
-    monthSavedUsd: 310,
-    yearSavedUsd: 3_720,
-    trendPct: -0.8,
-    details: [
-      '0.4 TB cached locally this month',
-      'OS-update dedup across endpoints — 38% hit rate',
-      'TLS resumption tuning — $60/mo',
-    ],
-  },
-  {
-    id: 'storage',
-    name: 'Database Storage Cost',
-    description: 'Telemetry retention + compression policy keeping the time-series DB lean.',
-    monthSavedUsd: 180,
-    yearSavedUsd: 2_160,
-    trendPct: 14.2,
-    details: [
-      'Downsampled metrics older than 30 days — 5.8x compression',
-      'Audit log archived to cold storage after 90d',
-      'Bedrock prompt-cache hit rate: 76%',
+      'HVAC tied to occupancy sensors — $720/mo',
+      'Smart lighting (motion + dusk) — $480/mo',
+      'Idle PoE auto-shutdown — $140/mo',
+      'Predictive maintenance flagged 2 appliances before failure',
     ],
   },
 ];
@@ -527,22 +488,22 @@ export const costWarnings: CostWarning[] = [
 /** 12 months of cumulative monthly savings broken down by category. Gentle ramp
  *  from ~$5.4k/mo when first deployed → $7.65k/mo today as utilisation grew. */
 export const savingsTrend: SavingsTrendPoint[] = [
-  { month: 'Jun', energy:   990, efficiency: 1_960, safety: 290, uptime: 1_280, routing: 460, bandwidth: 240, storage: 130 },
-  { month: 'Jul', energy: 1_060, efficiency: 2_100, safety: 320, uptime: 1_360, routing: 480, bandwidth: 250, storage: 135 },
-  { month: 'Aug', energy: 1_120, efficiency: 2_240, safety: 350, uptime: 1_440, routing: 510, bandwidth: 260, storage: 140 },
-  { month: 'Sep', energy: 1_180, efficiency: 2_360, safety: 380, uptime: 1_520, routing: 530, bandwidth: 270, storage: 148 },
-  { month: 'Oct', energy: 1_240, efficiency: 2_480, safety: 400, uptime: 1_590, routing: 550, bandwidth: 280, storage: 155 },
-  { month: 'Nov', energy: 1_290, efficiency: 2_580, safety: 420, uptime: 1_650, routing: 570, bandwidth: 285, storage: 160 },
-  { month: 'Dec', energy: 1_320, efficiency: 2_640, safety: 435, uptime: 1_700, routing: 590, bandwidth: 290, storage: 165 },
-  { month: 'Jan', energy: 1_350, efficiency: 2_690, safety: 445, uptime: 1_730, routing: 600, bandwidth: 295, storage: 168 },
-  { month: 'Feb', energy: 1_370, efficiency: 2_730, safety: 455, uptime: 1_760, routing: 615, bandwidth: 300, storage: 172 },
-  { month: 'Mar', energy: 1_390, efficiency: 2_760, safety: 465, uptime: 1_780, routing: 625, bandwidth: 305, storage: 175 },
-  { month: 'Apr', energy: 1_405, efficiency: 2_780, safety: 472, uptime: 1_800, routing: 632, bandwidth: 308, storage: 178 },
-  { month: 'May', energy: 1_420, efficiency: 2_800, safety: 480, uptime: 1_820, routing: 640, bandwidth: 310, storage: 180 },
+  { month: 'Jun', efficiency: 1_960, storage: 130, uptime: 1_280, energy:   990 },
+  { month: 'Jul', efficiency: 2_100, storage: 135, uptime: 1_360, energy: 1_060 },
+  { month: 'Aug', efficiency: 2_240, storage: 140, uptime: 1_440, energy: 1_120 },
+  { month: 'Sep', efficiency: 2_360, storage: 148, uptime: 1_520, energy: 1_180 },
+  { month: 'Oct', efficiency: 2_480, storage: 155, uptime: 1_590, energy: 1_240 },
+  { month: 'Nov', efficiency: 2_580, storage: 160, uptime: 1_650, energy: 1_290 },
+  { month: 'Dec', efficiency: 2_640, storage: 165, uptime: 1_700, energy: 1_320 },
+  { month: 'Jan', efficiency: 2_690, storage: 168, uptime: 1_730, energy: 1_350 },
+  { month: 'Feb', efficiency: 2_730, storage: 172, uptime: 1_760, energy: 1_370 },
+  { month: 'Mar', efficiency: 2_760, storage: 175, uptime: 1_780, energy: 1_390 },
+  { month: 'Apr', efficiency: 2_780, storage: 178, uptime: 1_800, energy: 1_405 },
+  { month: 'May', efficiency: 2_800, storage: 180, uptime: 1_820, energy: 1_420 },
 ];
 
 export const roiSummary: ROISummary = {
-  annualSavingsUsd:   91_800,   // sum of category yearSavedUsd
+  annualSavingsUsd:   74_640,   // sum of category yearSavedUsd
   appAnnualCostUsd:   24_000,   // ~$2k/mo for 11-branch SaaS tier (Meraki/Aruba Central range)
   paybackPeriodMonths: 3.1,
   downtimeAvoidedHours: 26,     // 26 hrs YTD — realistic for 5 mo of operations
@@ -591,13 +552,10 @@ export function getCostInsightsForBranch(branchId: string): BranchCostInsights {
 
   const trend: SavingsTrendPoint[] = savingsTrend.map((m) => ({
     month:       m.month,
-    energy:      Math.round(m.energy      * share),
     efficiency:  Math.round(m.efficiency  * share),
-    safety:      Math.round(m.safety      * share),
-    uptime:      Math.round(m.uptime      * share),
-    routing:     Math.round(m.routing     * share),
-    bandwidth:   Math.round(m.bandwidth   * share),
     storage:     Math.round(m.storage     * share),
+    uptime:      Math.round(m.uptime      * share),
+    energy:      Math.round(m.energy      * share),
   }));
 
   // Derive each category's monthSavedUsd / yearSavedUsd directly from the

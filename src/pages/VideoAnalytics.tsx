@@ -13,6 +13,8 @@ interface VideoStream {
   description: string;
   url: string;
   group: StreamGroup;
+  /** Camera hardware behind this pipeline. */
+  camera: string;
 }
 
 /** Stream URLs route through the local Express server at `/api/video/:id`.
@@ -21,20 +23,20 @@ interface VideoStream {
  *  via VIDEO_UPSTREAM_<ID>, or by group via VIDEO_BASE_NVIDIA / VIDEO_BASE_HAILO. */
 const STREAMS: VideoStream[] = [
   // ── Nvidia · GPU inference
-  { id: 'nv-nanoowl',  name: 'Inventory Management', description: 'Open-vocabulary object detection',  url: '/api/video/nv-nanoowl',  group: 'Nvidia' },
-  { id: 'nv-violence', name: 'Violence detection', description: 'Aggressive-behaviour classifier',     url: '/api/video/nv-violence', group: 'Nvidia' },
-  { id: 'nv-fall',     name: 'Fall detection',     description: 'Detects person falls in zones',       url: '/api/video/nv-fall',     group: 'Nvidia' },
-  { id: 'nv-ppe',      name: 'PPE compliance',     description: 'Hard-hat · vest',                     url: '/api/video/nv-ppe',      group: 'Nvidia' },
-  { id: 'nv-table',    name: 'Table monitor',      description: 'Table occupancy and dwell-time',      url: '/api/video/nv-table',    group: 'Nvidia' },
-  { id: 'nv-weapon',   name: 'Weapon detection',   description: 'Firearms and edged-weapon classifier', url: '/api/video/nv-weapon',   group: 'Nvidia' },
-  { id: 'nv-parking',  name: 'Parking monitor',    description: 'Bay occupancy and dwell-time',        url: '/api/video/nv-parking',  group: 'Nvidia' },
+  { id: 'nv-nanoowl',  name: 'Inventory Management', description: 'Open-vocabulary object detection',  url: '/api/video/nv-nanoowl',  group: 'Nvidia', camera: 'Axis P3265-LV' },
+  { id: 'nv-violence', name: 'Violence detection', description: 'Aggressive-behaviour classifier',     url: '/api/video/nv-violence', group: 'Nvidia', camera: 'Axis P3265-LV' },
+  { id: 'nv-fall',     name: 'Fall detection',     description: 'Detects person falls in zones',       url: '/api/video/nv-fall',     group: 'Nvidia', camera: 'Hikvision DS-2CD2387G2' },
+  { id: 'nv-ppe',      name: 'PPE compliance',     description: 'Hard-hat · vest',                     url: '/api/video/nv-ppe',      group: 'Nvidia', camera: 'Hikvision DS-2CD2387G2' },
+  { id: 'nv-table',    name: 'Table monitor',      description: 'Table occupancy and dwell-time',      url: '/api/video/nv-table',    group: 'Nvidia', camera: 'Reolink RLC-833A' },
+  { id: 'nv-weapon',   name: 'Weapon detection',   description: 'Firearms and edged-weapon classifier', url: '/api/video/nv-weapon',   group: 'Nvidia', camera: 'Axis P3265-LV' },
+  { id: 'nv-parking',  name: 'Parking monitor',    description: 'Bay occupancy and dwell-time',        url: '/api/video/nv-parking',  group: 'Nvidia', camera: 'Dahua IPC-Color4K' },
   // ── Hailo · NPU inference
-  { id: 'ha-anpd',     name: 'ANPR',               description: 'Automatic number-plate recognition',  url: '/api/video/ha-anpd',     group: 'Hailo' },
-  { id: 'ha-intruder', name: 'Intruder detection', description: 'Perimeter intrusion alerts',          url: '/api/video/ha-intruder', group: 'Hailo' },
-  { id: 'ha-hairnet',  name: 'Hairnet monitor',    description: 'Food-safety hairnet compliance',      url: '/api/video/ha-hairnet',  group: 'Hailo' },
-  { id: 'ha-fire',     name: 'Fire detection',     description: 'Smoke and flame classifier',          url: '/api/video/ha-fire',     group: 'Hailo' },
-  { id: 'ha-crowd',    name: 'Crowd analytics',    description: 'Density and flow analysis',           url: '/api/video/ha-crowd',    group: 'Hailo' },
-  { id: 'ha-drive',    name: 'Drive-thru monitor', description: 'Lane occupancy and wait time',        url: '/api/video/ha-drive',    group: 'Hailo' },
+  { id: 'ha-anpd',     name: 'ANPR',               description: 'Automatic number-plate recognition',  url: '/api/video/ha-anpd',     group: 'Hailo', camera: 'Dahua IPC-Color4K' },
+  { id: 'ha-intruder', name: 'Intruder detection', description: 'Perimeter intrusion alerts',          url: '/api/video/ha-intruder', group: 'Hailo', camera: 'Reolink RLC-833A' },
+  { id: 'ha-hairnet',  name: 'Hairnet monitor',    description: 'Food-safety hairnet compliance',      url: '/api/video/ha-hairnet',  group: 'Hailo', camera: 'Tapo C320WS' },
+  { id: 'ha-fire',     name: 'Fire detection',     description: 'Smoke and flame classifier',          url: '/api/video/ha-fire',     group: 'Hailo', camera: 'Tapo C320WS' },
+  { id: 'ha-crowd',    name: 'Crowd analytics',    description: 'Density and flow analysis',           url: '/api/video/ha-crowd',    group: 'Hailo', camera: 'Hikvision DS-2CD2387G2' },
+  { id: 'ha-drive',    name: 'Drive-thru monitor', description: 'Lane occupancy and wait time',        url: '/api/video/ha-drive',    group: 'Hailo', camera: 'Dahua IPC-Color4K' },
 ];
 
 const GROUP_META: Record<StreamGroup, { color: string; sub: string }> = {
@@ -42,9 +44,70 @@ const GROUP_META: Record<StreamGroup, { color: string; sub: string }> = {
   Hailo:  { color: 'var(--accent3)', sub: 'NPU inference pipeline' },
 };
 
+/** Probes each stream endpoint so the page can show which cameras are actually
+ *  reachable without opening the full video streams: a plain fetch resolves as
+ *  soon as response headers arrive, at which point the body is aborted so no
+ *  video bytes keep flowing. Re-probes on an interval. */
+function useStreamStatus(streams: VideoStream[], intervalMs = 30_000) {
+  const [status, setStatus] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let disposed = false;
+    const controllers = new Set<AbortController>();
+
+    const probe = () => {
+      for (const s of streams) {
+        const ctrl = new AbortController();
+        controllers.add(ctrl);
+        fetch(s.url, { signal: ctrl.signal, cache: 'no-store' })
+          .then((res) => {
+            if (!disposed) setStatus((prev) => ({ ...prev, [s.id]: res.ok }));
+            ctrl.abort(); // headers are enough — kill the body stream
+          })
+          .catch(() => {
+            // AbortError from our own cleanup must not mark the camera down.
+            if (!disposed && !ctrl.signal.aborted) {
+              setStatus((prev) => ({ ...prev, [s.id]: false }));
+            }
+          })
+          .finally(() => controllers.delete(ctrl));
+      }
+    };
+
+    probe();
+    const t = window.setInterval(probe, intervalMs);
+    return () => {
+      disposed = true;
+      window.clearInterval(t);
+      controllers.forEach((c) => c.abort());
+    };
+  }, [streams, intervalMs]);
+
+  return status;
+}
+
 export function VideoAnalyticsPage() {
   const nvidia = useMemo(() => STREAMS.filter((s) => s.group === 'Nvidia'), []);
   const hailo  = useMemo(() => STREAMS.filter((s) => s.group === 'Hailo'),  []);
+  const status = useStreamStatus(STREAMS);
+
+  const probedCount = Object.keys(status).length;
+  const onlineCount = STREAMS.filter((s) => status[s.id]).length;
+
+  // Camera models rolled up from per-stream reachability.
+  const models = useMemo(() => {
+    const m = new Map<string, { total: number; online: number; probed: number }>();
+    for (const s of STREAMS) {
+      const e = m.get(s.camera) ?? { total: 0, online: 0, probed: 0 };
+      e.total += 1;
+      if (status[s.id] !== undefined) e.probed += 1;
+      if (status[s.id]) e.online += 1;
+      m.set(s.camera, e);
+    }
+    return [...m.entries()];
+  }, [status]);
+
+  const onlineAccent = onlineCount === STREAMS.length ? 'var(--ok)' : onlineCount > 0 ? 'var(--warn)' : 'var(--err)';
 
   return (
     <>
@@ -54,25 +117,55 @@ export function VideoAnalyticsPage() {
       />
 
       <div className="kpi-strip">
-        <Kpi label="Active pipelines" value={String(STREAMS.length)} sub={`${nvidia.length} Nvidia · ${hailo.length} Hailo`} icon={Video} accent="var(--accent)" />
+        <Kpi label="Cameras online" value={`${onlineCount} / ${STREAMS.length}`}
+          sub={probedCount < STREAMS.length ? 'probing feeds…' : 'reachability · refreshed every 30 s'}
+          icon={Video} accent={probedCount === 0 ? 'var(--accent)' : onlineAccent} />
         <Kpi label="Nvidia analytics" value={String(nvidia.length)} sub="GPU inference"           icon={Cpu}  accent="var(--ok)" />
         <Kpi label="Hailo analytics"  value={String(hailo.length)}  sub="NPU inference"           icon={Cpu}  accent="var(--accent3)" />
-        <Kpi label="Transport"        value="MJPEG / HTTP"          sub="loaded on demand"        icon={Wifi} accent="var(--accent2)" />
+        <Kpi label="Transport"        value="RTSP / RTP / HTTP"     sub="camera → edge → dashboard" icon={Wifi} accent="var(--accent2)" />
       </div>
 
       <div className="grid">
         <div className="col-12">
-          <StreamGroupCard group="Nvidia" streams={nvidia} />
+          <Card
+            title="Camera fleet"
+            sub="Camera models behind the pipelines — reachability probed from the stream endpoints every 30 s."
+            right={
+              <span className={`badge ${onlineCount === STREAMS.length ? 'ok' : onlineCount > 0 ? 'warn' : 'err'}`}>
+                {onlineCount}/{STREAMS.length} online
+              </span>
+            }
+          >
+            <div className="va-cam-strip">
+              {models.map(([model, m]) => {
+                const state = m.probed === 0 ? 'off' : m.online === m.total ? 'ok' : m.online > 0 ? 'warn' : 'err';
+                return (
+                  <span key={model} className="va-cam-chip" title={`${m.online} of ${m.total} cameras reachable`}>
+                    <span className={`dot ${state}`} />
+                    <span className="va-cam-model">{model}</span>
+                    <span className="va-cam-count mono">{m.online}/{m.total}</span>
+                  </span>
+                );
+              })}
+            </div>
+          </Card>
         </div>
         <div className="col-12">
-          <StreamGroupCard group="Hailo" streams={hailo} />
+          <StreamGroupCard group="Nvidia" streams={nvidia} status={status} />
+        </div>
+        <div className="col-12">
+          <StreamGroupCard group="Hailo" streams={hailo} status={status} />
         </div>
       </div>
     </>
   );
 }
 
-function StreamGroupCard({ group, streams }: { group: StreamGroup; streams: VideoStream[] }) {
+function StreamGroupCard({ group, streams, status }: {
+  group: StreamGroup;
+  streams: VideoStream[];
+  status: Record<string, boolean>;
+}) {
   const meta = GROUP_META[group];
   return (
     <Card
@@ -100,7 +193,7 @@ function StreamGroupCard({ group, streams }: { group: StreamGroup; streams: Vide
       }
     >
       <div className="va-grid">
-        {streams.map((s) => <StreamTile key={s.id} stream={s} />)}
+        {streams.map((s) => <StreamTile key={s.id} stream={s} active={status[s.id]} />)}
       </div>
     </Card>
   );
@@ -108,7 +201,7 @@ function StreamGroupCard({ group, streams }: { group: StreamGroup; streams: Vide
 
 /* ─────────── Stream tile ─────────── */
 
-function StreamTile({ stream }: { stream: VideoStream }) {
+function StreamTile({ stream, active }: { stream: VideoStream; active?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   /** When `true`, the <img> for the stream is mounted (network request fires). */
   const [isLive, setIsLive] = useState(false);
@@ -168,10 +261,13 @@ function StreamTile({ stream }: { stream: VideoStream }) {
   return (
     <div ref={containerRef} className={`va-tile ${isFullscreen ? 'is-fullscreen' : ''}`}>
       <div className="va-tile-head">
-        <span className={`dot ${isLive && !errored ? 'ok' : 'warn'}`} />
+        {/* Open stream → live state; otherwise the probed camera reachability. */}
+        <span className={`dot ${isLive
+          ? (errored ? 'err' : 'ok')
+          : active === undefined ? 'off' : active ? 'ok' : 'err'}`} />
         <div className="va-tile-name">
           <div className="va-tile-title">{stream.name}</div>
-          <div className="va-tile-desc">{stream.description}</div>
+          <div className="va-tile-desc">{stream.camera} · {stream.description}</div>
         </div>
         {isLive && (
           <button
