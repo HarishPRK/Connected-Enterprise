@@ -1,16 +1,20 @@
 /**
  * Client hook for live IPsec metrics streaming from the Express server.
  *
- * On mount: GET /api/ipsec/snapshot for the current cache.
- * Then opens an EventSource on /api/ipsec/stream and replaces state on each
- * `update` / `snapshot` event. Listens to `status` events to surface the
- * upstream IoT connection state in the UI.
+ * SHARED FEED: every caller of `useIpsecMetrics()` subscribes to ONE
+ * module-level store — a single GET /api/ipsec/snapshot + one EventSource on
+ * /api/ipsec/stream, ref-counted across all consumers. The app renders the
+ * failover feed in several places at once (the global OpsIncidents provider,
+ * the Overview page, the Dynamic Failover page, the client→tunnel
+ * constellation); without sharing, each mounted consumer opened its own
+ * stream and the server fanned the same data out N times per client. The
+ * connection opens on the first subscriber and closes when the last unmounts.
  *
- * Designed so the rest of the app can call `useIpsecMetrics()` and get:
- *   { gateways, list, connected, lastError, lastReceivedAt }
+ * Callers get: { gateways, list, connected, lastError, subscribedTopic,
+ * endpoint, lastReceivedAt } — unchanged.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { IpsecGatewayState } from '../types';
 
 interface SnapshotPayload {
@@ -49,81 +53,105 @@ export interface UseIpsecMetricsResult {
   lastReceivedAt?: number;
 }
 
+/* ─────────── Shared store (one connection for the whole app) ─────────── */
+
+const EMPTY_LIST: IpsecGatewayState[] = [];
+let current: UseIpsecMetricsResult = { gateways: {}, list: EMPTY_LIST, connected: false };
+
+const listeners = new Set<() => void>();
+let es: EventSource | null = null;
+let snapAbort: AbortController | null = null;
+
+function emit() {
+  for (const l of listeners) l();
+}
+
+function sortList(gateways: Record<string, IpsecGatewayState>): IpsecGatewayState[] {
+  return Object.values(gateways).sort((a, b) =>
+    a.metrics.gateway.name.localeCompare(b.metrics.gateway.name),
+  );
+}
+
+function applySnapshot(snap: SnapshotPayload) {
+  const gateways = snap.gateways ?? {};
+  current = {
+    gateways,
+    list: sortList(gateways),
+    connected: typeof snap.connected === 'boolean' ? snap.connected : current.connected,
+    lastError: snap.lastError,
+    subscribedTopic: snap.subscribedTopic,
+    endpoint: snap.endpoint,
+    lastReceivedAt: snap.receivedAt,
+  };
+  emit();
+}
+
+function applyUpdate(u: UpdatePayload) {
+  const gateways = { ...current.gateways, [u.gatewayKey]: u.state };
+  current = { ...current, gateways, list: sortList(gateways), lastReceivedAt: u.state.receivedAt };
+  emit();
+}
+
+function applyStatus(s: StatusPayload) {
+  current = { ...current, connected: s.connected, lastError: s.reason };
+  emit();
+}
+
+function markDisconnected() {
+  if (!current.connected) return;
+  current = { ...current, connected: false };
+  emit();
+}
+
+function startFeed() {
+  if (es) return;
+
+  // Hydrate from /snapshot first so we have data immediately.
+  snapAbort = new AbortController();
+  fetch('/api/ipsec/snapshot', { signal: snapAbort.signal })
+    .then((r) => r.json() as Promise<SnapshotPayload>)
+    .then(applySnapshot)
+    .catch(() => { /* swallow — stream will recover */ });
+
+  // Live updates via SSE.
+  const source = new EventSource('/api/ipsec/stream');
+  es = source;
+
+  source.addEventListener('snapshot', (e) => {
+    try { applySnapshot(JSON.parse((e as MessageEvent).data)); } catch { /* ignore */ }
+  });
+  source.addEventListener('update', (e) => {
+    try { applyUpdate(JSON.parse((e as MessageEvent).data)); } catch { /* ignore */ }
+  });
+  source.addEventListener('status', (e) => {
+    try { applyStatus(JSON.parse((e as MessageEvent).data)); } catch { /* ignore */ }
+  });
+  // EventSource auto-reconnects; just mark disconnected for now.
+  source.onerror = () => markDisconnected();
+}
+
+function stopFeed() {
+  snapAbort?.abort();
+  snapAbort = null;
+  es?.close();
+  es = null;
+}
+
+function subscribe(onChange: () => void): () => void {
+  listeners.add(onChange);
+  if (listeners.size === 1) startFeed();
+  return () => {
+    listeners.delete(onChange);
+    if (listeners.size === 0) stopFeed();
+  };
+}
+
+function getSnapshot(): UseIpsecMetricsResult {
+  return current;
+}
+
 export function useIpsecMetrics(): UseIpsecMetricsResult {
-  const [gateways, setGateways] = useState<Record<string, IpsecGatewayState>>({});
-  const [connected, setConnected] = useState(false);
-  const [lastError, setLastError] = useState<string | undefined>();
-  const [subscribedTopic, setSubscribedTopic] = useState<string | undefined>();
-  const [endpoint, setEndpoint] = useState<string | undefined>();
-  const [lastReceivedAt, setLastReceivedAt] = useState<number | undefined>();
-  const esRef = useRef<EventSource | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    // Hydrate from /snapshot first so we have data immediately.
-    fetch('/api/ipsec/snapshot')
-      .then((r) => r.json() as Promise<SnapshotPayload>)
-      .then((snap) => {
-        if (cancelled) return;
-        setGateways(snap.gateways ?? {});
-        if (typeof snap.connected === 'boolean') setConnected(snap.connected);
-        setLastError(snap.lastError);
-        setSubscribedTopic(snap.subscribedTopic);
-        setEndpoint(snap.endpoint);
-        setLastReceivedAt(snap.receivedAt);
-      })
-      .catch(() => { /* swallow — stream will recover */ });
-
-    // Live updates via SSE.
-    const es = new EventSource('/api/ipsec/stream');
-    esRef.current = es;
-
-    es.addEventListener('snapshot', (e) => {
-      try {
-        const snap = JSON.parse((e as MessageEvent).data) as SnapshotPayload;
-        setGateways(snap.gateways ?? {});
-        if (typeof snap.connected === 'boolean') setConnected(snap.connected);
-        setLastError(snap.lastError);
-        setSubscribedTopic(snap.subscribedTopic);
-        setEndpoint(snap.endpoint);
-        setLastReceivedAt(snap.receivedAt);
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('update', (e) => {
-      try {
-        const u = JSON.parse((e as MessageEvent).data) as UpdatePayload;
-        setGateways((prev) => ({ ...prev, [u.gatewayKey]: u.state }));
-        setLastReceivedAt(u.state.receivedAt);
-      } catch { /* ignore */ }
-    });
-
-    es.addEventListener('status', (e) => {
-      try {
-        const s = JSON.parse((e as MessageEvent).data) as StatusPayload;
-        setConnected(s.connected);
-        setLastError(s.reason);
-      } catch { /* ignore */ }
-    });
-
-    es.onerror = () => {
-      // EventSource auto-reconnects; just mark disconnected for now.
-      setConnected(false);
-    };
-
-    return () => {
-      cancelled = true;
-      es.close();
-      esRef.current = null;
-    };
-  }, []);
-
-  const list = useMemo(() => {
-    return Object.values(gateways).sort((a, b) =>
-      a.metrics.gateway.name.localeCompare(b.metrics.gateway.name),
-    );
-  }, [gateways]);
-
-  return { gateways, list, connected, lastError, subscribedTopic, endpoint, lastReceivedAt };
+  // getSnapshot returns a cached reference that only changes when the feed
+  // changes, so useSyncExternalStore re-renders consumers exactly on updates.
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
