@@ -3667,6 +3667,13 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
   .ecc-table { font-size: 12px; }
 }
 
+/* Suspense fallback while a lazily-loaded route chunk streams in. */
+.route-loading {
+  padding: clamp(24px, 4vw, 56px);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 /* ─────────────────────────── Service Offerings (so-) ─────────────────────────── */
 
 /* The architecture "sandwich": consumer APIs above the container grid, the

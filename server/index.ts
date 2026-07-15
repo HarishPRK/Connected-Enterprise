@@ -6,6 +6,7 @@ import { config as loadDotenv } from 'dotenv';
 loadDotenv({ override: true });
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
@@ -21,6 +22,22 @@ const __dirname  = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
+
+// gzip everything compressible (the built JS bundle is ~1.2 MB → ~350 KB on the
+// wire, CSS ~89 KB → ~16 KB). CRITICAL: never compress the Server-Sent-Events
+// streams — the compressor buffers until its threshold, which stalls the live
+// snapshot/telemetry feeds. We skip any response whose Content-Type is
+// text/event-stream; the MJPEG video proxy (multipart/x-mixed-replace) and the
+// `no-transform` streams are already non-compressible / opted out, but the
+// explicit guard keeps SSE safe regardless of default heuristics.
+app.use(compression({
+  filter: (req, res) => {
+    const ct = String(res.getHeader('Content-Type') ?? '');
+    if (ct.includes('text/event-stream')) return false;
+    return compression.filter(req, res);
+  },
+}));
+
 app.use(express.json({ limit: '256kb' }));
 
 const llm = makeLLM();

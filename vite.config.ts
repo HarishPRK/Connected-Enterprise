@@ -4,6 +4,22 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // Peel the heavy, rarely-changing libraries into their own long-cached
+        // chunks so (a) they parse/download in parallel with app code, (b) they
+        // survive app deploys in the browser cache, and (c) pages that don't use
+        // charts never pay for recharts + d3. Route pages are split separately
+        // via React.lazy in App.tsx.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('recharts') || id.includes('d3-') || id.includes('victory') || id.includes('topojson')) return 'charts';
+          if (id.includes('react-router') || id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) return 'react-vendor';
+        },
+      },
+    },
+  },
   server: {
     // Bind to 0.0.0.0 so any machine on the same network can hit
     //   http://<this-machine's-LAN-ip>:5174/
