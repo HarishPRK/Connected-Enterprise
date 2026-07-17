@@ -635,6 +635,47 @@ app.get('/api/ipsec/stream', (req, res) => {
   });
 });
 
+/* ─────────── Application-Aware Routing (AAR) telemetry ───────────
+ * The gateway's AAR plugin publishes proto3 on routing/{flow,tunnel,route,
+ * decision}; ipsecSource decodes + aggregates them. These endpoints expose the
+ * aggregated state to the Application Steering Patchboard, mirroring the ipsec
+ * snapshot/stream pair. */
+
+/** Snapshot of the current aggregated AAR routing state. */
+app.get('/api/aar/snapshot', (_req, res) => {
+  res.json(ipsecSource.getAarSnapshot());
+});
+
+/** SSE stream — hydrates with the snapshot, then pushes the full snapshot on
+ *  every fresh routing/* message. */
+app.get('/api/aar/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+
+  const emit = (event: string, data: Record<string, unknown>) => {
+    if (!res.writable || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  emit('snapshot', ipsecSource.getAarSnapshot() as unknown as Record<string, unknown>);
+  const offAar = ipsecSource.onAar((s) => emit('update', s as unknown as Record<string, unknown>));
+
+  const hb = setInterval(() => {
+    if (res.writable && !res.writableEnded) res.write(': hb\n\n');
+  }, 15_000);
+
+  req.on('close', () => {
+    offAar();
+    clearInterval(hb);
+    if (!res.writableEnded) res.end();
+  });
+});
+
 /* ─────────── Device inventory (IT/OT) ───────────
  * Phase 0: served from the static seed in deviceSource.ts so the Devices page
  * runs off the API + SSE with no gateway changes. IT/OT is an editable,

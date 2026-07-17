@@ -18,6 +18,10 @@ import { mqtt, iot, auth } from 'aws-iot-device-sdk-v2';
 import { EventEmitter } from 'node:events';
 import type { DeviceTelemetry, IpsecGatewayState, IpsecMetrics, IpsecWifiClient } from '../src/types.js';
 import { decodeIpsecMetrics } from './ipsecProto.js';
+import {
+  decodeFlow, decodeTunnel, decodeRoute, decodeDecision,
+  type AarFlow, type AarTunnel, type AarRoute, type AarDecision, type AarSnapshot,
+} from './aarProto.js';
 
 const ENDPOINT  = process.env.IOT_ENDPOINT ?? 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';
 const REGION    = process.env.IOT_REGION   ?? process.env.AWS_REGION ?? 'us-east-1';
@@ -33,6 +37,12 @@ const SUBSCRIBE_TOPICS: string[] = (() => {
   const raw = list ?? single ?? 'rdk/ipsec/metrics,prpl/ipsec/metrics';
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 })();
+
+// Application-Aware Routing telemetry topics (proto/aar.proto). The AAR plugin
+// publishes on unprefixed `routing/*` topics. Override with IOT_AAR_TOPICS.
+const AAR_TOPICS: string[] = (
+  process.env.IOT_AAR_TOPICS ?? 'routing/flow,routing/tunnel,routing/route,routing/decision'
+).split(',').map((s) => s.trim()).filter(Boolean);
 
 /** Map the MQTT topic to the gateway-source tag exposed in IpsecGatewayState.
  *  Anything starting with `rdk/` → 'rdk', `prpl/` → 'prpl', else 'other'. */
@@ -169,6 +179,8 @@ interface IpsecSourceEvents {
   /** Raw device-inventory payload from a gateway, tagged with its source
    *  (`rdk` / `prpl` / `other`, or `<prefix>:matter` for Matter hub lists). */
   inventory: (msg: { source: string; payload: unknown }) => void;
+  /** Aggregated Application-Aware Routing state after every `routing/*` message. */
+  aar: (snapshot: AarSnapshot) => void;
 }
 
 /** Map a gateway Wi-Fi client to the device-inventory wire shape consumed by
@@ -221,6 +233,15 @@ class IpsecSource extends EventEmitter {
   /** First time each Wi-Fi client MAC was seen this session — the gateway
    *  doesn't report association time, so "connected for" grows from here. */
   private wifiFirstSeen = new Map<string, number>();
+
+  /** Latest AAR telemetry, keyed so repeats replace rather than accumulate:
+   *  tunnels by iface, decisions/routes by their subject IP, flows as a
+   *  bounded recent list. */
+  private aarTunnels = new Map<string, AarTunnel & { updatedAt: number }>();
+  private aarDecisions = new Map<string, AarDecision & { updatedAt: number }>();
+  private aarRoutes = new Map<string, AarRoute & { updatedAt: number }>();
+  private aarFlows: (AarFlow & { updatedAt: number })[] = [];
+  private aarLastAt = 0;
 
   /** Returns true if the SDK is wired up + AWS creds appear present. */
   hasCredentials(): boolean {
@@ -325,6 +346,19 @@ class IpsecSource extends EventEmitter {
           (t, payload) => this.handleInventory(t, payload),
         );
       }
+
+      // Subscribe to the AAR routing telemetry topics (proto/aar.proto). Each
+      // message updates the aggregated AAR state and fans out via the `aar`
+      // event; the Application Steering Patchboard consumes it over SSE.
+      for (const topic of AAR_TOPICS) {
+        await this.connection.subscribe(
+          topic,
+          mqtt.QoS.AtMostOnce,
+          (t, payload) => this.handleAarMessage(t, payload),
+        );
+      }
+      // eslint-disable-next-line no-console
+      console.log(`[aar] subscribed to [${AAR_TOPICS.join(', ')}]`);
 
       // Subscribe to the Matter device-list topics under their own source tag.
       for (const topic of MATTER_TOPICS) {
@@ -890,6 +924,57 @@ class IpsecSource extends EventEmitter {
     return res;
   }
 
+  /** Decode one `routing/<kind>` message and fold it into the AAR state. The
+   *  gateway publishes binary proto3; a JSON payload is accepted as a fallback
+   *  (mirrors handleMessage) in case an upstream rule pre-decodes it. */
+  private handleAarMessage(topic: string, payload: ArrayBuffer): void {
+    const kind = topic.split('/').pop() ?? '';
+    try {
+      const bytes = new Uint8Array(payload);
+      const looksLikeJson = bytes.length > 0 && (bytes[0] === 0x7b || bytes[0] === 0x5b);
+      const now = Date.now();
+
+      if (kind === 'flow') {
+        const f: AarFlow = looksLikeJson ? JSON.parse(new TextDecoder().decode(bytes)) : decodeFlow(bytes);
+        this.aarFlows.unshift({ ...f, updatedAt: now });
+        if (this.aarFlows.length > 100) this.aarFlows.length = 100;
+      } else if (kind === 'tunnel') {
+        const t: AarTunnel = looksLikeJson ? JSON.parse(new TextDecoder().decode(bytes)) : decodeTunnel(bytes);
+        this.aarTunnels.set(t.iface, { ...t, updatedAt: now });
+      } else if (kind === 'route') {
+        const r: AarRoute = looksLikeJson ? JSON.parse(new TextDecoder().decode(bytes)) : decodeRoute(bytes);
+        this.aarRoutes.set(r.dst_ip, { ...r, updatedAt: now });
+        if (this.aarRoutes.size > 200) this.aarRoutes.delete(this.aarRoutes.keys().next().value as string);
+      } else if (kind === 'decision') {
+        const d: AarDecision = looksLikeJson ? JSON.parse(new TextDecoder().decode(bytes)) : decodeDecision(bytes);
+        this.aarDecisions.set(d.src_ip, { ...d, updatedAt: now });
+      } else {
+        return;
+      }
+
+      this.aarLastAt = now;
+      this.emit('aar', this.buildAarSnapshot());
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[aar] failed to decode "${topic}":`, err);
+    }
+  }
+
+  private buildAarSnapshot(): AarSnapshot {
+    return {
+      tunnels: [...this.aarTunnels.values()].sort((a, b) => a.iface.localeCompare(b.iface)),
+      decisions: [...this.aarDecisions.values()].sort((a, b) => a.src_ip.localeCompare(b.src_ip)),
+      routes: [...this.aarRoutes.values()],
+      flows: this.aarFlows.slice(0, 50),
+      connected: this.connected,
+      receivedAt: this.aarLastAt,
+    };
+  }
+
+  getAarSnapshot(): AarSnapshot {
+    return this.buildAarSnapshot();
+  }
+
   getSnapshot() {
     return {
       gateways: Object.fromEntries(this.gateways.entries()),
@@ -919,6 +1004,11 @@ class IpsecSource extends EventEmitter {
   onInventory(listener: IpsecSourceEvents['inventory']): () => void {
     this.on('inventory', listener);
     return () => this.off('inventory', listener);
+  }
+
+  onAar(listener: IpsecSourceEvents['aar']): () => void {
+    this.on('aar', listener);
+    return () => this.off('aar', listener);
   }
 }
 

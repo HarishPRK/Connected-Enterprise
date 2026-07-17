@@ -1,0 +1,42 @@
+// Application-Aware Routing (AAR) telemetry, published by the gateway's AAR
+// plugin as proto3 binary on the `routing/*` MQTT topics:
+//
+//   routing/flow     -> Flow      (an active src->dst flow)
+//   routing/tunnel   -> Tunnel    (a tunnel iface + its measured latency)
+//   routing/route    -> Route     (a dst reachable via a tunnel, with latency)
+//   routing/decision -> Decision  (the routing verdict for a src_ip: which
+//                                   tunnel it rides to reach a dst, + latencies)
+//
+// Decoder: server/aarProto.ts (hand-rolled, same no-protobufjs policy as
+// ipsec_metrics). The server decodes these to JSON and fans them out on
+// /api/aar/stream; the Application Steering Patchboard consumes that feed as an
+// alternative/complement to prpl/ipsec/metrics.
+
+syntax = "proto3";
+
+package aar;
+
+message Flow {
+  string src_ip = 1;
+  string dst_ip = 2;
+}
+
+message Tunnel {
+  string iface      = 1;
+  int32  latency_ms = 2;
+}
+
+message Route {
+  string dst_ip     = 1;
+  int32  latency_ms = 2;
+  string via        = 3;
+}
+
+message Decision {
+  string src_ip            = 1;
+  string tunnel            = 2;
+  int32  tunnel_latency_ms = 3;
+  string dst_ip            = 4;
+  int32  dst_latency_ms    = 5;
+  int32  total_latency_ms  = 6;
+}
