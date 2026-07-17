@@ -220,16 +220,19 @@ function wavePath(sx: number, sy: number, ex: number, ey: number, amp: number, p
  * Rows start well below the eyebrows (y=26) so halos/rings never collide with
  * the header line; the gateway bus owns the middle column. */
 
-const W = 1000, H = 448;
+const W = 1000, H = 452;
 const CL_X = 190, CL_R = 24;          // ~150px label gutter left of the bubbles
 const PORT_X = CL_X + CL_R;
 const BUS_X = 468, BUS_W = 40;        // gateway bus spine
 const BUS_CX = BUS_X + BUS_W / 2;
-const BUS_TOP = 44;
+// Clients, tunnels, and the bus all sit on ONE vertical band so their centers
+// line up exactly; the bus caps 18px beyond the outer rows top and bottom.
+const BAND_TOP = 90, BAND_BOTTOM = 362;
+const BAND_CY = (BAND_TOP + BAND_BOTTOM) / 2;
+const BUS_TOP = BAND_TOP - 18, BUS_BOTTOM = BAND_BOTTOM + 18;
 const TUN_X = 700, TUN_W = 286, TUN_H = 60;
 const PLUG_INSET = 6;
 const SPARK_W = 64, SPARK_H = 12, SPARK_N = 24;
-const CLIENT_Y0 = 92, TUNNEL_Y0 = 100;
 
 interface SelectState { id: string; idx: number }
 interface PubState {
@@ -323,7 +326,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     const n = sorted.length;
     const slots: TunnelSlot[] = sorted.map((t, i) => {
       const family = familyOf(t.ifname);
-      return { ...t, family, y: n <= 1 ? H / 2 : TUNNEL_Y0 + i * ((H - 196) / (n - 1)), color: family === 'fiber' ? tc.accent : tc.accent2 };
+      return { ...t, family, y: n <= 1 ? BAND_CY : BAND_TOP + i * ((BAND_BOTTOM - BAND_TOP) / (n - 1)), color: family === 'fiber' ? tc.accent : tc.accent2 };
     });
     return { tunnels: slots, tunnelSource: src };
   }, [aarLive, aar.tunnels, gw, tc.accent, tc.accent2, simTick]);
@@ -352,7 +355,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     const mine = source ? allDevices.filter((d) => d.locationSource === source) : [];
     const place = (rows: Omit<PatchClient, 'y'>[]): PatchClient[] => {
       const n = rows.length;
-      return rows.map((r, i) => ({ ...r, y: n <= 1 ? H / 2 : CLIENT_Y0 + i * ((H - 172) / (n - 1)) }));
+      return rows.map((r, i) => ({ ...r, y: n <= 1 ? BAND_CY : BAND_TOP + i * ((BAND_BOTTOM - BAND_TOP) / (n - 1)) }));
     };
 
     if (aarLive && aar.decisions.length) {
@@ -565,7 +568,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
   const highlightIdx = overIdx ?? (selected ? selected.idx : null);
   const armed = dragId != null || selected != null;
-  const busYOf = (sy: number, ey: number) => clamp((sy + ey) / 2, BUS_TOP + 14, H - 102);
+  const busYOf = (sy: number, ey: number) => clamp((sy + ey) / 2, BUS_TOP + 16, BUS_BOTTOM - 16);
 
   const links = clients.map((c, i) => {
     const idx = slotIdxFor(c);
@@ -786,17 +789,17 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
         {/* ── gateway bus: the spine every route threads through ── */}
         <g>
-          <rect x={BUS_X} y={BUS_TOP} width={BUS_W} height={H - BUS_TOP - 92} rx={19}
+          <rect x={BUS_X} y={BUS_TOP} width={BUS_W} height={BUS_BOTTOM - BUS_TOP} rx={19}
             fill={surface} stroke={tc.accent3} strokeOpacity={0.55} strokeWidth={1.4} filter="url(#apb-glow)" />
           {/* traffic shimmer down the spine */}
-          <line x1={BUS_CX} y1={BUS_TOP + 36} x2={BUS_CX} y2={H - 100} stroke={tc.accent3}
+          <line x1={BUS_CX} y1={BUS_TOP + 36} x2={BUS_CX} y2={BUS_BOTTOM - 16} stroke={tc.accent3}
             strokeOpacity={0.3} strokeWidth={1.6} strokeDasharray="2 7"
             className={reduceMotion ? undefined : 'apb-busflow'} />
           <foreignObject x={BUS_CX - 9} y={BUS_TOP + 10} width={18} height={18} style={{ pointerEvents: 'none' }}>
             <div style={{ color: tc.accent3, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Router size={15} /></div>
           </foreignObject>
-          <text x={BUS_CX} y={H - 74} textAnchor="middle" fontSize="10.5" fontWeight={700} fill={tc.text}>{gwName}</text>
-          <text x={BUS_CX} y={H - 60} textAnchor="middle" fontSize="9" fill={tc.textMuted} fontFamily={MONO}>
+          <text x={BUS_CX} y={BUS_BOTTOM + 16} textAnchor="middle" fontSize="10.5" fontWeight={700} fill={tc.text}>{gwName}</text>
+          <text x={BUS_CX} y={BUS_BOTTOM + 29} textAnchor="middle" fontSize="9" fill={tc.textMuted} fontFamily={MONO}>
             {source ?? 'sim'} · {fleetLabel}
           </text>
         </g>
