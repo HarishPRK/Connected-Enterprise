@@ -718,6 +718,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         style={{ width: '100%', height: 'auto', display: 'block', touchAction: 'none' }}
         role="application"
         aria-label="Application steering patchboard: drag a client's wire onto a tunnel to re-route its application through the gateway"
+        onPointerDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}
         onPointerMove={onSvgMove}
         onPointerUp={endDrag}
         onPointerCancel={cancelDrag}
@@ -973,13 +974,13 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
               {!reduceMotion && (
                 <circle cx={CL_X} cy={c.y} r={30} fill={`url(#apb-halo-${dom})`} className="apb-halo"
-                  style={{ transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${phase}s` }} />
+                  style={{ pointerEvents: 'none', transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${phase}s` }} />
               )}
               {/* activity ring — slow rotating dashes say "client alive" */}
               <circle cx={CL_X} cy={c.y} r={CL_R + 6} fill="none" stroke={domColor}
                 strokeOpacity={0.32} strokeWidth={1.1} strokeDasharray="3 9"
                 className={reduceMotion ? undefined : 'apb-ring'}
-                style={reduceMotion ? undefined : { transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${phase * 3}s` }} />
+                style={reduceMotion ? { pointerEvents: 'none' } : { pointerEvents: 'none', transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${phase * 3}s` }} />
               {/* glass sphere — grabbable: dragging from the bubble picks up its wire */}
               <circle cx={CL_X} cy={c.y} r={CL_R} fill={`url(#apb-sphere-${dom})`} stroke={domColor} strokeWidth={1.5} strokeOpacity={0.9}
                 className={reduceMotion ? undefined : 'apb-breathe'}
