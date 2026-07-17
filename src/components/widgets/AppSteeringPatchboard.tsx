@@ -444,7 +444,11 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     };
   });
 
-  const sourceChip = (s: string) => (s === 'aar' ? 'live · routing/*' : s === 'ipsec' ? `live · ${source}/ipsec/metrics` : 'simulated');
+  const sourceChip = (s: string) =>
+    s === 'aar' ? 'live · routing/*'
+      : s === 'ipsec' ? `live · ${source}/ipsec/metrics`
+        : s === 'devices' ? 'live · device inventory'
+          : 'simulated';
   const fleetLabel = source ? (LOCATION_LABEL[source] ?? source) : 'demo';
 
   /* ───────── render ───────── */
