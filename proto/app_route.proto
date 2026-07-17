@@ -1,0 +1,35 @@
+// Application → tunnel steering command, published by the dashboard when an
+// operator re-patches a client's wire on the Application Traffic Routing page.
+//
+//   Topic:    <prefix>/approute/control      (rdk = Plano, prpl = McKinney)
+//   Payload:  binary proto3 AppRouteCommand
+//
+// The encoder lives in src/proto/appRoute.ts (browser) and the decoder in
+// server/appRouteProto.ts — both hand-rolled, same no-protobufjs policy as
+// the ipsec_metrics schema this project already decodes.
+
+syntax = "proto3";
+
+package approute;
+
+// One application riding one IPsec tunnel. `tunnel` is the tunnel ifname
+// exactly as the gateway reports it on <prefix>/ipsec/metrics
+// (e.g. "vti-fiber1", "vti-cell2").
+message TunnelBinding {
+  string application = 1;  // e.g. "Netflix", "Microsoft Teams"
+  string tunnel      = 2;  // tunnel ifname from ipsec metrics
+}
+
+message ClientRouteChange {
+  string client_mac    = 1;
+  string client_name   = 2;
+  TunnelBinding current = 3;  // what the client rides today
+  TunnelBinding desired = 4;  // what the operator patched it to
+}
+
+message AppRouteCommand {
+  uint64 timestamp_ms = 1;
+  string source       = 2;  // topic family: "rdk" | "prpl"
+  string gateway      = 3;  // gateway name from ipsec metrics
+  repeated ClientRouteChange changes = 4;
+}

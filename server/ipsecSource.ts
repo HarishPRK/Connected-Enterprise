@@ -741,6 +741,25 @@ class IpsecSource extends EventEmitter {
     return ackPromise;
   }
 
+  /** Relay a binary app-route steering command (proto3 AppRouteCommand, see
+   *  proto/app_route.proto) to `<prefix>/approute/control`. Fire-and-forget:
+   *  no gateway component acks this topic yet, so resolving means "handed to
+   *  the broker", not "applied on the gateway". */
+  async publishAppRoute(prefix: string, payload: Uint8Array): Promise<{ ok: boolean; error?: string }> {
+    if (!this.connection || !this.connected) {
+      return { ok: false, error: 'MQTT not connected — cannot reach the gateway' };
+    }
+    const topic = `${prefix}/approute/control`;
+    try {
+      await this.connection.publish(topic, payload, mqtt.QoS.AtLeastOnce);
+      // eslint-disable-next-line no-console
+      console.log(`[approute] published ${payload.byteLength} bytes to "${topic}"`);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   /**
    * Poke the gateway to re-fetch and republish the Matter device list. The
    * fresh list arrives on the existing `rdk/matter/devices/list` subscription

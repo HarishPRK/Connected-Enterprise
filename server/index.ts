@@ -14,6 +14,7 @@ import { makeLLM } from './llm.js';
 import { runAgent } from './agent.js';
 import { runChat, type ChatMessage } from './chat.js';
 import { ipsecSource } from './ipsecSource.js';
+import { decodeAppRouteCommand, type AppRouteCommand } from './appRouteProto.js';
 import { deviceSource } from './deviceSource.js';
 import { historySeries } from './telemetryHistory.js';
 
@@ -160,6 +161,55 @@ app.post('/api/gateway/path', async (req, res) => {
     res.status(502).json({ ok: false, mode, source, tunnel, error: result.error ?? 'path command failed' });
   }
 });
+
+/** POST /api/approute/publish?source=rdk|prpl — relays a binary proto3
+ *  AppRouteCommand (see proto/app_route.proto) from the Application Steering
+ *  Patchboard to `<source>/approute/control` over AWS IoT Core. The browser
+ *  encodes the payload (src/proto/appRoute.ts); we decode it here to validate
+ *  and log what's going on the wire, then publish the ORIGINAL bytes verbatim.
+ *  Fire-and-forget: no gateway component subscribes to this topic yet, so 200
+ *  means "accepted by the broker", not "applied on the gateway". */
+app.post(
+  '/api/approute/publish',
+  express.raw({ type: 'application/octet-stream', limit: '64kb' }),
+  async (req, res) => {
+    const source = req.query.source;
+    if (source !== 'rdk' && source !== 'prpl') {
+      res.status(400).json({ error: `source must be one of: rdk, prpl (got ${JSON.stringify(source)})` });
+      return;
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      res.status(400).json({ error: 'Body must be a non-empty application/octet-stream proto3 AppRouteCommand' });
+      return;
+    }
+
+    let decoded: AppRouteCommand;
+    try {
+      decoded = decodeAppRouteCommand(req.body);
+    } catch (err) {
+      res.status(400).json({ error: `payload is not a valid AppRouteCommand: ${err instanceof Error ? err.message : String(err)}` });
+      return;
+    }
+    if (decoded.changes.length === 0 || decoded.changes.some((c) => !c.desired.tunnel || !c.current.tunnel)) {
+      res.status(400).json({ error: 'AppRouteCommand must carry at least one change with current and desired tunnels set' });
+      return;
+    }
+
+    for (const c of decoded.changes) {
+      // eslint-disable-next-line no-console
+      console.log(`[approute] ${source}: ${c.client_name || c.client_mac} · ${c.desired.application} · ${c.current.tunnel} → ${c.desired.tunnel}`);
+    }
+
+    const topic = `${source}/approute/control`;
+    const result = await ipsecSource.publishAppRoute(source, req.body);
+    if (result.ok) {
+      res.json({ ok: true, topic, bytes: req.body.length, decoded });
+    } else {
+      // Encoded fine but the broker is unreachable — let the UI soften the toast.
+      res.status(503).json({ ok: false, offline: true, topic, bytes: req.body.length, error: result.error, decoded });
+    }
+  },
+);
 
 /** POST /api/ipsec/insight — Bedrock Claude reads the current IPsec snapshot
  *  and streams a network-ops analysis back as SSE `chunk` events. */

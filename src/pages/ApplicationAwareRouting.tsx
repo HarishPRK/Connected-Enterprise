@@ -12,6 +12,7 @@ import { appCategories, appPolicies } from '../data/mock';
 import type { AppCategory, AppCategoryId, AppPolicy } from '../types';
 import { useTheme, useThemeColors } from '../ui/Theme';
 import { AiInsightCard } from '../components/widgets/AiInsightCard';
+import { AppSteeringPatchboard } from '../components/widgets/AppSteeringPatchboard';
 import { ClientTunnelConstellation } from '../components/widgets/ClientTunnelConstellation';
 
 const catIcon: Record<AppCategoryId, React.ComponentType<{ size?: number }>> = {
@@ -99,6 +100,16 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
               })),
             }}
           />
+        </div>
+
+        {/* Application Steering Patchboard — drag a client's app onto a tunnel */}
+        <div className="col-12">
+          <Card
+            title="Application Steering Patchboard"
+            sub="Each client carries one application — grab its plug and patch it into a different tunnel; the change publishes as a proto3 AppRouteCommand on the gateway's approute topic"
+          >
+            <AppSteeringPatchboard branchId={branchId} />
+          </Card>
         </div>
 
         {/* Traffic Constellation — live clients → gateway → IPsec tunnels */}
