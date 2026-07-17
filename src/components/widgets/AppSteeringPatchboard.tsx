@@ -34,6 +34,7 @@ import {
   Laptop, Monitor, Printer, CreditCard, Server, PhoneCall,
   Flame, Wind, DoorClosed, Smartphone, Tablet, Cpu, Plug, HelpCircle,
   Video, Clapperboard, Mail, Briefcase, Globe, Activity, Gauge,
+  Sparkles, RefreshCw, X, Lock, Unlock,
 } from 'lucide-react';
 import type { Device, IpsecTunnelMetric, AppCategoryId } from '../../types';
 import { useIpsecMetrics } from '../../ui/useIpsecMetrics';
@@ -238,6 +239,24 @@ const PLUG_INSET = 6;
 const SPARK_W = 64, SPARK_H = 12, SPARK_N = 24;
 
 interface SelectState { id: string; idx: number }
+/** One recommended move from /api/approute/suggest (AI or heuristic). */
+interface Suggestion {
+  client_id: string;
+  client_name: string;
+  app: string;
+  from_tunnel: string;
+  to_tunnel: string;
+  expected_gain_ms: number;
+  reason: string;
+}
+interface AdvisorState {
+  open: boolean;
+  loading: boolean;
+  /** 'ai' (Bedrock/Anthropic) or 'heuristic' (deterministic fallback). */
+  mode?: string;
+  note?: string;
+  suggestions: Suggestion[];
+}
 interface PubState {
   seq: number;
   phase: 'publishing' | 'ok' | 'offline' | 'error' | 'nolive';
@@ -295,6 +314,16 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
   const histRef = useRef(new Map<string, number[]>());
   /** Post-publish packet surge: wire id → performance.now()/1000 deadline. */
   const surgeRef = useRef<{ id: string; until: number } | null>(null);
+
+  // Freeze: per-client routing lock (default OFF). Frozen clients can't be
+  // re-patched (drag, click, keyboard, or advisor Apply) until unfrozen.
+  const [frozen, setFrozen] = useState<Record<string, boolean>>({});
+  /** Bumps a nonce so the denied bubble replays its shake animation. */
+  const [shake, setShake] = useState<{ id: string; n: number } | null>(null);
+
+  // AI route advisor + its "guide" overlay (ghost wire to the suggested jack).
+  const [advisor, setAdvisor] = useState<AdvisorState>({ open: false, loading: false, suggestions: [] });
+  const [guide, setGuide] = useState<{ clientId: string; toIfname: string } | null>(null);
 
   const source = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
   const gw = useMemo(
@@ -419,12 +448,22 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
   /* ───────── commit + publish (unchanged pipeline) ───────── */
 
   function commitPatch(client: PatchClient, targetIdx: number) {
+    if (frozen[client.id]) {
+      setShake({ id: client.id, n: (shake?.n ?? 0) + 1 });
+      push({ kind: 'warn', title: `${client.name} is frozen`, detail: 'Routing is locked for this application — unfreeze it to re-patch.' });
+      return;
+    }
     const fromIdx = slotIdxFor(client);
     if (targetIdx < 0 || targetIdx >= tunnels.length || targetIdx === fromIdx) return;
     const from = tunnels[fromIdx];
     const to = tunnels[targetIdx];
 
     setOverrides((prev) => ({ ...prev, [client.id]: to.ifname }));
+    // A committed move consumes this client's guide + advisor suggestions.
+    setGuide((g) => (g?.clientId === client.id ? null : g));
+    setAdvisor((a) => (a.suggestions.some((s) => s.client_id === client.id)
+      ? { ...a, suggestions: a.suggestions.filter((s) => s.client_id !== client.id) }
+      : a));
 
     const cmd: AppRouteCommand = {
       timestamp_ms: Date.now(),
@@ -484,6 +523,62 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     })();
   }
 
+  /* ───────── freeze + AI advisor ───────── */
+
+  function toggleFreeze(id: string) {
+    setFrozen((f) => ({ ...f, [id]: !f[id] }));
+    setGuide((g) => (g?.clientId === id ? null : g)); // frozen clients can't be guided
+  }
+
+  /** One-shot advisor run: snapshot the board (minus frozen clients), let the
+   *  server compare tunnels (Bedrock, heuristic fallback), render suggestions. */
+  async function runAdvisor() {
+    const unfrozen = clients.filter((c) => !frozen[c.id]);
+    const frozenCount = clients.length - unfrozen.length;
+    setGuide(null);
+    if (unfrozen.length === 0) {
+      setAdvisor({ open: true, loading: false, mode: 'heuristic', note: 'All clients are frozen — nothing to advise on.', suggestions: [] });
+      return;
+    }
+    setAdvisor((a) => ({ ...a, open: true, loading: true, note: undefined, suggestions: [] }));
+    const counts = new Array(tunnels.length).fill(0) as number[];
+    for (const c of clients) { const i = slotIdxFor(c); if (i >= 0) counts[i]++; }
+    const body = {
+      source: source ?? 'sim',
+      clients: unfrozen.map((c) => {
+        const i = slotIdxFor(c);
+        return { id: c.id, name: c.name, app: c.app, tunnel: i >= 0 ? tunnels[i].ifname : '' };
+      }),
+      tunnels: tunnels.map((s, i) => ({
+        ifname: s.ifname, family: s.family, latency_ms: s.latency_ms,
+        loss_percent: s.loss_percent, reachable: s.reachable, apps: counts[i],
+      })),
+    };
+    try {
+      const res = await fetch('/api/approute/suggest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => null) as { mode?: string; note?: string; suggestions?: Suggestion[]; error?: string } | null;
+      if (!res.ok || !data) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      setAdvisor({
+        open: true, loading: false, mode: data.mode,
+        note: frozenCount > 0
+          ? `${frozenCount} frozen client${frozenCount === 1 ? '' : 's'} excluded${data.note ? ` · ${data.note}` : ''}`
+          : data.note,
+        suggestions: data.suggestions ?? [],
+      });
+    } catch (err) {
+      setAdvisor({ open: true, loading: false, mode: 'error', note: err instanceof Error ? err.message : String(err), suggestions: [] });
+    }
+  }
+
+  function applySuggestion(s: Suggestion) {
+    const client = clients.find((c) => c.id === s.client_id);
+    const idx = tunnels.findIndex((t) => t.ifname === s.to_tunnel);
+    if (!client || idx < 0) return;
+    commitPatch(client, idx); // frozen guard + publish + cleanup live inside
+  }
+
   /* ───────── pointer plumbing ───────── */
 
   function toSvgXY(e: { clientX: number; clientY: number }): { x: number; y: number } {
@@ -501,6 +596,12 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
   function startDrag(e: React.PointerEvent, id: string) {
     e.preventDefault();
+    if (frozen[id]) {
+      setShake({ id, n: (shake?.n ?? 0) + 1 });
+      const name = clients.find((c) => c.id === id)?.name ?? 'Client';
+      push({ kind: 'info', title: `${name} is frozen`, detail: 'Routing is locked for this application — unfreeze it to re-patch.' });
+      return;
+    }
     setSelected(null);
     try { svgRef.current?.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     const { x, y } = toSvgXY(e);
@@ -574,13 +675,15 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
   /* ───────── derived render data ───────── */
 
-  const highlightIdx = overIdx ?? (selected ? selected.idx : null);
+  const guideClient = guide ? clients.find((c) => c.id === guide.clientId) ?? null : null;
+  const guideIdx = guide ? tunnels.findIndex((s) => s.ifname === guide.toIfname) : -1;
+  const highlightIdx = overIdx ?? (selected ? selected.idx : guideIdx >= 0 ? guideIdx : null);
   const armed = dragId != null || selected != null;
   const busYOf = (sy: number, ey: number) => clamp((sy + ey) / 2, BUS_TOP + 16, BUS_BOTTOM - 16);
 
-  // Focus mode: while a client is selected (or being dragged) fade the other
-  // wires + their packets so the chosen flow stands out.
-  const focusedId = dragId ?? selected?.id ?? null;
+  // Focus mode: while a client is selected, dragged, or advisor-guided, fade
+  // the other wires + their packets so the chosen flow stands out.
+  const focusedId = dragId ?? selected?.id ?? guideClient?.id ?? null;
   const trafficOpacity = (cid: string) => (focusedId && focusedId !== cid ? 0.15 : 1);
 
   const links = clients.map((c, i) => {
@@ -722,7 +825,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         onPointerMove={onSvgMove}
         onPointerUp={endDrag}
         onPointerCancel={cancelDrag}
-        onKeyDown={(e) => { if (e.key === 'Escape') { setSelected(null); cancelDrag(); } }}
+        onKeyDown={(e) => { if (e.key === 'Escape') { setSelected(null); setGuide(null); cancelDrag(); } }}
       >
         <defs>
           <filter id="apb-glow" x="-70%" y="-70%" width="240%" height="240%">
@@ -959,12 +1062,31 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           );
         })()}
 
+        {/* ── advisor guide: ghost route to the suggested jack ── */}
+        {guideClient && guideIdx >= 0 && (() => {
+          const t = tunnels[guideIdx];
+          const busYT = busYOf(guideClient.y, t.y);
+          const ga = wavePath(PORT_X + 2, guideClient.y, GW_CX - GW_HALF, busYT, 0, 0);
+          const gb = wavePath(GW_CX + GW_HALF, busYT, TUN_X - PLUG_INSET - 4, t.y, 0, 0);
+          return (
+            <g style={{ pointerEvents: 'none' }}>
+              <path d={ga} fill="none" stroke={tc.accent3} strokeWidth={2} strokeDasharray="7 7"
+                strokeLinecap="round" opacity={0.85} className={reduceMotion ? undefined : 'apb-guide'} />
+              <path d={gb} fill="none" stroke={tc.accent3} strokeWidth={2} strokeDasharray="7 7"
+                strokeLinecap="round" opacity={0.85} className={reduceMotion ? undefined : 'apb-guide'} />
+              <polygon points={`${TUN_X - PLUG_INSET - 2},${t.y} ${TUN_X - PLUG_INSET - 13},${t.y - 5.5} ${TUN_X - PLUG_INSET - 13},${t.y + 5.5}`}
+                fill={tc.accent3} opacity={0.95} />
+            </g>
+          );
+        })()}
+
         {/* ── client bubbles ── */}
         {clients.map((c) => {
           const dom = c.domain;
           const domColor = dom === 'IT' ? tc.accent : tc.accent2;
           const label = c.name.length > 15 ? `${c.name.slice(0, 14)}…` : c.name;
           const phase = (idHash(c.id) % 40) / 10;
+          const isFrozen = !!frozen[c.id];
           return (
             <g key={c.id}>
               <text x={CL_X - CL_R - 14} y={c.y - 4} textAnchor="end" fontSize="13" fontWeight={600} fill={tc.text}>{label}</text>
@@ -972,6 +1094,8 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
                 fill={dark ? shade(c.appColor, 0.32) : shade(c.appColor, -0.18)}>{c.appLabel}</text>
               {c.meta && <text x={CL_X - CL_R - 14} y={c.y + 28} textAnchor="end" fontSize="9" fill={tc.textMuted} fontFamily={MONO}>{c.meta}</text>}
 
+              <g key={shake && shake.id === c.id ? `shake-${shake.n}` : 'calm'}
+                className={shake?.id === c.id && !reduceMotion ? 'apb-shake' : undefined}>
               {!reduceMotion && (
                 <circle cx={CL_X} cy={c.y} r={30} fill={`url(#apb-halo-${dom})`} className="apb-halo"
                   style={{ pointerEvents: 'none', transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${phase}s` }} />
@@ -982,14 +1106,18 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
                 className={reduceMotion ? undefined : 'apb-ring'}
                 style={reduceMotion ? { pointerEvents: 'none' } : { pointerEvents: 'none', transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${phase * 3}s` }} />
               {/* glass sphere — grabbable: dragging from the bubble picks up its wire */}
-              <circle cx={CL_X} cy={c.y} r={CL_R} fill={`url(#apb-sphere-${dom})`} stroke={domColor} strokeWidth={1.5} strokeOpacity={0.9}
+              <circle cx={CL_X} cy={c.y} r={CL_R} fill={`url(#apb-sphere-${dom})`}
+                stroke={isFrozen ? tc.accent3 : domColor} strokeWidth={1.5} strokeOpacity={0.9}
+                strokeDasharray={isFrozen ? '5 5' : undefined}
                 className={reduceMotion ? undefined : 'apb-breathe'}
                 onPointerDown={(e) => startDrag(e, c.id)}
                 style={{
-                  cursor: dragId === c.id ? 'grabbing' : 'grab',
+                  cursor: isFrozen ? 'not-allowed' : dragId === c.id ? 'grabbing' : 'grab',
                   ...(reduceMotion ? {} : { transformBox: 'fill-box' as const, transformOrigin: 'center', animationDelay: `-${phase}s` }),
                 }}>
-                <title>{`${c.name} · ${dom} client · ${c.appLabel} — drag onto a tunnel to re-route`}</title>
+                <title>{isFrozen
+                  ? `${c.name} · ${dom} client · ${c.appLabel} — routing frozen`
+                  : `${c.name} · ${dom} client · ${c.appLabel} — drag onto a tunnel to re-route`}</title>
               </circle>
               {/* soft specular highlight (gradient, not a sticker) */}
               <circle cx={CL_X - 8} cy={c.y - 9} r={9} fill="url(#apb-spec)" opacity={0.6} style={{ pointerEvents: 'none' }} />
@@ -1009,6 +1137,26 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
               {/* fixed wire port on the rim */}
               <circle cx={PORT_X} cy={c.y} r={3} fill={domColor} />
+              </g>
+
+              {/* freeze toggle — locks this client's routing (OFF by default) */}
+              <g role="button" tabIndex={0} aria-pressed={isFrozen}
+                aria-label={`${isFrozen ? 'Unfreeze' : 'Freeze'} routing for ${c.name}`}
+                onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                onClick={(e) => { e.stopPropagation(); toggleFreeze(c.id); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFreeze(c.id); } }}
+                style={{ cursor: 'pointer', outlineOffset: 2 }}>
+                <circle cx={CL_X - 17} cy={c.y - 17} r={9} fill={surface}
+                  stroke={isFrozen ? tc.accent3 : tc.textMuted}
+                  strokeOpacity={isFrozen ? 1 : 0.5} strokeWidth={isFrozen ? 1.6 : 1.1} />
+                {isFrozen && <circle cx={CL_X - 17} cy={c.y - 17} r={9} fill={`rgba(${hexRgb(tc.accent3)},0.2)`} />}
+                <foreignObject x={CL_X - 22} y={c.y - 22} width={10} height={10} style={{ pointerEvents: 'none' }}>
+                  <div style={{ color: isFrozen ? tc.accent3 : tc.textMuted, opacity: isFrozen ? 1 : 0.7, height: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {isFrozen ? <Lock size={8} /> : <Unlock size={8} />}
+                  </div>
+                </foreignObject>
+                <title>{isFrozen ? `Routing frozen for ${c.name} — click to unfreeze` : `Freeze routing for ${c.name}`}</title>
+              </g>
             </g>
           );
         })}
@@ -1036,6 +1184,110 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           <text x={CL_X - CL_R} y={H - 8} fontSize="10" fill={tc.textMuted}>+{extraCount} more client{extraCount === 1 ? '' : 's'}</text>
         )}
       </svg>
+
+      {/* ── AI route advisor ── */}
+      <button
+        onClick={() => (advisor.open ? (setAdvisor((a) => ({ ...a, open: false })), setGuide(null)) : void runAdvisor())}
+        title="Compare tunnels and suggest better routes"
+        style={{
+          position: 'absolute', top: 0, right: 0, zIndex: 6,
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          fontSize: 11.5, padding: '5px 10px', borderRadius: 9,
+          color: advisor.open ? 'var(--text)' : 'var(--text-dim)',
+        }}
+      >
+        <Sparkles size={13} style={{ color: tc.accent3 }} /> AI advisor
+      </button>
+      {advisor.open && (
+        <div role="region" aria-label="AI route advisor" style={{
+          position: 'absolute', top: 32, right: 0, width: 330, zIndex: 6,
+          background: dark ? 'rgba(18,16,38,0.97)' : '#ffffff',
+          border: '1px solid var(--border)', borderRadius: 12, padding: 12,
+          boxShadow: '0 14px 34px rgba(0,0,0,0.4)',
+          maxHeight: 330, overflowY: 'auto',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <Sparkles size={13} style={{ color: tc.accent3 }} />
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>Route advisor</span>
+            {advisor.mode && !advisor.loading && (
+              <span className="badge" style={{ fontSize: 9.5 }}>
+                {advisor.mode === 'ai' ? 'bedrock' : advisor.mode}
+              </span>
+            )}
+            <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4 }}>
+              <button onClick={() => void runAdvisor()} title="Re-run analysis" disabled={advisor.loading}
+                style={{ padding: '3px 6px', borderRadius: 7, display: 'inline-flex' }}>
+                <RefreshCw size={12} className={advisor.loading && !reduceMotion ? 'apb-spin' : undefined} />
+              </button>
+              <button onClick={() => { setAdvisor((a) => ({ ...a, open: false })); setGuide(null); }} title="Close"
+                style={{ padding: '3px 6px', borderRadius: 7, display: 'inline-flex' }}>
+                <X size={12} />
+              </button>
+            </span>
+          </div>
+
+          {advisor.loading ? (
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '10px 0' }}>
+              Comparing live tunnel metrics against each application's route…
+            </div>
+          ) : (
+            <>
+              {advisor.note && (
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 8 }}>{advisor.note}</div>
+              )}
+              {advisor.suggestions.length === 0 ? (
+                <div style={{ fontSize: 11.5, color: 'var(--text-dim)', padding: '6px 0' }}>
+                  Routing already looks optimal — every application is on its best reachable tunnel.
+                </div>
+              ) : advisor.suggestions.map((s, i) => {
+                const client = clients.find((c) => c.id === s.client_id);
+                const toIdx = tunnels.findIndex((t) => t.ifname === s.to_tunnel);
+                const blocked = !client || toIdx < 0 || !!(client && frozen[client.id]);
+                const active = guide?.clientId === s.client_id && guide?.toIfname === s.to_tunnel;
+                const better = s.expected_gain_ms > 0;
+                return (
+                  <div key={`${s.client_id}-${s.to_tunnel}`} style={{
+                    border: '1px solid', borderColor: active ? tc.accent3 : 'var(--border)',
+                    background: active ? `rgba(${hexRgb(tc.accent3)},0.07)` : 'transparent',
+                    borderRadius: 10, padding: '8px 10px', marginTop: i === 0 ? 0 : 8,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{s.client_name}</span>
+                      <span style={{ fontSize: 10.5, color: client ? (dark ? shade(client.appColor, 0.32) : shade(client.appColor, -0.18)) : 'var(--text-dim)' }}>{s.app}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, fontFamily: MONO, color: better ? 'var(--ok)' : 'var(--warn)' }}>
+                        {better ? `−${s.expected_gain_ms} ms` : s.expected_gain_ms === 0 ? 'reliability' : `+${-s.expected_gain_ms} ms`}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 10.5, fontFamily: MONO, color: 'var(--text-dim)', marginTop: 2 }}>
+                      {s.from_tunnel} → {s.to_tunnel}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>{s.reason}</div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 7 }}>
+                      {blocked ? (
+                        <span style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          <Lock size={10} /> {client ? 'frozen — unfreeze to apply' : 'no longer on the board'}
+                        </span>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => { setSelected(null); setGuide(active ? null : { clientId: s.client_id, toIfname: s.to_tunnel }); }}
+                            style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 7 }}>
+                            {active ? 'Hide guide' : 'Guide me'}
+                          </button>
+                          <button className="primary" onClick={() => applySuggestion(s)}
+                            style={{ fontSize: 10.5, padding: '3px 9px', borderRadius: 7 }}>
+                            Apply
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── wire-tap console ── */}
       <div role="status" aria-live="polite" style={{ marginTop: 8, borderTop: '1px dashed var(--border)', paddingTop: 8, fontFamily: MONO, fontSize: 11, lineHeight: 1.65, minHeight: 74 }}>
@@ -1078,6 +1330,9 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           <span style={{ width: 16, height: 2, borderRadius: 2, background: `linear-gradient(90deg, #E50914, ${tc.accent})` }} />
           wire = app's brand colour · packets re-color through the gateway · speed = live latency
         </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <Lock size={10} /> freeze locks a client's routing
+        </span>
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8 }}>
           <span className="badge" title="where the tunnel list comes from">tunnels: {sourceChip(tunnelSource)}</span>
           <span className="badge" title="where the client bindings come from">clients: {sourceChip(clientSource)} · {fleetLabel}</span>
@@ -1102,8 +1357,14 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         .apb-hex { opacity: 0; animation: apbHexIn .45s ease forwards; }
         @keyframes apbHexIn { to { opacity: 1 } }
         .apb-dimmable { transition: opacity 180ms ease; }
+        .apb-shake { animation: apbShake .32s ease; }
+        @keyframes apbShake { 0%,100% { transform: translateX(0) } 25% { transform: translateX(-3px) } 60% { transform: translateX(3px) } }
+        .apb-guide { animation: apbGuide .9s linear infinite; }
+        @keyframes apbGuide { to { stroke-dashoffset: -14; } }
+        .apb-spin { animation: apbSpin 1s linear infinite; }
+        @keyframes apbSpin { to { transform: rotate(360deg) } }
         @media (prefers-reduced-motion: reduce) {
-          .apb-halo, .apb-breathe, .apb-ring, .apb-bob, .apb-socket, .apb-ripple, .apb-flash { animation: none !important; }
+          .apb-halo, .apb-breathe, .apb-ring, .apb-bob, .apb-socket, .apb-ripple, .apb-flash, .apb-shake, .apb-guide, .apb-spin { animation: none !important; }
           .apb-hex { opacity: 1; animation: none !important; }
           .apb-dimmable { transition: none !important; }
         }

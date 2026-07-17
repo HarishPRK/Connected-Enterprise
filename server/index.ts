@@ -211,6 +211,101 @@ app.post(
   },
 );
 
+/** POST /api/approute/suggest — AI route advisor for the Application Steering
+ *  Patchboard. Body: { source, clients: [{id,name,app,tunnel}], tunnels:
+ *  [{ifname,family,latency_ms,loss_percent,reachable,apps}] } (frozen clients
+ *  are excluded by the UI before calling). One non-streaming Bedrock/Anthropic
+ *  call returns up to 3 recommended moves as strict JSON; a deterministic
+ *  lowest-latency heuristic answers when the LLM is unconfigured, times out,
+ *  or replies with something unparseable — the advisor always answers.
+ *  Suggestions are re-validated against the submitted board and gains are
+ *  recomputed from the data, so a hallucinated tunnel can't reach the UI. */
+app.post('/api/approute/suggest', async (req, res) => {
+  interface SClient { id: string; name: string; app: string; tunnel: string }
+  interface STunnel { ifname: string; family: string; latency_ms: number; loss_percent: number; reachable: boolean; apps: number }
+  const clients: SClient[] = Array.isArray(req.body?.clients) ? req.body.clients : [];
+  const tunnels: STunnel[] = Array.isArray(req.body?.tunnels) ? req.body.tunnels : [];
+  if (!clients.length || !tunnels.length) {
+    res.status(400).json({ error: 'Body must include non-empty clients[] and tunnels[]' });
+    return;
+  }
+
+  const byName = new Map(tunnels.map((t) => [t.ifname, t]));
+  /** Clamp a raw suggestion to the board: known client, known reachable target,
+   *  actually different from the current tunnel. Gain comes from the metrics. */
+  const validate = (raw: { client_id?: unknown; to_tunnel?: unknown; reason?: unknown }[]) => {
+    const out: { client_id: string; client_name: string; app: string; from_tunnel: string; to_tunnel: string; expected_gain_ms: number; reason: string }[] = [];
+    for (const r of raw) {
+      const c = clients.find((x) => x.id === r.client_id);
+      const to = typeof r.to_tunnel === 'string' ? byName.get(r.to_tunnel) : undefined;
+      const from = c ? byName.get(c.tunnel) : undefined;
+      if (!c || !to || !from || !to.reachable || to.ifname === from.ifname) continue;
+      out.push({
+        client_id: c.id, client_name: c.name, app: c.app,
+        from_tunnel: from.ifname, to_tunnel: to.ifname,
+        expected_gain_ms: Math.round((from.latency_ms - to.latency_ms) * 10) / 10,
+        reason: String(r.reason ?? '').slice(0, 200) || 'Lower measured latency on the target tunnel.',
+      });
+      if (out.length >= 3) break;
+    }
+    return out;
+  };
+
+  const heuristic = () => validate(clients.flatMap((c) => {
+    const cur = byName.get(c.tunnel);
+    if (!cur) return [];
+    const best = tunnels
+      .filter((t) => t.reachable && t.ifname !== cur.ifname)
+      .sort((a, b) => a.latency_ms - b.latency_ms)[0];
+    if (!best) return [];
+    const gain = cur.latency_ms - best.latency_ms;
+    if (gain < 2 || gain / Math.max(cur.latency_ms, 1) < 0.15) return [];
+    return [{
+      client_id: c.id, to_tunnel: best.ifname,
+      reason: `${best.ifname} is measuring ${best.latency_ms} ms vs ${cur.latency_ms} ms on ${cur.ifname} (${Math.round(gain)} ms faster) and is reachable.`,
+      _gain: gain,
+    }];
+  }).sort((a, b) => b._gain - a._gain));
+
+  if (!llm.client) {
+    res.json({ mode: 'heuristic', note: `LLM not configured (${llm.reason ?? 'unknown'})`, suggestions: heuristic() });
+    return;
+  }
+
+  try {
+    const prompt =
+      'You are the route advisor for an SD-WAN application steering board. Each client runs ONE application ' +
+      'pinned to ONE IPsec tunnel. Recommend up to 3 moves that measurably improve application performance. ' +
+      'Rules: never target an unreachable tunnel; realtime apps (voice/video/Teams/VoIP) care most about latency; ' +
+      'bulk/telemetry tolerates 5G; avoid piling every app onto one tunnel; only suggest a move when the improvement ' +
+      'is meaningful (roughly >15% latency or a reliability win). ' +
+      `TUNNELS: ${JSON.stringify(tunnels)} CLIENTS: ${JSON.stringify(clients)} ` +
+      'Reply with ONLY minified JSON, no prose, no code fences: ' +
+      '{"suggestions":[{"client_id":"<id>","to_tunnel":"<ifname>","reason":"<max 160 chars, cite the numbers>"}]} ' +
+      '(empty array if routing is already optimal).';
+
+    const create = llm.client.messages.create({
+      model: llm.model,
+      max_tokens: 600,
+      messages: [{ role: 'user', content: prompt }],
+    }) as Promise<{ content?: { type: string; text?: string }[] }>;
+    const msg = await Promise.race([
+      create,
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('advisor LLM timed out (20s)')), 20_000)),
+    ]);
+
+    const text = (msg.content ?? []).map((b) => (b.type === 'text' ? b.text ?? '' : '')).join('');
+    const stripped = text.replace(/^[\s\S]*?(\{)/, '$1').replace(/\}[^}]*$/, '}');
+    const parsed = JSON.parse(stripped) as { suggestions?: unknown };
+    const suggestions = validate(Array.isArray(parsed.suggestions) ? parsed.suggestions as Record<string, unknown>[] : []);
+    res.json({ mode: 'ai', model: llm.model, suggestions });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[approute-suggest] LLM path failed, serving heuristic:', err instanceof Error ? err.message : err);
+    res.json({ mode: 'heuristic', note: 'AI unavailable — deterministic comparison shown', suggestions: heuristic() });
+  }
+});
+
 /** POST /api/ipsec/insight — Bedrock Claude reads the current IPsec snapshot
  *  and streams a network-ops analysis back as SSE `chunk` events. */
 app.post('/api/ipsec/insight', async (_req, res) => {
