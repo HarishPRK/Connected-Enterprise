@@ -239,7 +239,9 @@ const PLUG_INSET = 6;
 const SPARK_W = 64, SPARK_H = 12, SPARK_N = 24;
 
 interface SelectState { id: string; idx: number }
-/** One recommended move from /api/approute/suggest (AI or heuristic). */
+/** One recommended move from /api/approute/suggest (AI or heuristic).
+ *  expected_gain_ms is NET of the server's load model (latency + queueing
+ *  pressure from the app weights riding each tunnel), not raw latency. */
 interface Suggestion {
   client_id: string;
   client_name: string;
@@ -247,6 +249,9 @@ interface Suggestion {
   from_tunnel: string;
   to_tunnel: string;
   expected_gain_ms: number;
+  /** App counts before the move (from includes this client; to excludes it). */
+  from_apps?: number;
+  to_apps?: number;
   reason: string;
 }
 interface AdvisorState {
@@ -541,17 +546,24 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
       return;
     }
     setAdvisor((a) => ({ ...a, open: true, loading: true, note: undefined, suggestions: [] }));
+    // Load = sum of app weights per tunnel (frozen clients still occupy their
+    // tunnel, so they count toward load even though they can't be moved).
     const counts = new Array(tunnels.length).fill(0) as number[];
-    for (const c of clients) { const i = slotIdxFor(c); if (i >= 0) counts[i]++; }
+    const loads = new Array(tunnels.length).fill(0) as number[];
+    for (const c of clients) {
+      const i = slotIdxFor(c);
+      if (i >= 0) { counts[i]++; loads[i] += c.weight; }
+    }
     const body = {
       source: source ?? 'sim',
       clients: unfrozen.map((c) => {
         const i = slotIdxFor(c);
-        return { id: c.id, name: c.name, app: c.app, tunnel: i >= 0 ? tunnels[i].ifname : '' };
+        return { id: c.id, name: c.name, app: c.app, weight: c.weight, tunnel: i >= 0 ? tunnels[i].ifname : '' };
       }),
       tunnels: tunnels.map((s, i) => ({
         ifname: s.ifname, family: s.family, latency_ms: s.latency_ms,
-        loss_percent: s.loss_percent, reachable: s.reachable, apps: counts[i],
+        loss_percent: s.loss_percent, reachable: s.reachable,
+        apps: counts[i], load: Math.round(loads[i] * 10) / 10,
       })),
     };
     try {
@@ -1254,12 +1266,18 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                       <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{s.client_name}</span>
                       <span style={{ fontSize: 10.5, color: client ? (dark ? shade(client.appColor, 0.32) : shade(client.appColor, -0.18)) : 'var(--text-dim)' }}>{s.app}</span>
-                      <span style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, fontFamily: MONO, color: better ? 'var(--ok)' : 'var(--warn)' }}>
+                      <span title="net gain — measured latency plus modeled load"
+                        style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 700, fontFamily: MONO, color: better ? 'var(--ok)' : 'var(--warn)' }}>
                         {better ? `−${s.expected_gain_ms} ms` : s.expected_gain_ms === 0 ? 'reliability' : `+${-s.expected_gain_ms} ms`}
                       </span>
                     </div>
                     <div style={{ fontSize: 10.5, fontFamily: MONO, color: 'var(--text-dim)', marginTop: 2 }}>
                       {s.from_tunnel} → {s.to_tunnel}
+                      {typeof s.from_apps === 'number' && typeof s.to_apps === 'number' && (
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          {' '}· load {s.from_apps} app{s.from_apps === 1 ? '' : 's'} → joins {s.to_apps}
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>{s.reason}</div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 7 }}>

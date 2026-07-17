@@ -221,8 +221,13 @@ app.post(
  *  Suggestions are re-validated against the submitted board and gains are
  *  recomputed from the data, so a hallucinated tunnel can't reach the UI. */
 app.post('/api/approute/suggest', async (req, res) => {
-  interface SClient { id: string; name: string; app: string; tunnel: string }
-  interface STunnel { ifname: string; family: string; latency_ms: number; loss_percent: number; reachable: boolean; apps: number }
+  interface SClient { id: string; name: string; app: string; tunnel: string; weight?: number }
+  interface STunnel { ifname: string; family: string; latency_ms: number; loss_percent: number; reachable: boolean; apps: number; load?: number }
+  interface OutSuggestion {
+    client_id: string; client_name: string; app: string;
+    from_tunnel: string; to_tunnel: string;
+    expected_gain_ms: number; from_apps: number; to_apps: number; reason: string;
+  }
   const clients: SClient[] = Array.isArray(req.body?.clients) ? req.body.clients : [];
   const tunnels: STunnel[] = Array.isArray(req.body?.tunnels) ? req.body.tunnels : [];
   if (!clients.length || !tunnels.length) {
@@ -231,41 +236,104 @@ app.post('/api/approute/suggest', async (req, res) => {
   }
 
   const byName = new Map(tunnels.map((t) => [t.ifname, t]));
-  /** Clamp a raw suggestion to the board: known client, known reachable target,
-   *  actually different from the current tunnel. Gain comes from the metrics. */
+
+  // Load model: each unit of concurrent app weight adds ~2ms of effective
+  // queueing latency on its tunnel, so effective(t) = latency + 2 * load(t).
+  // "obviously tunnel 1 is better" by raw latency stops being true once three
+  // heavy apps are already riding it.
+  const LOAD_MS_PER_WEIGHT = 2;
+  const wOf = (c: SClient) => (typeof c.weight === 'number' && c.weight > 0 ? c.weight : 2);
+
+  /** Working copy of per-tunnel load + app counts. Every candidate batch is
+   *  simulated SEQUENTIALLY against it, so suggestion #2 sees the world after
+   *  suggestion #1 — a batch can never collectively dogpile one fast tunnel. */
+  const makeWorld = () => {
+    const load = new Map(tunnels.map((t) => [t.ifname, typeof t.load === 'number' ? t.load : t.apps * 2]));
+    const apps = new Map(tunnels.map((t) => [t.ifname, t.apps]));
+    const effective = (t: STunnel, l: number) => t.latency_ms + LOAD_MS_PER_WEIGHT * l;
+    /** Net effective gain of moving c → to under the CURRENT working loads
+     *  (c's weight leaves `from` and lands on `to` before comparing). */
+    const netGain = (c: SClient, from: STunnel, to: STunnel) =>
+      effective(from, load.get(from.ifname) ?? 0) - effective(to, (load.get(to.ifname) ?? 0) + wOf(c));
+    const effectiveFrom = (from: STunnel) => effective(from, load.get(from.ifname) ?? 0);
+    const move = (c: SClient, from: STunnel, to: STunnel) => {
+      load.set(from.ifname, Math.max(0, (load.get(from.ifname) ?? 0) - wOf(c)));
+      load.set(to.ifname, (load.get(to.ifname) ?? 0) + wOf(c));
+      apps.set(from.ifname, Math.max(0, (apps.get(from.ifname) ?? 1) - 1));
+      apps.set(to.ifname, (apps.get(to.ifname) ?? 0) + 1);
+    };
+    return { load, apps, netGain, effectiveFrom, move };
+  };
+
+  /** A move is worth surfacing if the current tunnel is down, or the net
+   *  effective gain is ≥2ms (validator) — the heuristic additionally wants
+   *  ≥15% relative improvement before it volunteers one. */
+  const accepts = (from: STunnel, gain: number) => !from.reachable || gain >= 2;
+
+  /** Clamp the AI's raw list to the board and RE-PRICE each move under the
+   *  load model — a suggestion that only looks good on raw latency (or that a
+   *  prior suggestion in the same batch just crowded out) is dropped. */
   const validate = (raw: { client_id?: unknown; to_tunnel?: unknown; reason?: unknown }[]) => {
-    const out: { client_id: string; client_name: string; app: string; from_tunnel: string; to_tunnel: string; expected_gain_ms: number; reason: string }[] = [];
+    const world = makeWorld();
+    const moved = new Set<string>();
+    const out: OutSuggestion[] = [];
     for (const r of raw) {
       const c = clients.find((x) => x.id === r.client_id);
       const to = typeof r.to_tunnel === 'string' ? byName.get(r.to_tunnel) : undefined;
       const from = c ? byName.get(c.tunnel) : undefined;
-      if (!c || !to || !from || !to.reachable || to.ifname === from.ifname) continue;
+      if (!c || !to || !from || !to.reachable || to.ifname === from.ifname || moved.has(c.id)) continue;
+      const gain = world.netGain(c, from, to);
+      if (!accepts(from, gain)) continue;
       out.push({
         client_id: c.id, client_name: c.name, app: c.app,
         from_tunnel: from.ifname, to_tunnel: to.ifname,
-        expected_gain_ms: Math.round((from.latency_ms - to.latency_ms) * 10) / 10,
-        reason: String(r.reason ?? '').slice(0, 200) || 'Lower measured latency on the target tunnel.',
+        expected_gain_ms: Math.round(gain * 10) / 10,
+        from_apps: world.apps.get(from.ifname) ?? 0,
+        to_apps: world.apps.get(to.ifname) ?? 0,
+        reason: String(r.reason ?? '').slice(0, 200) || 'Better effective latency once load is priced in.',
       });
+      world.move(c, from, to);
+      moved.add(c.id);
       if (out.length >= 3) break;
     }
     return out;
   };
 
-  const heuristic = () => validate(clients.flatMap((c) => {
-    const cur = byName.get(c.tunnel);
-    if (!cur) return [];
-    const best = tunnels
-      .filter((t) => t.reachable && t.ifname !== cur.ifname)
-      .sort((a, b) => a.latency_ms - b.latency_ms)[0];
-    if (!best) return [];
-    const gain = cur.latency_ms - best.latency_ms;
-    if (gain < 2 || gain / Math.max(cur.latency_ms, 1) < 0.15) return [];
-    return [{
-      client_id: c.id, to_tunnel: best.ifname,
-      reason: `${best.ifname} is measuring ${best.latency_ms} ms vs ${cur.latency_ms} ms on ${cur.ifname} (${Math.round(gain)} ms faster) and is reachable.`,
-      _gain: gain,
-    }];
-  }).sort((a, b) => b._gain - a._gain));
+  /** Greedy load-aware fallback: repeatedly take the single best net-gain
+   *  move, commit it to the working world, and re-evaluate. Stops when the
+   *  best remaining move is marginal (<2ms or <15% of effective latency). */
+  const heuristic = () => {
+    const world = makeWorld();
+    const moved = new Set<string>();
+    const out: OutSuggestion[] = [];
+    while (out.length < 3) {
+      let best: { c: SClient; from: STunnel; to: STunnel; gain: number } | null = null;
+      for (const c of clients) {
+        if (moved.has(c.id)) continue;
+        const from = byName.get(c.tunnel);
+        if (!from) continue;
+        for (const to of tunnels) {
+          if (!to.reachable || to.ifname === from.ifname) continue;
+          const gain = world.netGain(c, from, to);
+          if (!best || gain > best.gain) best = { c, from, to, gain };
+        }
+      }
+      if (!best || !accepts(best.from, best.gain)) break;
+      if (best.from.reachable && best.gain / Math.max(world.effectiveFrom(best.from), 1) < 0.15) break;
+      const fromApps = world.apps.get(best.from.ifname) ?? 0;
+      const toApps = world.apps.get(best.to.ifname) ?? 0;
+      out.push({
+        client_id: best.c.id, client_name: best.c.name, app: best.c.app,
+        from_tunnel: best.from.ifname, to_tunnel: best.to.ifname,
+        expected_gain_ms: Math.round(best.gain * 10) / 10,
+        from_apps: fromApps, to_apps: toApps,
+        reason: `${best.to.ifname} measures ${best.to.latency_ms} ms carrying ${toApps} app${toApps === 1 ? '' : 's'} vs ${best.from.ifname} at ${best.from.latency_ms} ms with ${fromApps} — ~${Math.round(best.gain)} ms better once load is priced in.`,
+      });
+      world.move(best.c, best.from, best.to);
+      moved.add(best.c.id);
+    }
+    return out;
+  };
 
   if (!llm.client) {
     res.json({ mode: 'heuristic', note: `LLM not configured (${llm.reason ?? 'unknown'})`, suggestions: heuristic() });
@@ -276,12 +344,17 @@ app.post('/api/approute/suggest', async (req, res) => {
     const prompt =
       'You are the route advisor for an SD-WAN application steering board. Each client runs ONE application ' +
       'pinned to ONE IPsec tunnel. Recommend up to 3 moves that measurably improve application performance. ' +
+      'LOAD MODEL (use it, do not just compare raw latency): every tunnel carries `load` (sum of the app weights ' +
+      `riding it) and each client has \`weight\`; effective_latency(tunnel) = latency_ms + ${LOAD_MS_PER_WEIGHT} * load, ` +
+      'where a move first removes the client\'s weight from its current tunnel and adds it to the target — the ' +
+      'raw-fastest tunnel is often the WRONG target when it is already crowded. Consider your suggestions in ' +
+      'sequence: an earlier move changes the load the next one sees. ' +
       'Rules: never target an unreachable tunnel; realtime apps (voice/video/Teams/VoIP) care most about latency; ' +
-      'bulk/telemetry tolerates 5G; avoid piling every app onto one tunnel; only suggest a move when the improvement ' +
-      'is meaningful (roughly >15% latency or a reliability win). ' +
+      'bulk/telemetry tolerates 5G; prefer balanced placements over dogpiling; only suggest a move when the NET ' +
+      'effective gain is meaningful (>=2ms and roughly >=15%), or the current tunnel is unreachable or clearly lossy. ' +
       `TUNNELS: ${JSON.stringify(tunnels)} CLIENTS: ${JSON.stringify(clients)} ` +
       'Reply with ONLY minified JSON, no prose, no code fences: ' +
-      '{"suggestions":[{"client_id":"<id>","to_tunnel":"<ifname>","reason":"<max 160 chars, cite the numbers>"}]} ' +
+      '{"suggestions":[{"client_id":"<id>","to_tunnel":"<ifname>","reason":"<max 160 chars, cite latency AND load numbers>"}]} ' +
       '(empty array if routing is already optimal).';
 
     const create = llm.client.messages.create({
