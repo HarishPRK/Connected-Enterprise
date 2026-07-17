@@ -33,7 +33,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Laptop, Monitor, Printer, CreditCard, Server, PhoneCall,
   Flame, Wind, DoorClosed, Smartphone, Tablet, Cpu, Plug, HelpCircle,
-  Video, Clapperboard, Mail, Briefcase, Globe, Activity, Gauge, Router,
+  Video, Clapperboard, Mail, Briefcase, Globe, Activity, Gauge,
 } from 'lucide-react';
 import type { Device, IpsecTunnelMetric, AppCategoryId } from '../../types';
 import { useIpsecMetrics } from '../../ui/useIpsecMetrics';
@@ -223,13 +223,16 @@ function wavePath(sx: number, sy: number, ex: number, ey: number, amp: number, p
 const W = 1000, H = 452;
 const CL_X = 190, CL_R = 24;          // ~150px label gutter left of the bubbles
 const PORT_X = CL_X + CL_R;
-const BUS_X = 468, BUS_W = 40;        // gateway bus spine
-const BUS_CX = BUS_X + BUS_W / 2;
-// Clients, tunnels, and the bus all sit on ONE vertical band so their centers
-// line up exactly; the bus caps 18px beyond the outer rows top and bottom.
+const BUS_CX = 488;                    // gateway column center
+// Clients, tunnels, and the gateway all sit on ONE vertical band so their
+// centers line up exactly; the device caps ~18px beyond the outer rows.
 const BAND_TOP = 90, BAND_BOTTOM = 362;
 const BAND_CY = (BAND_TOP + BAND_BOTTOM) / 2;
 const BUS_TOP = BAND_TOP - 18, BUS_BOTTOM = BAND_BOTTOM + 18;
+// Rotatable 3D gateway tower — cables plug into its front-face side edges.
+const GW_CX = BUS_CX;
+const GW_TOP = BUS_TOP + 6, GW_BOT = BUS_BOTTOM - 4;
+const GW_HALF = 52;                    // front-face half-width (widest, spin=0)
 const TUN_X = 700, TUN_W = 286, TUN_H = 60;
 const PLUG_INSET = 6;
 const SPARK_W = 64, SPARK_H = 12, SPARK_N = 24;
@@ -267,6 +270,11 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
   const { push } = useToast();
   const dark = theme === 'dark';
   const surface = dark ? 'rgba(16,14,34,0.96)' : '#ffffff';
+  // Gateway device shell tones (white slab, cylinder-shaded edges).
+  const gwBright = dark ? '#f2f2fa' : '#ffffff';
+  const gwLight = dark ? '#d3d5e5' : '#e9ebf2';
+  const gwEdge = dark ? '#6c6f90' : '#b4b8c9';
+  const gwTopDark = dark ? '#0d0d15' : '#141420';
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const seqRef = useRef(0);
@@ -600,6 +608,9 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     let raf = 0;
     const tick = () => {
       const now = performance.now() / 1000;
+      const edgeL = GW_CX - GW_HALF;   // cables plug into the device's fixed side edges
+      const edgeR = GW_CX + GW_HALF;
+
       const d = dragRef.current;
       for (const g of linksRef.current) {
         const els = wireEls.current.get(g.id);
@@ -620,29 +631,30 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
         const surge = surgeRef.current?.id === g.id && now < (surgeRef.current?.until ?? 0);
         const busY = busYOf(g.sy, p.y);
-        const sag = dragging ? Math.min(40, Math.hypot(p.x - (BUS_X + BUS_W), p.y - busY) * 0.1) : 0;
+        const sag = dragging ? Math.min(40, Math.hypot(p.x - edgeR, p.y - busY) * 0.1) : 0;
         const ampA = (dragging ? 3.6 : 2.8) + (surge ? 1 : 0);
         const ampB = (dragging ? 4.4 : 3.2) + (surge ? 1 : 0);
         const phaseA = now * 3.4 + g.phase0;
         const phaseB = phaseA + 1.3;
 
-        const pathA = wavePath(g.sx, g.sy, BUS_X, busY, ampA, phaseA);
-        const pathB = wavePath(BUS_X + BUS_W, busY, p.x, p.y, ampB, phaseB, sag);
+        const pathA = wavePath(g.sx, g.sy, edgeL, busY, ampA, phaseA);
+        const pathB = wavePath(edgeR, busY, p.x, p.y, ampB, phaseB, sag);
         els.bodyA?.setAttribute('d', pathA);
         els.glowA?.setAttribute('d', pathA);
         els.hitA?.setAttribute('d', pathA);
         els.bodyB?.setAttribute('d', pathB);
         els.glowB?.setAttribute('d', pathB);
         els.hitB?.setAttribute('d', pathB);
-        els.grad?.setAttribute('x1', String(BUS_X + BUS_W));
-        els.grad?.setAttribute('y1', String(busY));
-        els.grad?.setAttribute('x2', String(p.x));
-        els.grad?.setAttribute('y2', String(p.y));
+        els.grad?.setAttribute('x1', edgeR.toFixed(1));
+        els.grad?.setAttribute('y1', busY.toFixed(1));
+        els.grad?.setAttribute('x2', p.x.toFixed(1));
+        els.grad?.setAttribute('y2', p.y.toFixed(1));
         els.led?.setAttribute('transform', `translate(0 ${busY.toFixed(1)})`);
         els.plug?.setAttribute('transform', `translate(${(p.x - g.tx).toFixed(1)} ${(p.y - g.ty).toFixed(1)})`);
 
-        // Packets: client → bus (brand color) → tunnel (family color); speed
-        // falls with latency; a fresh publish surges them for ~2s.
+        // Packets: client → device (brand color) → tunnel (family color);
+        // they vanish inside the device and re-emerge recolored. Speed falls
+        // with latency; a fresh publish surges them for ~2s.
         const speed0 = Math.max(0.10, Math.min(0.7, 26 / (g.latency + 8)));
         const speed = surge ? speed0 * 2.6 : speed0;
         els.packets.forEach((pk, i) => {
@@ -651,13 +663,13 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           const t = (now * speed + i / els.packets.length + g.phase0) % 1;
           let x: number, y: number, fill: string;
           if (t < 0.47) {
-            [x, y] = wavePoint(t / 0.47, g.sx, g.sy, BUS_X, busY, ampA, phaseA);
+            [x, y] = wavePoint(t / 0.47, g.sx, g.sy, edgeL, busY, ampA, phaseA);
             fill = g.color;
           } else if (t > 0.53) {
-            [x, y] = wavePoint((t - 0.53) / 0.47, BUS_X + BUS_W, busY, p.x, p.y, ampB, phaseB, sag);
+            [x, y] = wavePoint((t - 0.53) / 0.47, edgeR, busY, p.x, p.y, ampB, phaseB, sag);
             fill = g.slotColor;
           } else {
-            pk.setAttribute('opacity', '0'); // inside the gateway bus
+            pk.setAttribute('opacity', '0'); // inside the gateway
             return;
           }
           pk.setAttribute('cx', x.toFixed(1));
@@ -711,6 +723,19 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
             <feGaussianBlur stdDeviation="4.5" result="b" />
             <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
           </filter>
+          <filter id="gw-blur" x="-60%" y="-25%" width="220%" height="150%"><feGaussianBlur stdDeviation="5" /></filter>
+          <linearGradient id="gw-body" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor={gwEdge} />
+            <stop offset="18%" stopColor={gwLight} />
+            <stop offset="48%" stopColor={gwBright} />
+            <stop offset="82%" stopColor={gwLight} />
+            <stop offset="100%" stopColor={gwEdge} />
+          </linearGradient>
+          <linearGradient id="gw-shine" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#fff" stopOpacity="0" />
+            <stop offset="50%" stopColor="#fff" stopOpacity="0.75" />
+            <stop offset="100%" stopColor="#fff" stopOpacity="0" />
+          </linearGradient>
           <radialGradient id="apb-spec" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="#fff" stopOpacity={dark ? 0.85 : 0.95} />
             <stop offset="100%" stopColor="#fff" stopOpacity="0" />
@@ -735,7 +760,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           {links.map((l) => (
             <linearGradient key={l.i} id={`apb-w-${l.i}`} gradientUnits="userSpaceOnUse"
               ref={(el) => { ensureEls(l.c.id).grad = el; }}
-              x1={BUS_X + BUS_W} y1={l.busY0} x2={l.tx} y2={l.ty}>
+              x1={GW_CX + GW_HALF} y1={l.busY0} x2={l.tx} y2={l.ty}>
               <stop offset="0%" stopColor={l.c.appColor} stopOpacity={0.95} />
               <stop offset="100%" stopColor={l.slot?.color ?? l.c.appColor} stopOpacity={0.95} />
             </linearGradient>
@@ -750,8 +775,8 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         {/* ── wires: client → bus (brand color), bus → tunnel (brand→family) ── */}
         {links.map((l) => {
           const dragging = dragId === l.c.id;
-          const initialA = wavePath(l.sx, l.sy, BUS_X, l.busY0, 0, 0);
-          const initialB = wavePath(BUS_X + BUS_W, l.busY0, l.tx, l.ty, 0, 0);
+          const initialA = wavePath(l.sx, l.sy, GW_CX - GW_HALF, l.busY0, 0, 0);
+          const initialB = wavePath(GW_CX + GW_HALF, l.busY0, l.tx, l.ty, 0, 0);
           const packetCount = (l.slot?.family === 'fiber' ? 3 : 2) + (l.c.weight >= 2.5 ? 1 : 0);
           const rgbA = hexRgb(l.c.appColor);
           return (
@@ -787,29 +812,42 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           );
         })}
 
-        {/* ── gateway bus: the spine every route threads through ── */}
+        {/* ── gateway: the 3D device the whole path threads through ── */}
         <g>
-          <rect x={BUS_X} y={BUS_TOP} width={BUS_W} height={BUS_BOTTOM - BUS_TOP} rx={19}
-            fill={surface} stroke={tc.accent3} strokeOpacity={0.55} strokeWidth={1.4} filter="url(#apb-glow)" />
-          {/* traffic shimmer down the spine */}
-          <line x1={BUS_CX} y1={BUS_TOP + 36} x2={BUS_CX} y2={BUS_BOTTOM - 16} stroke={tc.accent3}
-            strokeOpacity={0.3} strokeWidth={1.6} strokeDasharray="2 7"
-            className={reduceMotion ? undefined : 'apb-busflow'} />
-          <foreignObject x={BUS_CX - 9} y={BUS_TOP + 10} width={18} height={18} style={{ pointerEvents: 'none' }}>
-            <div style={{ color: tc.accent3, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Router size={15} /></div>
-          </foreignObject>
-          <text x={BUS_CX} y={BUS_BOTTOM + 16} textAnchor="middle" fontSize="10.5" fontWeight={700} fill={tc.text}>{gwName}</text>
-          <text x={BUS_CX} y={BUS_BOTTOM + 29} textAnchor="middle" fontSize="9" fill={tc.textMuted} fontFamily={MONO}>
+          {/* ground shadow */}
+          <ellipse cx={GW_CX} cy={GW_BOT + 5} rx={GW_HALF * 0.8} ry={7} fill="#000"
+            opacity={dark ? 0.5 : 0.15} style={{ pointerEvents: 'none' }} />
+          {/* device shell */}
+          <g>
+            <ellipse cx={GW_CX} cy={GW_BOT} rx={GW_HALF} ry={9} fill={gwTopDark} opacity={0.9} />
+            <rect x={GW_CX - GW_HALF} y={GW_TOP} width={GW_HALF * 2} height={GW_BOT - GW_TOP} rx={20}
+              fill="url(#gw-body)" stroke={gwEdge} strokeOpacity={0.5} strokeWidth={1}>
+              <title>Gateway {gwName}</title>
+            </rect>
+            {/* status light */}
+            <circle cx={GW_CX} cy={GW_BOT - 44} r={4} fill={tc.accent3} opacity={0.9} filter="url(#apb-glow)" />
+            {/* vented grille cap */}
+            <ellipse cx={GW_CX} cy={GW_TOP} rx={GW_HALF - 2} ry={13} fill={gwTopDark} />
+            <ellipse cx={GW_CX} cy={GW_TOP} rx={GW_HALF - 11} ry={8.5} fill="none" stroke="#fff" strokeOpacity={0.11} />
+            <ellipse cx={GW_CX} cy={GW_TOP} rx={GW_HALF - 22} ry={5} fill="none" stroke="#fff" strokeOpacity={0.1} />
+            <ellipse cx={GW_CX} cy={GW_TOP} rx={GW_HALF - 33} ry={2.4} fill="none" stroke="#fff" strokeOpacity={0.08} />
+          </g>
+          {/* soft edge-lit sheen for a glass finish */}
+          <rect x={GW_CX - 15} y={GW_TOP + 18} width={22} height={GW_BOT - GW_TOP - 40} rx={11}
+            fill="url(#gw-shine)" opacity={0.26} filter="url(#gw-blur)" style={{ pointerEvents: 'none' }} />
+          {/* caption */}
+          <text x={GW_CX} y={GW_BOT + 24} textAnchor="middle" fontSize="10.5" fontWeight={700} fill={tc.text}>{gwName}</text>
+          <text x={GW_CX} y={GW_BOT + 37} textAnchor="middle" fontSize="9" fill={tc.textMuted} fontFamily={MONO}>
             {source ?? 'sim'} · {fleetLabel}
           </text>
         </g>
 
-        {/* bus port LEDs — slide with the wire while it's re-patched */}
+        {/* device port LEDs — the plug points; slide vertically with the wire */}
         {links.map((l) => (
           <g key={`led-${l.c.id}`} ref={(el) => { ensureEls(l.c.id).led = el; }}
             transform={`translate(0 ${l.busY0})`} style={{ pointerEvents: 'none' }}>
-            <circle cx={BUS_X} cy={0} r={2.6} fill={l.c.appColor} />
-            <circle cx={BUS_X + BUS_W} cy={0} r={2.6} fill={l.slot?.color ?? tc.textMuted} />
+            <circle cx={GW_CX - GW_HALF} cy={0} r={2.8} fill={l.c.appColor} />
+            <circle cx={GW_CX + GW_HALF} cy={0} r={2.8} fill={l.slot?.color ?? tc.textMuted} />
           </g>
         ))}
 
@@ -1047,8 +1085,6 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         @keyframes apbRing { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
         .apb-bob { animation: apbBob 3.4s ease-in-out infinite; }
         @keyframes apbBob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-2.5px) } }
-        .apb-busflow { animation: apbBusFlow 1.1s linear infinite; }
-        @keyframes apbBusFlow { to { stroke-dashoffset: -9; } }
         .apb-socket { animation: apbSocket 1.5s ease-in-out infinite; }
         @keyframes apbSocket { 0%,100% { stroke-opacity: .45 } 50% { stroke-opacity: 1 } }
         .apb-ripple { animation: apbRipple .9s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
@@ -1058,7 +1094,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         .apb-hex { opacity: 0; animation: apbHexIn .45s ease forwards; }
         @keyframes apbHexIn { to { opacity: 1 } }
         @media (prefers-reduced-motion: reduce) {
-          .apb-halo, .apb-breathe, .apb-ring, .apb-bob, .apb-busflow, .apb-socket, .apb-ripple, .apb-flash { animation: none !important; }
+          .apb-halo, .apb-breathe, .apb-ring, .apb-bob, .apb-socket, .apb-ripple, .apb-flash { animation: none !important; }
           .apb-hex { opacity: 1; animation: none !important; }
         }
       `}</style>
