@@ -578,6 +578,11 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
   const armed = dragId != null || selected != null;
   const busYOf = (sy: number, ey: number) => clamp((sy + ey) / 2, BUS_TOP + 16, BUS_BOTTOM - 16);
 
+  // Focus mode: while a client is selected (or being dragged) fade the other
+  // wires + their packets so the chosen flow stands out.
+  const focusedId = dragId ?? selected?.id ?? null;
+  const trafficOpacity = (cid: string) => (focusedId && focusedId !== cid ? 0.15 : 1);
+
   const links = clients.map((c, i) => {
     const idx = slotIdxFor(c);
     const slot = idx >= 0 ? tunnels[idx] : null;
@@ -780,7 +785,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           const packetCount = (l.slot?.family === 'fiber' ? 3 : 2) + (l.c.weight >= 2.5 ? 1 : 0);
           const rgbA = hexRgb(l.c.appColor);
           return (
-            <g key={`w-${l.c.id}`}>
+            <g key={`w-${l.c.id}`} className="apb-dimmable" opacity={trafficOpacity(l.c.id)}>
               {dragging && l.slot && (
                 <path d={initialB} fill="none" stroke={tc.textMuted} strokeOpacity={0.2} strokeWidth={1.2} strokeDasharray="4 8" />
               )}
@@ -845,6 +850,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         {/* device port LEDs — the plug points; slide vertically with the wire */}
         {links.map((l) => (
           <g key={`led-${l.c.id}`} ref={(el) => { ensureEls(l.c.id).led = el; }}
+            className="apb-dimmable" opacity={trafficOpacity(l.c.id)}
             transform={`translate(0 ${l.busY0})`} style={{ pointerEvents: 'none' }}>
             <circle cx={GW_CX - GW_HALF} cy={0} r={2.8} fill={l.c.appColor} />
             <circle cx={GW_CX + GW_HALF} cy={0} r={2.8} fill={l.slot?.color ?? tc.textMuted} />
@@ -1013,6 +1019,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           const dragging = dragId === l.c.id;
           return (
             <g key={`p-${l.c.id}`} ref={(el) => { ensureEls(l.c.id).plug = el; }}
+              className="apb-dimmable" opacity={trafficOpacity(l.c.id)}
               style={{ cursor: dragging ? 'grabbing' : 'grab' }} onPointerDown={(e) => startDrag(e, l.c.id)}>
               <circle cx={l.tx} cy={l.ty} r={7.5} fill={surface} stroke={plugColor} strokeWidth={isSel || dragging ? 2.4 : 1.8}
                 filter={dragging || isSel ? 'url(#apb-glow)' : undefined} />
@@ -1093,9 +1100,11 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         @keyframes apbFlash { 0% { filter: drop-shadow(0 0 6px currentColor) } 100% { } }
         .apb-hex { opacity: 0; animation: apbHexIn .45s ease forwards; }
         @keyframes apbHexIn { to { opacity: 1 } }
+        .apb-dimmable { transition: opacity 180ms ease; }
         @media (prefers-reduced-motion: reduce) {
           .apb-halo, .apb-breathe, .apb-ring, .apb-bob, .apb-socket, .apb-ripple, .apb-flash { animation: none !important; }
           .apb-hex { opacity: 1; animation: none !important; }
+          .apb-dimmable { transition: none !important; }
         }
       `}</style>
     </div>
