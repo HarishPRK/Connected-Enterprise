@@ -1,15 +1,20 @@
 /**
  * Application Steering Patchboard — clients (left) each carry one application
- * as a floating glass bubble with an orbiting app moon; IPsec tunnels (right)
- * are jacks with live latency + a rolling sparkline. Every client hangs off a
- * living patch wire: a bezier with a traveling sine ripple, along which packet
- * dots flow at a speed inversely proportional to the tunnel's latency (fiber
- * visibly streams faster than 5G — the motion encodes state).
+ * as a glass bubble with a rotating activity ring and a bobbing app badge;
+ * a glowing GATEWAY BUS runs down the middle (the real topology: client →
+ * gateway → tunnel); IPsec tunnel jacks (right) show live latency, a rolling
+ * sparkline, and a load ring. Every client hangs off a living patch wire:
+ * a dense music-seekbar ripple travels along it and packet dots stream at a
+ * speed inversely proportional to the tunnel's latency. Wires enter the bus
+ * at a port LED and re-emerge sorted toward their tunnel; packets re-color
+ * from the app's brand hue to the tunnel family hue as they pass through.
  *
  * Re-patching (drag the wire/plug/bubble onto another jack, click-then-click,
  * or keyboard) encodes a proto3 AppRouteCommand (proto/app_route.proto) and
  * publishes it to `<source>/approute/control` via POST /api/approute/publish.
- * The wire-tap console shows the exact JSON → proto3 hex → topic.
+ * A successful publish surges that wire's packets for ~2s. The wire-tap
+ * console shows the exact JSON → proto3 hex → topic. While a wire hovers a
+ * jack, a what-if HUD previews the latency delta before you commit.
  *
  * DATA SOURCES (best available wins, per branch):
  *   • AAR feed (proto/aar.proto, routing/*): tunnels from routing/tunnel,
@@ -18,18 +23,17 @@
  *   • else a clearly-labelled simulated board.
  * Location scoping stays STRICT — Plano (rdk) and McKinney (prpl) never mix.
  *
- * PERFORMANCE: wave geometry, packets, and the dragged plug are animated by a
- * single rAF loop that writes SVG attributes imperatively through refs — no
- * React re-render per frame or per pointer-move. React state changes only on
- * drop-target changes, commits, and feed updates. Reduced motion renders
- * static beziers (no wave/packets/orbit) with every interaction intact.
+ * PERFORMANCE: wave geometry, packets, LEDs, and the dragged plug are animated
+ * by one rAF loop that writes SVG attributes imperatively through refs — no
+ * React re-render per frame or per pointer-move. Reduced motion renders
+ * static wires (no wave/packets/ring/surge) with every interaction intact.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Laptop, Monitor, Printer, CreditCard, Server, PhoneCall,
   Flame, Wind, DoorClosed, Smartphone, Tablet, Cpu, Plug, HelpCircle,
-  Video, Clapperboard, Mail, Briefcase, Globe, Activity, Gauge,
+  Video, Clapperboard, Mail, Briefcase, Globe, Activity, Gauge, Router,
 } from 'lucide-react';
 import type { Device, IpsecTunnelMetric, AppCategoryId } from '../../types';
 import { useIpsecMetrics } from '../../ui/useIpsecMetrics';
@@ -54,20 +58,30 @@ const kindIcon: Record<Device['kind'], React.ComponentType<{ size?: number }>> =
 const LOCATION_LABEL: Record<string, string> = { rdk: 'Plano', prpl: 'McKinney' };
 const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
-interface AppDef { name: string; cat: AppCategoryId; icon: React.ComponentType<{ size?: number }>; }
+interface AppDef {
+  name: string;
+  cat: AppCategoryId;
+  icon: React.ComponentType<{ size?: number }>;
+  /** The app's own brand hue — carried by its wire, badge, and label. */
+  color: string;
+  /** Wire thickness ~ traffic intensity of the app class. */
+  weight: number;
+}
 
+// Brand palettes (Teams lavender, Netflix red, M365 flame, Salesforce azure…)
+// picked from each brand's family at a shade that reads on both themes.
 const IT_APPS: AppDef[] = [
-  { name: 'Microsoft Teams', cat: 'video',    icon: Video },
-  { name: 'Netflix',         cat: 'video',    icon: Clapperboard },
-  { name: 'Microsoft 365',   cat: 'business', icon: Mail },
-  { name: 'VoIP',            cat: 'voice',    icon: PhoneCall },
-  { name: 'Salesforce',      cat: 'business', icon: Briefcase },
-  { name: 'Web browsing',    cat: 'web',      icon: Globe },
+  { name: 'Microsoft Teams', cat: 'video',    icon: Video,        color: '#7B83EB', weight: 2.6 },
+  { name: 'Netflix',         cat: 'video',    icon: Clapperboard, color: '#E50914', weight: 2.8 },
+  { name: 'Microsoft 365',   cat: 'business', icon: Mail,         color: '#D83B01', weight: 2.1 },
+  { name: 'VoIP',            cat: 'voice',    icon: PhoneCall,    color: '#06B6D4', weight: 2.3 },
+  { name: 'Salesforce',      cat: 'business', icon: Briefcase,    color: '#00A1E0', weight: 2.1 },
+  { name: 'Web browsing',    cat: 'web',      icon: Globe,        color: '#A855F7', weight: 1.9 },
 ];
 const OT_APPS: AppDef[] = [
-  { name: 'OT Telemetry',  cat: 'iot',      icon: Activity },
-  { name: 'POS Payments',  cat: 'business', icon: CreditCard },
-  { name: 'Sensor Stream', cat: 'iot',      icon: Gauge },
+  { name: 'OT Telemetry',  cat: 'iot',      icon: Activity,   color: '#EF4444', weight: 2.0 },
+  { name: 'POS Payments',  cat: 'business', icon: CreditCard, color: '#84CC16', weight: 2.0 },
+  { name: 'Sensor Stream', cat: 'iot',      icon: Gauge,      color: '#F59E0B', weight: 1.9 },
 ];
 
 function catColor(id: AppCategoryId): string {
@@ -76,6 +90,16 @@ function catColor(id: AppCategoryId): string {
 function hexRgb(hex: string): string {
   const h = hex.replace('#', '');
   return `${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)}`;
+}
+/** Mix a hex toward white (amt > 0) or black (amt < 0). Brand hues are tuned
+ *  for wires; small label text needs a lighter shade on dark / darker on light
+ *  to clear contrast. */
+function shade(hex: string, amt: number): string {
+  const h = hex.replace('#', '');
+  const target = amt < 0 ? 0 : 255;
+  const a = Math.abs(amt);
+  const f = (i: number) => Math.round(parseInt(h.slice(i, i + 2), 16) * (1 - a) + target * a);
+  return `rgb(${f(0)},${f(2)},${f(4)})`;
 }
 
 /* ───────── fallbacks when a branch has no live feed yet ───────── */
@@ -112,6 +136,9 @@ function idHash(id: string): number {
 function shortIp(ip: string): string {
   return ip.length > 15 ? `${ip.slice(0, 14)}…` : ip;
 }
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
 
 interface NormTunnel { ifname: string; reachable: boolean; latency_ms: number; loss_percent: number; active: boolean; }
 interface TunnelSlot extends NormTunnel { family: TunnelFamily; y: number; color: string; }
@@ -125,6 +152,7 @@ interface PatchClient {
   DevIcon: React.ComponentType<{ size?: number }>;
   domain: 'IT' | 'OT';
   appColor: string;
+  weight: number;
   currentIfname?: string;
   meta?: string;
   y: number;
@@ -149,12 +177,11 @@ function latencyHealth(ms: number, family: TunnelFamily): 'ok' | 'warn' | 'err' 
 }
 
 /* ───────── wave-wire geometry ─────────
- * Base curve: cubic bezier with horizontal tangents (the Android-Studio wire).
- * Live wires get a perpendicular traveling sine ripple, tapered to zero at
- * both ends so the anchors never tear. Sampled as a polyline (28 segments is
- * visually indistinguishable from a true curve at this scale). */
+ * Base curve: cubic bezier with horizontal tangents. On top rides a dense
+ * traveling ripple in the music-seekbar style: many uniform peaks and dips,
+ * with amplitude ramping in/out only right at the anchors. */
 
-const SAMPLES = 28;
+const SAMPLES = 44; // per segment (two segments per wire)
 
 function bezierPoint(t: number, x0: number, y0: number, cx1: number, cy1: number, cx2: number, cy2: number, x1: number, y1: number): [number, number] {
   const u = 1 - t;
@@ -162,40 +189,47 @@ function bezierPoint(t: number, x0: number, y0: number, cx1: number, cy1: number
   return [a * x0 + b * cx1 + c * cx2 + d * x1, a * y0 + b * cy1 + c * cy2 + d * y1];
 }
 
-/** Build the waved path. `phase` advances with time; amp 0 = plain bezier. */
-function wavePath(sx: number, sy: number, ex: number, ey: number, amp: number, phase: number, sag = 0): string {
-  const k = Math.max(60, Math.min(180, Math.abs(ex - sx) * 0.45));
+/** Point on the waved wire at t. amp 0 = plain bezier (packets share this
+ *  function so they ride the exact same ripple as the wire body). */
+function wavePoint(t: number, sx: number, sy: number, ex: number, ey: number, amp: number, phase: number, sag = 0): [number, number] {
+  const k = Math.max(40, Math.min(170, Math.abs(ex - sx) * 0.45));
   const cx1 = sx + k, cy1 = sy + sag, cx2 = ex - k, cy2 = ey + sag;
+  const [px, py] = bezierPoint(t, sx, sy, cx1, cy1, cx2, cy2, ex, ey);
+  if (!amp) return [px, py];
+  const [qx, qy] = bezierPoint(Math.min(1, t + 0.02), sx, sy, cx1, cy1, cx2, cy2, ex, ey);
+  const dx = qx - px, dy = qy - py;
+  const len = Math.hypot(dx, dy) || 1;
   const dist = Math.hypot(ex - sx, ey - sy);
-  const waves = Math.max(2, Math.min(5, dist / 110));
+  const waves = Math.max(4, Math.min(11, dist / 34));
+  // Fast ramp at the ends, flat-topped through the middle — uniform ripple.
+  const taper = Math.min(1, 3.5 * Math.sin(Math.PI * t));
+  const off = amp * taper * Math.sin(2 * Math.PI * waves * t - phase);
+  return [px + (-dy / len) * off, py + (dx / len) * off];
+}
+
+function wavePath(sx: number, sy: number, ex: number, ey: number, amp: number, phase: number, sag = 0): string {
   let d = `M ${sx.toFixed(1)} ${sy.toFixed(1)}`;
   for (let i = 1; i <= SAMPLES; i++) {
-    const t = i / SAMPLES;
-    const [px, py] = bezierPoint(t, sx, sy, cx1, cy1, cx2, cy2, ex, ey);
-    // Perpendicular direction from a small forward difference.
-    const [qx, qy] = bezierPoint(Math.min(1, t + 0.02), sx, sy, cx1, cy1, cx2, cy2, ex, ey);
-    const dx = qx - px, dy = qy - py;
-    const len = Math.hypot(dx, dy) || 1;
-    const off = amp * Math.sin(2 * Math.PI * waves * t - phase) * Math.sin(Math.PI * t);
-    d += ` L ${(px + (-dy / len) * off).toFixed(1)} ${(py + (dx / len) * off).toFixed(1)}`;
+    const [x, y] = wavePoint(i / SAMPLES, sx, sy, ex, ey, amp, phase, sag);
+    d += ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
   }
   return d;
 }
 
-/** Point on the plain bezier at t (packets ride the base curve). */
-function basePoint(t: number, sx: number, sy: number, ex: number, ey: number, sag = 0): [number, number] {
-  const k = Math.max(60, Math.min(180, Math.abs(ex - sx) * 0.45));
-  return bezierPoint(t, sx, sy, sx + k, sy + sag, ex - k, ey + sag, ex, ey);
-}
+/* ───────── geometry ─────────
+ * Rows start well below the eyebrows (y=26) so halos/rings never collide with
+ * the header line; the gateway bus owns the middle column. */
 
-/* ───────── geometry (compact) ───────── */
-
-const W = 760, H = 392;
-const CL_X = 120, CL_R = 22;
+const W = 1000, H = 448;
+const CL_X = 190, CL_R = 24;          // ~150px label gutter left of the bubbles
 const PORT_X = CL_X + CL_R;
-const TUN_X = 508, TUN_W = 214, TUN_H = 56;
+const BUS_X = 468, BUS_W = 40;        // gateway bus spine
+const BUS_CX = BUS_X + BUS_W / 2;
+const BUS_TOP = 44;
+const TUN_X = 700, TUN_W = 286, TUN_H = 60;
 const PLUG_INSET = 6;
-const SPARK_W = 54, SPARK_H = 12, SPARK_N = 24;
+const SPARK_W = 64, SPARK_H = 12, SPARK_N = 24;
+const CLIENT_Y0 = 92, TUNNEL_Y0 = 100;
 
 interface SelectState { id: string; idx: number }
 interface PubState {
@@ -205,9 +239,9 @@ interface PubState {
 }
 interface WireEls {
   grad: SVGLinearGradientElement | null;
-  glow: SVGPathElement | null;
-  body: SVGPathElement | null;
-  hit: SVGPathElement | null;
+  glowA: SVGPathElement | null; bodyA: SVGPathElement | null; hitA: SVGPathElement | null;
+  glowB: SVGPathElement | null; bodyB: SVGPathElement | null; hitB: SVGPathElement | null;
+  led: SVGGElement | null;
   plug: SVGGElement | null;
   packets: (SVGCircleElement | null)[];
 }
@@ -215,6 +249,7 @@ interface LinkGeom {
   id: string; idx: number; sx: number; sy: number;
   tx: number; ty: number;            // committed socket end
   color: string; slotColor: string; latency: number; family: TunnelFamily; hasSlot: boolean;
+  weight: number;
   phase0: number;
 }
 
@@ -247,6 +282,8 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
   const wireEls = useRef(new Map<string, WireEls>());
   const linksRef = useRef<LinkGeom[]>([]);
   const histRef = useRef(new Map<string, number[]>());
+  /** Post-publish packet surge: wire id → performance.now()/1000 deadline. */
+  const surgeRef = useRef<{ id: string; until: number } | null>(null);
 
   const source = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
   const gw = useMemo(
@@ -262,8 +299,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
   const aarEligible = source === AAR_BRANCH_SOURCE || source === undefined;
   const aarLive = aarEligible && aar.receivedAt > 0;
 
-  /* ── Tunnels: AAR → ipsec → sim (sim gets a gentle deterministic jitter so
-   *    the sparkline + packet speeds breathe in demos — still labelled sim). ── */
+  /* ── Tunnels: AAR → ipsec → sim (sim drifts gently so demos breathe). ── */
   const { tunnels, tunnelSource } = useMemo(() => {
     const liveIpsec = gw?.metrics.tunnels?.length ? gw.metrics.tunnels : null;
     let raw: NormTunnel[];
@@ -287,7 +323,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     const n = sorted.length;
     const slots: TunnelSlot[] = sorted.map((t, i) => {
       const family = familyOf(t.ifname);
-      return { ...t, family, y: n <= 1 ? H / 2 : 62 + i * ((H - 128) / (n - 1)), color: family === 'fiber' ? tc.accent : tc.accent2 };
+      return { ...t, family, y: n <= 1 ? H / 2 : TUNNEL_Y0 + i * ((H - 196) / (n - 1)), color: family === 'fiber' ? tc.accent : tc.accent2 };
     });
     return { tunnels: slots, tunnelSource: src };
   }, [aarLive, aar.tunnels, gw, tc.accent, tc.accent2, simTick]);
@@ -316,7 +352,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     const mine = source ? allDevices.filter((d) => d.locationSource === source) : [];
     const place = (rows: Omit<PatchClient, 'y'>[]): PatchClient[] => {
       const n = rows.length;
-      return rows.map((r, i) => ({ ...r, y: n <= 1 ? H / 2 : 54 + i * ((H - 108) / (n - 1)) }));
+      return rows.map((r, i) => ({ ...r, y: n <= 1 ? H / 2 : CLIENT_Y0 + i * ((H - 172) / (n - 1)) }));
     };
 
     if (aarLive && aar.decisions.length) {
@@ -332,6 +368,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           DevIcon: kindIcon[dev?.kind ?? 'generic'] ?? HelpCircle,
           domain,
           appColor: catColor('web'),
+          weight: 2.1,
           currentIfname: d.tunnel || undefined,
           meta: d.total_latency_ms ? `${d.total_latency_ms} ms e2e` : undefined,
         };
@@ -344,7 +381,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
       const ot = mine.filter((d) => d.domain === 'OT').sort((a, b) => a.id.localeCompare(b.id)).slice(0, 2);
       const mk = (d: typeof mine[number], app: AppDef): Omit<PatchClient, 'y'> => ({
         id: d.mac, name: d.name, appLabel: app.name, app: app.name, AppIcon: app.icon,
-        DevIcon: kindIcon[d.kind] ?? HelpCircle, domain: d.domain, appColor: catColor(app.cat),
+        DevIcon: kindIcon[d.kind] ?? HelpCircle, domain: d.domain, appColor: app.color, weight: app.weight,
       });
       const rows = [
         ...it.map((d, i) => mk(d, IT_APPS[i % IT_APPS.length])),
@@ -356,7 +393,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
     const rows = SIM_CLIENTS.map((c) => ({
       id: c.id, name: c.name, appLabel: c.app.name, app: c.app.name, AppIcon: c.app.icon,
-      DevIcon: kindIcon[c.kind] ?? HelpCircle, domain: c.domain, appColor: catColor(c.app.cat),
+      DevIcon: kindIcon[c.kind] ?? HelpCircle, domain: c.domain, appColor: c.app.color, weight: c.app.weight,
     }));
     return { clients: place(rows), clientSource: 'sim' as const, extraCount: 0 };
   }, [aarLive, aar.decisions, allDevices, source]);
@@ -392,6 +429,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     const bytes = encodeAppRouteCommand(cmd);
     const seq = ++seqRef.current;
     setLastPatched({ id: client.id, seq, toIdx: targetIdx });
+    surgeRef.current = { id: client.id, until: performance.now() / 1000 + 2.4 };
 
     const base: Omit<PubState, 'phase'> = {
       seq,
@@ -444,7 +482,6 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     return { x: (e.clientX - rect.left) * (W / rect.width), y: (e.clientY - rect.top) * (H / rect.height) };
   }
 
-  // Generous drop zone: anywhere from just right of mid-board over a jack row.
   function hitTunnel(x: number, y: number): number | null {
     if (x < TUN_X - 110 || x > TUN_X + TUN_W + 20) return null;
     const i = tunnels.findIndex((s) => Math.abs(y - s.y) <= TUN_H / 2 + 18);
@@ -468,7 +505,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     if (!d.moved && Math.hypot(x - d.x, y - d.y) > 5) d.moved = true;
     d.x = x; d.y = y;
     const over = hitTunnel(x, y);
-    setOverIdx((prev) => (prev === over ? prev : over)); // re-render only on change
+    setOverIdx((prev) => (prev === over ? prev : over));
   }
 
   function endDrag() {
@@ -490,7 +527,6 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     setOverIdx(null);
   }
 
-  // Escape cancels a drag even when focus is elsewhere.
   useEffect(() => {
     if (!dragId) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cancelDrag(); };
@@ -529,14 +565,17 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
   const highlightIdx = overIdx ?? (selected ? selected.idx : null);
   const armed = dragId != null || selected != null;
+  const busYOf = (sy: number, ey: number) => clamp((sy + ey) / 2, BUS_TOP + 14, H - 102);
 
   const links = clients.map((c, i) => {
     const idx = slotIdxFor(c);
     const slot = idx >= 0 ? tunnels[idx] : null;
+    const ty = slot?.y ?? c.y;
     return {
       c, i, idx, slot,
       sx: PORT_X + 2, sy: c.y,
-      tx: TUN_X - PLUG_INSET, ty: slot?.y ?? c.y,
+      tx: TUN_X - PLUG_INSET, ty,
+      busY0: busYOf(c.y, ty),
       pulsing: lastPatched?.id === c.id,
       h: idHash(c.id),
     };
@@ -547,6 +586,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     id: l.c.id, idx: l.idx, sx: l.sx, sy: l.sy, tx: l.tx, ty: l.ty,
     color: l.c.appColor, slotColor: l.slot?.color ?? tc.textMuted,
     latency: l.slot?.latency_ms ?? 30, family: l.slot?.family ?? 'fiber', hasSlot: !!l.slot,
+    weight: l.c.weight,
     phase0: (l.h % 100) / 100 * Math.PI * 2,
   }));
 
@@ -562,8 +602,6 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         const els = wireEls.current.get(g.id);
         if (!els) continue;
         const dragging = d?.id === g.id && d.moved;
-        // Endpoint: pointer while dragging (snapping onto a hovered socket),
-        // else the committed socket. The plug eases toward it every frame.
         let txT = g.tx, tyT = g.ty;
         if (dragging && d) {
           const over = hitTunnel(d.x, d.y);
@@ -577,28 +615,53 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         if (Math.abs(p.y - tyT) < 0.4) p.y = tyT;
         plugPos.current.set(g.id, p);
 
-        const sag = dragging ? Math.min(46, Math.hypot(p.x - g.sx, p.y - g.sy) * 0.1) : 0;
-        const amp = dragging ? 3.8 : 2.4;
-        const phase = now * 2.6 + g.phase0;
-        const path = wavePath(g.sx, g.sy, p.x, p.y, amp, phase, sag);
-        els.body?.setAttribute('d', path);
-        els.glow?.setAttribute('d', path);
-        els.hit?.setAttribute('d', path);
+        const surge = surgeRef.current?.id === g.id && now < (surgeRef.current?.until ?? 0);
+        const busY = busYOf(g.sy, p.y);
+        const sag = dragging ? Math.min(40, Math.hypot(p.x - (BUS_X + BUS_W), p.y - busY) * 0.1) : 0;
+        const ampA = (dragging ? 3.6 : 2.8) + (surge ? 1 : 0);
+        const ampB = (dragging ? 4.4 : 3.2) + (surge ? 1 : 0);
+        const phaseA = now * 3.4 + g.phase0;
+        const phaseB = phaseA + 1.3;
+
+        const pathA = wavePath(g.sx, g.sy, BUS_X, busY, ampA, phaseA);
+        const pathB = wavePath(BUS_X + BUS_W, busY, p.x, p.y, ampB, phaseB, sag);
+        els.bodyA?.setAttribute('d', pathA);
+        els.glowA?.setAttribute('d', pathA);
+        els.hitA?.setAttribute('d', pathA);
+        els.bodyB?.setAttribute('d', pathB);
+        els.glowB?.setAttribute('d', pathB);
+        els.hitB?.setAttribute('d', pathB);
+        els.grad?.setAttribute('x1', String(BUS_X + BUS_W));
+        els.grad?.setAttribute('y1', String(busY));
         els.grad?.setAttribute('x2', String(p.x));
         els.grad?.setAttribute('y2', String(p.y));
-        els.plug?.setAttribute('transform', `translate(${p.x - g.tx} ${p.y - g.ty})`);
+        els.led?.setAttribute('transform', `translate(0 ${busY.toFixed(1)})`);
+        els.plug?.setAttribute('transform', `translate(${(p.x - g.tx).toFixed(1)} ${(p.y - g.ty).toFixed(1)})`);
 
-        // Packets ride the base curve; speed falls with latency (state → motion).
-        const speed = Math.max(0.10, Math.min(0.7, 26 / (g.latency + 8)));
+        // Packets: client → bus (brand color) → tunnel (family color); speed
+        // falls with latency; a fresh publish surges them for ~2s.
+        const speed0 = Math.max(0.10, Math.min(0.7, 26 / (g.latency + 8)));
+        const speed = surge ? speed0 * 2.6 : speed0;
         els.packets.forEach((pk, i) => {
           if (!pk) return;
           if (dragging || !g.hasSlot) { pk.setAttribute('opacity', '0'); return; }
           const t = (now * speed + i / els.packets.length + g.phase0) % 1;
-          const [px, py] = basePoint(t, g.sx, g.sy, p.x, p.y, sag);
-          pk.setAttribute('cx', px.toFixed(1));
-          pk.setAttribute('cy', py.toFixed(1));
-          // Hide right at the endpoints so packets appear to enter/leave the nodes.
-          pk.setAttribute('opacity', t < 0.05 || t > 0.95 ? '0' : '0.9');
+          let x: number, y: number, fill: string;
+          if (t < 0.47) {
+            [x, y] = wavePoint(t / 0.47, g.sx, g.sy, BUS_X, busY, ampA, phaseA);
+            fill = g.color;
+          } else if (t > 0.53) {
+            [x, y] = wavePoint((t - 0.53) / 0.47, BUS_X + BUS_W, busY, p.x, p.y, ampB, phaseB, sag);
+            fill = g.slotColor;
+          } else {
+            pk.setAttribute('opacity', '0'); // inside the gateway bus
+            return;
+          }
+          pk.setAttribute('cx', x.toFixed(1));
+          pk.setAttribute('cy', y.toFixed(1));
+          pk.setAttribute('fill', fill);
+          pk.setAttribute('r', surge ? '3' : '2.1');
+          pk.setAttribute('opacity', t < 0.03 || t > 0.97 ? '0' : surge ? '1' : '0.9');
         });
       }
       raf = requestAnimationFrame(tick);
@@ -610,7 +673,10 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
   const ensureEls = (id: string): WireEls => {
     let e = wireEls.current.get(id);
-    if (!e) { e = { grad: null, glow: null, body: null, hit: null, plug: null, packets: [] }; wireEls.current.set(id, e); }
+    if (!e) {
+      e = { grad: null, glowA: null, bodyA: null, hitA: null, glowB: null, bodyB: null, hitB: null, led: null, plug: null, packets: [] };
+      wireEls.current.set(id, e);
+    }
     return e;
   };
 
@@ -620,6 +686,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         : s === 'devices' ? 'live · device inventory'
           : 'simulated';
   const fleetLabel = source ? (LOCATION_LABEL[source] ?? source) : 'demo';
+  const gwName = gw?.metrics.gateway.name || 'gateway';
 
   /* ───────── render ───────── */
 
@@ -630,7 +697,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         viewBox={`0 0 ${W} ${H}`}
         style={{ width: '100%', height: 'auto', display: 'block', touchAction: 'none' }}
         role="application"
-        aria-label="Application steering patchboard: drag a client's wire onto a tunnel to re-route its application"
+        aria-label="Application steering patchboard: drag a client's wire onto a tunnel to re-route its application through the gateway"
         onPointerMove={onSvgMove}
         onPointerUp={endDrag}
         onPointerCancel={cancelDrag}
@@ -641,18 +708,22 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
             <feGaussianBlur stdDeviation="4.5" result="b" />
             <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
           </filter>
+          <radialGradient id="apb-spec" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#fff" stopOpacity={dark ? 0.85 : 0.95} />
+            <stop offset="100%" stopColor="#fff" stopOpacity="0" />
+          </radialGradient>
           {(['IT', 'OT'] as const).map((dom) => {
             const rgb = hexRgb(dom === 'IT' ? tc.accent : tc.accent2);
             return (
               <g key={dom}>
-                <radialGradient id={`apb-sphere-${dom}`} cx="36%" cy="30%" r="72%">
-                  <stop offset="0%" stopColor={`rgba(255,255,255,${dark ? 0.9 : 0.98})`} />
-                  <stop offset="24%" stopColor={`rgba(${rgb},${dark ? 0.6 : 0.5})`} />
-                  <stop offset="62%" stopColor={`rgba(${rgb},${dark ? 0.26 : 0.3})`} />
-                  <stop offset="100%" stopColor={`rgba(${rgb},${dark ? 0.1 : 0.16})`} />
+                <radialGradient id={`apb-sphere-${dom}`} cx="36%" cy="30%" r="75%">
+                  <stop offset="0%" stopColor={`rgba(255,255,255,${dark ? 0.5 : 0.9})`} />
+                  <stop offset="30%" stopColor={`rgba(${rgb},${dark ? 0.42 : 0.34})`} />
+                  <stop offset="72%" stopColor={`rgba(${rgb},${dark ? 0.16 : 0.18})`} />
+                  <stop offset="100%" stopColor={`rgba(${rgb},${dark ? 0.3 : 0.24})`} />
                 </radialGradient>
                 <radialGradient id={`apb-halo-${dom}`} cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor={`rgba(${rgb},0.5)`} />
+                  <stop offset="0%" stopColor={`rgba(${rgb},0.45)`} />
                   <stop offset="100%" stopColor={`rgba(${rgb},0)`} />
                 </radialGradient>
               </g>
@@ -661,7 +732,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           {links.map((l) => (
             <linearGradient key={l.i} id={`apb-w-${l.i}`} gradientUnits="userSpaceOnUse"
               ref={(el) => { ensureEls(l.c.id).grad = el; }}
-              x1={l.sx} y1={l.sy} x2={l.tx} y2={l.ty}>
+              x1={BUS_X + BUS_W} y1={l.busY0} x2={l.tx} y2={l.ty}>
               <stop offset="0%" stopColor={l.c.appColor} stopOpacity={0.95} />
               <stop offset="100%" stopColor={l.slot?.color ?? l.c.appColor} stopOpacity={0.95} />
             </linearGradient>
@@ -670,37 +741,74 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
         {/* eyebrows */}
         <text x={CL_X - CL_R} y={26} fontSize="9.5" fontWeight={700} letterSpacing="0.14em" fill={tc.textMuted}>CLIENTS · ONE APP EACH</text>
+        <text x={BUS_CX} y={26} textAnchor="middle" fontSize="9.5" fontWeight={700} letterSpacing="0.14em" fill={tc.textMuted}>GATEWAY</text>
         <text x={TUN_X} y={26} fontSize="9.5" fontWeight={700} letterSpacing="0.14em" fill={tc.textMuted}>IPSEC TUNNELS</text>
 
-        {/* ── wires (rAF-driven waved paths; initial d is the static bezier) ── */}
+        {/* ── wires: client → bus (brand color), bus → tunnel (brand→family) ── */}
         {links.map((l) => {
           const dragging = dragId === l.c.id;
-          const initial = wavePath(l.sx, l.sy, l.tx, l.ty, 0, 0);
-          const packetCount = l.slot?.family === 'fiber' ? 3 : 2;
+          const initialA = wavePath(l.sx, l.sy, BUS_X, l.busY0, 0, 0);
+          const initialB = wavePath(BUS_X + BUS_W, l.busY0, l.tx, l.ty, 0, 0);
+          const packetCount = (l.slot?.family === 'fiber' ? 3 : 2) + (l.c.weight >= 2.5 ? 1 : 0);
+          const rgbA = hexRgb(l.c.appColor);
           return (
             <g key={`w-${l.c.id}`}>
-              {/* committed-socket ghost while its plug is in hand */}
               {dragging && l.slot && (
-                <path d={initial} fill="none" stroke={tc.textMuted} strokeOpacity={0.2} strokeWidth={1.2} strokeDasharray="4 8" />
+                <path d={initialB} fill="none" stroke={tc.textMuted} strokeOpacity={0.2} strokeWidth={1.2} strokeDasharray="4 8" />
               )}
-              <path ref={(el) => { ensureEls(l.c.id).glow = el; }} d={initial} fill="none"
-                stroke={`url(#apb-w-${l.i})`} strokeOpacity={dragging ? 0.3 : 0.15} strokeWidth={6} strokeLinecap="round" />
-              <path ref={(el) => { ensureEls(l.c.id).body = el; }} d={initial} fill="none"
-                stroke={`url(#apb-w-${l.i})`} strokeWidth={dragging ? 2.6 : 2} strokeLinecap="round"
+              <path ref={(el) => { ensureEls(l.c.id).glowA = el; }} d={initialA} fill="none"
+                stroke={`rgba(${rgbA},1)`} strokeOpacity={0.14} strokeWidth={l.c.weight * 2.6} strokeLinecap="round" />
+              <path ref={(el) => { ensureEls(l.c.id).bodyA = el; }} d={initialA} fill="none"
+                stroke={`rgba(${rgbA},0.92)`} strokeWidth={l.c.weight} strokeLinecap="round"
                 className={l.pulsing ? 'apb-flash' : undefined} />
-              {/* packets — animated by the wave engine */}
+              <path ref={(el) => { ensureEls(l.c.id).glowB = el; }} d={initialB} fill="none"
+                stroke={`url(#apb-w-${l.i})`} strokeOpacity={dragging ? 0.3 : 0.14}
+                strokeWidth={l.c.weight * 2.6} strokeLinecap="round" />
+              <path ref={(el) => { ensureEls(l.c.id).bodyB = el; }} d={initialB} fill="none"
+                stroke={`url(#apb-w-${l.i})`} strokeWidth={dragging ? l.c.weight + 0.7 : l.c.weight} strokeLinecap="round"
+                className={l.pulsing ? 'apb-flash' : undefined} />
               {!reduceMotion && Array.from({ length: packetCount }, (_, pi) => (
-                <circle key={pi} r={2.1} fill={l.slot?.color ?? l.c.appColor} opacity={0}
+                <circle key={pi} r={2.1} fill={l.c.appColor} opacity={0}
                   ref={(el) => { ensureEls(l.c.id).packets[pi] = el; }} style={{ pointerEvents: 'none' }} />
               ))}
-              {/* grab the wire anywhere along its length */}
-              <path ref={(el) => { ensureEls(l.c.id).hit = el; }} d={initial} fill="none"
+              {/* grab the wire anywhere along either segment */}
+              <path ref={(el) => { ensureEls(l.c.id).hitA = el; }} d={initialA} fill="none"
+                stroke="transparent" strokeWidth={18} strokeLinecap="round"
+                style={{ cursor: dragging ? 'grabbing' : 'grab', pointerEvents: 'stroke' }}
+                onPointerDown={(e) => startDrag(e, l.c.id)} />
+              <path ref={(el) => { ensureEls(l.c.id).hitB = el; }} d={initialB} fill="none"
                 stroke="transparent" strokeWidth={18} strokeLinecap="round"
                 style={{ cursor: dragging ? 'grabbing' : 'grab', pointerEvents: 'stroke' }}
                 onPointerDown={(e) => startDrag(e, l.c.id)} />
             </g>
           );
         })}
+
+        {/* ── gateway bus: the spine every route threads through ── */}
+        <g>
+          <rect x={BUS_X} y={BUS_TOP} width={BUS_W} height={H - BUS_TOP - 92} rx={19}
+            fill={surface} stroke={tc.accent3} strokeOpacity={0.55} strokeWidth={1.4} filter="url(#apb-glow)" />
+          {/* traffic shimmer down the spine */}
+          <line x1={BUS_CX} y1={BUS_TOP + 36} x2={BUS_CX} y2={H - 100} stroke={tc.accent3}
+            strokeOpacity={0.3} strokeWidth={1.6} strokeDasharray="2 7"
+            className={reduceMotion ? undefined : 'apb-busflow'} />
+          <foreignObject x={BUS_CX - 9} y={BUS_TOP + 10} width={18} height={18} style={{ pointerEvents: 'none' }}>
+            <div style={{ color: tc.accent3, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Router size={15} /></div>
+          </foreignObject>
+          <text x={BUS_CX} y={H - 74} textAnchor="middle" fontSize="10.5" fontWeight={700} fill={tc.text}>{gwName}</text>
+          <text x={BUS_CX} y={H - 60} textAnchor="middle" fontSize="9" fill={tc.textMuted} fontFamily={MONO}>
+            {source ?? 'sim'} · {fleetLabel}
+          </text>
+        </g>
+
+        {/* bus port LEDs — slide with the wire while it's re-patched */}
+        {links.map((l) => (
+          <g key={`led-${l.c.id}`} ref={(el) => { ensureEls(l.c.id).led = el; }}
+            transform={`translate(0 ${l.busY0})`} style={{ pointerEvents: 'none' }}>
+            <circle cx={BUS_X} cy={0} r={2.6} fill={l.c.appColor} />
+            <circle cx={BUS_X + BUS_W} cy={0} r={2.6} fill={l.slot?.color ?? tc.textMuted} />
+          </g>
+        ))}
 
         {/* ── tunnel jacks ── */}
         {tunnels.map((s, idx) => {
@@ -713,7 +821,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           const span = Math.max(hi - lo, 1);
           const sparkPts = hist.map((v, i) => {
             const x = TUN_X + TUN_W - 14 - SPARK_W + (i / Math.max(hist.length - 1, 1)) * SPARK_W;
-            const y = s.y + 17 - ((v - lo) / span) * SPARK_H;
+            const y = s.y + 19 - ((v - lo) / span) * SPARK_H;
             return `${x.toFixed(1)},${y.toFixed(1)}`;
           }).join(' ');
           const ripple = lastPatched?.toIdx === idx && pub?.phase === 'ok';
@@ -727,7 +835,13 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
                 <title>{`${s.ifname} — ${s.reachable ? 'reachable' : 'unreachable'} · ${s.latency_ms} ms · ${s.loss_percent}% loss`}</title>
               </rect>
 
-              {/* socket + drop affordances */}
+              {/* load ring — arc share of this branch's apps riding the jack */}
+              {n > 0 && (
+                <circle cx={TUN_X} cy={s.y} r={15} fill="none" stroke={s.color}
+                  strokeOpacity={0.55} strokeWidth={2} strokeLinecap="round"
+                  strokeDasharray={`${((n / Math.max(clients.length, 1)) * 2 * Math.PI * 15).toFixed(1)} ${(2 * Math.PI * 15).toFixed(1)}`}
+                  transform={`rotate(-90 ${TUN_X} ${s.y})`} />
+              )}
               <circle cx={TUN_X} cy={s.y} r={hot ? 12 : 8} fill={surface} stroke={s.color}
                 strokeWidth={hot ? 2 : 1.4} strokeOpacity={armed ? 1 : 0.6}
                 className={armed && !hot && !reduceMotion ? 'apb-socket' : undefined} />
@@ -736,7 +850,6 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
                   {!reduceMotion && <animateTransform attributeName="transform" type="rotate" from={`0 ${TUN_X} ${s.y}`} to={`360 ${TUN_X} ${s.y}`} dur="6s" repeatCount="indefinite" />}
                 </circle>
               )}
-              {/* publish success ripple */}
               {ripple && !reduceMotion && (
                 <g key={`rip-${lastPatched?.seq}`}>
                   <circle cx={TUN_X} cy={s.y} r={8} fill="none" stroke={s.color} className="apb-ripple" />
@@ -754,13 +867,12 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
               <text x={TUN_X + TUN_W - 14} y={s.y - 8} textAnchor="end" fontSize="12" fontWeight={600} fill={healthColor} fontFamily={MONO}>
                 {s.latency_ms} ms
               </text>
-              {/* rolling latency sparkline */}
               {hist.length > 1 && (
                 <>
                   <polyline points={sparkPts} fill="none" stroke={s.color} strokeOpacity={0.75} strokeWidth={1.2} strokeLinejoin="round" />
                   <circle
                     cx={TUN_X + TUN_W - 14}
-                    cy={s.y + 17 - ((hist[hist.length - 1] - lo) / span) * SPARK_H}
+                    cy={s.y + 19 - ((hist[hist.length - 1] - lo) / span) * SPARK_H}
                     r={1.8} fill={healthColor}
                   />
                 </>
@@ -768,6 +880,36 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
             </g>
           );
         })}
+
+        {/* ── what-if HUD: latency delta preview while a wire hovers a jack ── */}
+        {(() => {
+          const activeId = dragId != null && overIdx != null ? dragId : selected?.id;
+          const candIdx = dragId != null ? overIdx : selected?.idx;
+          if (!activeId || candIdx == null) return null;
+          const client = clients.find((c) => c.id === activeId);
+          if (!client) return null;
+          const fromIdx = slotIdxFor(client);
+          if (candIdx === fromIdx) return null;
+          const from = tunnels[fromIdx];
+          const to = tunnels[candIdx];
+          if (!from || !to) return null;
+          const delta = Math.round((to.latency_ms - from.latency_ms) * 10) / 10;
+          const better = delta < 0;
+          const cy = to.y < 100 ? to.y + TUN_H / 2 + 20 : to.y - TUN_H / 2 - 18;
+          return (
+            <g style={{ pointerEvents: 'none' }}>
+              <rect x={TUN_X - 46} y={cy - 12} width={182} height={23} rx={11.5}
+                fill={surface} stroke={better ? tc.ok : tc.err} strokeOpacity={0.75} strokeWidth={1.1} />
+              <text x={TUN_X - 34} y={cy + 3.5} fontSize="10.5" fontFamily={MONO} fill={tc.textDim}>
+                {from.latency_ms} → {to.latency_ms} ms
+              </text>
+              <text x={TUN_X + 124} y={cy + 3.5} textAnchor="end" fontSize="10.5" fontWeight={700}
+                fontFamily={MONO} fill={better ? tc.ok : tc.err}>
+                {better ? '' : '+'}{delta} ms
+              </text>
+            </g>
+          );
+        })()}
 
         {/* ── client bubbles ── */}
         {clients.map((c) => {
@@ -777,16 +919,22 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           const phase = (idHash(c.id) % 40) / 10;
           return (
             <g key={c.id}>
-              <text x={CL_X - CL_R - 12} y={c.y - 4} textAnchor="end" fontSize="12.5" fontWeight={600} fill={tc.text}>{label}</text>
-              <text x={CL_X - CL_R - 12} y={c.y + 12} textAnchor="end" fontSize="10.5" fontWeight={600} fill={c.appColor}>{c.appLabel}</text>
-              {c.meta && <text x={CL_X - CL_R - 12} y={c.y + 26} textAnchor="end" fontSize="9" fill={tc.textMuted} fontFamily={MONO}>{c.meta}</text>}
+              <text x={CL_X - CL_R - 14} y={c.y - 4} textAnchor="end" fontSize="13" fontWeight={600} fill={tc.text}>{label}</text>
+              <text x={CL_X - CL_R - 14} y={c.y + 13} textAnchor="end" fontSize="11" fontWeight={600}
+                fill={dark ? shade(c.appColor, 0.32) : shade(c.appColor, -0.18)}>{c.appLabel}</text>
+              {c.meta && <text x={CL_X - CL_R - 14} y={c.y + 28} textAnchor="end" fontSize="9" fill={tc.textMuted} fontFamily={MONO}>{c.meta}</text>}
 
               {!reduceMotion && (
                 <circle cx={CL_X} cy={c.y} r={30} fill={`url(#apb-halo-${dom})`} className="apb-halo"
                   style={{ transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${phase}s` }} />
               )}
+              {/* activity ring — slow rotating dashes say "client alive" */}
+              <circle cx={CL_X} cy={c.y} r={CL_R + 6} fill="none" stroke={domColor}
+                strokeOpacity={0.32} strokeWidth={1.1} strokeDasharray="3 9"
+                className={reduceMotion ? undefined : 'apb-ring'}
+                style={reduceMotion ? undefined : { transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${phase * 3}s` }} />
               {/* glass sphere — grabbable: dragging from the bubble picks up its wire */}
-              <circle cx={CL_X} cy={c.y} r={CL_R} fill={`url(#apb-sphere-${dom})`} stroke={domColor} strokeWidth={1.4} strokeOpacity={0.85}
+              <circle cx={CL_X} cy={c.y} r={CL_R} fill={`url(#apb-sphere-${dom})`} stroke={domColor} strokeWidth={1.5} strokeOpacity={0.9}
                 className={reduceMotion ? undefined : 'apb-breathe'}
                 onPointerDown={(e) => startDrag(e, c.id)}
                 style={{
@@ -795,33 +943,20 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
                 }}>
                 <title>{`${c.name} · ${dom} client · ${c.appLabel} — drag onto a tunnel to re-route`}</title>
               </circle>
-              <ellipse cx={CL_X - 7} cy={c.y - 8} rx={6} ry={3.6} fill="#fff" opacity={dark ? 0.75 : 0.9}
-                style={{ pointerEvents: 'none' }}
-                className={reduceMotion ? undefined : 'apb-glint'} />
+              {/* soft specular highlight (gradient, not a sticker) */}
+              <circle cx={CL_X - 8} cy={c.y - 9} r={9} fill="url(#apb-spec)" opacity={0.6} style={{ pointerEvents: 'none' }} />
               <foreignObject x={CL_X - 9} y={c.y - 9} width={18} height={18} style={{ pointerEvents: 'none' }}>
-                <div style={{ color: domColor, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><c.DevIcon size={14} /></div>
+                <div style={{ color: domColor, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><c.DevIcon size={15} /></div>
               </foreignObject>
 
-              {/* app moon — orbits the client; counter-rotated so the glyph stays
-                  upright. Attribute transforms position; CSS only rotates. The
-                  invisible r=40 circle pins each group's fill-box center to the
-                  bubble center so transform-origin:center is exact. Reduced
-                  motion parks the moon at 45° via attribute transforms. */}
-              <g transform={`translate(${CL_X} ${c.y})${reduceMotion ? ' rotate(45)' : ''}`} style={{ pointerEvents: 'none' }}>
-                <g className={reduceMotion ? undefined : 'apb-orbit'}
-                  style={reduceMotion ? undefined : { transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${(phase * 4) % 16}s` }}>
-                  <circle r={40} fill="none" stroke="none" />
-                  <g transform={`translate(${CL_R + 7} 0)${reduceMotion ? ' rotate(-45)' : ''}`}>
-                    <g className={reduceMotion ? undefined : 'apb-orbit-c'}
-                      style={reduceMotion ? undefined : { transformBox: 'fill-box', transformOrigin: 'center', animationDelay: `-${(phase * 4) % 16}s` }}>
-                      <circle r={9} fill={`rgba(${hexRgb(c.appColor)},${dark ? 0.3 : 0.22})`} stroke={c.appColor} strokeWidth={1.3} />
-                      <circle cx={-2.6} cy={-2.6} r={2} fill="#fff" opacity={0.85} />
-                      <foreignObject x={-5.5} y={-5.5} width={11} height={11}>
-                        <div style={{ color: c.appColor, height: 11, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><c.AppIcon size={9} /></div>
-                      </foreignObject>
-                    </g>
-                  </g>
-                </g>
+              {/* app badge — fixed at lower-right (never wanders into labels), gentle bob */}
+              <g className={reduceMotion ? undefined : 'apb-bob'}
+                style={reduceMotion ? { pointerEvents: 'none' } : { pointerEvents: 'none', animationDelay: `-${phase / 2}s` }}>
+                <circle cx={CL_X + 17} cy={c.y + 17} r={10} fill={surface} stroke={c.appColor} strokeWidth={1.4} />
+                <circle cx={CL_X + 17} cy={c.y + 17} r={10} fill={`rgba(${hexRgb(c.appColor)},${dark ? 0.26 : 0.16})`} />
+                <foreignObject x={CL_X + 17 - 6} y={c.y + 17 - 6} width={12} height={12}>
+                  <div style={{ color: c.appColor, height: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><c.AppIcon size={10} /></div>
+                </foreignObject>
               </g>
 
               {/* fixed wire port on the rim */}
@@ -891,8 +1026,8 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         <LegendDot color={tc.accent} label="fiber jack" />
         <LegendDot color={tc.accent2} label="5G jack" />
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 16, height: 2, borderRadius: 2, background: `linear-gradient(90deg, ${catColor('video')}, ${tc.accent})` }} />
-          packet speed = live latency
+          <span style={{ width: 16, height: 2, borderRadius: 2, background: `linear-gradient(90deg, #E50914, ${tc.accent})` }} />
+          wire = app's brand colour · packets re-color through the gateway · speed = live latency
         </span>
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8 }}>
           <span className="badge" title="where the tunnel list comes from">tunnels: {sourceChip(tunnelSource)}</span>
@@ -905,22 +1040,22 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         @keyframes apbHalo { 0%,100% { transform: scale(0.9); opacity: .35 } 50% { transform: scale(1.12); opacity: .6 } }
         .apb-breathe { animation: apbBreathe 4.8s ease-in-out infinite; }
         @keyframes apbBreathe { 0%,100% { transform: scale(1) } 50% { transform: scale(1.035) } }
-        .apb-glint { animation: apbGlint 5.2s ease-in-out infinite; }
-        @keyframes apbGlint { 0%,100% { opacity: .5 } 50% { opacity: .95 } }
-        .apb-orbit { animation: apbOrbit 16s linear infinite; }
-        @keyframes apbOrbit { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
-        .apb-orbit-c { animation: apbOrbitC 16s linear infinite; }
-        @keyframes apbOrbitC { from { transform: rotate(0deg) } to { transform: rotate(-360deg) } }
+        .apb-ring { animation: apbRing 26s linear infinite; }
+        @keyframes apbRing { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+        .apb-bob { animation: apbBob 3.4s ease-in-out infinite; }
+        @keyframes apbBob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-2.5px) } }
+        .apb-busflow { animation: apbBusFlow 1.1s linear infinite; }
+        @keyframes apbBusFlow { to { stroke-dashoffset: -9; } }
         .apb-socket { animation: apbSocket 1.5s ease-in-out infinite; }
         @keyframes apbSocket { 0%,100% { stroke-opacity: .45 } 50% { stroke-opacity: 1 } }
         .apb-ripple { animation: apbRipple .9s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
         @keyframes apbRipple { from { r: 8; stroke-opacity: .8; stroke-width: 2 } to { r: 34; stroke-opacity: 0; stroke-width: .5 } }
         .apb-flash { animation: apbFlash 1.2s ease-out; }
-        @keyframes apbFlash { 0% { stroke-opacity: 1; filter: drop-shadow(0 0 6px currentColor) } 100% { stroke-opacity: 1 } }
+        @keyframes apbFlash { 0% { filter: drop-shadow(0 0 6px currentColor) } 100% { } }
         .apb-hex { opacity: 0; animation: apbHexIn .45s ease forwards; }
         @keyframes apbHexIn { to { opacity: 1 } }
         @media (prefers-reduced-motion: reduce) {
-          .apb-halo, .apb-breathe, .apb-glint, .apb-orbit, .apb-orbit-c, .apb-socket, .apb-ripple, .apb-flash { animation: none !important; }
+          .apb-halo, .apb-breathe, .apb-ring, .apb-bob, .apb-busflow, .apb-socket, .apb-ripple, .apb-flash { animation: none !important; }
           .apb-hex { opacity: 1; animation: none !important; }
         }
       `}</style>
