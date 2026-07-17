@@ -18,6 +18,18 @@ export interface ClientRouteChange {
   client_name: string;
   current: TunnelBinding;
   desired: TunnelBinding;
+  /** proto enum RouteOrigin: 0 unspecified, 1 operator, 2 advisor-AI, 3 advisor-heuristic. */
+  origin: number;
+  advisor_reason: string;
+  expected_gain_ms: number;
+}
+
+/** Routing lock toggle for one client's application. */
+export interface ClientFreeze {
+  client_mac: string;
+  client_name: string;
+  application: string;
+  frozen: boolean;
 }
 
 export interface AppRouteCommand {
@@ -25,6 +37,7 @@ export interface AppRouteCommand {
   source: string;
   gateway: string;
   changes: ClientRouteChange[];
+  freezes: ClientFreeze[];
 }
 
 /* ───────── low-level wire decoding ───────── */
@@ -50,6 +63,14 @@ function readLengthDelimited(r: Reader): Uint8Array {
   const out = r.buf.subarray(r.pos, r.pos + len);
   r.pos += len;
   return out;
+}
+
+/** IEEE 754 double, fixed64 little-endian (wire type 1). */
+function readDouble(r: Reader): number {
+  if (r.pos + 8 > r.buf.length) throw new Error('unexpected end of buffer');
+  const v = new DataView(r.buf.buffer, r.buf.byteOffset + r.pos, 8).getFloat64(0, true);
+  r.pos += 8;
+  return v;
 }
 
 function skipField(r: Reader, wireType: number): void {
@@ -87,24 +108,41 @@ function decodeClientRouteChange(buf: Uint8Array): ClientRouteChange {
     client_mac: '', client_name: '',
     current: { application: '', tunnel: '' },
     desired: { application: '', tunnel: '' },
+    origin: 0, advisor_reason: '', expected_gain_ms: 0,
   };
   for (const { field, wire, r } of fields(buf)) {
     if      (field === 1 && wire === 2) out.client_mac = new TextDecoder().decode(readLengthDelimited(r));
     else if (field === 2 && wire === 2) out.client_name = new TextDecoder().decode(readLengthDelimited(r));
     else if (field === 3 && wire === 2) out.current = decodeTunnelBinding(readLengthDelimited(r));
     else if (field === 4 && wire === 2) out.desired = decodeTunnelBinding(readLengthDelimited(r));
+    else if (field === 5 && wire === 0) out.origin = Number(readVarint(r));
+    else if (field === 6 && wire === 2) out.advisor_reason = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 7 && wire === 1) out.expected_gain_ms = readDouble(r);
+    else skipField(r, wire);
+  }
+  return out;
+}
+
+function decodeClientFreeze(buf: Uint8Array): ClientFreeze {
+  const out: ClientFreeze = { client_mac: '', client_name: '', application: '', frozen: false };
+  for (const { field, wire, r } of fields(buf)) {
+    if      (field === 1 && wire === 2) out.client_mac = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 2 && wire === 2) out.client_name = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 3 && wire === 2) out.application = new TextDecoder().decode(readLengthDelimited(r));
+    else if (field === 4 && wire === 0) out.frozen = readVarint(r) !== 0n;
     else skipField(r, wire);
   }
   return out;
 }
 
 export function decodeAppRouteCommand(buf: Uint8Array): AppRouteCommand {
-  const out: AppRouteCommand = { timestamp_ms: 0, source: '', gateway: '', changes: [] };
+  const out: AppRouteCommand = { timestamp_ms: 0, source: '', gateway: '', changes: [], freezes: [] };
   for (const { field, wire, r } of fields(buf)) {
     if      (field === 1 && wire === 0) out.timestamp_ms = Number(readVarint(r));
     else if (field === 2 && wire === 2) out.source = new TextDecoder().decode(readLengthDelimited(r));
     else if (field === 3 && wire === 2) out.gateway = new TextDecoder().decode(readLengthDelimited(r));
     else if (field === 4 && wire === 2) out.changes.push(decodeClientRouteChange(readLengthDelimited(r)));
+    else if (field === 5 && wire === 2) out.freezes.push(decodeClientFreeze(readLengthDelimited(r)));
     else skipField(r, wire);
   }
   return out;

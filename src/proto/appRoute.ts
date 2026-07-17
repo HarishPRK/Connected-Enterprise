@@ -17,11 +17,34 @@ export interface TunnelBinding {
   tunnel: string;
 }
 
+/** proto enum RouteOrigin — who initiated the change. */
+export type RouteOrigin = 0 | 1 | 2 | 3;
+export const ROUTE_ORIGIN = {
+  unspecified: 0,
+  operator: 1,
+  advisorAi: 2,
+  advisorHeuristic: 3,
+} as const satisfies Record<string, RouteOrigin>;
+
 export interface ClientRouteChange {
   client_mac: string;
   client_name: string;
   current: TunnelBinding;
   desired: TunnelBinding;
+  /** Operator drag vs AI-advisor-applied (field 5). */
+  origin?: RouteOrigin;
+  /** Advisor's cited reasoning, advisor origins only (field 6). */
+  advisor_reason?: string;
+  /** Advisor's net latency gain incl. modeled load, ms (field 7, double). */
+  expected_gain_ms?: number;
+}
+
+/** Routing lock toggle for one client's application (gateway should enforce). */
+export interface ClientFreeze {
+  client_mac: string;
+  client_name: string;
+  application: string;
+  frozen: boolean;
 }
 
 export interface AppRouteCommand {
@@ -31,6 +54,8 @@ export interface AppRouteCommand {
   /** Gateway name from ipsec metrics. */
   gateway: string;
   changes: ClientRouteChange[];
+  /** Freeze toggles — may be published without any route changes (field 5). */
+  freezes?: ClientFreeze[];
 }
 
 /* ───────── low-level wire encoding ───────── */
@@ -68,6 +93,21 @@ class Writer {
     return this.tag(field, 0).varint(v);
   }
 
+  bool(field: number, v: boolean): this {
+    if (!v) return this; // proto3 default (false) is omitted
+    return this.tag(field, 0).varint(1);
+  }
+
+  /** IEEE 754 double, fixed64 little-endian (wire type 1). */
+  double(field: number, v: number): this {
+    if (!v) return this;
+    this.tag(field, 1);
+    const b = new Uint8Array(8);
+    new DataView(b.buffer).setFloat64(0, v, true);
+    for (const x of b) this.out.push(x);
+    return this;
+  }
+
   /** Length-delimited submessage. Presence is meaningful, so empty bodies still emit. */
   message(field: number, body: Uint8Array): this {
     this.tag(field, 2).varint(body.length);
@@ -97,6 +137,18 @@ export function encodeClientRouteChange(c: ClientRouteChange): Uint8Array<ArrayB
     .string(2, c.client_name)
     .message(3, encodeTunnelBinding(c.current))
     .message(4, encodeTunnelBinding(c.desired))
+    .uint64(5, c.origin ?? 0)
+    .string(6, c.advisor_reason ?? '')
+    .double(7, c.expected_gain_ms ?? 0)
+    .bytes();
+}
+
+export function encodeClientFreeze(f: ClientFreeze): Uint8Array<ArrayBuffer> {
+  return new Writer()
+    .string(1, f.client_mac)
+    .string(2, f.client_name)
+    .string(3, f.application)
+    .bool(4, f.frozen)
     .bytes();
 }
 
@@ -106,6 +158,7 @@ export function encodeAppRouteCommand(cmd: AppRouteCommand): Uint8Array<ArrayBuf
     .string(2, cmd.source)
     .string(3, cmd.gateway);
   for (const c of cmd.changes) w.message(4, encodeClientRouteChange(c));
+  for (const f of cmd.freezes ?? []) w.message(5, encodeClientFreeze(f));
   return w.bytes();
 }
 

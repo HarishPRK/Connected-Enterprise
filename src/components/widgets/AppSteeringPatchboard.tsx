@@ -43,7 +43,7 @@ import { useAarRouting } from '../../ui/useAarRouting';
 import { useTheme, useThemeColors } from '../../ui/Theme';
 import { useToast } from '../../ui/Toast';
 import { BRANCH_TO_IPSEC_SOURCE, appCategories } from '../../data/mock';
-import { encodeAppRouteCommand, toHex, type AppRouteCommand } from '../../proto/appRoute';
+import { encodeAppRouteCommand, toHex, ROUTE_ORIGIN, type AppRouteCommand } from '../../proto/appRoute';
 
 /* The AAR plugin publishes on unprefixed routing/* topics; we associate it with
  * McKinney (prpl), matching "either these topics or prpl/ipsec/metrics". */
@@ -470,7 +470,16 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
       ? { ...a, suggestions: a.suggestions.filter((s) => s.client_id !== client.id) }
       : a));
 
-    const cmd: AppRouteCommand = {
+    // Tag provenance on the wire: a commit that matches an active advisor
+    // suggestion for this client+target (Apply, guided drag, or a plain drag
+    // that happens to follow the advice) carries the advisor's origin,
+    // reasoning, and promised net gain; everything else is an operator move.
+    const sug = advisor.suggestions.find((s) => s.client_id === client.id && s.to_tunnel === to.ifname);
+    const origin = sug
+      ? (advisor.mode === 'ai' ? ROUTE_ORIGIN.advisorAi : ROUTE_ORIGIN.advisorHeuristic)
+      : ROUTE_ORIGIN.operator;
+
+    const seq = publishCmd({
       timestamp_ms: Date.now(),
       source: source ?? 'sim',
       gateway: gw?.metrics.gateway.name ?? 'gateway',
@@ -479,16 +488,25 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         client_name: client.name,
         current: { application: client.app, tunnel: from.ifname },
         desired: { application: client.app, tunnel: to.ifname },
+        origin,
+        advisor_reason: sug?.reason,
+        expected_gain_ms: sug?.expected_gain_ms,
       }],
-    };
-    const bytes = encodeAppRouteCommand(cmd);
-    const seq = ++seqRef.current;
+    },
+    `${client.name} · ${client.appLabel} · ${from.ifname} → ${to.ifname}`,
+    `Route published — ${client.appLabel} → ${to.ifname}`);
+
     setLastPatched({ id: client.id, seq, toIdx: targetIdx });
     surgeRef.current = { id: client.id, until: performance.now() / 1000 + 2.4 };
+  }
 
+  /** Encode + publish an AppRouteCommand on `<source>/approute/control`,
+   *  driving the wire-tap console and toasts. Returns the publish seq. */
+  function publishCmd(cmd: AppRouteCommand, label: string, successTitle: string): number {
+    const bytes = encodeAppRouteCommand(cmd);
+    const seq = ++seqRef.current;
     const base: Omit<PubState, 'phase'> = {
-      seq,
-      label: `${client.name} · ${client.appLabel} · ${from.ifname} → ${to.ifname}`,
+      seq, label,
       json: JSON.stringify(cmd),
       hex: toHex(bytes),
       bytes: bytes.length,
@@ -497,8 +515,8 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
     if (!source) {
       setPub({ ...base, phase: 'nolive' });
-      push({ kind: 'info', title: 'Route encoded (not published)', detail: 'This branch has no live gateway — proto3 payload shown in the wire-tap console.' });
-      return;
+      push({ kind: 'info', title: 'Command encoded (not published)', detail: 'This branch has no live gateway — proto3 payload shown in the wire-tap console.' });
+      return seq;
     }
 
     setPub({ ...base, phase: 'publishing' });
@@ -511,28 +529,43 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         if (seqRef.current !== seq) return;
         if (res.ok && data?.ok) {
           setPub({ ...base, phase: 'ok' });
-          push({ kind: 'success', title: `Route published — ${client.appLabel} → ${to.ifname}`, detail: `${bytes.length} B proto3 on ${base.topic} (qos1)` });
+          push({ kind: 'success', title: successTitle, detail: `${bytes.length} B proto3 on ${base.topic} (qos1)` });
         } else if (res.status === 503 && data?.offline) {
           setPub({ ...base, phase: 'offline', error: data.error });
-          push({ kind: 'warn', title: 'Broker offline — route encoded, not delivered', detail: data.error });
+          push({ kind: 'warn', title: 'Broker offline — command encoded, not delivered', detail: data.error });
         } else {
           setPub({ ...base, phase: 'error', error: data?.error ?? `HTTP ${res.status}` });
-          push({ kind: 'error', title: 'Route publish failed', detail: data?.error ?? `HTTP ${res.status}` });
+          push({ kind: 'error', title: 'Publish failed', detail: data?.error ?? `HTTP ${res.status}` });
         }
       } catch (err) {
         if (seqRef.current !== seq) return;
         const msg = err instanceof Error ? err.message : String(err);
         setPub({ ...base, phase: 'error', error: msg });
-        push({ kind: 'error', title: 'Route publish failed', detail: msg });
+        push({ kind: 'error', title: 'Publish failed', detail: msg });
       }
     })();
+    return seq;
   }
 
   /* ───────── freeze + AI advisor ───────── */
 
   function toggleFreeze(id: string) {
-    setFrozen((f) => ({ ...f, [id]: !f[id] }));
+    const client = clients.find((c) => c.id === id);
+    const next = !frozen[id];
+    setFrozen((f) => ({ ...f, [id]: next }));
     setGuide((g) => (g?.clientId === id ? null : g)); // frozen clients can't be guided
+    if (!client) return;
+    // The lock is a routing-control fact the gateway can enforce — publish it
+    // on the same approute topic as a freeze-only AppRouteCommand.
+    publishCmd({
+      timestamp_ms: Date.now(),
+      source: source ?? 'sim',
+      gateway: gw?.metrics.gateway.name ?? 'gateway',
+      changes: [],
+      freezes: [{ client_mac: client.id, client_name: client.name, application: client.app, frozen: next }],
+    },
+    `${client.name} · ${client.appLabel} · ${next ? 'freeze' : 'unfreeze'} routing`,
+    next ? `Freeze published — ${client.name} routing locked` : `Unfreeze published — ${client.name} routing released`);
   }
 
   /** One-shot advisor run: snapshot the board (minus frozen clients), let the

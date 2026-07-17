@@ -26,7 +26,10 @@ function check(name: string, ok: boolean, detail?: string) {
 const golden = toHex(encodeTunnelBinding({ application: 'A', tunnel: 'B' }));
 check('TunnelBinding golden bytes', golden === '0a 01 41 12 01 42', `got ${golden}`);
 
-/* 2 — full command round-trip through the real server decoder */
+/* 2 — full command round-trip through the real server decoder, covering the
+ *     v2 fields: advisor origin/reason/gain (double) + a freeze toggle.
+ *     Field values that are proto3 defaults ('' / 0 / false) are omitted on
+ *     the wire and restored on decode, so JSON equality still holds. */
 const cmd: AppRouteCommand = {
   timestamp_ms: 1768521600123,
   source: 'prpl',
@@ -37,13 +40,22 @@ const cmd: AppRouteCommand = {
       client_name: 'kitchen-pos',
       current: { application: 'Netflix', tunnel: 'vti-fiber1' },
       desired: { application: 'Netflix', tunnel: 'vti-cell1' },
+      origin: 2, // ROUTE_ORIGIN_ADVISOR_AI
+      advisor_reason: 'vti-cell1 at 38 ms carries 1 app vs vti-fiber1 crowded at 3 apps.',
+      expected_gain_ms: 8.4,
     },
     {
       client_mac: 'aa:bb:cc:00:00:01',
       client_name: 'front-desk',
       current: { application: 'Microsoft Teams', tunnel: 'vti-fiber2' },
       desired: { application: 'Microsoft Teams', tunnel: 'vti-fiber1' },
+      origin: 1, // ROUTE_ORIGIN_OPERATOR
+      advisor_reason: '',
+      expected_gain_ms: 0,
     },
+  ],
+  freezes: [
+    { client_mac: 'aa:bb:cc:00:00:05', client_name: 'dock-door', application: 'OT Telemetry', frozen: true },
   ],
 };
 const bytes = encodeAppRouteCommand(cmd);

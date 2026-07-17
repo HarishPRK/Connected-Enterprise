@@ -20,11 +20,33 @@ message TunnelBinding {
   string tunnel      = 2;  // tunnel ifname from ipsec metrics
 }
 
+// Who initiated a route change: a manual operator drag on the patchboard, or
+// the AI route advisor (Bedrock reasoning vs the deterministic fallback).
+enum RouteOrigin {
+  ROUTE_ORIGIN_UNSPECIFIED       = 0;
+  ROUTE_ORIGIN_OPERATOR          = 1;
+  ROUTE_ORIGIN_ADVISOR_AI        = 2;
+  ROUTE_ORIGIN_ADVISOR_HEURISTIC = 3;
+}
+
 message ClientRouteChange {
   string client_mac    = 1;
   string client_name   = 2;
   TunnelBinding current = 3;  // what the client rides today
   TunnelBinding desired = 4;  // what the operator patched it to
+  RouteOrigin origin    = 5;  // operator drag vs AI-advisor-applied
+  string advisor_reason = 6;  // advisor's cited reasoning (advisor origins only)
+  double expected_gain_ms = 7; // advisor's net latency gain incl. modeled load
+}
+
+// Routing lock for one client's application. Published when the operator
+// toggles freeze on the patchboard; the gateway SHOULD reject/ignore steering
+// for a frozen client+application until a frozen=false follows.
+message ClientFreeze {
+  string client_mac  = 1;
+  string client_name = 2;
+  string application = 3;
+  bool   frozen      = 4;  // true = lock routing, false = release
 }
 
 message AppRouteCommand {
@@ -32,4 +54,5 @@ message AppRouteCommand {
   string source       = 2;  // topic family: "rdk" | "prpl"
   string gateway      = 3;  // gateway name from ipsec metrics
   repeated ClientRouteChange changes = 4;
+  repeated ClientFreeze freezes      = 5;  // freeze toggles (may arrive without changes)
 }

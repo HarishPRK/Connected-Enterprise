@@ -190,14 +190,23 @@ app.post(
       res.status(400).json({ error: `payload is not a valid AppRouteCommand: ${err instanceof Error ? err.message : String(err)}` });
       return;
     }
-    if (decoded.changes.length === 0 || decoded.changes.some((c) => !c.desired.tunnel || !c.current.tunnel)) {
-      res.status(400).json({ error: 'AppRouteCommand must carry at least one change with current and desired tunnels set' });
+    if (decoded.changes.length === 0 && decoded.freezes.length === 0) {
+      res.status(400).json({ error: 'AppRouteCommand must carry at least one route change or freeze toggle' });
+      return;
+    }
+    if (decoded.changes.some((c) => !c.desired.tunnel || !c.current.tunnel)) {
+      res.status(400).json({ error: 'Every route change must carry current and desired tunnels' });
       return;
     }
 
+    const ORIGIN_LABEL: Record<number, string> = { 1: 'operator', 2: 'advisor-ai', 3: 'advisor-heuristic' };
     for (const c of decoded.changes) {
       // eslint-disable-next-line no-console
-      console.log(`[approute] ${source}: ${c.client_name || c.client_mac} · ${c.desired.application} · ${c.current.tunnel} → ${c.desired.tunnel}`);
+      console.log(`[approute] ${source}: ${c.client_name || c.client_mac} · ${c.desired.application} · ${c.current.tunnel} → ${c.desired.tunnel}${c.origin ? ` · ${ORIGIN_LABEL[c.origin] ?? c.origin}` : ''}`);
+    }
+    for (const f of decoded.freezes) {
+      // eslint-disable-next-line no-console
+      console.log(`[approute] ${source}: ${f.client_name || f.client_mac} · ${f.application} · ${f.frozen ? 'FREEZE' : 'UNFREEZE'} routing`);
     }
 
     const topic = `${source}/approute/control`;
