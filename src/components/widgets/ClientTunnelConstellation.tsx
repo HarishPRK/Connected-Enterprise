@@ -92,8 +92,8 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
     const mine = source ? allDevices.filter((d) => d.locationSource === source) : allDevices;
     // Cap per domain so the orbits stay legible; overflow is summarized.
     return {
-      it: mine.filter((d) => d.domain === 'IT').slice(0, 8),
-      ot: mine.filter((d) => d.domain === 'OT').slice(0, 8),
+      it: mine.filter((d) => d.domain === 'IT').slice(0, 6),
+      ot: mine.filter((d) => d.domain === 'OT').slice(0, 4),
       itTotal: mine.filter((d) => d.domain === 'IT').length,
       otTotal: mine.filter((d) => d.domain === 'OT').length,
     };
@@ -105,10 +105,11 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
   );
 
   // ── Geometry ─────────────────────────────────────────────────────────────
-  const W = 1200, H = 560;
-  const GW = { x: 430, y: 285 };
-  const TUN_X = 840, TUN_W = 240, TUN_H = 58;
-  const CLOUD = { x: 1148, y: GW.y };
+  const W = 900, H = 424;
+  const GW = { x: 322, y: 214 };
+  const TUN_X = 620, TUN_W = 202, TUN_H = 46;
+  const CLOUD = { x: 866, y: GW.y };
+  const ORBIT_IN = 168, ORBIT_OUT = 214;
 
   const tunnels: TunnelSlot[] = useMemo(() => {
     const list = [...(gw?.metrics.tunnels ?? [])].sort((a, b) => {
@@ -123,7 +124,7 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
         t,
         family,
         active: !!gw && gw.metrics.active_tunnel === t.ifname,
-        y: n <= 1 ? GW.y : 96 + i * ((H - 200) / (n - 1)),
+        y: n <= 1 ? GW.y : 70 + i * ((H - 150) / (n - 1)),
         color: family === 'fiber' ? tc.accent : tc.accent2,
         clients: 0,
       };
@@ -137,7 +138,7 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
     return list.map((d, i) => {
       const deg = startDeg + ((i + 0.5) * (endDeg - startDeg)) / Math.max(n, 1);
       const rad = (deg * Math.PI) / 180;
-      const r = n > 5 && i % 2 === 1 ? 292 : 226; // stagger crowded arcs onto the outer ring
+      const r = n > 4 && i % 2 === 1 ? ORBIT_OUT : ORBIT_IN; // stagger crowded arcs onto the outer ring
       return { d, x: GW.x + r * Math.cos(rad), y: GW.y + r * Math.sin(rad), r };
     });
   }
@@ -153,7 +154,7 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
       if (slot) slot.clients += 1;
       const h = macHash(n.d.mac);
       // Comet path: device → swing through the core → out to the tunnel mouth.
-      const midX = (GW.x + 66 + TUN_X) / 2;
+      const midX = (GW.x + 50 + TUN_X) / 2;
       const path = slot
         ? `M ${n.x} ${n.y} Q ${(n.x + GW.x) / 2} ${(n.y + GW.y) / 2} ${GW.x} ${GW.y} ` +
           `C ${midX} ${GW.y}, ${midX} ${slot.y}, ${TUN_X} ${slot.y}`
@@ -207,7 +208,7 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
   const locChip = source ? `${source} · ${LOCATION_LABEL[source] ?? source}` : gw.source ?? '';
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div style={{ position: 'relative', maxWidth: W, margin: '0 auto' }}>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img"
         aria-label={`Live clients of the ${locChip} gateway and the IPsec tunnel each one rides`}>
         <defs>
@@ -230,7 +231,7 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
         {stars.map((s, i) => (
           <circle key={i} cx={s.x} cy={s.y} r={s.r} fill={tc.text} opacity={s.o} />
         ))}
-        {[226, 292].map((r) => (
+        {[ORBIT_IN, ORBIT_OUT].map((r) => (
           <circle key={r} cx={GW.x} cy={GW.y} r={r} fill="none"
             stroke={tc.text} strokeOpacity={0.07} strokeDasharray="2 7" />
         ))}
@@ -238,14 +239,14 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
         {/* Radar sweep — a slow wedge orbiting the core */}
         {!reduceMotion && (
           <g opacity={0.9}>
-            <path d={`M ${GW.x} ${GW.y} L ${GW.x - 310} ${GW.y - 60} A 316 316 0 0 0 ${GW.x - 310} ${GW.y + 60} Z`}
+            <path d={`M ${GW.x} ${GW.y} L ${GW.x - 232} ${GW.y - 46} A 236 236 0 0 0 ${GW.x - 232} ${GW.y + 46} Z`}
               fill="url(#ctc-sweep)">
             </path>
             <animateTransform attributeName="transform" type="rotate"
               from={`0 ${GW.x} ${GW.y}`} to={`360 ${GW.x} ${GW.y}`} dur="14s" repeatCount="indefinite" />
           </g>
         )}
-        <circle cx={GW.x} cy={GW.y} r={180} fill="url(#ctc-core)" />
+        <circle cx={GW.x} cy={GW.y} r={138} fill="url(#ctc-core)" />
 
         {/* Comet trails: client → core → tunnel corridor */}
         {links.map((l) => (
@@ -306,9 +307,9 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
         ))}
 
         {/* Cloud transit terminus */}
-        <circle cx={CLOUD.x} cy={CLOUD.y} r={18} fill={surface} stroke={tc.accent3} strokeWidth={1.4} strokeOpacity={0.7} />
-        <text x={CLOUD.x} y={CLOUD.y + 4} textAnchor="middle" fontSize="12" fill={tc.accent3}>☁</text>
-        <text x={CLOUD.x} y={CLOUD.y + 40} textAnchor="middle" fontSize="10" fill={tc.textMuted}>cloud transit</text>
+        <circle cx={CLOUD.x} cy={CLOUD.y} r={15} fill={surface} stroke={tc.accent3} strokeWidth={1.3} strokeOpacity={0.7} />
+        <text x={CLOUD.x} y={CLOUD.y + 4} textAnchor="middle" fontSize="11" fill={tc.accent3}>☁</text>
+        <text x={CLOUD.x} y={CLOUD.y + 32} textAnchor="middle" fontSize="9.5" fill={tc.textMuted}>cloud transit</text>
 
         {/* Client moons */}
         {[...itNodes, ...otNodes].map(({ d, x, y }) => {
@@ -318,19 +319,19 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
           const labelLeft = x < GW.x - 40;
           return (
             <g key={d.id}>
-              <circle cx={x} cy={y} r={16} fill={surface} stroke={color}
-                strokeWidth={1.4} strokeOpacity={d.status === 'err' ? 0.3 : 0.85}>
+              <circle cx={x} cy={y} r={13} fill={surface} stroke={color}
+                strokeWidth={1.3} strokeOpacity={d.status === 'err' ? 0.3 : 0.85}>
                 <title>{`${d.name} · ${d.domain} · ${d.ip} · ${d.status}`}</title>
               </circle>
               {d.status !== 'ok' && (
-                <circle cx={x + 12} cy={y - 12} r={3.5} fill={d.status === 'err' ? tc.err : tc.warn} />
+                <circle cx={x + 10} cy={y - 10} r={3} fill={d.status === 'err' ? tc.err : tc.warn} />
               )}
-              <foreignObject x={x - 8} y={y - 8} width={16} height={16} style={{ pointerEvents: 'none' }}>
-                <div style={{ color, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon size={12} />
+              <foreignObject x={x - 7} y={y - 7} width={14} height={14} style={{ pointerEvents: 'none' }}>
+                <div style={{ color, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon size={10} />
                 </div>
               </foreignObject>
-              <text x={labelLeft ? x - 22 : x + 22} y={y + 4}
+              <text x={labelLeft ? x - 18 : x + 18} y={y + 4}
                 textAnchor={labelLeft ? 'end' : 'start'} fontSize="10.5" fontWeight={600} fill={tc.textDim}>
                 {label}
               </text>
@@ -340,40 +341,41 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
 
         {/* Overflow chips when the fleet is larger than the orbits show */}
         {clients.itTotal > clients.it.length && (
-          <text x={GW.x - 250} y={GW.y - 250} fontSize="10.5" fill={tc.textMuted}>
+          <text x={12} y={32} fontSize="9.5" fill={tc.textMuted}>
             +{clients.itTotal - clients.it.length} more IT
           </text>
         )}
         {clients.otTotal > clients.ot.length && (
-          <text x={GW.x - 250} y={GW.y + 258} fontSize="10.5" fill={tc.textMuted}>
+          <text x={12} y={H - 24} fontSize="9.5" fill={tc.textMuted}>
             +{clients.otTotal - clients.ot.length} more OT
           </text>
         )}
 
         {/* Gateway core */}
         {!reduceMotion && (
-          <circle cx={GW.x} cy={GW.y} r={46} fill="none" stroke={tc.accent} strokeWidth={1}>
-            <animate attributeName="r" values="40;54;40" dur="3.2s" repeatCount="indefinite" />
+          <circle cx={GW.x} cy={GW.y} r={36} fill="none" stroke={tc.accent} strokeWidth={1}>
+            <animate attributeName="r" values="30;42;30" dur="3.2s" repeatCount="indefinite" />
             <animate attributeName="stroke-opacity" values="0.5;0;0.5" dur="3.2s" repeatCount="indefinite" />
           </circle>
         )}
-        <circle cx={GW.x} cy={GW.y} r={34} fill={surface} stroke={tc.accent} strokeWidth={1.6} filter="url(#ctc-glow)" />
-        <foreignObject x={GW.x - 12} y={GW.y - 12} width={24} height={24} style={{ pointerEvents: 'none' }}>
-          <div style={{ color: tc.accent, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Router size={20} />
+        <circle cx={GW.x} cy={GW.y} r={26} fill={surface} stroke={tc.accent} strokeWidth={1.5} filter="url(#ctc-glow)" />
+        <foreignObject x={GW.x - 10} y={GW.y - 10} width={20} height={20} style={{ pointerEvents: 'none' }}>
+          <div style={{ color: tc.accent, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Router size={16} />
           </div>
         </foreignObject>
-        <text x={GW.x} y={GW.y + 56} textAnchor="middle" fontSize="12" fontWeight={700} fill={tc.text}>
+        <text x={GW.x} y={GW.y + 44} textAnchor="middle" fontSize="11.5" fontWeight={700} fill={tc.text}>
           {gwName}
         </text>
-        <text x={GW.x} y={GW.y + 72} textAnchor="middle" fontSize="10" fill={tc.textMuted}
+        <text x={GW.x} y={GW.y + 58} textAnchor="middle" fontSize="9.5" fill={tc.textMuted}
           fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
           {locChip}
         </text>
 
-        {/* Domain arc labels */}
-        <text x={GW.x - 150} y={GW.y - 200} fontSize="10" fontWeight={700} letterSpacing="0.1em" fill={tc.accent} opacity={0.8}>IT ORBIT</text>
-        <text x={GW.x - 150} y={GW.y + 210} fontSize="10" fontWeight={700} letterSpacing="0.1em" fill={tc.accent2} opacity={0.8}>OT ORBIT</text>
+        {/* Domain arc labels — parked in the canvas corners so they never
+            collide with the node labels on the orbits. */}
+        <text x={12} y={18} fontSize="9.5" fontWeight={700} letterSpacing="0.1em" fill={tc.accent} opacity={0.8}>IT ORBIT</text>
+        <text x={12} y={H - 10} fontSize="9.5" fontWeight={700} letterSpacing="0.1em" fill={tc.accent2} opacity={0.8}>OT ORBIT</text>
       </svg>
 
       {/* Legend + provenance */}

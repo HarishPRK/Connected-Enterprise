@@ -445,34 +445,82 @@ class IpsecSource extends EventEmitter {
         metrics = decodeIpsecMetrics(bytes);
       }
 
-      // Normalise: protobuf3 default values may yield undefined fields when
-      // the source omits them. Fill in defaults so the UI doesn't crash.
+      const source = topicToSource(topic);
+
+      // ── Identity ────────────────────────────────────────────────────────
+      // proto3 omits empty strings, so `?? 'unknown'` never fires for a field
+      // the gateway simply didn't send. Resolve identity against what we
+      // already track for this source rather than forking a phantom
+      // `<source>:unknown` entry that the UI could then select instead of the
+      // real gateway.
+      const inName = String(metrics.gateway?.name ?? '').trim();
+      const inMac  = String(metrics.gateway?.mac  ?? '').trim();
+      let gatewayKey: string;
+      let prev: IpsecGatewayState | undefined;
+      if (inName || inMac) {
+        gatewayKey = `${source}:${(inName || inMac).toLowerCase()}`;
+        prev = this.gateways.get(gatewayKey);
+      } else {
+        const latest = [...this.gateways.entries()]
+          .filter(([, s]) => s.source === source)
+          .sort((a, b) => b[1].receivedAt - a[1].receivedAt)[0];
+        gatewayKey = latest?.[0] ?? `${source}:unknown`;
+        prev = latest?.[1];
+      }
+      const prevM = prev?.metrics;
+
+      // ── Merge, don't clobber ────────────────────────────────────────────
+      // The gateway publishes every ~10s and not every payload carries every
+      // section. An ABSENT section means "not reported this cycle", so we
+      // carry the last known value forward instead of writing zeros — that
+      // clobbering is what made the Dynamic Failover page flash 0 ms / 0-of-0
+      // tunnels between payloads. A section that IS reported always wins,
+      // including tunnels present but `reachable: false`, so a genuine
+      // outage still surfaces immediately.
+      const hasTunnels = Array.isArray(metrics.tunnels) && metrics.tunnels.length > 0;
+      const tunnels = hasTunnels
+        ? metrics.tunnels.map((t) => ({
+            ifname:       String(t.ifname ?? ''),
+            present:      Boolean(t.present),
+            reachable:    Boolean(t.reachable),
+            latency_ms:   Number(t.latency_ms ?? 0),
+            loss_percent: Number(t.loss_percent ?? 0),
+            rx_bytes:     Number(t.rx_bytes ?? 0),
+            tx_bytes:     Number(t.tx_bytes ?? 0),
+          }))
+        : (prevM?.tunnels ?? []);
+      if (!hasTunnels && (prevM?.tunnels.length ?? 0) > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[ipsec] ${gatewayKey}: payload carried no tunnels — retaining last known ${prevM!.tunnels.length}`);
+      }
+
+      const hasWan = !!(metrics.wan && (metrics.wan.ifname || metrics.wan.rx_bytes || metrics.wan.tx_bytes));
+      const wan = hasWan
+        ? {
+            ifname:     String(metrics.wan?.ifname ?? ''),
+            link_up:    Boolean(metrics.wan?.link_up),
+            rx_bytes:   Number(metrics.wan?.rx_bytes   ?? 0),
+            tx_bytes:   Number(metrics.wan?.tx_bytes   ?? 0),
+            rx_packets: Number(metrics.wan?.rx_packets ?? 0),
+            tx_packets: Number(metrics.wan?.tx_packets ?? 0),
+          }
+        : (prevM?.wan ?? { ifname: '', link_up: false, rx_bytes: 0, tx_bytes: 0, rx_packets: 0, tx_packets: 0 });
+
       const normalised: IpsecMetrics = {
-        timestamp_ms: Number(metrics.timestamp_ms ?? 0),
-        active_tunnel: String(metrics.active_tunnel ?? ''),
-        tunnel_count: Number(metrics.tunnel_count ?? (metrics.tunnels?.length ?? 0)),
-        tunnels: Array.isArray(metrics.tunnels) ? metrics.tunnels.map((t) => ({
-          ifname:       String(t.ifname ?? ''),
-          present:      Boolean(t.present),
-          reachable:    Boolean(t.reachable),
-          latency_ms:   Number(t.latency_ms ?? 0),
-          loss_percent: Number(t.loss_percent ?? 0),
-          rx_bytes:     Number(t.rx_bytes ?? 0),
-          tx_bytes:     Number(t.tx_bytes ?? 0),
-        })) : [],
-        wan: {
-          ifname:     String(metrics.wan?.ifname ?? ''),
-          link_up:    Boolean(metrics.wan?.link_up),
-          rx_bytes:   Number(metrics.wan?.rx_bytes   ?? 0),
-          tx_bytes:   Number(metrics.wan?.tx_bytes   ?? 0),
-          rx_packets: Number(metrics.wan?.rx_packets ?? 0),
-          tx_packets: Number(metrics.wan?.tx_packets ?? 0),
-        },
+        timestamp_ms: Number(metrics.timestamp_ms ?? 0) || prevM?.timestamp_ms || 0,
+        // Only trust an empty active_tunnel when this payload actually
+        // reported tunnels (then "none active" is the real state).
+        active_tunnel: hasTunnels
+          ? String(metrics.active_tunnel ?? '')
+          : (String(metrics.active_tunnel ?? '') || prevM?.active_tunnel || ''),
+        tunnel_count: Number(metrics.tunnel_count ?? 0) || tunnels.length,
+        tunnels,
+        wan,
         gateway: {
-          name:        String(metrics.gateway?.name ?? 'unknown'),
-          mac:         String(metrics.gateway?.mac ?? ''),
-          prim_wan_ip: String(metrics.gateway?.prim_wan_ip ?? ''),
-          sec_wan_ip:  String(metrics.gateway?.sec_wan_ip ?? ''),
+          name:        inName || prevM?.gateway.name || 'unknown',
+          mac:         inMac  || prevM?.gateway.mac  || '',
+          prim_wan_ip: String(metrics.gateway?.prim_wan_ip ?? '') || prevM?.gateway.prim_wan_ip || '',
+          sec_wan_ip:  String(metrics.gateway?.sec_wan_ip  ?? '') || prevM?.gateway.sec_wan_ip  || '',
         },
         wifi: metrics.wifi ? {
           total_clients:        Number(metrics.wifi.total_clients ?? 0),
@@ -480,16 +528,13 @@ class IpsecSource extends EventEmitter {
           weak_signal_clients:  Number(metrics.wifi.weak_signal_clients ?? 0),
           clients_with_errors:  Number(metrics.wifi.clients_with_errors ?? 0),
           high_retrans_clients: Number(metrics.wifi.high_retrans_clients ?? 0),
-          clients: Array.isArray(metrics.wifi.clients) ? metrics.wifi.clients : [],
-        } : undefined,
-        cellular: metrics.cellular ?? undefined,
+          clients: Array.isArray(metrics.wifi.clients) && metrics.wifi.clients.length > 0
+            ? metrics.wifi.clients
+            : (prevM?.wifi?.clients ?? []),
+        } : prevM?.wifi,
+        cellular: metrics.cellular ?? prevM?.cellular,
       };
 
-      const source = topicToSource(topic);
-      // Key by `<source>:<gateway-name>` so the two streams never collide even
-      // if both ever publish a gateway with the same name.
-      const baseKey = (normalised.gateway.name || normalised.gateway.mac || 'unknown').toLowerCase();
-      const gatewayKey = `${source}:${baseKey}`;
       const state: IpsecGatewayState = { metrics: normalised, receivedAt: Date.now(), source };
       this.gateways.set(gatewayKey, state);
       this.emit('update', { gatewayKey, state });
