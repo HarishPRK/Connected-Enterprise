@@ -483,6 +483,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
       timestamp_ms: Date.now(),
       source: source ?? 'sim',
       gateway: gw?.metrics.gateway.name ?? 'gateway',
+      type: 'user_initiated',
       changes: [{
         client_mac: client.id,
         client_name: client.name,
@@ -491,6 +492,9 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
         origin,
         advisor_reason: sug?.reason,
         expected_gain_ms: sug?.expected_gain_ms,
+        // Frozen clients are rejected above, so a published change is always
+        // false here — sent explicitly so the key is never missing.
+        freeze: !!frozen[client.id],
       }],
     },
     `${client.name} · ${client.appLabel} · ${from.ifname} → ${to.ifname}`,
@@ -561,6 +565,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
       timestamp_ms: Date.now(),
       source: source ?? 'sim',
       gateway: gw?.metrics.gateway.name ?? 'gateway',
+      type: 'user_initiated',
       changes: [],
       freezes: [{ client_mac: client.id, client_name: client.name, application: client.app, frozen: next }],
     },

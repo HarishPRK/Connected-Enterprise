@@ -37,6 +37,8 @@ export interface ClientRouteChange {
   advisor_reason?: string;
   /** Advisor's net latency gain incl. modeled load, ms (field 7, double). */
   expected_gain_ms?: number;
+  /** Client's freeze state at the time of the change (field 8, always sent). */
+  freeze?: boolean;
 }
 
 /** Routing lock toggle for one client's application (gateway should enforce). */
@@ -56,6 +58,8 @@ export interface AppRouteCommand {
   changes: ClientRouteChange[];
   /** Freeze toggles — may be published without any route changes (field 5). */
   freezes?: ClientFreeze[];
+  /** What triggered the publish, e.g. "user_initiated" (field 6). */
+  type?: string;
 }
 
 /* ───────── low-level wire encoding ───────── */
@@ -96,6 +100,13 @@ class Writer {
   bool(field: number, v: boolean): this {
     if (!v) return this; // proto3 default (false) is omitted
     return this.tag(field, 0).varint(1);
+  }
+
+  /** Write a bool even when it's `false`. proto3 normally drops default values,
+   *  which would leave a freeze=false with no key at all on the wire; emitting
+   *  it explicitly is valid proto3 and keeps the field visible to consumers. */
+  boolAlways(field: number, v: boolean): this {
+    return this.tag(field, 0).varint(v ? 1 : 0);
   }
 
   /** IEEE 754 double, fixed64 little-endian (wire type 1). */
@@ -140,6 +151,7 @@ export function encodeClientRouteChange(c: ClientRouteChange): Uint8Array<ArrayB
     .uint64(5, c.origin ?? 0)
     .string(6, c.advisor_reason ?? '')
     .double(7, c.expected_gain_ms ?? 0)
+    .boolAlways(8, !!c.freeze)
     .bytes();
 }
 
@@ -148,7 +160,7 @@ export function encodeClientFreeze(f: ClientFreeze): Uint8Array<ArrayBuffer> {
     .string(1, f.client_mac)
     .string(2, f.client_name)
     .string(3, f.application)
-    .bool(4, f.frozen)
+    .boolAlways(4, f.frozen)
     .bytes();
 }
 
@@ -159,6 +171,7 @@ export function encodeAppRouteCommand(cmd: AppRouteCommand): Uint8Array<ArrayBuf
     .string(3, cmd.gateway);
   for (const c of cmd.changes) w.message(4, encodeClientRouteChange(c));
   for (const f of cmd.freezes ?? []) w.message(5, encodeClientFreeze(f));
+  w.string(6, cmd.type ?? '');
   return w.bytes();
 }
 

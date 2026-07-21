@@ -37,6 +37,9 @@ message ClientRouteChange {
   RouteOrigin origin    = 5;  // operator drag vs AI-advisor-applied
   string advisor_reason = 6;  // advisor's cited reasoning (advisor origins only)
   double expected_gain_ms = 7; // advisor's net latency gain incl. modeled load
+  // The client's routing-freeze state at the time of this change. ALWAYS
+  // written on the wire (including false) so the key is never absent.
+  bool   freeze         = 8;
 }
 
 // Routing lock for one client's application. Published when the operator
@@ -46,7 +49,9 @@ message ClientFreeze {
   string client_mac  = 1;
   string client_name = 2;
   string application = 3;
-  bool   frozen      = 4;  // true = lock routing, false = release
+  // true = lock routing, false = release. ALWAYS written on the wire (proto3
+  // would normally drop a false), so an unfreeze still carries the key.
+  bool   frozen      = 4;
 }
 
 message AppRouteCommand {
@@ -55,4 +60,8 @@ message AppRouteCommand {
   string gateway      = 3;  // gateway name from ipsec metrics
   repeated ClientRouteChange changes = 4;
   repeated ClientFreeze freezes      = 5;  // freeze toggles (may arrive without changes)
+  // What triggered this publish. "user_initiated" for anything a person did
+  // on the dashboard (drag, click-to-rewire, keyboard, advisor Apply, freeze
+  // toggle). Reserved for future automated senders.
+  string type         = 6;
 }

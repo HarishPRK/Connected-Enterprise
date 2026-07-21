@@ -22,6 +22,8 @@ export interface ClientRouteChange {
   origin: number;
   advisor_reason: string;
   expected_gain_ms: number;
+  /** Client's routing-freeze state at the time of the change. */
+  freeze: boolean;
 }
 
 /** Routing lock toggle for one client's application. */
@@ -38,6 +40,8 @@ export interface AppRouteCommand {
   gateway: string;
   changes: ClientRouteChange[];
   freezes: ClientFreeze[];
+  /** What triggered the publish, e.g. "user_initiated". */
+  type: string;
 }
 
 /* ───────── low-level wire decoding ───────── */
@@ -108,7 +112,7 @@ function decodeClientRouteChange(buf: Uint8Array): ClientRouteChange {
     client_mac: '', client_name: '',
     current: { application: '', tunnel: '' },
     desired: { application: '', tunnel: '' },
-    origin: 0, advisor_reason: '', expected_gain_ms: 0,
+    origin: 0, advisor_reason: '', expected_gain_ms: 0, freeze: false,
   };
   for (const { field, wire, r } of fields(buf)) {
     if      (field === 1 && wire === 2) out.client_mac = new TextDecoder().decode(readLengthDelimited(r));
@@ -118,6 +122,7 @@ function decodeClientRouteChange(buf: Uint8Array): ClientRouteChange {
     else if (field === 5 && wire === 0) out.origin = Number(readVarint(r));
     else if (field === 6 && wire === 2) out.advisor_reason = new TextDecoder().decode(readLengthDelimited(r));
     else if (field === 7 && wire === 1) out.expected_gain_ms = readDouble(r);
+    else if (field === 8 && wire === 0) out.freeze = readVarint(r) !== 0n;
     else skipField(r, wire);
   }
   return out;
@@ -136,13 +141,14 @@ function decodeClientFreeze(buf: Uint8Array): ClientFreeze {
 }
 
 export function decodeAppRouteCommand(buf: Uint8Array): AppRouteCommand {
-  const out: AppRouteCommand = { timestamp_ms: 0, source: '', gateway: '', changes: [], freezes: [] };
+  const out: AppRouteCommand = { timestamp_ms: 0, source: '', gateway: '', changes: [], freezes: [], type: '' };
   for (const { field, wire, r } of fields(buf)) {
     if      (field === 1 && wire === 0) out.timestamp_ms = Number(readVarint(r));
     else if (field === 2 && wire === 2) out.source = new TextDecoder().decode(readLengthDelimited(r));
     else if (field === 3 && wire === 2) out.gateway = new TextDecoder().decode(readLengthDelimited(r));
     else if (field === 4 && wire === 2) out.changes.push(decodeClientRouteChange(readLengthDelimited(r)));
     else if (field === 5 && wire === 2) out.freezes.push(decodeClientFreeze(readLengthDelimited(r)));
+    else if (field === 6 && wire === 2) out.type = new TextDecoder().decode(readLengthDelimited(r));
     else skipField(r, wire);
   }
   return out;
