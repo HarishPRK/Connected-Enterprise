@@ -206,7 +206,7 @@ app.post(
     }
     for (const f of decoded.freezes) {
       // eslint-disable-next-line no-console
-      console.log(`[approute] ${source}: ${f.client_name || f.client_mac} · ${f.application} · ${f.frozen ? 'FREEZE' : 'UNFREEZE'} routing (frozen=${f.frozen})${decoded.type ? ` · ${decoded.type}` : ''}`);
+      console.log(`[approute] ${source}: ${f.client_name || f.client_mac} · ${f.application}${f.tunnel ? ` on ${f.tunnel}` : ''} · ${f.freeze ? 'FREEZE' : 'UNFREEZE'} routing (freeze=${f.freeze})${decoded.type ? ` · ${decoded.type}` : ''}`);
     }
 
     const topic = `${source}/approute/control`;

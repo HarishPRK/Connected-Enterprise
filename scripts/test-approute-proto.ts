@@ -67,7 +67,7 @@ const cmd: AppRouteCommand = {
     },
   ],
   freezes: [
-    { client_mac: 'aa:bb:cc:00:00:05', client_name: 'dock-door', application: 'OT Telemetry', frozen: true },
+    { client_mac: 'aa:bb:cc:00:00:05', client_name: 'dock-door', application: 'OT Telemetry', freeze: true, tunnel: 'vti-cell2' },
   ],
 };
 const bytes = encodeAppRouteCommand(cmd);
@@ -87,10 +87,16 @@ check('defaults restored on decode',
 /* 3b — an UNFREEZE must still carry the key. proto3 would normally drop a
  *      false, leaving the consumer unable to tell "released" from "absent";
  *      the encoder writes it explicitly. Bytes for
- *      ClientFreeze{client_mac:"m", frozen:false}:
+ *      ClientFreeze{client_mac:"m", freeze:false}:
  *        0a 01 6d  (field 1, len 1, "m")   20 00  (field 4, varint 0)   */
-const freezeOff = toHex(encodeClientFreeze({ client_mac: 'm', client_name: '', application: '', frozen: false }));
-check('unfreeze keeps frozen=false on the wire', freezeOff === '0a 01 6d 20 00', `got ${freezeOff}`);
+const freezeOff = toHex(encodeClientFreeze({ client_mac: 'm', client_name: '', application: '', freeze: false, tunnel: '' }));
+check('unfreeze keeps freeze=false on the wire', freezeOff === '0a 01 6d 20 00', `got ${freezeOff}`);
+
+/* 3c — a FREEZE carries the pinned tunnel, so the gateway knows what to hold
+ *      the application on: adds 2a 09 "vti-cell2" (field 5, len 9). */
+const freezeOn = toHex(encodeClientFreeze({ client_mac: 'm', client_name: '', application: '', freeze: true, tunnel: 'vti-cell2' }));
+check('freeze carries the pinned tunnel',
+  freezeOn === `0a 01 6d 20 01 2a 09 ${toHex(new TextEncoder().encode('vti-cell2'))}`, `got ${freezeOn}`);
 
 /* 4 — decoder skips unknown trailing fields (forward compatibility):
  *     field 15, varint wire type → tag 0x78, value 0x01 */

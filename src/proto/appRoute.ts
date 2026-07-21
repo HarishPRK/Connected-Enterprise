@@ -46,7 +46,10 @@ export interface ClientFreeze {
   client_mac: string;
   client_name: string;
   application: string;
-  frozen: boolean;
+  /** true = lock, false = release. Always encoded (field 4). */
+  freeze: boolean;
+  /** Tunnel the application is pinned to while frozen (field 5). */
+  tunnel: string;
 }
 
 export interface AppRouteCommand {
@@ -160,7 +163,8 @@ export function encodeClientFreeze(f: ClientFreeze): Uint8Array<ArrayBuffer> {
     .string(1, f.client_mac)
     .string(2, f.client_name)
     .string(3, f.application)
-    .boolAlways(4, f.frozen)
+    .boolAlways(4, f.freeze)
+    .string(5, f.tunnel)
     .bytes();
 }
 

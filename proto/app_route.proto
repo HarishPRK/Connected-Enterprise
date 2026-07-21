@@ -51,7 +51,11 @@ message ClientFreeze {
   string application = 3;
   // true = lock routing, false = release. ALWAYS written on the wire (proto3
   // would normally drop a false), so an unfreeze still carries the key.
-  bool   frozen      = 4;
+  // Named `freeze` to match ClientRouteChange.freeze.
+  bool   freeze      = 4;
+  // The tunnel the application is pinned to at the moment of the freeze —
+  // what the gateway should hold it on while `freeze` is true.
+  string tunnel      = 5;
 }
 
 message AppRouteCommand {

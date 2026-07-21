@@ -560,14 +560,22 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
     setGuide((g) => (g?.clientId === id ? null : g)); // frozen clients can't be guided
     if (!client) return;
     // The lock is a routing-control fact the gateway can enforce — publish it
-    // on the same approute topic as a freeze-only AppRouteCommand.
+    // on the same approute topic as a freeze-only AppRouteCommand. `tunnel` is
+    // what the app is pinned to right now: what the gateway should hold it on.
+    const idx = slotIdxFor(client);
     publishCmd({
       timestamp_ms: Date.now(),
       source: source ?? 'sim',
       gateway: gw?.metrics.gateway.name ?? 'gateway',
       type: 'user_initiated',
       changes: [],
-      freezes: [{ client_mac: client.id, client_name: client.name, application: client.app, frozen: next }],
+      freezes: [{
+        client_mac: client.id,
+        client_name: client.name,
+        application: client.app,
+        freeze: next,
+        tunnel: idx >= 0 ? tunnels[idx].ifname : '',
+      }],
     },
     `${client.name} · ${client.appLabel} · ${next ? 'freeze' : 'unfreeze'} routing`,
     next ? `Freeze published — ${client.name} routing locked` : `Unfreeze published — ${client.name} routing released`);

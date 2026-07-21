@@ -31,7 +31,10 @@ export interface ClientFreeze {
   client_mac: string;
   client_name: string;
   application: string;
-  frozen: boolean;
+  /** true = lock routing, false = release. */
+  freeze: boolean;
+  /** Tunnel the application is pinned to while frozen. */
+  tunnel: string;
 }
 
 export interface AppRouteCommand {
@@ -129,12 +132,13 @@ function decodeClientRouteChange(buf: Uint8Array): ClientRouteChange {
 }
 
 function decodeClientFreeze(buf: Uint8Array): ClientFreeze {
-  const out: ClientFreeze = { client_mac: '', client_name: '', application: '', frozen: false };
+  const out: ClientFreeze = { client_mac: '', client_name: '', application: '', freeze: false, tunnel: '' };
   for (const { field, wire, r } of fields(buf)) {
     if      (field === 1 && wire === 2) out.client_mac = new TextDecoder().decode(readLengthDelimited(r));
     else if (field === 2 && wire === 2) out.client_name = new TextDecoder().decode(readLengthDelimited(r));
     else if (field === 3 && wire === 2) out.application = new TextDecoder().decode(readLengthDelimited(r));
-    else if (field === 4 && wire === 0) out.frozen = readVarint(r) !== 0n;
+    else if (field === 4 && wire === 0) out.freeze = readVarint(r) !== 0n;
+    else if (field === 5 && wire === 2) out.tunnel = new TextDecoder().decode(readLengthDelimited(r));
     else skipField(r, wire);
   }
   return out;
