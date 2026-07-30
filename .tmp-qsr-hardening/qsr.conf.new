@@ -1,0 +1,146 @@
+server {
+    listen 80;
+    server_name 18.209.50.19;
+
+    root /home/ec2-user/frontend_app/build;
+    index index.html;
+
+    location /localfeed/ {
+        proxy_pass http://127.0.0.1:5050/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        chunked_transfer_encoding off;
+    }
+
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:8080/socket.io/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 86400;
+    }
+
+    location /cv/ {
+        proxy_pass http://127.0.0.1:5004/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300;
+    }
+
+    location /api/devices {
+        resolver 8.8.8.8 8.8.4.4 ipv6=off valid=30s;
+        set $aws_devices "d23ffdtzx1.execute-api.us-east-1.amazonaws.com";
+        proxy_pass https://$aws_devices/Prod/devices;
+        proxy_ssl_server_name on;
+        proxy_set_header Host $aws_devices;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /api/request-status {
+        resolver 8.8.8.8 8.8.4.4 ipv6=off valid=30s;
+        set $aws_status "rk93ge5kcc.execute-api.us-east-1.amazonaws.com";
+        proxy_pass https://$aws_status/request-status;
+        proxy_ssl_server_name on;
+        proxy_set_header Host $aws_status;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /api/control {
+        resolver 8.8.8.8 8.8.4.4 ipv6=off valid=30s;
+        set $aws_control "yxnxmnkvr4.execute-api.us-east-1.amazonaws.com";
+        proxy_pass https://$aws_control/device/control;
+        proxy_ssl_server_name on;
+        proxy_set_header Host $aws_control;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Long-lived telemetry streams from the local QSR routing service.
+    # Keep these locations before the generic API proxy and the SPA fallback.
+    location ~ ^/api/(aar|ipsec)/stream$ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600;
+        add_header X-Accel-Buffering no;
+    }
+
+    # Gateway-changing commands require an authenticated operator. Create the
+    # password file during deployment:
+    #   sudo htpasswd -c /etc/nginx/.htpasswd-qsr-routing <operator>
+    location = /api/approute/publish {
+        auth_basic "QSR routing operator";
+        auth_basic_user_file /etc/nginx/.htpasswd-qsr-routing;
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-QSR-Operator $remote_user;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 120;
+    }
+
+    # IT/OT inventory, Dynamic Failover, AAR telemetry, route advisor, and
+    # AppRoute publishing are served by the local TypeScript service.
+    location ~ ^/api/(health|ipsec|gateway|aar|approute|insight|insights)(/|$) {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 120;
+    }
+
+    location /static/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    location /ai/ {
+        proxy_pass http://127.0.0.1:3001/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 120;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        chunked_transfer_encoding off;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 256;
+    gzip_types text/plain text/css text/javascript application/javascript application/json image/svg+xml;
+}

@@ -1,0 +1,23 @@
+[Unit]
+Description=QSR IT/OT, Dynamic Failover, and Application Routing API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+# Adjust this path to the checked-out Project_QSR directory on the instance.
+WorkingDirectory=/home/ec2-user/Project_QSR
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3001
+EnvironmentFile=-/etc/qsr-routing.env
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
