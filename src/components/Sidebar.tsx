@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Router, Laptop, Siren, Shuffle, Building2,
   PackagePlus, Sparkles, Settings, GitBranch, Layers, AlertOctagon, FileSearch,
-  TrendingUp, CloudCog, ShieldCheck, Video, Bot, Gauge,
+  TrendingUp, CloudCog, ShieldCheck, Video, Bot, Gauge, Box,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 
@@ -11,6 +11,7 @@ const nav = [
   { to: '/',                 label: 'Overview',                  icon: LayoutDashboard, section: 'Monitor' },
   { to: '/fleet',            label: 'Fleet',                     icon: Building2,       section: 'Monitor' },
   { to: '/connectivity',     label: 'Connectivity',              icon: Router,          section: 'Monitor' },
+  { to: '/gateway-twin',     label: 'Gateway Twin',              icon: Box,             section: 'Monitor' },
   { to: '/it-devices',       label: 'IT Devices',                icon: Laptop,          section: 'Monitor' },
   { to: '/ot-devices',       label: 'OT Devices',                icon: Siren,           section: 'Monitor' },
   { to: '/video-analytics',  label: 'Video Analytics',           icon: Video,           section: 'Monitor' },

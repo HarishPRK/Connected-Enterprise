@@ -32,6 +32,7 @@ const ServiceOfferingsPage       = lazy(() => import('./pages/ServiceOfferings')
 const SecurityPage               = lazy(() => import('./pages/Security').then((m) => ({ default: m.SecurityPage })));
 const VideoAnalyticsPage         = lazy(() => import('./pages/VideoAnalytics').then((m) => ({ default: m.VideoAnalyticsPage })));
 const AgenticAIPage              = lazy(() => import('./pages/AgenticAI').then((m) => ({ default: m.AgenticAIPage })));
+const GatewayTwinPage            = lazy(() => import('./pages/GatewayTwin').then((m) => ({ default: m.GatewayTwinPage })));
 
 // Default branch — McKinney (backed by the prpl/ipsec/metrics live feed).
 // Falls back to the first configured branch if the id ever drifts.
@@ -82,6 +83,7 @@ export default function App() {
                 <Route path="/"               element={<Overview branchId={branchId} onSelectBranch={setBranchId} />} />
                 <Route path="/fleet"          element={<FleetPage />} />
                 <Route path="/connectivity"   element={<Connectivity />} />
+                <Route path="/gateway-twin"   element={<GatewayTwinPage />} />
                 <Route path="/it-devices"     element={<DevicesPage domain="IT" branchId={branchId} />} />
                 <Route path="/ot-devices"     element={<DevicesPage domain="OT" branchId={branchId} />} />
                 <Route path="/service-offerings" element={<ServiceOfferingsPage />} />

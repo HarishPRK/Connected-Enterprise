@@ -1,0 +1,92 @@
+{
+  "id": "gw-operational-twin",
+  "name": "GW Operational Twin — AT&T BGW620-700 All-Fi Hub",
+  "version": "0.1.0",
+  "kind": "embeddable-3d-operational-twin",
+  "entry": "app/index.html",
+  "device": {
+    "model": "BGW620-700",
+    "vendor": "Vantiva (for AT&T)",
+    "fccId": "G95BGW620",
+    "class": "XGS-PON fiber gateway, Wi-Fi 7 tri-band, 5G backup WAN"
+  },
+  "dataContract": {
+    "schema": "TR-181 Device:2 (USP/TR-369-shaped stream)",
+    "source": "in-browser simulator (self-contained; no backend required)",
+    "paths": [
+      "Device.LEDs.LED.1.",
+      "Device.Ethernet.Interface.{i}.",
+      "Device.WiFi.Radio.{i}.",
+      "Device.Optical.Interface.1.",
+      "Device.XPON.ONU.1.",
+      "Device.Cellular.Interface.1.",
+      "Device.DeviceInfo.TemperatureStatus.TemperatureSensor.{i}.",
+      "Device.Hosts.Host.{i}."
+    ]
+  },
+  "requirements": {
+    "runtime": "any browser with WebGL2; no host-app dependencies",
+    "hosting": "serve the app/ folder as static files (relative asset paths — any subpath works)",
+    "liteMode": "?lite=1 skips the GPU-heavy floor reflection for software GL"
+  },
+  "urlParams": {
+    "embed": "1 — activates the postMessage bridge (auto-on inside an iframe)",
+    "scenario": "normal | boot | fwupdate | overheat | outage | cellular | voip",
+    "explode": "0..1 exploded-view amount",
+    "mode": "xray — thermal x-ray shell",
+    "rings": "1 — RF coverage rings",
+    "hosts": "1 — host constellation",
+    "flow": "0 — disable port comet streams",
+    "still": "1 — disable idle auto-rotate",
+    "nohud": "1 — hide all 2D chrome (recommended for tiles/cards)",
+    "lite": "1 — skip floor reflection (software GL)",
+    "az | pol | dist | tx | ty": "camera pose (degrees / meters)",
+    "port": "select a rear-bay port (lan1 lan2 lan3 ont usb fiber sfp phone fiveg)"
+  },
+  "postMessage": {
+    "inbound": {
+      "envelope": { "target": "gw-twin", "type": "<command>", "payload": {} },
+      "commands": {
+        "set-scenario": { "scenario": "ScenarioId" },
+        "set-explode": { "value": "0..1" },
+        "set-mode": { "mode": "solid | xray" },
+        "set-overlays": { "rings": "bool?", "hosts": "bool?", "flow": "bool?", "atmos": "bool?" },
+        "set-auto-rotate": { "value": "bool" },
+        "set-hud": { "hidden": "bool" },
+        "focus-part": { "id": "PartId | null" },
+        "select-port": { "port": "PortId | null" },
+        "get-state": {}
+      }
+    },
+    "outbound": {
+      "envelope": { "source": "gw-twin", "type": "<event>", "payload": {} },
+      "events": {
+        "ready": "once — { version, scenarios[], parts[] }",
+        "state": "every 2 s + on change — { scenario, mode, explode, led, health, temps[], optical, ports[] }",
+        "event": "per feed entry — { t, severity, text, src }"
+      }
+    }
+  },
+  "scenarios": [
+    { "id": "normal", "label": "Normal" },
+    { "id": "boot", "label": "Boot sequence" },
+    { "id": "fwupdate", "label": "Firmware update" },
+    { "id": "overheat", "label": "Overheat" },
+    { "id": "outage", "label": "Fiber outage" },
+    { "id": "cellular", "label": "Cellular failover" },
+    { "id": "voip", "label": "VoIP problem" }
+  ],
+  "parts": [
+    { "id": "vent", "label": "Exhaust crown" },
+    { "id": "sleeve", "label": "Outer sleeve" },
+    { "id": "base", "label": "Intake pod" },
+    { "id": "portbay", "label": "Service facia" },
+    { "id": "lightpipe", "label": "Status light pipe" },
+    { "id": "heatsink-l", "label": "Heatsink — left bank" },
+    { "id": "heatsink-r", "label": "Heatsink — right bank" },
+    { "id": "mainboard", "label": "Main board" },
+    { "id": "rfboard", "label": "Wi-Fi 7 radio board" },
+    { "id": "thread-combo", "label": "Qorvo QPG7015M" },
+    { "id": "antenna-0", "label": "5G antenna" }
+  ]
+}
