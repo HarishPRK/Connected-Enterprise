@@ -2365,6 +2365,10 @@ type ForceMode = "auto" | "fiber" | "5g";
  *  across tunnels) as a roadmap capability. */
 type ViewMode = "live" | "target";
 
+/** What an active downstream path is visualising. `infra` keeps the gateway →
+ *  internet path visible when no client inventory has been discovered yet. */
+type TunnelCarry = "it" | "ot" | "both" | "infra";
+
 /** Device-class colours — shared by the device links, the topology flows, and
  *  the per-tunnel rows so the IT/OT story reads consistently everywhere. */
 const IT_COLOR = "#34d399"; // emerald — IT devices
@@ -2472,17 +2476,6 @@ function GatewayBlock({
   // The gateway's topic family — drives which IoT Core topic the command is
   // published to. Falls back to 'rdk' for the captured-sample / unknown case.
   const source: "rdk" | "prpl" = g.source === "prpl" ? "prpl" : "rdk";
-
-  // Device presence — gate the per-tunnel rows' IT/OT tags so they match the
-  // topology (no IT devices ⇒ no IT tag, same as no IT flow in the diagram).
-  // Strictly filter by gateway source so Plano (rdk) and McKinney (prpl) never
-  // mix — only devices whose locationSource matches this gateway are counted.
-  const { devices: blockDevicesAll } = useDevices();
-  const blockDevices = blockDevicesAll.filter(
-    (d) => d.locationSource === source,
-  );
-  const hasIT = blockDevices.some((d) => d.domain === "IT");
-  const hasOT = blockDevices.some((d) => d.domain === "OT");
 
   const commandTitle = (cmd: PathCommand) =>
     cmd === "auto"
@@ -2697,11 +2690,7 @@ function GatewayBlock({
     const underlay = inferUnderlay(t.ifname);
     const list = underlay === "fiber" ? fiberOrdered : cellOrdered;
     const idx = list.findIndex((x) => x.ifname === t.ifname);
-    const cls = routeClassFor(forceMode, underlay, idx);
-    // Drop the tag when that class has no connected devices.
-    if (cls === "it" && !hasIT) return null;
-    if (cls === "ot" && !hasOT) return null;
-    return cls;
+    return routeClassFor(forceMode, underlay, idx);
   };
   // A row is "active/carrying": in target view, if it carries a class; in live
   // view, if it's the device's single active tunnel.
@@ -3048,10 +3037,12 @@ function IpsecFlowSvg({
   const otAll = allDevices.filter((d) => d.domain === "OT");
   const itDevices = itAll.slice(0, 3);
   const otDevices = otAll.slice(0, 3);
-  // Whether each class actually has connected devices — the topology only draws
-  // a class's traffic flow when devices of that class are present.
+  // Device presence only controls the endpoint links into the gateway. The
+  // gateway → tunnel → cloud path represents infrastructure availability and
+  // remains active even when the client inventory is empty.
   const hasIT = itAll.length > 0;
   const hasOT = otAll.length > 0;
+  const hasClients = hasIT || hasOT;
 
   // Hover tooltip — which tunnel is hovered + pointer position within the wrap.
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -3161,8 +3152,9 @@ function IpsecFlowSvg({
   const anyReachable = fiberReachable || cellReachable;
 
   // ── Routing visualisation — live vs target-policy ──
-  // Live: the device's single active tunnel carries everything ("both"). Target:
-  // the app-aware policy splits IT/OT across tunnels (shared `routeClassFor`).
+  // Live: the device's single active tunnel carries everything ("both"), or a
+  // generic infrastructure heartbeat when there are no clients. Target: the
+  // app-aware policy splits IT/OT across tunnels (shared `routeClassFor`).
   // `tunnelCarry` is the single source of truth used by every flow leg, pill,
   // row, and badge so the whole page stays consistent.
   const isTarget = viewMode === "target";
@@ -3171,42 +3163,44 @@ function IpsecFlowSvg({
     ? inferUnderlay(activeIfname)
     : null;
 
-  // Drop a class when it has no connected devices — no IT devices ⇒ no IT flow.
-  const presentClass = (cls: "it" | "ot" | null): "it" | "ot" | null => {
-    if (cls === "it") return hasIT ? "it" : null;
-    if (cls === "ot") return hasOT ? "ot" : null;
-    return null;
-  };
-
   const tunnelCarry = (
     underlay: Underlay,
     idx: number,
     ifname: string,
-  ): "it" | "ot" | "both" | null => {
-    if (isTarget) return presentClass(routeClassFor(forceMode, underlay, idx));
-    // Live: the single active tunnel carries whichever classes are connected.
+  ): TunnelCarry | null => {
+    // Target policy is infrastructure configuration, so its routes stay visible
+    // regardless of whether client discovery has populated yet.
+    if (isTarget) return routeClassFor(forceMode, underlay, idx);
+    // Live: the selected tunnel remains the active infrastructure path even at
+    // zero clients; endpoint inventory only affects the links left of gateway.
     if (!ifname || ifname !== activeIfname) return null;
     if (hasIT && hasOT) return "both";
     if (hasIT) return "it";
     if (hasOT) return "ot";
-    return null;
+    return "infra";
   };
   // "both" (live single active tunnel) leads with IT emerald; its trailing
   // particle is OT pink (set per-leg) so one tunnel shows IT+OT together.
-  const carryColorOf = (carry: "it" | "ot" | "both") =>
-    carry === "it" ? IT_COLOR : carry === "ot" ? OT_COLOR : IT_COLOR;
+  const carryColorOf = (carry: TunnelCarry) =>
+    carry === "it"
+      ? IT_COLOR
+      : carry === "ot"
+        ? OT_COLOR
+        : carry === "infra"
+          ? c.ok
+          : IT_COLOR;
 
-  // Carrier tunnels for the gateway badge (target = IT/OT carriers, only when
-  // that class has devices; live = the single active tunnel).
+  // Carrier tunnels for the gateway badge (target = configured IT/OT carriers;
+  // live = the single active tunnel), independent of client inventory.
   const itCarrierTunnel =
-    isTarget && hasIT
+    isTarget
       ? (fiberTunnels.find(
           (_t, i) => routeClassFor(forceMode, "fiber", i) === "it",
         ) ??
         cellTunnels.find((_t, i) => routeClassFor(forceMode, "5g", i) === "it"))
       : undefined;
   const otCarrierTunnel =
-    isTarget && hasOT
+    isTarget
       ? (fiberTunnels.find(
           (_t, i) => routeClassFor(forceMode, "fiber", i) === "ot",
         ) ??
@@ -3216,7 +3210,8 @@ function IpsecFlowSvg({
     ? undefined
     : m.tunnels.find((t) => t.ifname === activeIfname);
 
-  // An underlay reads as "active" only if it carries a *present* class's traffic.
+  // An underlay reads as active when a reachable tunnel carries the live or
+  // configured infrastructure path.
   const fiberActive = fiberTunnels.some(
     (t, i) => tunnelCarry("fiber", i, t.ifname) != null && t.reachable,
   );
@@ -3274,8 +3269,8 @@ function IpsecFlowSvg({
       .join(" ");
   };
 
-  // Section title + legend reflect the current view — and only list a class when
-  // it actually has connected devices (so the key matches the drawn flows).
+  // Section title + legend reflect the current view. At zero clients, call out
+  // that the infrastructure path remains active instead of implying user traffic.
   const sectionTitle = isTarget
     ? "Application-aware routing"
     : "Live path · single active tunnel";
@@ -3293,12 +3288,17 @@ function IpsecFlowSvg({
         ? "OT devices → 5G · T4"
         : "OT devices → 5G"
     : `OT → ${activeIfname || "active"}`;
-  const legend: { color: string; label: string }[] = [
-    ...(hasIT ? [{ color: IT_COLOR, label: itLabel }] : []),
-    ...(hasOT ? [{ color: OT_COLOR, label: otLabel }] : []),
-  ];
-  if (legend.length === 0) {
-    legend.push({ color: c.textMuted, label: "No device traffic" });
+  const legend: { color: string; label: string }[] = isTarget
+    ? [
+        { color: IT_COLOR, label: itLabel },
+        { color: OT_COLOR, label: otLabel },
+      ]
+    : [
+        ...(hasIT ? [{ color: IT_COLOR, label: itLabel }] : []),
+        ...(hasOT ? [{ color: OT_COLOR, label: otLabel }] : []),
+      ];
+  if (!hasClients) {
+    legend.push({ color: c.ok, label: "Infrastructure path active · no clients" });
   }
 
   return (
@@ -3496,9 +3496,9 @@ function IpsecFlowSvg({
         />
 
         {/* ─── Gateway → underlays ───
-            Live: both IT+OT merge into the single active tunnel, so draw ONE
-            unified active leg (green — matches the flow downstream); the other
-            underlay shows as a dim standby in its own colour.
+            Live: connected client classes merge into the single active tunnel;
+            with no clients, a generic infrastructure leg remains active. The
+            other underlay shows as a dim standby in its own colour.
             Target: class-steered split — IT and OT each into their underlay
             (parallel, non-crossing, when they share one). */}
         {(() => {
@@ -3527,14 +3527,24 @@ function IpsecFlowSvg({
           );
 
           if (!isTarget) {
-            // Live — the connected classes converge on the device's single
-            // active tunnel. Only draw a class's line if it has devices; when
-            // both are present they run parallel, otherwise the one runs centred.
+            // Live — connected classes converge on the device's active tunnel.
+            // With no clients, keep one centred infrastructure connector flowing.
             const end = activeUnderlayOf === "fiber" ? fiberLeft : cellLeft;
             const both = hasIT && hasOT;
             const noDevices = !hasIT && !hasOT;
             return (
               <>
+                {activeUnderlayOf && noDevices && (
+                  <NodeConnector
+                    a={gwRight}
+                    b={end}
+                    state="ok"
+                    c={c}
+                    beziD={beziD}
+                    accent={c.ok}
+                    flowing
+                  />
+                )}
                 {activeUnderlayOf && hasIT && (
                   <NodeConnector
                     a={{ x: gwRight.x, y: gwRight.y + (both ? -6 : 0) }}
@@ -3557,10 +3567,8 @@ function IpsecFlowSvg({
                     flowing
                   />
                 )}
-                {/* Always show both underlay links as dashed connectors when
-                    no devices are discovered — the gateway still has paths. */}
-                {(activeUnderlayOf !== "fiber" || noDevices) && standbyFiber}
-                {(activeUnderlayOf !== "5g" || noDevices) && standbyCell}
+                {activeUnderlayOf !== "fiber" && standbyFiber}
+                {activeUnderlayOf !== "5g" && standbyCell}
               </>
             );
           }
@@ -3577,28 +3585,24 @@ function IpsecFlowSvg({
           };
           return (
             <>
-              {hasOT && (
-                <NodeConnector
-                  a={startFor(otUnderlay, -5)}
-                  b={endFor(otUnderlay, -8)}
-                  state="ok"
-                  c={c}
-                  beziD={beziD}
-                  accent={OT_COLOR}
-                  flowing
-                />
-              )}
-              {hasIT && (
-                <NodeConnector
-                  a={startFor(itUnderlay, 5)}
-                  b={endFor(itUnderlay, 8)}
-                  state="ok"
-                  c={c}
-                  beziD={beziD}
-                  accent={IT_COLOR}
-                  flowing
-                />
-              )}
+              <NodeConnector
+                a={startFor(otUnderlay, -5)}
+                b={endFor(otUnderlay, -8)}
+                state="ok"
+                c={c}
+                beziD={beziD}
+                accent={OT_COLOR}
+                flowing
+              />
+              <NodeConnector
+                a={startFor(itUnderlay, 5)}
+                b={endFor(itUnderlay, 8)}
+                state="ok"
+                c={c}
+                beziD={beziD}
+                accent={IT_COLOR}
+                flowing
+              />
               {itUnderlay !== "fiber" && otUnderlay !== "fiber" && standbyFiber}
               {itUnderlay !== "5g" && otUnderlay !== "5g" && standbyCell}
             </>
