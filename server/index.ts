@@ -17,7 +17,12 @@ import { ipsecSource } from './ipsecSource.js';
 import { decodeAppRouteCommand, type AppRouteCommand } from './appRouteProto.js';
 import { deviceSource } from './deviceSource.js';
 import { historySeries } from './telemetryHistory.js';
-import { gatewayTwinSource } from './gatewayTwinSource.js';
+import {
+  gatewayTwinSource,
+  type GatewayTwinLogBatch,
+  type GatewayTwinTelemetry,
+  type GatewayTwinUpstreamState,
+} from './gatewayTwinSource.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -808,35 +813,41 @@ app.get('/api/gateway-logs/stream', (req, res) => {
     res.write(`${idLine}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
-  // EventSource uses this after a dropped connection. Only log batches carry
-  // ids; current connection state and latest telemetry are always rehydrated.
-  res.write('retry: 2000\n\n');
-  writeEvent('state', gatewayTwinSource.getState());
-  for (const telemetry of gatewayTwinSource.getLatestTelemetry()) {
-    writeEvent('device-telemetry', telemetry);
-  }
+  type BufferedGatewayEvent =
+    | { event: 'state'; data: GatewayTwinUpstreamState }
+    | { event: 'device-telemetry'; data: GatewayTwinTelemetry }
+    | { event: 'log-batch'; data: GatewayTwinLogBatch };
 
-  const rawLastEventId = req.get('Last-Event-ID') ?? '';
-  const parsedLastEventId = Number.parseInt(rawLastEventId, 10);
-  const lastEventId = Number.isSafeInteger(parsedLastEventId) && parsedLastEventId >= 0
-    ? parsedLastEventId
-    : undefined;
-  for (const batch of gatewayTwinSource.getHistoryAfter(lastEventId)) {
-    writeEvent('log-batch', batch, batch.id);
-  }
+  const bufferedEvents: BufferedGatewayEvent[] = [];
+  let hydrating = true;
 
-  const offState = gatewayTwinSource.onState((state) => writeEvent('state', state));
+  const deliver = (item: BufferedGatewayEvent) => {
+    writeEvent(item.event, item.data, item.event === 'log-batch' ? item.data.id : undefined);
+  };
+  const bufferOrDeliver = (item: BufferedGatewayEvent) => {
+    if (hydrating) {
+      bufferedEvents.push(item);
+      return;
+    }
+    deliver(item);
+  };
+
+  // Subscribe before taking any snapshots. GatewayTwinSource updates its
+  // in-memory state before emitting, so everything queued through the capture
+  // boundary is already represented by the synchronous baseline below. Any
+  // delivery triggered while that baseline is being written remains buffered
+  // and is flushed afterwards in original emission order.
+  const offState = gatewayTwinSource.onState((state) => {
+    bufferOrDeliver({ event: 'state', data: state });
+  });
   const offTelemetry = gatewayTwinSource.onTelemetry((telemetry) => {
-    writeEvent('device-telemetry', telemetry);
+    bufferOrDeliver({ event: 'device-telemetry', data: telemetry });
   });
   const offBatch = gatewayTwinSource.onBatch((batch) => {
-    writeEvent('log-batch', batch, batch.id);
+    bufferOrDeliver({ event: 'log-batch', data: batch });
   });
 
-  const heartbeat = setInterval(() => {
-    if (res.writable && !res.writableEnded) res.write(': keep-alive\n\n');
-  }, 15_000);
-
+  let heartbeat: NodeJS.Timeout | undefined;
   let cleanedUp = false;
   const cleanup = () => {
     if (cleanedUp) return;
@@ -844,11 +855,54 @@ app.get('/api/gateway-logs/stream', (req, res) => {
     offState();
     offTelemetry();
     offBatch();
-    clearInterval(heartbeat);
+    if (heartbeat) clearInterval(heartbeat);
     if (!res.writableEnded) res.end();
   };
+  // Install cleanup before the first write so an immediately disconnected
+  // client cannot leave its just-registered source listeners behind.
   req.once('close', cleanup);
   res.once('close', cleanup);
+
+  // EventSource uses this after a dropped connection. Only log batches carry
+  // ids; current connection state and latest telemetry are always rehydrated.
+  const rawLastEventId = req.get('Last-Event-ID') ?? '';
+  const parsedLastEventId = Number.parseInt(rawLastEventId, 10);
+  const lastEventId = Number.isSafeInteger(parsedLastEventId) && parsedLastEventId >= 0
+    ? parsedLastEventId
+    : undefined;
+  const initialState = gatewayTwinSource.getState();
+  const initialTelemetry = gatewayTwinSource.getLatestTelemetry();
+  const initialHistory = gatewayTwinSource.getHistoryAfter(lastEventId);
+  const snapshotBoundary = bufferedEvents.length;
+
+  if (cleanedUp) return;
+  res.write('retry: 2000\n\n');
+  writeEvent('state', initialState);
+  for (const telemetry of initialTelemetry) {
+    writeEvent('device-telemetry', telemetry);
+  }
+  for (const batch of initialHistory) {
+    writeEvent('log-batch', batch, batch.id);
+  }
+
+  // Events before snapshotBoundary are already represented by the
+  // captured latest-state/latest-per-topic/history baseline. Later events are
+  // true deltas and must be delivered exactly once after hydration.
+  if (!cleanedUp) {
+    for (let index = snapshotBoundary; index < bufferedEvents.length; index += 1) {
+      deliver(bufferedEvents[index]);
+    }
+  }
+  // Keep buffering while draining so a synchronous/re-entrant source emit is
+  // appended and preserves its position behind events that were already queued.
+  hydrating = false;
+  bufferedEvents.length = 0;
+
+  if (!cleanedUp) {
+    heartbeat = setInterval(() => {
+      if (res.writable && !res.writableEnded) res.write(': keep-alive\n\n');
+    }, 15_000);
+  }
 });
 
 /** Snapshot of the latest decoded payload for every gateway we've seen. */

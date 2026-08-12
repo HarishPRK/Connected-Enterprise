@@ -27,6 +27,9 @@ import { gatewayTwinSource } from './gatewayTwinSource.js';
 const ENDPOINT  = process.env.IOT_ENDPOINT ?? 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';
 const REGION    = process.env.IOT_REGION   ?? process.env.AWS_REGION ?? 'us-east-1';
 const CLIENT_ID = process.env.IOT_CLIENT_ID ?? `ce-server-${Math.random().toString(36).slice(2, 10)}`;
+const SUBSCRIBE_MAX_ATTEMPTS = 3;
+const SUBSCRIBE_RETRY_BASE_MS = 250;
+const GATEWAY_TWIN_RETRY_MS = 5_000;
 
 // We subscribe to one topic per gateway family. Defaults cover Plano (rdk)
 // and McKinney (prpl). Override the whole list with `IOT_IPSEC_TOPICS` as a
@@ -221,6 +224,14 @@ class IpsecSource extends EventEmitter {
   private connected = false;
   private lastError?: string;
   private gatewayTwinSubscribed = false;
+  private gatewayTwinSubscribedTopics = new Set<string>();
+  private gatewayTwinSubscriptionGeneration = 0;
+  private gatewayTwinRetryTimer?: NodeJS.Timeout;
+  /** Serializes full subscription refreshes so a reconnect cannot race the
+   *  initial registration pass or another resume event. */
+  private subscriptionRefresh: Promise<void> = Promise.resolve();
+  /** Reconnects re-register Shelly topics, but must not create another poller. */
+  private shellyStatusPoll?: NodeJS.Timeout;
   /** In-flight path-control commands keyed by correlation id. */
   private pendingPathCmds = new Map<string, (r: PathCommandResult) => void>();
   /** In-flight Matter control commands keyed by requestId. */
@@ -297,6 +308,7 @@ class IpsecSource extends EventEmitter {
       this.connection.on('interrupt', (err) => {
         this.connected = false;
         this.lastError = err?.error ?? String(err);
+        this.resetGatewayTwinSubscriptions();
         gatewayTwinSource.setConnectionState('reconnecting', this.lastError);
         // eslint-disable-next-line no-console
         console.warn('[ipsec] connection interrupted:', this.lastError);
@@ -305,13 +317,13 @@ class IpsecSource extends EventEmitter {
       this.connection.on('resume', (_returnCode, sessionPresent) => {
         this.connected = true;
         this.lastError = undefined;
-        // This client normally uses a clean session, so an interrupted
-        // connection returns without broker-side subscriptions. Re-establish
-        // the Twin topics before claiming the SSE source is connected.
+        // A clean session returns without any broker-side subscriptions.
+        // Re-register every topic family (not just the Gateway Twin) so IPsec,
+        // path control, inventory, AAR, Matter, and Shelly feeds all recover.
         if (!sessionPresent) {
-          this.gatewayTwinSubscribed = false;
+          this.resetGatewayTwinSubscriptions();
           gatewayTwinSource.setConnectionState('connecting');
-          void this.subscribeGatewayTwinTopics();
+          void this.refreshSubscriptions();
         } else if (this.gatewayTwinSubscribed) {
           gatewayTwinSource.setConnectionState('connected');
         } else {
@@ -323,6 +335,7 @@ class IpsecSource extends EventEmitter {
       });
       this.connection.on('disconnect', () => {
         this.connected = false;
+        this.resetGatewayTwinSubscriptions();
         gatewayTwinSource.setConnectionState('offline');
         // eslint-disable-next-line no-console
         console.log('[ipsec] disconnected');
@@ -338,112 +351,7 @@ class IpsecSource extends EventEmitter {
       });
 
       await this.connection.connect();
-
-      // Subscribe to every configured topic. Each gateway's payload carries
-      // its own `gateway.name`; we tag the cached state with the source so the
-      // UI can route Plano (`rdk/...`) and McKinney (`prpl/...`) separately.
-      for (const topic of SUBSCRIBE_TOPICS) {
-        await this.connection.subscribe(
-          topic,
-          mqtt.QoS.AtMostOnce,
-          (t, payload) => this.handleMessage(t, payload),
-        );
-      }
-
-      // The Gateway Twin shares this exact AWS IoT connection. Its source owns
-      // decoding/history/SSE state only; it never opens another MQTT client or
-      // reads X.509 certificate files.
-      await this.subscribeGatewayTwinTopics();
-
-      // Subscribe to the path-control result topics so we can correlate acks
-      // from the gateway's pathcontrol component back to in-flight commands.
-      for (const prefix of PATH_PREFIXES) {
-        await this.connection.subscribe(
-          pathResultTopic(prefix),
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handlePathResult(t, payload),
-        );
-      }
-
-      // Subscribe to the device-inventory topics. The parsed payload is fanned
-      // out via the `inventory` event; deviceSource consumes it.
-      for (const topic of INVENTORY_TOPICS) {
-        await this.connection.subscribe(
-          topic,
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handleInventory(t, payload),
-        );
-      }
-
-      // Subscribe to the AAR routing telemetry topics (proto/aar.proto). Each
-      // message updates the aggregated AAR state and fans out via the `aar`
-      // event; the Application Steering Patchboard consumes it over SSE.
-      for (const topic of AAR_TOPICS) {
-        await this.connection.subscribe(
-          topic,
-          mqtt.QoS.AtMostOnce,
-          (t, payload) => this.handleAarMessage(t, payload),
-        );
-      }
-      // eslint-disable-next-line no-console
-      console.log(`[aar] subscribed to [${AAR_TOPICS.join(', ')}]`);
-
-      // Subscribe to the Matter device-list topics under their own source tag.
-      for (const topic of MATTER_TOPICS) {
-        await this.connection.subscribe(
-          topic,
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handleInventory(t, payload, `${topicToSource(t)}:matter`),
-        );
-      }
-
-      // Subscribe to the Matter control result topic so sendMatterCommand can
-      // correlate the gateway component's acks back to in-flight commands.
-      await this.connection.subscribe(
-        MATTER_RESULT_TOPIC,
-        mqtt.QoS.AtLeastOnce,
-        (t, payload) => this.handleMatterResult(t, payload),
-      );
-
-      // Shelly fleet: status notifications + retained online flag per device,
-      // plus the single RPC reply topic shared by all of them.
-      for (const id of SHELLY_DEVICE_IDS) {
-        await this.connection.subscribe(
-          `${id}/events/rpc`,
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handleShellyEvent(id, payload),
-        );
-        await this.connection.subscribe(
-          `${id}/online`,
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handleShellyOnline(id, payload),
-        );
-        // Full status dumps (relay + sys) and per-component updates.
-        await this.connection.subscribe(
-          `${id}/status`,
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handleShellyStatus(id, payload),
-        );
-        await this.connection.subscribe(
-          `${id}/status/switch:0`,
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handleShellyStatus(id, payload),
-        );
-      }
-      if (SHELLY_DEVICE_IDS.length > 0) {
-        await this.connection.subscribe(
-          `${SHELLY_REPLY_SRC}/rpc`,
-          mqtt.QoS.AtLeastOnce,
-          (t, payload) => this.handleShellyReply(t, payload),
-        );
-        // Pull a full status snapshot now and every minute — NotifyStatus only
-        // carries deltas, so a fresh server would otherwise show stale (often
-        // zero) metering until a value happens to change on the device.
-        for (const id of SHELLY_DEVICE_IDS) this.requestShellyStatus(id);
-        setInterval(() => {
-          for (const id of SHELLY_DEVICE_IDS) this.requestShellyStatus(id);
-        }, 60_000);
-      }
+      await this.refreshSubscriptions();
     } catch (err) {
       this.connected = false;
       this.lastError = err instanceof Error ? err.message : String(err);
@@ -456,33 +364,273 @@ class IpsecSource extends EventEmitter {
     }
   }
 
-  private async subscribeGatewayTwinTopics(): Promise<void> {
+  /** Queue a complete subscription pass. A resume can arrive while the startup
+   *  pass is still unwinding after an interruption; serializing guarantees the
+   *  resumed connection gets a fresh pass without duplicate concurrent SUBSCRIBE
+   *  requests for the same topic. */
+  private refreshSubscriptions(): Promise<void> {
+    const refresh = this.subscriptionRefresh.then(
+      () => this.subscribeAllTopics(),
+      () => this.subscribeAllTopics(),
+    );
+    this.subscriptionRefresh = refresh;
+    return refresh;
+  }
+
+  /** Register every callback used by the shared clean-session MQTT connection.
+   *  Topic failures are isolated so one rejected SUBACK cannot prevent unrelated
+   *  feeds later in the pass from recovering. */
+  private async subscribeAllTopics(): Promise<void> {
     if (!this.connection) {
       gatewayTwinSource.setConnectionState('error', 'AWS IoT connection is not initialized');
       return;
     }
-    try {
-      const topics = gatewayTwinSource.getSubscriptionTopics();
-      for (const topic of topics) {
-        const granted = await this.connection.subscribe(
+
+    const failures: string[] = [];
+    const subscribe = async (
+      scope: string,
+      topic: string,
+      qos: mqtt.QoS,
+      onMessage: mqtt.OnMessageCallback,
+    ): Promise<void> => {
+      try {
+        await this.subscribeTopicWithRetry(scope, topic, qos, onMessage);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        failures.push(`${scope}:${topic} (${detail})`);
+        console.error(`[${scope}] failed to subscribe to ${topic}:`, err);
+      }
+    };
+
+    // Each gateway payload carries its own name. The callback tags cached state
+    // with the topic family so Plano (`rdk/...`) and McKinney (`prpl/...`) remain
+    // independently routable after both startup and reconnect.
+    for (const topic of SUBSCRIBE_TOPICS) {
+      await subscribe(
+        'ipsec',
+        topic,
+        mqtt.QoS.AtMostOnce,
+        (t, payload) => this.handleMessage(t, payload),
+      );
+    }
+
+    // The Gateway Twin shares this exact connection. It owns decoding, history,
+    // and SSE state, but never creates a second MQTT client.
+    await this.subscribeGatewayTwinTopics();
+
+    for (const prefix of PATH_PREFIXES) {
+      const topic = pathResultTopic(prefix);
+      await subscribe(
+        'path-control',
+        topic,
+        mqtt.QoS.AtLeastOnce,
+        (t, payload) => this.handlePathResult(t, payload),
+      );
+    }
+
+    for (const topic of INVENTORY_TOPICS) {
+      await subscribe(
+        'inventory',
+        topic,
+        mqtt.QoS.AtLeastOnce,
+        (t, payload) => this.handleInventory(t, payload),
+      );
+    }
+
+    for (const topic of AAR_TOPICS) {
+      await subscribe(
+        'aar',
+        topic,
+        mqtt.QoS.AtMostOnce,
+        (t, payload) => this.handleAarMessage(t, payload),
+      );
+    }
+
+    for (const topic of MATTER_TOPICS) {
+      await subscribe(
+        'matter-inventory',
+        topic,
+        mqtt.QoS.AtLeastOnce,
+        (t, payload) => this.handleInventory(t, payload, `${topicToSource(t)}:matter`),
+      );
+    }
+
+    await subscribe(
+      'matter-control',
+      MATTER_RESULT_TOPIC,
+      mqtt.QoS.AtLeastOnce,
+      (t, payload) => this.handleMatterResult(t, payload),
+    );
+
+    for (const id of SHELLY_DEVICE_IDS) {
+      await subscribe(
+        'shelly',
+        `${id}/events/rpc`,
+        mqtt.QoS.AtLeastOnce,
+        (_t, payload) => this.handleShellyEvent(id, payload),
+      );
+      await subscribe(
+        'shelly',
+        `${id}/online`,
+        mqtt.QoS.AtLeastOnce,
+        (_t, payload) => this.handleShellyOnline(id, payload),
+      );
+      await subscribe(
+        'shelly',
+        `${id}/status`,
+        mqtt.QoS.AtLeastOnce,
+        (_t, payload) => this.handleShellyStatus(id, payload),
+      );
+      await subscribe(
+        'shelly',
+        `${id}/status/switch:0`,
+        mqtt.QoS.AtLeastOnce,
+        (_t, payload) => this.handleShellyStatus(id, payload),
+      );
+    }
+
+    if (SHELLY_DEVICE_IDS.length > 0) {
+      await subscribe(
+        'shelly',
+        `${SHELLY_REPLY_SRC}/rpc`,
+        mqtt.QoS.AtLeastOnce,
+        (t, payload) => this.handleShellyReply(t, payload),
+      );
+
+      // NotifyStatus only carries deltas, so pull a complete snapshot on each
+      // connection. Keep a single minute poller across any number of resumes.
+      for (const id of SHELLY_DEVICE_IDS) this.requestShellyStatus(id);
+      if (!this.shellyStatusPoll) {
+        this.shellyStatusPoll = setInterval(() => {
+          for (const id of SHELLY_DEVICE_IDS) this.requestShellyStatus(id);
+        }, 60_000);
+      }
+    }
+
+    if (failures.length > 0) {
+      console.error(`[ipsec] subscription refresh completed with ${failures.length} failure(s): ${failures.join('; ')}`);
+    } else {
+      console.log('[ipsec] all shared MQTT subscriptions are active');
+    }
+  }
+
+  /** Subscribe with bounded exponential backoff. The AWS CRT promise normally
+   *  rejects for a failed SUBACK, but the explicit error-code check also covers
+   *  alternate SDK implementations and mocks. */
+  private async subscribeTopicWithRetry(
+    scope: string,
+    topic: string,
+    qos: mqtt.QoS,
+    onMessage: mqtt.OnMessageCallback,
+  ): Promise<void> {
+    let lastError = 'unknown subscription error';
+
+    for (let attempt = 1; attempt <= SUBSCRIBE_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        if (!this.connection) throw new Error('AWS IoT connection is not initialized');
+        const granted = await this.connection.subscribe(topic, qos, onMessage);
+        if (granted.error_code) {
+          throw new Error(`AWS IoT rejected the SUBACK (error ${granted.error_code})`);
+        }
+        return;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        if (attempt === SUBSCRIBE_MAX_ATTEMPTS) break;
+
+        const retryMs = SUBSCRIBE_RETRY_BASE_MS * (2 ** (attempt - 1));
+        console.warn(
+          `[${scope}] subscribe to ${topic} failed (${lastError}); retrying in ${retryMs}ms `
+          + `(${attempt + 1}/${SUBSCRIBE_MAX_ATTEMPTS})`,
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, retryMs));
+      }
+    }
+
+    throw new Error(`subscription failed after ${SUBSCRIBE_MAX_ATTEMPTS} attempts: ${lastError}`);
+  }
+
+  private resetGatewayTwinSubscriptions(): void {
+    this.gatewayTwinSubscriptionGeneration += 1;
+    this.gatewayTwinSubscribed = false;
+    this.gatewayTwinSubscribedTopics.clear();
+    if (this.gatewayTwinRetryTimer) {
+      clearTimeout(this.gatewayTwinRetryTimer);
+      this.gatewayTwinRetryTimer = undefined;
+    }
+  }
+
+  /** Keep retrying only the missing Twin topics after a bounded subscription
+   *  pass is exhausted. This repairs transient/policy-rollout failures without
+   *  waiting for another MQTT disconnect to trigger the next attempt. */
+  private scheduleGatewayTwinRetry(): void {
+    if (this.gatewayTwinRetryTimer || !this.connected) return;
+
+    this.gatewayTwinRetryTimer = setTimeout(() => {
+      this.gatewayTwinRetryTimer = undefined;
+      if (!this.connected) return;
+
+      const missingTopics = gatewayTwinSource.getSubscriptionTopics()
+        .filter((topic) => !this.gatewayTwinSubscribedTopics.has(topic));
+      if (missingTopics.length > 0) {
+        void this.subscribeGatewayTwinTopics(missingTopics);
+      }
+    }, GATEWAY_TWIN_RETRY_MS);
+    this.gatewayTwinRetryTimer.unref?.();
+  }
+
+  private async subscribeGatewayTwinTopics(topicsToSubscribe?: readonly string[]): Promise<void> {
+    if (!this.connection) {
+      gatewayTwinSource.setConnectionState('error', 'AWS IoT connection is not initialized');
+      return;
+    }
+
+    const generation = this.gatewayTwinSubscriptionGeneration;
+    const expectedTopics = gatewayTwinSource.getSubscriptionTopics();
+    const topics = topicsToSubscribe ?? expectedTopics;
+    const failures: string[] = [];
+
+    // Treat every Twin topic independently. A policy or transient failure on
+    // one topic must not prevent later telemetry topics from being registered.
+    for (const topic of topics) {
+      try {
+        await this.subscribeTopicWithRetry(
+          'gateway-twin',
           topic,
           mqtt.QoS.AtLeastOnce,
           (t, payload, duplicate) => gatewayTwinSource.ingest(t, payload, duplicate),
         );
-        if (granted.error_code) {
-          throw new Error(`AWS IoT rejected ${topic} (error ${granted.error_code})`);
-        }
+        if (generation !== this.gatewayTwinSubscriptionGeneration) return;
+        this.gatewayTwinSubscribedTopics.add(topic);
+      } catch (err) {
+        if (generation !== this.gatewayTwinSubscriptionGeneration) return;
+        failures.push(`${topic}: ${err instanceof Error ? err.message : String(err)}`);
       }
+    }
+
+    if (generation !== this.gatewayTwinSubscriptionGeneration) return;
+    const missingTopics = expectedTopics
+      .filter((topic) => !this.gatewayTwinSubscribedTopics.has(topic));
+
+    if (missingTopics.length === 0) {
       this.gatewayTwinSubscribed = true;
       gatewayTwinSource.setConnectionState('connected');
-      console.log(`[gateway-twin] subscribed to [${topics.join(', ')}] on the shared IoT connection`);
-    } catch (err) {
+      if (this.gatewayTwinRetryTimer) {
+        clearTimeout(this.gatewayTwinRetryTimer);
+        this.gatewayTwinRetryTimer = undefined;
+      }
+      console.log(`[gateway-twin] subscribed to [${expectedTopics.join(', ')}] on the shared IoT connection`);
+    } else {
       this.gatewayTwinSubscribed = false;
-      const detail = err instanceof Error ? err.message : String(err);
+      const detail = failures.length > 0
+        ? failures.join('; ')
+        : `missing SUBACK for ${missingTopics.join(', ')}`;
       gatewayTwinSource.setConnectionState('error', `AWS IoT subscription failed: ${detail}`);
       // Do not fail the IPsec/device subscriptions if only the Twin topic policy
       // is missing; the rest of Connected Enterprise remains operational.
-      console.error('[gateway-twin] failed to subscribe:', err);
+      console.error(
+        `[gateway-twin] ${missingTopics.length}/${expectedTopics.length} topic(s) are not subscribed: ${detail}`,
+      );
+      this.scheduleGatewayTwinRetry();
     }
   }
 
@@ -863,6 +1011,7 @@ class IpsecSource extends EventEmitter {
     // we intentionally do NOT put `tunnel` on the wire so the published command
     // matches exactly what the component expects. Re-add it here once the
     // gateway gains a tunnel-pinning endpoint.
+    void tunnel;
     const payload: Record<string, unknown> = { id, mode };
 
     try {

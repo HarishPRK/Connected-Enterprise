@@ -230,6 +230,10 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 
 export class GatewayTwinSource extends EventEmitter {
   private config?: SourceConfig;
+  /** Message delivery proves the MQTT transport is alive, but readiness also
+   *  requires every configured topic to have an accepted SUBACK. ipsecSource
+   *  drives this flag through setConnectionState after each subscription pass. */
+  private subscriptionsReady = false;
   // Epoch-based ids stay monotonic across normal server restarts. Starting at
   // 1 would make a reconnecting EventSource send a larger Last-Event-ID from
   // the previous process and suppress new replay entries until the counter
@@ -285,6 +289,7 @@ export class GatewayTwinSource extends EventEmitter {
   }
 
   setConnectionState(state: GatewayTwinConnectionState, error: string | null = null): void {
+    this.subscriptionsReady = state === 'connected';
     this.upstream = {
       ...this.upstream,
       state,
@@ -381,12 +386,15 @@ export class GatewayTwinSource extends EventEmitter {
   }
 
   private noteSuccessfulMessage(receivedAt: number, statusMessage: boolean): void {
-    const shouldBroadcastState = this.upstream.state !== 'connected' || this.upstream.error !== null;
+    const shouldBroadcastState = this.subscriptionsReady
+      && (this.upstream.state !== 'connected' || this.upstream.error !== null);
     this.upstream = {
       ...this.upstream,
-      state: 'connected',
-      error: null,
-      connectedAt: this.upstream.connectedAt ?? receivedAt,
+      state: this.subscriptionsReady ? 'connected' : this.upstream.state,
+      error: this.subscriptionsReady ? null : this.upstream.error,
+      connectedAt: this.subscriptionsReady
+        ? this.upstream.connectedAt ?? receivedAt
+        : this.upstream.connectedAt,
       lastMessageAt: receivedAt,
       lastStatusAt: statusMessage ? receivedAt : this.upstream.lastStatusAt,
     };
