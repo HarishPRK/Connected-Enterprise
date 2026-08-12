@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import GatewayTwinEmbed, {
   type GatewayTwinHandle,
@@ -7,6 +8,7 @@ import GatewayTwinEmbed, {
   type TwinState,
 } from '../components/GatewayTwinEmbed';
 import { BRANCH_TO_IPSEC_SOURCE, branches } from '../data/mock';
+import { useToast } from '../ui/Toast';
 
 /* ─────────── Gateway Digital Twin
  * Embeds the GW Operational Twin widget (public/widgets/gw-twin — built from
@@ -60,10 +62,15 @@ function sourceStatus(
 }
 
 export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
+  const pageRef = useRef<HTMLDivElement>(null);
   const twin = useRef<GatewayTwinHandle>(null);
+  const fullscreenErrorAt = useRef(0);
   const [scenario, setScenario] = useState<TwinScenario>('normal');
   const [twinState, setTwinState] = useState<TwinState>();
   const [ready, setReady] = useState(false);
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const { push } = useToast();
   const branch = branches.find((item) => item.id === branchId) ?? branches[0];
   // The current OSPv2 DeviceInfo topics belong to the prpl gateway family.
   // Other branches intentionally render the same complete simulator without
@@ -74,8 +81,62 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
     [liveEnabled, twinState?.live],
   );
 
+  const reportFullscreenError = useCallback((detail?: string) => {
+    const now = Date.now();
+    if (now - fullscreenErrorAt.current < 400) return;
+    fullscreenErrorAt.current = now;
+    push({
+      kind: 'error',
+      title: 'Full-screen action failed',
+      detail: detail ?? 'Allow full-screen access in the browser, then try again.',
+    });
+  }, [push]);
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setIsFullscreen(document.fullscreenElement === pageRef.current);
+    };
+    const onFullscreenError = () => reportFullscreenError();
+
+    setFullscreenSupported(Boolean(
+      document.fullscreenEnabled && pageRef.current?.requestFullscreen,
+    ));
+    syncFullscreenState();
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    document.addEventListener('fullscreenerror', onFullscreenError);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreenState);
+      document.removeEventListener('fullscreenerror', onFullscreenError);
+    };
+  }, [reportFullscreenError]);
+
+  const toggleFullscreen = async () => {
+    const page = pageRef.current;
+    if (!page || !fullscreenSupported) {
+      reportFullscreenError('This browser does not support full-screen mode.');
+      return;
+    }
+
+    try {
+      if (document.fullscreenElement === page) {
+        await document.exitFullscreen();
+      } else if (document.fullscreenElement) {
+        reportFullscreenError('Exit the current full-screen view, then try again.');
+      } else {
+        await page.requestFullscreen();
+      }
+    } catch (error) {
+      reportFullscreenError(
+        error instanceof Error ? error.message : undefined,
+      );
+    }
+  };
+
   return (
-    <div className="gateway-twin-page">
+    <div
+      ref={pageRef}
+      className={`gateway-twin-page${isFullscreen ? ' is-fullscreen' : ''}`}
+    >
       <PageHeader
         title="GW Operational Twin"
         subtitle="Gemtek OSPv2 edge gateway · XGS-PON · Wi-Fi 7 · prplOS — live fields overlay a complete TR-181 simulator fallback"
@@ -110,6 +171,22 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
                 ))}
               </select>
             </label>
+            <button
+              type="button"
+              className="gateway-twin-fullscreen-button"
+              disabled={!fullscreenSupported}
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? 'Exit gateway twin full screen' : 'Open gateway twin full screen'}
+              aria-pressed={isFullscreen}
+              title={fullscreenSupported
+                ? isFullscreen ? 'Exit full screen (Esc)' : 'Open twin in full screen'
+                : 'Full-screen mode is unavailable in this browser'}
+            >
+              {isFullscreen
+                ? <Minimize2 size={16} aria-hidden="true" />
+                : <Maximize2 size={16} aria-hidden="true" />}
+              <span>{isFullscreen ? 'Exit full screen' : 'Full screen'}</span>
+            </button>
           </div>
         }
       />

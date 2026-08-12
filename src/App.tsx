@@ -44,6 +44,7 @@ export default function App() {
   const [notifOpen, setNotifOpen] = useState(false);
   const activeAlerts = alerts.filter((a) => a.level !== 'ok').length;
   const location = useLocation();
+  const isGatewayTwin = location.pathname === '/gateway-twin';
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -76,8 +77,11 @@ export default function App() {
           onOpenNotifications={() => setNotifOpen(true)}
         />
         <Sidebar />
-        <main className="main">
-          <div key={location.pathname} className="page-transition">
+        <main className={`main${isGatewayTwin ? ' gateway-twin-main' : ''}`}>
+          <div
+            key={location.pathname}
+            className={`page-transition${isGatewayTwin ? ' gateway-twin-route' : ''}`}
+          >
             <Suspense fallback={<div className="route-loading">Loading…</div>}>
               <Routes location={location}>
                 <Route path="/"               element={<Overview branchId={branchId} onSelectBranch={setBranchId} />} />
