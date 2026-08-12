@@ -23,6 +23,14 @@ export type TwinScenario =
 
 export interface TwinEvent { t: number; severity: string; text: string; src: string }
 
+export interface TwinLiveState {
+  enabled: boolean
+  connection: 'disabled' | 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'error'
+  receivedAt: number | null
+  endpoint: string | null
+  error: string | null
+}
+
 export interface TwinState {
   scenario: TwinScenario
   mode: 'solid' | 'xray'
@@ -32,6 +40,7 @@ export interface TwinState {
   temps: Array<{ id: string; name: string; valueC: number; highAlarmC: number }>
   optical: { rxDbm: number; txDbm: number; alarm: boolean }
   ports: Array<{ id: string; label: string; link: boolean; speedMbps: number; rxBps: number; txBps: number }>
+  live: TwinLiveState
 }
 
 export interface GatewayTwinHandle {
@@ -56,6 +65,8 @@ export interface GatewayTwinEmbedProps {
   hosts?: boolean
   flow?: boolean
   still?: boolean
+  /** Enable the live AWS IoT field overlay; false keeps the simulator baseline. */
+  live?: boolean
   /** hide the twin's own HUD — recommended when embedding as a tile */
   nohud?: boolean
   /** skip GPU-heavy floor reflection (software GL / low-power hosts) */
@@ -73,7 +84,7 @@ const DEFAULT_SRC = '/widgets/gw-twin/app/index.html'
 export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedProps>(
   function GatewayTwinEmbed(props, ref) {
     const {
-      src = DEFAULT_SRC, scenario, explode, xray, rings, hosts, flow, still,
+      src = DEFAULT_SRC, scenario, explode, xray, rings, hosts, flow, still, live,
       nohud, lite, title = 'GW Operational Twin', className, style,
       onReady, onState, onTwinEvent,
     } = props
@@ -91,15 +102,22 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
       if (hosts) q.set('hosts', '1')
       if (flow === false) q.set('flow', '0')
       if (still) q.set('still', '1')
+      if (live === false) q.set('live', '0')
       if (nohud) q.set('nohud', '1')
       if (lite) q.set('lite', '1')
       return `${src}?${q}`
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [src]) // deliberately: props after mount are handled via the ref API
+    }, [src, live]) // runtime view changes are handled via the ref API
+
+    const widgetOrigin = useMemo(
+      () => new URL(src, window.location.href).origin,
+      [src],
+    )
 
     useEffect(() => {
       const onMessage = (e: MessageEvent) => {
         if (e.source !== iframeRef.current?.contentWindow) return
+        if (e.origin !== widgetOrigin) return
         const m = e.data
         if (!m || typeof m !== 'object' || m.source !== 'gw-twin') return
         if (m.type === 'ready') callbacks.current.onReady?.(m.payload)
@@ -108,11 +126,14 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
       }
       window.addEventListener('message', onMessage)
       return () => window.removeEventListener('message', onMessage)
-    }, [])
+    }, [widgetOrigin])
 
     useImperativeHandle(ref, () => {
       const send = (type: string, payload?: unknown) =>
-        iframeRef.current?.contentWindow?.postMessage({ target: 'gw-twin', type, payload }, '*')
+        iframeRef.current?.contentWindow?.postMessage(
+          { target: 'gw-twin', type, payload },
+          widgetOrigin,
+        )
       return {
         send,
         setScenario: (s) => send('set-scenario', { scenario: s }),
@@ -122,7 +143,7 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
         focusPart: (id) => send('focus-part', { id }),
         requestState: () => send('get-state'),
       }
-    }, [])
+    }, [widgetOrigin])
 
     return (
       <iframe
@@ -132,6 +153,7 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
         className={className}
         style={{ border: 0, width: '100%', height: '100%', display: 'block', background: '#060709', ...style }}
         allow="fullscreen"
+        referrerPolicy="strict-origin-when-cross-origin"
       />
     )
   },

@@ -22,6 +22,7 @@ import {
   decodeFlow, decodeTunnel, decodeRoute, decodeDecision,
   type AarFlow, type AarTunnel, type AarRoute, type AarDecision, type AarSnapshot,
 } from './aarProto.js';
+import { gatewayTwinSource } from './gatewayTwinSource.js';
 
 const ENDPOINT  = process.env.IOT_ENDPOINT ?? 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';
 const REGION    = process.env.IOT_REGION   ?? process.env.AWS_REGION ?? 'us-east-1';
@@ -219,6 +220,7 @@ class IpsecSource extends EventEmitter {
   private started = false;
   private connected = false;
   private lastError?: string;
+  private gatewayTwinSubscribed = false;
   /** In-flight path-control commands keyed by correlation id. */
   private pendingPathCmds = new Map<string, (r: PathCommandResult) => void>();
   /** In-flight Matter control commands keyed by requestId. */
@@ -258,11 +260,13 @@ class IpsecSource extends EventEmitter {
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
+    gatewayTwinSource.setEndpoint(ENDPOINT);
 
     if (!this.hasCredentials()) {
       // eslint-disable-next-line no-console
       console.warn('[ipsec] No AWS credentials (set AWS_ACCESS_KEY_ID / AWS_PROFILE, or AWS_USE_INSTANCE_ROLE=1 on EC2) — skipping IoT subscription. The dashboard will return an empty snapshot.');
       this.lastError = 'no-aws-credentials';
+      gatewayTwinSource.setConnectionState('offline', this.lastError);
       return;
     }
 
@@ -285,6 +289,7 @@ class IpsecSource extends EventEmitter {
       this.connection.on('connect', () => {
         this.connected = true;
         this.lastError = undefined;
+        gatewayTwinSource.setConnectionState('connecting');
         // eslint-disable-next-line no-console
         console.log(`[ipsec] connected to ${ENDPOINT} as ${CLIENT_ID}, subscribing to [${SUBSCRIBE_TOPICS.join(', ')}]`);
         this.emit('status', { connected: true });
@@ -292,24 +297,42 @@ class IpsecSource extends EventEmitter {
       this.connection.on('interrupt', (err) => {
         this.connected = false;
         this.lastError = err?.error ?? String(err);
+        gatewayTwinSource.setConnectionState('reconnecting', this.lastError);
         // eslint-disable-next-line no-console
         console.warn('[ipsec] connection interrupted:', this.lastError);
         this.emit('status', { connected: false, reason: this.lastError });
       });
-      this.connection.on('resume', () => {
+      this.connection.on('resume', (_returnCode, sessionPresent) => {
         this.connected = true;
         this.lastError = undefined;
+        // This client normally uses a clean session, so an interrupted
+        // connection returns without broker-side subscriptions. Re-establish
+        // the Twin topics before claiming the SSE source is connected.
+        if (!sessionPresent) {
+          this.gatewayTwinSubscribed = false;
+          gatewayTwinSource.setConnectionState('connecting');
+          void this.subscribeGatewayTwinTopics();
+        } else if (this.gatewayTwinSubscribed) {
+          gatewayTwinSource.setConnectionState('connected');
+        } else {
+          void this.subscribeGatewayTwinTopics();
+        }
         // eslint-disable-next-line no-console
         console.log('[ipsec] connection resumed');
         this.emit('status', { connected: true });
       });
       this.connection.on('disconnect', () => {
         this.connected = false;
+        gatewayTwinSource.setConnectionState('offline');
         // eslint-disable-next-line no-console
         console.log('[ipsec] disconnected');
         this.emit('status', { connected: false });
       });
       this.connection.on('error', (err) => {
+        gatewayTwinSource.setConnectionState(
+          'error',
+          err instanceof Error ? err.message : String(err),
+        );
         // eslint-disable-next-line no-console
         console.error('[ipsec] mqtt error:', err);
       });
@@ -326,6 +349,11 @@ class IpsecSource extends EventEmitter {
           (t, payload) => this.handleMessage(t, payload),
         );
       }
+
+      // The Gateway Twin shares this exact AWS IoT connection. Its source owns
+      // decoding/history/SSE state only; it never opens another MQTT client or
+      // reads X.509 certificate files.
+      await this.subscribeGatewayTwinTopics();
 
       // Subscribe to the path-control result topics so we can correlate acks
       // from the gateway's pathcontrol component back to in-flight commands.
@@ -422,6 +450,39 @@ class IpsecSource extends EventEmitter {
       // eslint-disable-next-line no-console
       console.error('[ipsec] failed to connect/subscribe:', err);
       this.emit('status', { connected: false, reason: this.lastError });
+      if (!this.gatewayTwinSubscribed) {
+        gatewayTwinSource.setConnectionState('error', this.lastError);
+      }
+    }
+  }
+
+  private async subscribeGatewayTwinTopics(): Promise<void> {
+    if (!this.connection) {
+      gatewayTwinSource.setConnectionState('error', 'AWS IoT connection is not initialized');
+      return;
+    }
+    try {
+      const topics = gatewayTwinSource.getSubscriptionTopics();
+      for (const topic of topics) {
+        const granted = await this.connection.subscribe(
+          topic,
+          mqtt.QoS.AtLeastOnce,
+          (t, payload, duplicate) => gatewayTwinSource.ingest(t, payload, duplicate),
+        );
+        if (granted.error_code) {
+          throw new Error(`AWS IoT rejected ${topic} (error ${granted.error_code})`);
+        }
+      }
+      this.gatewayTwinSubscribed = true;
+      gatewayTwinSource.setConnectionState('connected');
+      console.log(`[gateway-twin] subscribed to [${topics.join(', ')}] on the shared IoT connection`);
+    } catch (err) {
+      this.gatewayTwinSubscribed = false;
+      const detail = err instanceof Error ? err.message : String(err);
+      gatewayTwinSource.setConnectionState('error', `AWS IoT subscription failed: ${detail}`);
+      // Do not fail the IPsec/device subscriptions if only the Twin topic policy
+      // is missing; the rest of Connected Enterprise remains operational.
+      console.error('[gateway-twin] failed to subscribe:', err);
     }
   }
 

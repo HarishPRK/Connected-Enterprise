@@ -17,6 +17,7 @@ import { ipsecSource } from './ipsecSource.js';
 import { decodeAppRouteCommand, type AppRouteCommand } from './appRouteProto.js';
 import { deviceSource } from './deviceSource.js';
 import { historySeries } from './telemetryHistory.js';
+import { gatewayTwinSource } from './gatewayTwinSource.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -774,6 +775,82 @@ app.get('/api/agentic-smart/response/:id', (req, res) => {
 // Kick off the MQTT subscription as soon as the server boots. Idempotent.
 void ipsecSource.start();
 
+/* ─────────── Gateway Operational Twin live telemetry ───────────
+ * ipsecSource owns the one AWS IoT WebSocket connection. gatewayTwinSource
+ * receives its topic deliveries, decodes LogBatch protobufs / prplOS JSON, and
+ * retains bounded replay state for this SSE endpoint. */
+
+app.get('/api/gateway-logs/readyz', (_req, res) => {
+  const state = gatewayTwinSource.getState();
+  const ready = state.state === 'connected';
+  // The app's legacy global CORS middleware is intentionally not inherited by
+  // live gateway telemetry. Browsers may consume this resource same-origin only.
+  res.removeHeader('Access-Control-Allow-Origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(ready ? 200 : 503).json({ ready, state: state.state, endpoint: state.endpoint });
+});
+
+app.get('/api/gateway-logs/stream', (req, res) => {
+  res.removeHeader('Access-Control-Allow-Origin');
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+
+  const writeEvent = (event: string, data: unknown, id?: number) => {
+    if (!res.writable || res.writableEnded) return;
+    const idLine = id == null ? '' : `id: ${id}\n`;
+    res.write(`${idLine}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // EventSource uses this after a dropped connection. Only log batches carry
+  // ids; current connection state and latest telemetry are always rehydrated.
+  res.write('retry: 2000\n\n');
+  writeEvent('state', gatewayTwinSource.getState());
+  for (const telemetry of gatewayTwinSource.getLatestTelemetry()) {
+    writeEvent('device-telemetry', telemetry);
+  }
+
+  const rawLastEventId = req.get('Last-Event-ID') ?? '';
+  const parsedLastEventId = Number.parseInt(rawLastEventId, 10);
+  const lastEventId = Number.isSafeInteger(parsedLastEventId) && parsedLastEventId >= 0
+    ? parsedLastEventId
+    : undefined;
+  for (const batch of gatewayTwinSource.getHistoryAfter(lastEventId)) {
+    writeEvent('log-batch', batch, batch.id);
+  }
+
+  const offState = gatewayTwinSource.onState((state) => writeEvent('state', state));
+  const offTelemetry = gatewayTwinSource.onTelemetry((telemetry) => {
+    writeEvent('device-telemetry', telemetry);
+  });
+  const offBatch = gatewayTwinSource.onBatch((batch) => {
+    writeEvent('log-batch', batch, batch.id);
+  });
+
+  const heartbeat = setInterval(() => {
+    if (res.writable && !res.writableEnded) res.write(': keep-alive\n\n');
+  }, 15_000);
+
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    offState();
+    offTelemetry();
+    offBatch();
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  };
+  req.once('close', cleanup);
+  res.once('close', cleanup);
+});
+
 /** Snapshot of the latest decoded payload for every gateway we've seen. */
 app.get('/api/ipsec/snapshot', (_req, res) => {
   res.json(ipsecSource.getSnapshot());
@@ -1112,8 +1189,18 @@ app.get('/api/video/:id', async (req, res) => {
 /* ─────────── Static frontend (production) ───────────
  * In production we run a single Node process that serves both `/api/*` and
  * the Vite-built static SPA from `dist/`. In dev, Vite serves the SPA on
- * port 5173 and proxies API calls here — so we just skip the static block
+ * port 5174 and proxies API calls here — so we just skip the static block
  * when `dist/` doesn't exist. */
+// The embedded twin now renders live operational values. Keep its document
+// same-origin with this host so another site cannot frame it and observe or
+// socially engineer interactions with that telemetry.
+app.use('/widgets/gw-twin', (_req, res, next) => {
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  next();
+});
+
 const distDir = path.resolve(__dirname, '..', 'dist');
 const indexHtml = path.join(distDir, 'index.html');
 const hasBuild = existsSync(indexHtml);
@@ -1124,6 +1211,14 @@ if (hasBuild) {
     maxAge: '30d',
     immutable: true,
   }));
+
+  // The iframe shell is unhashed but points at hashed chunks. Never let a
+  // browser retain an older shell after a deploy has replaced those chunks.
+  app.get('/widgets/gw-twin/app/index.html', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(path.join(distDir, 'widgets', 'gw-twin', 'app', 'index.html'));
+  });
+
   app.use(express.static(distDir, { index: false, maxAge: '1h' }));
 
   // SPA fallback — every non-API GET serves index.html so React Router routes

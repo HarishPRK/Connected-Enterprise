@@ -1,18 +1,18 @@
 {
   "id": "gw-operational-twin",
-  "name": "GW Operational Twin — AT&T BGW620-700 All-Fi Hub",
+  "name": "GW Operational Twin — Gemtek OSPv2 Edge Gateway",
   "version": "0.1.0",
   "kind": "embeddable-3d-operational-twin",
   "entry": "app/index.html",
   "device": {
-    "model": "BGW620-700",
-    "vendor": "Vantiva (for AT&T)",
-    "fccId": "G95BGW620",
-    "class": "XGS-PON fiber gateway, Wi-Fi 7 tri-band, 5G backup WAN"
+    "model": "OSPv2",
+    "vendor": "Gemtek",
+    "platform": "MaxLinear MxL25644",
+    "class": "XGS-PON edge gateway, Wi-Fi 7 tri-band, 5G backup WAN, prplOS"
   },
   "dataContract": {
     "schema": "TR-181 Device:2 (USP/TR-369-shaped stream)",
-    "source": "in-browser simulator (self-contained; no backend required)",
+    "source": "hybrid: live AWS IoT DeviceInfo/Ethernet/Wi-Fi fields and gateway logs, with a complete in-browser simulator fallback",
     "paths": [
       "Device.LEDs.LED.1.",
       "Device.Ethernet.Interface.{i}.",
@@ -40,6 +40,7 @@
     "still": "1 — disable idle auto-rotate",
     "nohud": "1 — hide all 2D chrome (recommended for tiles/cards)",
     "lite": "1 — skip floor reflection (software GL)",
+    "live": "0 — disable the AWS IoT overlay and use the simulator baseline only",
     "az | pol | dist | tx | ty": "camera pose (degrees / meters)",
     "port": "select a rear-bay port (lan1 lan2 lan3 ont usb fiber sfp phone fiveg)"
   },
@@ -62,7 +63,7 @@
       "envelope": { "source": "gw-twin", "type": "<event>", "payload": {} },
       "events": {
         "ready": "once — { version, scenarios[], parts[] }",
-        "state": "every 2 s + on change — { scenario, mode, explode, led, health, temps[], optical, ports[] }",
+        "state": "every 2 s + on change — { scenario, mode, explode, led, health, temps[], optical, ports[], live }",
         "event": "per feed entry — { t, severity, text, src }"
       }
     }
@@ -79,7 +80,7 @@
   "parts": [
     { "id": "vent", "label": "Exhaust crown" },
     { "id": "sleeve", "label": "Outer sleeve" },
-    { "id": "base", "label": "Intake pod" },
+    { "id": "base", "label": "Pedestal base" },
     { "id": "portbay", "label": "Service facia" },
     { "id": "lightpipe", "label": "Status light pipe" },
     { "id": "heatsink-l", "label": "Heatsink — left bank" },

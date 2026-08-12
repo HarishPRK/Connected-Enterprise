@@ -27,6 +27,13 @@ export default defineConfig({
     host: true,
     port: 5174,
     strictPort: true,
+    // The operational twin now emits live telemetry to its parent. Keep both
+    // the app and its same-origin iframe out of untrusted framing contexts in
+    // development; production applies the same policy in Express.
+    headers: {
+      'X-Frame-Options': 'SAMEORIGIN',
+      'Content-Security-Policy': "frame-ancestors 'self'",
+    },
     proxy: {
       // Forward /api/** to the agent server (see server/index.ts).
       // Important for SSE: configure: ... lets us tweak the proxy if needed.

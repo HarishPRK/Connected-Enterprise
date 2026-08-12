@@ -1,9 +1,9 @@
 # GW Operational Twin — Embeddable Widget
 
-Portable export of the BGW620-700 3D operational digital twin. The widget is
-**fully self-contained**: procedural 3D model, in-browser TR-181 simulator,
-scenarios, LED mirroring, thermal x-ray, exploded view — no backend, no
-external asset fetches, no host-app dependencies. It works in any web app
+Portable export of the Gemtek OSPv2 3D operational digital twin. The widget
+contains its complete procedural model and TR-181 simulator fallback, and can
+overlay live AWS IoT DeviceInfo, Ethernet, Wi-Fi, and gateway-log data through
+a same-origin SSE endpoint. It works in any web app
 (React 18/19, Vite, CRA, Vue, plain HTML) via an iframe plus an optional
 postMessage control API.
 
@@ -96,11 +96,13 @@ Full schema in `twin-manifest.json`. Summary:
 
 ## Notes
 
-- **Telemetry is simulated** (TR-181-shaped, in-browser). The AWS IoT live-log
-  bridge is disabled in this build (`VITE_GATEWAY_LOG_STREAM_URL=off`), so the
-  widget never calls `/api/gateway-logs` inside a host app.
+- This build calls `/api/gateway-logs/stream` for live telemetry and logs. A
+  host must implement the SSE contract or pass `live: false` (`?live=0`) to use
+  the simulator baseline without opening the stream.
+- Live fields override only the values actually received. Unreported domains
+  continue to use the simulator, so the twin remains complete during outages.
 - Needs WebGL2. On weak/software GL hosts add `lite: true` (`?lite=1`).
-- postMessage uses `targetOrigin '*'` — fine for simulated demo data; tighten
-  before carrying real customer telemetry.
+- postMessage pins to the parent referrer's origin when available; hosts should
+  still serve the widget same-origin and restrict framing to trusted pages.
 - Trademarks: device branding derives from public FCC exhibits; genericize
   before wider distribution (see the twin repo's README).

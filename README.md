@@ -26,8 +26,41 @@ agentic-AI incident response workflow.
 
 ```bash
 npm install
-npm run dev          # frontend only — Vite on :5173
+npm run dev          # frontend only — Vite on :5174
 ```
+
+## Gateway Twin live bridge
+
+The Gateway Twin consumes live gateway data through the Connected Enterprise
+backend; it does not open a browser MQTT connection. `server/ipsecSource.ts`
+reuses its existing AWS IoT WebSocket/SigV4 session and forwards these subscribed
+topics to `server/gatewayTwinSource.ts`:
+
+- Protobuf `LogBatch`: `gw/mygw/events`, `gw/mygw/status`
+- prplOS DeviceInfo JSON: `prplos/deviceinfo/uptime`, `softwareversion`, `hardwareversion`, `serialnumber`, `memorystatus`, `cpuutilization`, `temperaturesensor`, and `processes` (each after the same `prplos/deviceinfo/` prefix)
+- prplOS Ethernet JSON: `prplos/ethernet/{eth1,eth0_1,eth0_4,eth0_3,eth0_2}`
+- prplOS Wi-Fi JSON: `prplos/wifi/{wlan0,wlan2,wlan4}`
+
+The twin connects to `/api/gateway-logs/stream`. That non-buffered SSE endpoint
+replays bounded log history and the latest sample for each telemetry topic, then
+streams `state`, `log-batch`, and `device-telemetry` events. Readiness is exposed
+at `/api/gateway-logs/readyz`.
+
+It uses the same `AWS_*`, `IOT_ENDPOINT`, `IOT_REGION`, and `IOT_CLIENT_ID`
+configuration as the other live feeds—do not install a second certificate-based
+bridge. Optional input aliases and retention can be set in `.env`:
+
+```dotenv
+IOT_GATEWAY_TWIN_EVENTS_TOPIC=gw/mygw/events
+IOT_GATEWAY_TWIN_STATUS_TOPIC=gw/mygw/status
+IOT_GATEWAY_TWIN_PRPLOS_PREFIX=prplos
+IOT_GATEWAY_TWIN_HISTORY_SIZE=256
+```
+
+Input aliases are normalized back to the canonical topic names above before SSE
+delivery, preserving the embedded twin's strict event contract. The AWS IoT
+policy attached to the server credentials must allow subscribe/receive access to
+all configured topics.
 
 ## Running the live Claude agent (Phase 2)
 
@@ -134,6 +167,7 @@ src/
   types.ts
 server/
   index.ts        # Express + SSE endpoint
+  gatewayTwinSource.ts # Twin LogBatch/prplOS decoding, state, and bounded replay
   agent.ts        # Agent loop (Anthropic Messages API + tool use)
   tools.ts        # Tool defs + mocked impls + write-gate
   prompts.ts      # Personas (OT, WAN, IT, Fleet)

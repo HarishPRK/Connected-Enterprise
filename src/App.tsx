@@ -83,7 +83,7 @@ export default function App() {
                 <Route path="/"               element={<Overview branchId={branchId} onSelectBranch={setBranchId} />} />
                 <Route path="/fleet"          element={<FleetPage />} />
                 <Route path="/connectivity"   element={<Connectivity />} />
-                <Route path="/gateway-twin"   element={<GatewayTwinPage />} />
+                <Route path="/gateway-twin"   element={<GatewayTwinPage key={branchId} branchId={branchId} />} />
                 <Route path="/it-devices"     element={<DevicesPage domain="IT" branchId={branchId} />} />
                 <Route path="/ot-devices"     element={<DevicesPage domain="OT" branchId={branchId} />} />
                 <Route path="/service-offerings" element={<ServiceOfferingsPage />} />
