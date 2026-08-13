@@ -42,7 +42,11 @@ import {
   HelpCircle,
   Radio,
 } from "lucide-react";
-import { pathThresholds, BRANCH_TO_IPSEC_SOURCE } from "../data/mock";
+import {
+  pathThresholds,
+  BRANCH_TO_IPSEC_SOURCE,
+  BRANCH_TO_IPSEC_TOPIC,
+} from "../data/mock";
 import type {
   CellularMetrics,
   IpsecGatewayState,
@@ -707,6 +711,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   // `rdk/...` gateways, McKinney sees `prpl/...` gateways. Branches without
   // a mapped source see the unfiltered list (handy during development).
   const branchSource = branchId ? BRANCH_TO_IPSEC_SOURCE[branchId] : undefined;
+  const branchTopic = branchId ? BRANCH_TO_IPSEC_TOPIC[branchId] : undefined;
   const branchList = branchSource
     ? ipsec.list.filter((g) => g.source === branchSource)
     : ipsec.list;
@@ -879,7 +884,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
             showSample={showSample}
             onToggleSample={() => setShowSample((s) => !s)}
             effectiveList={effectiveList}
-            branchTopic={branchSource ? `${branchSource}/ipsec/metrics` : null}
+            branchTopic={branchTopic ?? null}
           />
         </div>
 
@@ -900,7 +905,10 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
             streams a plain-English analysis. Only shown when we have data. */}
         {liveState && (
           <div className="col-12">
-            <IpsecAiInsightsCard receivedAt={liveState.receivedAt} />
+            <IpsecAiInsightsCard
+              receivedAt={liveState.receivedAt}
+              topic={branchTopic ?? ipsec.subscribedTopic ?? "ipsec/metrics"}
+            />
           </div>
         )}
 
@@ -1603,7 +1611,13 @@ function EnterpriseTile({
   );
 }
 
-function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
+function IpsecAiInsightsCard({
+  receivedAt,
+  topic,
+}: {
+  receivedAt: number;
+  topic: string;
+}) {
   const c = useThemeColors();
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1731,7 +1745,7 @@ function IpsecAiInsightsCard({ receivedAt }: { receivedAt: number }) {
           >
             <Loader2 size={13} className="spin" />
             Reading the latest payload from{" "}
-            <span className="mono">rdk/ipsec/metrics</span>…
+            <span className="mono">{topic}</span>…
           </div>
         ) : (
           <div style={{ color: "var(--text-muted)" }}>
@@ -2134,7 +2148,7 @@ function RssiCard({ clients }: { clients: IpsecWifiClient[] }) {
 
 /* ───────────── Live IPsec ingest card ─────────────
  * Shows the latest `IpsecMetrics` per gateway streamed from AWS IoT Core
- * (gateway → MQTT rdk/ipsec/metrics → protobuf decode in our server → SSE).
+ * (gateway → MQTT configured IPsec topic → protobuf decode in our server → SSE).
  * Designed to render gracefully across all states: no creds, not yet
  * connected, connected but no payload yet, one gateway, many gateways. */
 
@@ -2239,15 +2253,15 @@ export function LiveIpsecCard({
   onToggleSample: () => void;
   effectiveList: IpsecGatewayState[];
   /** Topic the current branch is bound to (e.g. `rdk/ipsec/metrics` for
-   *  Plano, `prpl/ipsec/metrics` for McKinney). Falls back to the server's
-   *  full subscription list when the branch has no live mapping. */
+   *  Plano, `prplhome/ipsec/metrics` for McKinney/QDR). Falls back to the
+   *  server's full subscription list when the branch has no live mapping. */
   branchTopic: string | null;
 }) {
   const c = useThemeColors();
   const empty = effectiveList.length === 0;
 
   // Show only the topic this branch actually consumes, not the server's full
-  // multi-subscription list. The server still subscribes to both topics; the
+  // multi-subscription list. The server still subscribes to all topics; the
   // UI just hides the irrelevant one for this branch.
   const topicLabel = branchTopic ?? ipsec.subscribedTopic ?? "ipsec/metrics";
 

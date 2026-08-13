@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { LiveIpsecCard, SAMPLE_IPSEC_GATEWAY } from '../../pages/DynamicPathSelection';
-import { BRANCH_TO_IPSEC_SOURCE } from '../../data/mock';
+import { BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_IPSEC_TOPIC } from '../../data/mock';
 import type { UseIpsecMetricsResult } from '../../ui/useIpsecMetrics';
 
 /** Branch-scoped Dynamic Failover diagram for the Overview page.
@@ -8,8 +8,8 @@ import type { UseIpsecMetricsResult } from '../../ui/useIpsecMetrics';
  *  Thin wrapper around the Dynamic Failover page's `LiveIpsecCard` — the same
  *  live flow diagram (IT/OT devices → gateway → Fiber/5G underlays → IPsec
  *  tunnels → WAN), driven by the branch's own MQTT feed: Plano renders the
- *  gateway streaming on `rdk/ipsec/metrics`, McKinney the one on
- *  `prpl/ipsec/metrics`. The `ipsec` stream is passed in from the parent so
+ *  gateway streaming on `rdk/ipsec/metrics`, McKinney/QDR the one on
+ *  `prplhome/ipsec/metrics`. The `ipsec` stream is passed in from the parent so
  *  the page keeps a single SSE connection.
  *
  *  Only render this for branches present in `BRANCH_TO_IPSEC_SOURCE`; branches
@@ -38,7 +38,7 @@ export function FailoverTopology({
       showSample={showSample}
       onToggleSample={() => setShowSample((s) => !s)}
       effectiveList={effectiveList}
-      branchTopic={branchSource ? `${branchSource}/ipsec/metrics` : null}
+      branchTopic={BRANCH_TO_IPSEC_TOPIC[branchId] ?? null}
     />
   );
 }

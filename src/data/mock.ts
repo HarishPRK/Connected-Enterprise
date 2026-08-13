@@ -13,7 +13,14 @@ import type {
  *  the topic prefix it arrived on). */
 export const BRANCH_TO_IPSEC_SOURCE: Record<string, 'rdk' | 'prpl'> = {
   'b-pln-01': 'rdk',   // Plano  → rdk/ipsec/metrics
-  'b-mck-03': 'prpl',  // McKinney → prpl/ipsec/metrics
+  'b-mck-03': 'prpl',  // McKinney/QDR → prplhome/ipsec/metrics (normalised to prpl)
+};
+
+/** Exact telemetry topic shown for each live branch. `prplhome` is normalised
+ *  to the `prpl` source above so existing branch/device scoping stays stable. */
+export const BRANCH_TO_IPSEC_TOPIC: Record<string, string> = {
+  'b-pln-01': 'rdk/ipsec/metrics',
+  'b-mck-03': 'prplhome/ipsec/metrics',
 };
 
 export const branches: Branch[] = [

@@ -438,8 +438,8 @@ Style — be ruthlessly brief:
 
 Priority: active path health → underlay availability → concerning signs (latency >150ms, loss >3%, unreachable tunnels).`;
 
-  const userMessage = `Latest IPsec gateway telemetry (decoded from the protobuf \
-on \`rdk/ipsec/metrics\`). Server received it ${Math.round((Date.now() - snap.receivedAt) / 1000)} s ago.
+  const userMessage = `Latest IPsec gateway telemetry (decoded from the protobuf on \
+\`${snap.subscribedTopics.join(', ')}\`). Server received it ${Math.round((Date.now() - snap.receivedAt) / 1000)} s ago.
 
 \`\`\`json
 ${JSON.stringify(snap, null, 2)}

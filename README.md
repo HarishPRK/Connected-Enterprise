@@ -29,6 +29,20 @@ npm install
 npm run dev          # frontend only — Vite on :5174
 ```
 
+## Live IT/OT and Dynamic Failover telemetry
+
+The Express server uses one AWS IoT connection for both pages. By default it
+subscribes to `rdk/ipsec/metrics`, `prpl/ipsec/metrics`, and
+`prplhome/ipsec/metrics`. The QDR `prplhome` feed is routed to the existing
+McKinney/`prpl` branch: tunnel/WAN fields drive Dynamic Failover, while its
+`wifi.clients[]` block drives IT/OT device inventory and per-client telemetry.
+
+Override the complete list only when needed:
+
+```dotenv
+IOT_IPSEC_TOPICS=rdk/ipsec/metrics,prpl/ipsec/metrics,prplhome/ipsec/metrics
+```
+
 ## Gateway Twin live bridge
 
 The Gateway Twin consumes live gateway data through the Connected Enterprise

@@ -11,7 +11,8 @@ import { Topology } from '../components/widgets/Topology';
 import { FailoverTopology } from '../components/widgets/FailoverTopology';
 import { BranchOverviewCard } from '../components/widgets/BranchOverviewCard';
 import {
-  appTraffic, branches, BRANCH_TO_IPSEC_SOURCE, getDevicesForBranch, lanPorts, poePorts, wanLinks,
+  appTraffic, branches, BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_IPSEC_TOPIC,
+  getDevicesForBranch, lanPorts, poePorts, wanLinks,
 } from '../data/mock';
 import type { BandwidthPoint, Device, WanLink, Status } from '../types';
 import { useLiveData } from '../ui/LiveData';
@@ -54,7 +55,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const branchDevices = devicesLoaded && liveDevices.length > 0 ? liveDevices : mockDevices;
   const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
-  // ── Live IPsec overlay (Plano = rdk topic, McKinney = prpl topic) ──
+  // ── Live IPsec overlay (Plano = rdk, McKinney/QDR = prplhome) ──
   // Pick the cached gateway whose source-tag matches the current branch's
   // MQTT family. Falls back to "no live data" for branches not in the map.
   const ipsec = useIpsecMetrics();
@@ -63,7 +64,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     ? ipsec.list.find((g) => g.source === branchSource)
     : undefined;
   const usingLive = !!liveState;
-  const liveTopic = branchSource ? `${branchSource}/ipsec/metrics` : null;
+  const liveTopic = BRANCH_TO_IPSEC_TOPIC[branchId] ?? null;
 
   // Throughput in Mbps + rolling bandwidth series, both derived from
   // successive WAN byte counters. Attributing the total Mbps to whichever
@@ -203,7 +204,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
         </div>
 
         {/* Row 2 — full-width topology. Branches backed by a live MQTT feed
-            (Plano → rdk/ipsec/metrics, McKinney → prpl/ipsec/metrics) render
+            (Plano → rdk/ipsec/metrics, McKinney → prplhome/ipsec/metrics) render
             the Dynamic Failover diagram driven by that branch's telemetry;
             branches without a feed keep the illustrative static Topology. */}
         <div className="col-12">

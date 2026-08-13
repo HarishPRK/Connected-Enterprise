@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { StatusBadge } from '../components/StatusBadge';
-import { getDeviceHealth, getDevicesForBranch, BRANCH_TO_IPSEC_SOURCE } from '../data/mock';
+import {
+  getDeviceHealth,
+  getDevicesForBranch,
+  BRANCH_TO_IPSEC_SOURCE,
+  BRANCH_TO_IPSEC_TOPIC,
+} from '../data/mock';
 import type { Device } from '../types';
 import { useDevices, classifyDevice, controlMatterDevice, controlShellyDevice, refreshMatterDevices, type DeviceView } from '../ui/useDevices';
 import {
@@ -52,12 +57,12 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
   }
 
   // Strictly scope live devices to THIS branch's location so Plano (rdk) and
-  // McKinney (prpl) fleets never mix. A device from rdk/ipsec/metrics carries
-  // locationSource 'rdk' and must only ever appear on the Plano branch (and
-  // vice-versa). Devices with no locationSource (pure seed, before real LAN
-  // discovery) are intentionally excluded from the live view — the
-  // branch-specific mock below backs the empty state instead.
+  // McKinney (prpl) fleets never mix. `prplhome/ipsec/metrics` is normalised
+  // to locationSource 'prpl', while `rdk/ipsec/metrics` becomes 'rdk'. Devices
+  // with no locationSource (pure seed, before real LAN discovery) are excluded
+  // from the live view; the branch-specific mock below backs the empty state.
   const branchSource = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
+  const branchTopic = BRANCH_TO_IPSEC_TOPIC[branchId];
   const liveForBranch = useMemo(
     () => (branchSource
       ? liveDevices.filter((d) => d.locationSource === branchSource)
@@ -215,7 +220,7 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
         subtitle={subtitle}
         right={
           <div className="toolbar" style={{ alignItems: 'center' }}>
-            <SourcePill source={source} connected={connected} />
+            <SourcePill source={source} connected={connected} topic={branchTopic} />
             <button onClick={handleRefresh} disabled={refreshing} title="Re-fetch the Matter device list from the gateway">
               <RefreshCw size={14} className={refreshing ? 'spin' : undefined} />
               {refreshing ? 'Refreshing…' : 'Refresh'}
@@ -412,7 +417,15 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
 /** Small status chip showing where the inventory is coming from: the live
  *  gateway feed, the gateway-but-currently-offline case, or the demo seed used
  *  until the gateway's discovery component starts publishing. */
-function SourcePill({ source, connected }: { source: 'seed' | 'gateway'; connected: boolean }) {
+function SourcePill({
+  source,
+  connected,
+  topic,
+}: {
+  source: 'seed' | 'gateway';
+  connected: boolean;
+  topic?: string;
+}) {
   const live = source === 'gateway' && connected;
   const label = source === 'seed'
     ? 'Demo data · no gateway feed'
@@ -423,8 +436,8 @@ function SourcePill({ source, connected }: { source: 'seed' | 'gateway'; connect
   return (
     <span
       title={source === 'seed'
-        ? 'Showing the built-in demo inventory. Real devices appear once the gateway publishes to rdk/devices/inventory.'
-        : connected ? 'Streaming live device inventory from the gateway.' : 'No live inventory right now — showing the last devices the gateway reported.'}
+        ? `Showing the built-in demo inventory. Real devices appear when ${topic ?? 'the gateway telemetry feed'} publishes Wi-Fi clients.`
+        : connected ? `Streaming live device inventory from ${topic ?? 'the gateway'}.` : 'No live inventory right now — showing the last devices the gateway reported.'}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5,
         color: 'var(--text-dim)', padding: '3px 9px', borderRadius: 999,

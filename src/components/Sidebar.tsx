@@ -74,7 +74,8 @@ export function Sidebar() {
                 to={n.to}
                 end={n.to === '/'}
                 className={({ isActive }) => (isActive ? 'active' : undefined)}
-                title={collapsed ? n.label : undefined}
+                aria-label={n.label}
+                title={n.label}
               >
                 <Icon size={16} />
                 <span>{n.label}</span>

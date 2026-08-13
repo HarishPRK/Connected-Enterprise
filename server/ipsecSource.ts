@@ -4,9 +4,9 @@
  * Connects to AWS IoT Core over MQTT-WebSocket with SigV4 auth (uses
  * AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN from the
  * environment, same as the rest of our AWS plumbing). Subscribes to the
- * gateway's raw `rdk/ipsec/metrics` topic and decodes the protobuf payload
- * in-process — no IoT Rule needed. JSON payloads are also accepted as a
- * fallback in case an upstream rule starts publishing decoded JSON later.
+ * gateway's configured IPsec metrics topics and decodes the protobuf
+ * payload in-process — no IoT Rule needed. JSON payloads are also accepted as
+ * a fallback in case an upstream rule starts publishing decoded JSON later.
  *
  * Maintains the latest decoded `IpsecMetrics` per gateway in an in-memory
  * `Map<gatewayName, IpsecGatewayState>` and exposes:
@@ -31,14 +31,20 @@ const SUBSCRIBE_MAX_ATTEMPTS = 3;
 const SUBSCRIBE_RETRY_BASE_MS = 250;
 const GATEWAY_TWIN_RETRY_MS = 5_000;
 
-// We subscribe to one topic per gateway family. Defaults cover Plano (rdk)
-// and McKinney (prpl). Override the whole list with `IOT_IPSEC_TOPICS` as a
-// comma-separated string. `IOT_IPSEC_TOPIC` (singular) is honoured for
-// backwards-compat with older deploys.
+// We subscribe to one topic per gateway family. Defaults cover Plano (rdk),
+// the original McKinney topic (prpl), and the QDR McKinney topic (prplhome).
+// Override the whole list with `IOT_IPSEC_TOPICS` as a comma-separated string.
+// `IOT_IPSEC_TOPIC` (singular) is honoured for backwards compatibility.
+export const DEFAULT_IPSEC_TOPICS = [
+  'rdk/ipsec/metrics',
+  'prpl/ipsec/metrics',
+  'prplhome/ipsec/metrics',
+] as const;
+
 const SUBSCRIBE_TOPICS: string[] = (() => {
   const single = process.env.IOT_IPSEC_TOPIC;
   const list   = process.env.IOT_IPSEC_TOPICS;
-  const raw = list ?? single ?? 'rdk/ipsec/metrics,prpl/ipsec/metrics';
+  const raw = list ?? single ?? DEFAULT_IPSEC_TOPICS.join(',');
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 })();
 
@@ -49,10 +55,11 @@ const AAR_TOPICS: string[] = (
 ).split(',').map((s) => s.trim()).filter(Boolean);
 
 /** Map the MQTT topic to the gateway-source tag exposed in IpsecGatewayState.
- *  Anything starting with `rdk/` → 'rdk', `prpl/` → 'prpl', else 'other'. */
+ *  `prplhome` is the QDR/McKinney alias and routes to the same `prpl` branch
+ *  used by IT/OT Devices and Dynamic Failover. */
 function topicToSource(topic: string): 'rdk' | 'prpl' | 'other' {
   if (topic.startsWith('rdk/'))  return 'rdk';
-  if (topic.startsWith('prpl/')) return 'prpl';
+  if (topic.startsWith('prpl/') || topic.startsWith('prplhome/')) return 'prpl';
   return 'other';
 }
 
@@ -217,7 +224,7 @@ function wifiClientToRawDevice(c: IpsecWifiClient): Record<string, unknown> {
   };
 }
 
-class IpsecSource extends EventEmitter {
+export class IpsecSource extends EventEmitter {
   private gateways = new Map<string, IpsecGatewayState>();
   private connection?: mqtt.MqttClientConnection;
   private started = false;
@@ -638,7 +645,8 @@ class IpsecSource extends EventEmitter {
     try {
       const bytes = new Uint8Array(payload);
 
-      // The gateway publishes raw protobuf bytes on `rdk/ipsec/metrics`.
+      // Gateways publish raw protobuf bytes on the configured metrics topics,
+      // including `prplhome/ipsec/metrics` for the QDR/McKinney feed.
       // If an upstream IoT Rule ever starts producing JSON instead (e.g. by
       // running `decode(*, 'proto', …)` first), accept that shape too.
       const looksLikeJson = bytes.length > 0 && (bytes[0] === 0x7b /* { */ || bytes[0] === 0x5b /* [ */);
@@ -757,7 +765,10 @@ class IpsecSource extends EventEmitter {
           `${c.hostname || c.mac}: rssi=${c.rssi}dBm snr=${c.snr}dB health=${c.health || 'ok'}`).join(' | '));
         const now = Date.now();
         this.emit('inventory', {
-          source: `${source}:wifi`,
+          // Keep inventories from legacy `prpl` and QDR `prplhome` publishers
+          // separate. deviceSource still maps both prefixes to McKinney and
+          // de-duplicates clients by MAC, so one feed cannot clobber the other.
+          source: `${topic}:wifi`,
           payload: {
             devices: normalised.wifi.clients.map((c) => {
               const key = c.mac.toUpperCase();

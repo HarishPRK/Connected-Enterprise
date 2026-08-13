@@ -11,6 +11,7 @@
     "start": "tsx server/index.ts",
     "sim:devices": "tsx scripts/sim-device-inventory.ts",
     "sim:matter": "tsx scripts/sim-matter-list.ts",
+    "test:server": "tsx --test server/*.test.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },
