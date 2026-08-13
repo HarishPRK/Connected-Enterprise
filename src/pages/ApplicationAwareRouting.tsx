@@ -6,14 +6,13 @@ import { Modal } from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import {
   Layers, Plus, Search, ArrowRight, Cable, Radio, Shuffle,
-  Mic, Video, Briefcase, Globe, Cloud, Cpu, Power,
+  Mic, Video, Briefcase, Globe, Cloud, Cpu, Power, Sparkles,
 } from 'lucide-react';
 import { appCategories, appPolicies } from '../data/mock';
 import type { AppCategory, AppCategoryId, AppPolicy } from '../types';
 import { useTheme, useThemeColors } from '../ui/Theme';
 import { AiInsightCard } from '../components/widgets/AiInsightCard';
 import { AppSteeringPatchboard } from '../components/widgets/AppSteeringPatchboard';
-import { ClientTunnelConstellation } from '../components/widgets/ClientTunnelConstellation';
 
 const catIcon: Record<AppCategoryId, React.ComponentType<{ size?: number }>> = {
   voice: Mic, video: Video, business: Briefcase, web: Globe, bulk: Cloud, iot: Cpu,
@@ -27,16 +26,14 @@ const slaBadge = {
 
 export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) {
   const [query, setQuery] = useState('');
-  const [catFilter, setCatFilter] = useState<AppCategoryId | 'all'>('all');
   const [editing, setEditing] = useState<AppPolicy | null>(null);
   const { push } = useToast();
   const chart = useThemeColors();
 
   const list = useMemo(
     () => appPolicies
-      .filter((p) => catFilter === 'all' || p.category === catFilter)
       .filter((p) => !query || p.app.toLowerCase().includes(query.toLowerCase()) || p.match.toLowerCase().includes(query.toLowerCase())),
-    [query, catFilter],
+    [query],
   );
 
   const totals = {
@@ -77,7 +74,35 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
       </div>
 
       <div className="grid">
-        {/* AI insight across the routing policy set */}
+        {/* Application Steering Patchboard — drag a client's app onto a tunnel */}
+        <div className="col-8">
+          <Card
+            title="Application Steering Patchboard"
+            sub="Each client carries one application — grab its plug and patch it into a different tunnel; the change publishes as a proto3 AppRouteCommand on the gateway's approute topic"
+          >
+            <AppSteeringPatchboard branchId={branchId} externalAdvisorTrigger advisorHostId="app-route-advisor-widget" />
+          </Card>
+        </div>
+
+        {/* AI route advisor — controls the advisor attached to the patchboard */}
+        <div className="col-4">
+          <Card title="AI Advisor" sub="Compare live tunnel conditions and suggest better application routes">
+            <div id="app-route-advisor-widget" style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 120 }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.6 }}>
+                The advisor evaluates current tunnel latency, reachability, load, and frozen clients before suggesting a route change.
+              </div>
+              <button
+                className="primary"
+                onClick={() => document.querySelector<HTMLButtonElement>('[data-route-advisor-trigger]')?.click()}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                <Sparkles size={14} /> Run AI advisor
+              </button>
+            </div>
+          </Card>
+        </div>
+
+        {/* AI insight remains in its normal full-width analysis position */}
         <div className="col-12">
           <AiInsightCard
             topic="app-routing"
@@ -100,68 +125,6 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
               })),
             }}
           />
-        </div>
-
-        {/* Application Steering Patchboard — drag a client's app onto a tunnel */}
-        <div className="col-12">
-          <Card
-            title="Application Steering Patchboard"
-            sub="Each client carries one application — grab its plug and patch it into a different tunnel; the change publishes as a proto3 AppRouteCommand on the gateway's approute topic"
-          >
-            <AppSteeringPatchboard branchId={branchId} />
-          </Card>
-        </div>
-
-        {/* Traffic Constellation — live clients → gateway → IPsec tunnels */}
-        <div className="col-12">
-          <Card
-            title="Traffic Constellation"
-            sub="Live clients orbiting this branch's gateway — each comet is a client's traffic riding its assigned IPsec tunnel"
-          >
-            <ClientTunnelConstellation branchId={branchId} />
-          </Card>
-        </div>
-
-        {/* App flow Sankey-ish diagram */}
-        <div className="col-8">
-          <Card
-            title="Application → Path mapping"
-            sub="Live: each band shows traffic share routed via that path"
-          >
-            <AppFlowDiagram />
-          </Card>
-        </div>
-
-        {/* Category cards */}
-        <div className="col-4">
-          <Card title="Categories" sub="DPI auto-detected · click to filter">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <CategoryRow
-                name="All"
-                desc="Show every application"
-                color="var(--accent)"
-                pct={100}
-                icon={Layers}
-                active={catFilter === 'all'}
-                onClick={() => setCatFilter('all')}
-              />
-              {appCategories.map((c) => {
-                const Icon = catIcon[c.id];
-                return (
-                  <CategoryRow
-                    key={c.id}
-                    name={c.name}
-                    desc={c.description}
-                    color={c.color}
-                    pct={c.trafficSharePct}
-                    icon={Icon}
-                    active={catFilter === c.id}
-                    onClick={() => setCatFilter(c.id)}
-                  />
-                );
-              })}
-            </div>
-          </Card>
         </div>
 
         {/* Policy table */}
@@ -370,39 +333,6 @@ function SmallStat({
   );
 }
 
-function CategoryRow({
-  name, desc, color, pct, icon: Icon, active, onClick,
-}: {
-  name: string; desc: string; color: string; pct: number;
-  icon: React.ComponentType<{ size?: number }>; active: boolean; onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 10, padding: 10,
-        textAlign: 'left', justifyContent: 'flex-start',
-        background: active ? 'var(--grad-accent-soft)' : 'rgba(255,255,255,0.025)',
-        borderColor: active ? 'rgba(var(--accent-rgb) / 0.35)' : 'var(--border)',
-      }}
-    >
-      <span style={{ width: 28, height: 28, borderRadius: 8, background: `${color}22`, color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <Icon size={14} />
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>
-          <span>{name}</span>
-          <span className="mono" style={{ color: 'var(--text-muted)' }}>{pct}%</span>
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{desc}</div>
-        <div className="progress" style={{ marginTop: 6, height: 4 }}>
-          <span style={{ width: `${pct}%`, background: color, boxShadow: 'none' }} />
-        </div>
-      </div>
-    </button>
-  );
-}
-
 function PathPair({ pref, backup }: { pref: AppPolicy['preferredPath']; backup: AppPolicy['backupPath'] }) {
   const Pref = pref === 'Fiber' ? Cable : pref === '5G' ? Radio : Shuffle;
   const c = useThemeColors();
@@ -448,7 +378,7 @@ function FormRow({ label, children }: { label: string; children: React.ReactNode
 
 
 /* App → Path Sankey-ish flow diagram */
-function AppFlowDiagram() {
+export function AppFlowDiagram() {
   const W = 760, H = 360;
   const leftX = 80, rightX = W - 80;
   const lanes = appCategories;

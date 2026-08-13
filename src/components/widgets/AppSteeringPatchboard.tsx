@@ -30,6 +30,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Laptop, Monitor, Printer, CreditCard, Server, PhoneCall,
   Flame, Wind, DoorClosed, Smartphone, Tablet, Cpu, Plug, HelpCircle,
@@ -285,7 +286,7 @@ interface LinkGeom {
 
 /* ───────── component ───────── */
 
-export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
+export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false, advisorHostId }: { branchId: string; externalAdvisorTrigger?: boolean; advisorHostId?: string }) {
   const tc = useThemeColors();
   const { theme } = useTheme();
   const ipsec = useIpsecMetrics();
@@ -329,6 +330,12 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
   // AI route advisor + its "guide" overlay (ghost wire to the suggested jack).
   const [advisor, setAdvisor] = useState<AdvisorState>({ open: false, loading: false, suggestions: [] });
   const [guide, setGuide] = useState<{ clientId: string; toIfname: string } | null>(null);
+  const [advisorHost, setAdvisorHost] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!advisorHostId) return;
+    setAdvisorHost(document.getElementById(advisorHostId));
+  }, [advisorHostId]);
 
   const source = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
   const gw = useMemo(
@@ -1245,6 +1252,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
 
       {/* ── AI route advisor ── */}
       <button
+        data-route-advisor-trigger
         onClick={() => (advisor.open ? (setAdvisor((a) => ({ ...a, open: false })), setGuide(null)) : void runAdvisor())}
         title="Compare tunnels and suggest better routes"
         style={{
@@ -1252,13 +1260,18 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
           display: 'inline-flex', alignItems: 'center', gap: 6,
           fontSize: 11.5, padding: '5px 10px', borderRadius: 9,
           color: advisor.open ? 'var(--text)' : 'var(--text-dim)',
+          ...(externalAdvisorTrigger ? { display: 'none' } : {}),
         }}
       >
         <Sparkles size={13} style={{ color: tc.accent3 }} /> AI advisor
       </button>
-      {advisor.open && (
+      {advisor.open && advisorHost && createPortal(
         <div role="region" aria-label="AI route advisor" style={{
-          position: 'absolute', top: 32, right: 0, width: 330, zIndex: 6,
+          position: externalAdvisorTrigger ? 'relative' : 'absolute',
+          top: externalAdvisorTrigger ? 'auto' : 32,
+          right: externalAdvisorTrigger ? 'auto' : 0,
+          width: externalAdvisorTrigger ? '100%' : 330,
+          zIndex: 6,
           background: dark ? 'rgba(18,16,38,0.97)' : '#ffffff',
           border: '1px solid var(--border)', borderRadius: 12, padding: 12,
           boxShadow: '0 14px 34px rgba(0,0,0,0.4)',
@@ -1350,7 +1363,7 @@ export function AppSteeringPatchboard({ branchId }: { branchId: string }) {
               })}
             </>
           )}
-        </div>
+        </div>, advisorHost
       )}
 
       {/* ── wire-tap console ── */}

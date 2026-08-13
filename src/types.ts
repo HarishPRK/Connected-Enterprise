@@ -11,9 +11,15 @@ export interface Branch {
 
 export interface LanPort {
   id: number;
-  linkUp: boolean;
-  speedMbps: number;
+  label?: string;
+  interfaceName?: string;
+  linkUp?: boolean;
+  speedMbps?: number;
   device?: string;
+  rxPackets?: string;
+  txPackets?: string;
+  rxPps?: number;
+  txPps?: number;
 }
 
 export interface PoePort {
@@ -29,8 +35,9 @@ export interface WanLink {
   active: boolean;
   rssi?: number;
   sinr?: number;
-  rxMbps: number;
-  txMbps: number;
+  /** Omitted until two source counter samples have produced a measured rate. */
+  rxMbps?: number;
+  txMbps?: number;
 }
 
 export interface BandwidthPoint {
@@ -40,9 +47,13 @@ export interface BandwidthPoint {
 }
 
 export interface AppTraffic {
-  app: 'Teams' | 'Gmail' | 'Browsing' | 'Google Meet' | 'OT';
+  /** A source-reported label. The Overview uses the live client name/IP/MAC. */
+  app: string;
   sharePct: number;
-  via: '5G' | 'Fiber';
+  /** Measured client throughput represented by this row. */
+  mbps?: number;
+  /** Kept for policy/demo consumers; live client telemetry is not path-scoped. */
+  via?: '5G' | 'Fiber';
 }
 
 export interface Device {

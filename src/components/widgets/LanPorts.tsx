@@ -1,18 +1,94 @@
 import { Card } from '../Card';
 import type { LanPort } from '../../types';
+import {
+  WidgetDataBadge,
+  WidgetDataEmpty,
+  WidgetDataNote,
+  type WidgetDataMeta,
+} from './WanWidget';
 
-export function LanPorts({ ports }: { ports: LanPort[] }) {
-  const up = ports.filter((p) => p.linkUp).length;
+export interface LanPortsProps extends WidgetDataMeta {
+  ports: readonly LanPort[] | null;
+}
+
+function formatPortRate(speedMbps: number | undefined) {
+  if (typeof speedMbps !== 'number' || !Number.isFinite(speedMbps) || speedMbps <= 0) {
+    return 'rate not reported';
+  }
+  if (speedMbps >= 1000 && speedMbps % 1000 === 0) return `${speedMbps / 1000}G`;
+  return `${speedMbps}M`;
+}
+
+function formatPacketRate(value: number) {
+  if (value < 1) return `${value.toFixed(2)} pkt/s`;
+  if (value < 10 && !Number.isInteger(value)) return `${value.toFixed(1)} pkt/s`;
+  if (value < 1_000) return `${Math.round(value).toLocaleString()} pkt/s`;
+  if (value < 1_000_000) return `${(value / 1_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} kpkt/s`;
+  return `${(value / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} Mpkt/s`;
+}
+
+function portActivity(port: LanPort) {
+  const hasPacketCounters = port.rxPackets !== undefined || port.txPackets !== undefined;
+  const hasRxRate = Number.isFinite(port.rxPps);
+  const hasTxRate = Number.isFinite(port.txPps);
+  const packetRate = (hasRxRate ? Number(port.rxPps) : 0) + (hasTxRate ? Number(port.txPps) : 0);
+  if (hasPacketCounters) {
+    return {
+      active: packetRate > 0,
+      text: hasRxRate || hasTxRate ? formatPacketRate(packetRate) : 'collecting rate…',
+    };
+  }
+  if (port.linkUp === false) return { active: false, text: 'down' };
+  if (port.linkUp === true) return { active: true, text: formatPortRate(port.speedMbps) };
+  return { active: false, text: 'link state not reported' };
+}
+
+export function LanPorts({
+  ports,
+  dataState = 'unavailable',
+  source,
+  statusMessage,
+  observedAt,
+}: LanPortsProps) {
+  const canShowObservation = dataState === 'live' || dataState === 'stale';
+  const visiblePorts = canShowObservation ? (ports ?? []) : [];
+  const summary = visiblePorts.length > 0
+    ? `${visiblePorts.length} live interface reports`
+    : 'GW Twin interface activity';
+
   return (
-    <Card title="LAN Ports" sub={`${up}/${ports.length} link up`}>
-      {ports.map((p) => (
-        <div key={p.id} className="port-row">
-          <span className="port-id">P{p.id}</span>
-          <span className={`dot ${p.linkUp ? 'ok' : 'off'}`} />
-          <span className="port-dev">{p.device ?? <em style={{ color: 'var(--text-muted)' }}>— unused</em>}</span>
-          <span className="port-rate">{p.linkUp ? `${p.speedMbps >= 1000 ? '1G' : `${p.speedMbps}M`}` : 'down'}</span>
-        </div>
-      ))}
+    <Card
+      title="LAN Ports"
+      sub={(
+        <>
+          <div>{summary}</div>
+          <WidgetDataNote
+            dataState={dataState}
+            source={source}
+            statusMessage={statusMessage}
+            observedAt={observedAt}
+          />
+        </>
+      )}
+      right={<WidgetDataBadge state={dataState} />}
+    >
+      {visiblePorts.length === 0 ? (
+        <WidgetDataEmpty state={dataState} liveLabel="LAN port data" />
+      ) : (
+        visiblePorts.map((port) => {
+          const activity = portActivity(port);
+          return (
+            <div key={port.id} className="port-row" title={port.interfaceName}>
+              <span className="port-id">P{port.id}</span>
+              <span className={`dot ${activity.active ? 'ok' : 'off'}`} />
+              <span className="port-dev" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                {port.label?.trim() || port.device?.trim() || port.interfaceName || 'Interface'}
+              </span>
+              <span className="port-rate">{activity.text}</span>
+            </div>
+          );
+        })
+      )}
     </Card>
   );
 }

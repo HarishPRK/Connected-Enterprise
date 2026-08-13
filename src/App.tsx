@@ -46,6 +46,7 @@ export default function App() {
   const activeAlerts = alerts.filter((a) => a.level !== 'ok').length;
   const location = useLocation();
   const isGatewayTwin = location.pathname === '/gateway-twin';
+  const isAskAi = location.pathname === '/ask-ai';
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -78,10 +79,10 @@ export default function App() {
           onOpenNotifications={() => setNotifOpen(true)}
         />
         <Sidebar />
-        <main className={`main${isGatewayTwin ? ' gateway-twin-main' : ''}`}>
+        <main className={`main${isGatewayTwin ? ' gateway-twin-main' : ''}${isAskAi ? ' askai-main' : ''}`}>
           <div
             key={location.pathname}
-            className={`page-transition${isGatewayTwin ? ' gateway-twin-route' : ''}`}
+            className={`page-transition${isGatewayTwin ? ' gateway-twin-route' : ''}${isAskAi ? ' askai-route' : ''}`}
           >
             <Suspense fallback={<div className="route-loading">Loading…</div>}>
               <Routes location={location}>
@@ -102,7 +103,7 @@ export default function App() {
                 <Route path="/app-routing"    element={<ApplicationAwareRoutingPage branchId={branchId} />} />
                 <Route path="/traffic-policy" element={<TrafficPolicyPage />} />
                 <Route path="/onboarding"     element={<OnboardingPage branchId={branchId} />} />
-                <Route path="/ask-ai"         element={<AskAiPage />} />
+                <Route path="/ask-ai"         element={<AskAiPage branchId={branchId} />} />
                 <Route path="/agentic-ai"     element={<AgenticAIPage />} />
                 <Route path="/settings"       element={<SettingsPage />} />
               </Routes>

@@ -20,6 +20,11 @@ import {
 const sevOrder: Record<IncidentSeverity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const sevBadge: Record<IncidentSeverity, string> = { critical: 'err', high: 'err', medium: 'warn', low: '' };
 const sevLabel: Record<IncidentSeverity, string> = { critical: 'CRITICAL', high: 'HIGH', medium: 'MED', low: 'LOW' };
+const sevColor: Record<IncidentSeverity, string> = {
+  critical: 'var(--err)', high: 'var(--err)', medium: 'var(--warn)', low: 'var(--ok)',
+};
+/* Statuses where the agent is actively working — these get the live ping. */
+const activeStatuses: IncidentStatus[] = ['triaging', 'investigating', 'resolving'];
 
 const statusBadge: Record<IncidentStatus, string> = {
   triaging: 'warn', investigating: 'warn', awaiting_approval: 'warn',
@@ -144,6 +149,13 @@ export function IncidentsPage() {
     const autoResolved = allList.filter((i) => i.status === 'resolved' && i.assignee === 'agent').length;
     const escalated = allList.filter((i) => i.status === 'escalated').length;
     return { open, awaiting, autoResolved, escalated };
+  }, [allList]);
+
+  // Per-status counts for the segmented filter chips
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: allList.length };
+    for (const i of allList) counts[i.status] = (counts[i.status] ?? 0) + 1;
+    return counts;
   }, [allList]);
 
   // ─── Live Claude agent runner ───
@@ -380,16 +392,17 @@ export function IncidentsPage() {
               </div>
             }
           >
-            <div className="toolbar" style={{ marginBottom: 4 }}>
+            <div className="inc-seg" role="tablist" aria-label="Filter by status">
               {(['all', 'investigating', 'awaiting_approval', 'resolved', 'escalated'] as const).map((s) => (
                 <button
                   key={s}
+                  role="tab"
+                  aria-selected={s === statusFilter}
+                  className={s === statusFilter ? 'active' : undefined}
                   onClick={() => setStatusFilter(s)}
-                  style={s === statusFilter
-                    ? { background: 'var(--grad-accent-soft)', borderColor: 'var(--accent)', color: 'var(--text)' }
-                    : undefined}
                 >
                   {s === 'all' ? 'All' : statusLabel[s]}
+                  <span className="seg-count">{statusCounts[s] ?? 0}</span>
                 </button>
               ))}
             </div>
@@ -430,24 +443,19 @@ export function IncidentsPage() {
 
 function IncidentRow({ inc, selected, onClick }: { inc: Incident; selected: boolean; onClick: () => void }) {
   const branch = branches.find((b) => b.id === inc.branchId);
+  const isActive = activeStatuses.includes(inc.status);
   return (
     <button
       onClick={onClick}
-      style={{
-        display: 'flex', flexDirection: 'column', gap: 4,
-        padding: '9px 12px', borderRadius: 10, textAlign: 'left', justifyContent: 'flex-start',
-        background: selected ? 'var(--grad-accent-soft)' : 'rgba(var(--accent-rgb) / 0.03)',
-        borderColor: selected ? 'var(--accent)' : 'var(--border)',
-      }}
+      className={`inc-row${selected ? ' selected' : ''}`}
+      style={{ '--sev': sevColor[inc.severity] } as React.CSSProperties}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+      <div className="inc-row-top">
         <span className={`badge ${sevBadge[inc.severity]}`}>{sevLabel[inc.severity]}</span>
-        <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {inc.title}
-        </span>
+        <span className="inc-row-title">{inc.title}</span>
         <span className={`badge ${statusBadge[inc.status]}`}>{statusLabel[inc.status]}</span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', fontSize: 11, color: 'var(--text-muted)' }}>
+      <div className="inc-row-meta">
         <span className="mono">{inc.id}</span>
         <span>·</span>
         <span>{branch?.name}</span>
@@ -455,7 +463,8 @@ function IncidentRow({ inc, selected, onClick }: { inc: Incident; selected: bool
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {inc.assignee === 'agent' ? <><Bot size={10} />{inc.agentName ?? 'Agent'}</> : inc.assignee}
         </span>
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <span className="spacer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {isActive && <span className="inc-ping" title="Agent working" />}
           <Clock size={10} />{timeAgo(inc.createdISO)}
         </span>
       </div>
@@ -480,6 +489,7 @@ function IncidentDetail({
 
   return (
     <Card
+      className="inc-detail-card"
       title={
         <span>
           {incident.id} · {incident.title}
@@ -535,27 +545,25 @@ function IncidentDetail({
 
 function DetailHeader({ incident }: { incident: Incident }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', flexWrap: 'wrap',
-      gap: 16, fontSize: 12, color: 'var(--text-muted)',
-      padding: '6px 0',
-    }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--text)' }}>
+    <div className="inc-meta">
+      <span className="inc-chip">
         {incident.assignee === 'agent'
-          ? <><Bot size={12} style={{ color: 'var(--accent)' }} />{incident.agentName}</>
-          : <>{incident.assignee}</>}
+          ? <><Bot size={12} style={{ color: 'var(--accent)' }} /><strong>{incident.agentName}</strong></>
+          : <strong>{incident.assignee}</strong>}
       </span>
       {incident.confidence != null && (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 11 }}>Confidence</span>
+        <span className="inc-chip">
+          Confidence
           <ConfidenceBar value={incident.confidence} />
         </span>
       )}
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span className="inc-chip">
         <Clock size={11} />Created {timeAgo(incident.createdISO)} ago
       </span>
       {incident.resolvedISO && (
-        <span>· Resolved {timeAgo(incident.resolvedISO)} ago</span>
+        <span className="inc-chip" style={{ color: 'var(--ok)', borderColor: 'rgba(var(--ok-rgb) / 0.35)' }}>
+          <CheckCircle2 size={11} />Resolved {timeAgo(incident.resolvedISO)} ago
+        </span>
       )}
     </div>
   );
@@ -566,9 +574,12 @@ function ConfidenceBar({ value }: { value: number }) {
   const color = value > 0.85 ? c.ok : value > 0.65 ? c.warn : c.err;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span className="mono" style={{ color }}>{value.toFixed(2)}</span>
-      <div style={{ width: 80, height: 5, background: 'rgba(var(--accent-rgb) / 0.10)', borderRadius: 999, overflow: 'hidden' }}>
-        <div style={{ width: `${value * 100}%`, height: '100%', background: color, transition: 'width 0.4s' }} />
+      <span className="mono" style={{ color, fontWeight: 600 }}>{value.toFixed(2)}</span>
+      <div style={{ width: 76, height: 5, background: 'rgba(var(--accent-rgb) / 0.10)', borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{
+          width: `${value * 100}%`, height: '100%', borderRadius: 999,
+          background: color, opacity: 0.85, transition: 'width 0.4s',
+        }} />
       </div>
     </div>
   );
@@ -619,8 +630,10 @@ function AgentTimeline({ incident }: { incident: Incident }) {
         {stillStreaming && <span className="badge"><span className="dot ok" /> Streaming</span>}
       </div>
       <div className="agent-timeline">
-        {visible.map((step) => <StepCard key={step.id} step={step} />)}
-        {stillStreaming && <ThinkingDots />}
+        <div className="agent-steps">
+          {visible.map((step) => <StepCard key={step.id} step={step} />)}
+          {stillStreaming && <ThinkingDots />}
+        </div>
       </div>
     </div>
   );
@@ -658,9 +671,9 @@ function StepBlock({
       ? <RichText text={children} />
       : children;
   return (
-    <div className={`step step-${variant}`} style={{ borderLeftColor: accentColor }}>
+    <div className={`step step-${variant}`} style={{ '--step-accent': accentColor } as React.CSSProperties}>
+      <span className="step-node"><Icon size={13} /></span>
       <div className="step-head">
-        <span style={{ color: accentColor, display: 'inline-flex' }}><Icon size={13} /></span>
         <span>{label}</span>
       </div>
       <div className="step-body">{body}</div>
@@ -671,9 +684,9 @@ function StepBlock({
 function ToolCallStep({ step }: { step: AgentStep }) {
   const hasArgs = step.args && Object.keys(step.args).length > 0;
   return (
-    <div className="step step-tool" style={{ borderLeftColor: 'var(--accent-3)' }}>
+    <div className="step step-tool" style={{ '--step-accent': 'var(--accent-3)' } as React.CSSProperties}>
+      <span className="step-node"><Wrench size={13} /></span>
       <div className="step-head">
-        <span style={{ color: 'var(--accent-3)', display: 'inline-flex' }}><Wrench size={13} /></span>
         <span>Tool call</span>
         <span style={{ flex: 1 }} />
         <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{step.tool}()</span>
@@ -688,11 +701,11 @@ function ToolResultStep({ step }: { step: AgentStep }) {
   const ok = step.ok !== false;
   const color = ok ? 'var(--ok)' : 'var(--err)';
   return (
-    <div className="step step-result" style={{ borderLeftColor: color }}>
+    <div className="step step-result" style={{ '--step-accent': color } as React.CSSProperties}>
+      <span className="step-node">
+        {ok ? <CheckCircle2 size={13} /> : <AlertOctagon size={13} />}
+      </span>
       <div className="step-head">
-        <span style={{ color, display: 'inline-flex' }}>
-          {ok ? <CheckCircle2 size={13} /> : <AlertOctagon size={13} />}
-        </span>
         <span>Tool result</span>
         <span style={{ flex: 1 }} />
         <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>← {step.tool}</span>
@@ -728,9 +741,9 @@ function CollapsibleJson({ label, json }: { label: string; json: string }) {
 
 function ThinkingDots() {
   return (
-    <div className="step step-thinking" style={{ borderLeftColor: 'var(--accent)' }}>
+    <div className="step step-thinking">
+      <span className="step-node"><FileSearch size={13} /></span>
       <div className="step-head">
-        <span style={{ color: 'var(--accent)', display: 'inline-flex' }}><FileSearch size={13} /></span>
         <span>Working…</span>
       </div>
       <div className="step-body">
@@ -878,9 +891,10 @@ function MiniKpi({ label, value, icon: Icon, accent, sub }: {
   label: string; value: string; icon: React.ComponentType<{ size?: number }>; accent: string; sub?: string;
 }) {
   return (
-    <div className="kpi-card">
+    <div className="kpi-card inc-kpi" style={{ '--kpi-accent': accent } as React.CSSProperties}>
+      <span className="kpi-rail" />
       <div className="kpi-top">
-        <div className="kpi-icon" style={{ color: accent, background: `linear-gradient(135deg, ${accent}33, transparent)` }}>
+        <div className="kpi-icon" style={{ color: accent, background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 20%, transparent), transparent)` }}>
           <Icon size={16} />
         </div>
         <div className="kpi-label">{label}</div>
