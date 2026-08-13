@@ -35,12 +35,24 @@ function portActivity(port: LanPort) {
   if (hasPacketCounters) {
     return {
       active: packetRate > 0,
+      packetRate: hasRxRate || hasTxRate ? packetRate : null,
       text: hasRxRate || hasTxRate ? formatPacketRate(packetRate) : 'collecting rate…',
     };
   }
-  if (port.linkUp === false) return { active: false, text: 'down' };
-  if (port.linkUp === true) return { active: true, text: formatPortRate(port.speedMbps) };
-  return { active: false, text: 'link state not reported' };
+  if (port.linkUp === false) return { active: false, packetRate: null, text: 'down' };
+  if (port.linkUp === true) return { active: true, packetRate: null, text: formatPortRate(port.speedMbps) };
+  return { active: false, packetRate: null, text: 'link state not reported' };
+}
+
+/** Blink period like physical switch LEDs: busier port → faster blink.
+ *  null = solid (link up, no measured traffic). */
+function blinkSeconds(pps: number | null): number | null {
+  if (pps === null || !Number.isFinite(pps) || pps <= 0) return null;
+  if (pps < 5) return 1.1;
+  if (pps < 50) return 0.7;
+  if (pps < 500) return 0.4;
+  if (pps < 5_000) return 0.22;
+  return 0.13;
 }
 
 export function LanPorts({
@@ -77,10 +89,14 @@ export function LanPorts({
       ) : (
         visiblePorts.map((port) => {
           const activity = portActivity(port);
+          const blink = blinkSeconds(activity.packetRate);
           return (
             <div key={port.id} className="port-row" title={port.interfaceName}>
               <span className="port-id">P{port.id}</span>
-              <span className={`dot ${activity.active ? 'ok' : 'off'}`} />
+              <span
+                className={`dot ${activity.active ? 'ok' : 'off'}${blink ? ' led-blink' : ''}`}
+                style={blink ? { animationDuration: `${blink}s` } : undefined}
+              />
               <span className="port-dev" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                 {port.label?.trim() || port.device?.trim() || port.interfaceName || 'Interface'}
               </span>

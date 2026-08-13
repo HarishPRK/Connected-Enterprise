@@ -1,25 +1,22 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, Router, Laptop, Siren, Shuffle, Building2,
+  LayoutDashboard, Laptop, Siren, Shuffle,
   PackagePlus, Sparkles, Settings, GitBranch, Layers, AlertOctagon, FileSearch,
-  TrendingUp, CloudCog, ShieldCheck, Video, Bot, Gauge, Box,
+  TrendingUp, CloudCog, ShieldCheck, Video, Bot, Box,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 
 const nav = [
   { to: '/',                 label: 'Overview',                  icon: LayoutDashboard, section: 'Monitor' },
-  { to: '/fleet',            label: 'Fleet',                     icon: Building2,       section: 'Monitor' },
-  { to: '/connectivity',     label: 'Connectivity',              icon: Router,          section: 'Monitor' },
-  { to: '/gateway-twin',     label: 'Gateway Twin',              icon: Box,             section: 'Monitor' },
   { to: '/it-devices',       label: 'IT Devices',                icon: Laptop,          section: 'Monitor' },
   { to: '/ot-devices',       label: 'OT Devices',                icon: Siren,           section: 'Monitor' },
+  { to: '/gateway-twin',     label: 'Gateway Twin',              icon: Box,             section: 'Monitor' },
   { to: '/video-analytics',  label: 'Video Analytics',           icon: Video,           section: 'Monitor' },
   { to: '/path-selection',   label: 'Dynamic Failover',    icon: GitBranch,       section: 'Routing' },
   { to: '/app-routing',      label: 'Application Traffic Routing', icon: Layers,          section: 'Routing' },
   { to: '/service-offerings', label: 'Service Offerings',        icon: CloudCog,        section: 'Insights' },
   { to: '/cost-insights',    label: 'Cost Insights',             icon: TrendingUp,      section: 'Insights' },
-  { to: '/command-center',   label: 'Command Center',            icon: Gauge,           section: 'Insights' },
   { to: '/incidents',        label: 'Incidents',                 icon: AlertOctagon,    section: 'Operate' },
   { to: '/security',         label: 'Security',                  icon: ShieldCheck,     section: 'Operate' },
   { to: '/audit',            label: 'Audit Log',                 icon: FileSearch,      section: 'Operate' },
@@ -85,7 +82,7 @@ export function Sidebar() {
         </div>
       ))}
       <div className="sidebar-footer">
-        v0.1.0 · <span className="gradient-text">preview build</span>
+        v0.1.0
       </div>
     </aside>
   );

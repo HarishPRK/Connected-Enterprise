@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import {
-  Activity, ArrowDown, ArrowUp, Building2, Cpu, ShieldAlert,
-  TrendingUp, TrendingDown,
+  Activity, ArrowDown, ArrowUp, Building2, CheckCircle2, Cpu, ShieldAlert,
+  TrendingUp, TrendingDown, WifiOff,
 } from 'lucide-react';
 import { Sparkline } from './Sparkline';
 import { branches, fleetStats } from '../../data/mock';
@@ -22,6 +23,74 @@ interface Kpi {
   accentKey: 'accent' | 'accent2' | 'accent3' | 'ok' | 'warn' | 'err';
   /** When provided, the card becomes clickable. */
   onClick?: () => void;
+  /** Human-readable trend override — replaces the raw delta percentage
+   *  (e.g. "All clear" instead of "-100%"). When set without trendSub,
+   *  the "vs last 24h" suffix is hidden. */
+  trendLabel?: string;
+  trendSub?: string;
+  trendTone?: 'ok' | 'err' | 'muted';
+  trendIcon?: React.ComponentType<{ size?: number }>;
+  /** 'heat' renders the series as a 30-day uptime heat strip instead of a sparkline. */
+  sparkKind?: 'line' | 'heat';
+  /** Slow red breathing glow on the card while a condition needs attention. */
+  alerting?: boolean;
+}
+
+/** Deterministic per-branch daily uptime series — 30 days, seeded so a branch
+ *  always shows the same history, with dip depth tied to its 30d average. */
+function uptimeDaily(pct: number, seed: number, days = 30): number[] {
+  let s = ((seed || 1) * 2654435761) >>> 0;
+  const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  const badDays = pct >= 99.95 ? 1 : pct >= 99.9 ? 2 : pct >= 99.5 ? 4 : 6;
+  const arr = Array.from({ length: days }, () => 100);
+  for (let i = 0; i < badDays; i += 1) {
+    const idx = Math.floor(rnd() * days);
+    const dip = pct >= 99.9 ? 99.3 + rnd() * 0.6 : 96.5 + rnd() * 2.5;
+    arr[idx] = Math.min(arr[idx], Number(dip.toFixed(2)));
+  }
+  return arr;
+}
+
+/** GitHub-style heat strip: 15×2 grid, one cell per day, newest last. */
+function UptimeHeatStrip({ values, width = 88, height = 32 }: {
+  values: number[]; width?: number; height?: number;
+}) {
+  const cols = 15;
+  const gap = 2;
+  const cell = (width - (cols - 1) * gap) / cols;
+  const rows = Math.ceil(values.length / cols);
+  const gridH = rows * cell + (rows - 1) * gap;
+  const y0 = (height - gridH) / 2;
+  // Anchor "today" once per mount — tooltip dates don't need to tick live.
+  const [today] = useState(() => Date.now());
+  const fillFor = (v: number) => (
+    v >= 99.95 ? { fill: 'var(--ok)', opacity: 0.9 }
+    : v >= 99.5 ? { fill: 'var(--ok)', opacity: 0.45 }
+    : v >= 98 ? { fill: 'var(--warn)', opacity: 0.85 }
+    : { fill: 'var(--err)', opacity: 0.9 }
+  );
+  return (
+    <svg width={width} height={height}>
+      {values.map((v, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const { fill, opacity } = fillFor(v);
+        const day = new Date(today - (values.length - 1 - i) * 86_400_000)
+          .toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        return (
+          <rect
+            key={i}
+            x={col * (cell + gap)}
+            y={y0 + row * (cell + gap)}
+            width={cell} height={cell} rx={1.5}
+            fill={fill} fillOpacity={opacity}
+          >
+            <title>{`${day} · ${v.toFixed(2)}%`}</title>
+          </rect>
+        );
+      })}
+    </svg>
+  );
 }
 
 const sineSeries = (n: number, base: number, noise: number, seed = 0) =>
@@ -136,6 +205,9 @@ export function KpiStrip({
             : [0,0,0,0,0,0,0,0,0,0,0,0],
           accentKey: livePlanoMode.gatewayOnline ? 'ok' : 'err',
           onClick: livePlanoMode.onGatewayClick,
+          trendLabel: livePlanoMode.gatewayOnline ? 'streaming live' : 'stream offline',
+          trendTone: livePlanoMode.gatewayOnline ? 'ok' as const : 'err' as const,
+          trendIcon: livePlanoMode.gatewayOnline ? Activity : WifiOff,
         }
       : {
           label: 'Devices online',
@@ -152,14 +224,26 @@ export function KpiStrip({
       icon: ShieldAlert, delta: alertsDelta,
       series: sineSeries(12, Math.max(1, alertsValue) * 1.4, 0.8, seed + 1),
       accentKey: alertsValue > 0 ? 'warn' : 'ok',
+      alerting: alertsValue > 0,
+      ...(alertsValue === 0 ? {
+        trendLabel: 'All clear',
+        trendTone: 'ok' as const,
+        trendIcon: CheckCircle2,
+      } : null),
     },
     {
       label: 'Avg uptime (30d)',
       num: stats?.uptimePct ?? 99.92,
       format: (n) => `${n.toFixed(2)}%`,
       icon: Activity, delta: uptimeDelta,
-      series: sineSeries(12, stats ? stats.uptimePct : 99, 0.4, seed + 2),
+      series: uptimeDaily(stats?.uptimePct ?? 99.92, seed + 2),
+      sparkKind: 'heat' as const,
       accentKey: 'ok',
+      // Uptime moves in fractions of a point, not whole percents — present the
+      // delta as percentage points so "99.99%" never sits next to "+6%".
+      trendLabel: `${uptimeDelta >= 0 ? '+' : ''}${(uptimeDelta / 100).toFixed(2)}pp`,
+      trendSub: 'vs prior 30d',
+      trendTone: uptimeDelta >= 0 ? 'ok' as const : 'err' as const,
     },
     ...(!liveWanTraffic ? [{
       label: 'Throughput',
@@ -180,15 +264,22 @@ export function KpiStrip({
     <div className="kpi-strip">
       {kpis.map((k) => {
         const Icon = k.icon;
-        const Trend = k.delta >= 0 ? TrendingUp : TrendingDown;
-        const trendColor = k.delta === 0 ? c.textMuted
+        const Trend = k.trendIcon ?? (k.delta >= 0 ? TrendingUp : TrendingDown);
+        const toneColor = k.trendTone === 'ok' ? c.ok
+          : k.trendTone === 'err' ? c.err
+          : k.trendTone === 'muted' ? c.textMuted
+          : undefined;
+        const trendColor = toneColor ?? (k.delta === 0 ? c.textMuted
           : (k.label === 'Active alerts'
               ? (k.delta < 0 ? c.ok : c.err)
-              : (k.delta > 0 ? c.ok : c.err));
+              : (k.delta > 0 ? c.ok : c.err)));
+        const trendText = k.trendLabel
+          ?? (k.delta === 0 ? 'no change' : `${k.delta > 0 ? '+' : ''}${k.delta}%`);
+        const trendSub = k.trendLabel ? k.trendSub : (k.trendSub ?? 'vs last 24h');
         const accent = c[k.accentKey];
         const clickable = !!k.onClick;
         return (
-          <div key={k.label} className="kpi-card"
+          <div key={k.label} className={`kpi-card${k.alerting ? ' kpi-card-alerting' : ''}`}
             onClick={k.onClick}
             role={clickable ? 'button' : undefined}
             tabIndex={clickable ? 0 : undefined}
@@ -207,13 +298,15 @@ export function KpiStrip({
                 <AnimatedNumber value={k.num} format={k.format} />
               </div>
               <div className="kpi-spark">
-                <Sparkline values={k.series} stroke={accent} fill={hexAlpha(accent, 0.18)} width={88} height={32} />
+                {k.sparkKind === 'heat'
+                  ? <UptimeHeatStrip values={k.series} width={88} height={32} />
+                  : <Sparkline values={k.series} stroke={accent} fill={hexAlpha(accent, 0.18)} width={88} height={32} />}
               </div>
             </div>
             <div className="kpi-trend" style={{ color: trendColor }}>
               <Trend size={11} />
-              <span>{k.delta === 0 ? 'no change' : `${k.delta > 0 ? '+' : ''}${k.delta}%`}</span>
-              <span className="kpi-trend-sub">vs last 24h</span>
+              <span>{trendText}</span>
+              {trendSub && <span className="kpi-trend-sub">{trendSub}</span>}
             </div>
           </div>
         );
@@ -256,20 +349,32 @@ function WanTrafficKpi({
           ? 'Waiting for the next gateway counter sample…'
           : 'WAN telemetry unavailable';
 
+  const isStale = state === 'stale';
   return (
-    <div className="kpi-card kpi-wan-card">
+    <div
+      className="kpi-card kpi-wan-card"
+      style={isStale ? {
+        borderColor: hexAlpha(c.warn, 0.4),
+        boxShadow: `inset 0 0 0 1px ${hexAlpha(c.warn, 0.12)}, 0 0 22px ${hexAlpha(c.warn, 0.08)}`,
+      } : undefined}
+    >
       <div className="kpi-top">
         <div
           className="kpi-icon"
           style={{
-            background: `linear-gradient(135deg, ${hexAlpha(c.accent3, 0.22)}, transparent)`,
-            color: c.accent3,
+            background: `linear-gradient(135deg, ${hexAlpha(isStale ? c.warn : c.accent3, 0.22)}, transparent)`,
+            color: isStale ? c.warn : c.accent3,
           }}
         >
           <Activity size={16} />
         </div>
         <div className="kpi-label">WAN traffic</div>
-        <span className="kpi-window-label">live rate</span>
+        <span
+          className="kpi-window-label"
+          style={isStale ? { color: c.warn, borderColor: hexAlpha(c.warn, 0.35) } : undefined}
+        >
+          {isStale ? 'stale' : 'live rate'}
+        </span>
       </div>
       <div
         className="kpi-wan-rates"

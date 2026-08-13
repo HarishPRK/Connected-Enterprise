@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { geoPath, geoAlbersUsa, geoMercator, geoCentroid, type GeoProjection } from 'd3-geo';
 import { feature } from 'topojson-client';
 import type { Feature, FeatureCollection, Geometry } from 'geojson';
 import type { Topology, GeometryCollection } from 'topojson-specification';
 import { ArrowLeft } from 'lucide-react';
 import { Card } from '../Card';
-import { branches } from '../../data/mock';
+import { branches, fleetStats } from '../../data/mock';
 import type { Branch } from '../../types';
 import { useTheme, useThemeColors } from '../../ui/Theme';
 
@@ -66,12 +66,40 @@ interface BranchMapProps {
   embedded?: boolean;
 }
 
+/** Radar-style expanding rings — two staggered pulses so the ripple never goes quiet. */
+function RadarRipple({ x, y, r, color, dur = 2.4 }: {
+  x: number; y: number; r: number; color: string; dur?: number;
+}) {
+  return (
+    <>
+      {[0, -dur / 2].map((begin) => (
+        <circle key={begin} cx={x} cy={y} r={r} fill="none" stroke={color} strokeWidth={1.4}>
+          <animate attributeName="r" values={`${r};${r + 18}`} dur={`${dur}s`} begin={`${begin}s`} repeatCount="indefinite" />
+          <animate attributeName="stroke-opacity" values="0.55;0" dur={`${dur}s`} begin={`${begin}s`} repeatCount="indefinite" />
+        </circle>
+      ))}
+    </>
+  );
+}
+
+/** warn/err pulse color for a set of branches, or null when all healthy. */
+function issueColorFor(list: Branch[], colors: { warn: string; err: string }): string | null {
+  let worst: 'warn' | 'err' | null = null;
+  for (const b of list) {
+    const s = fleetStats[b.id]?.status;
+    if (s === 'err') worst = 'err';
+    else if (s === 'warn' && worst === null) worst = 'warn';
+  }
+  return worst === 'err' ? colors.err : worst === 'warn' ? colors.warn : null;
+}
+
 export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapProps) {
   const [states, setStates] = useState<Feature<Geometry, StateProps>[] | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [zoom, setZoom] = useState<ZoomLevel | null>(null);
   const c = useThemeColors();
   const { theme } = useTheme();
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
 
   useEffect(() => {
     let cancelled = false;
@@ -386,7 +414,7 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
           {/* ── SD-WAN connectivity links (drawn behind markers) ── */}
           {connections.length > 0 && (
             <g>
-              {connections.map(({ id, from, to }) => {
+              {connections.map(({ id, from, to }, linkIndex) => {
                 // Slight arc upward so lines don't run dead-straight across the map.
                 const midX = (from.x + to.x) / 2;
                 const midY = (from.y + to.y) / 2;
@@ -397,10 +425,14 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
                 const cx = midX;
                 const cy = midY - lift;
                 const d = `M ${from.x} ${from.y} Q ${cx} ${cy}, ${to.x} ${to.y}`;
+                const pathId = `${uid}-${id}`;
+                const cometDur = 2.8 + (linkIndex % 3) * 0.6;
+                const cometBegin = -(linkIndex * 0.9);
                 return (
                   <g key={id}>
                     {/* Soft base line */}
                     <path
+                      id={pathId}
                       d={d}
                       stroke={c.accent}
                       strokeWidth={1.4}
@@ -423,6 +455,25 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
                         repeatCount="indefinite"
                       />
                     </path>
+                    {/* Comet: bright head + soft trailing glow riding the arc */}
+                    <circle r={4.5} fill={c.accent} opacity={0.25}>
+                      <animateMotion
+                        dur={`${cometDur}s`}
+                        begin={`${cometBegin - 0.07}s`}
+                        repeatCount="indefinite"
+                      >
+                        <mpath href={`#${pathId}`} />
+                      </animateMotion>
+                    </circle>
+                    <circle r={2.2} fill={c.accent} opacity={0.95}>
+                      <animateMotion
+                        dur={`${cometDur}s`}
+                        begin={`${cometBegin}s`}
+                        repeatCount="indefinite"
+                      >
+                        <mpath href={`#${pathId}`} />
+                      </animateMotion>
+                    </circle>
                   </g>
                 );
               })}
@@ -434,6 +485,7 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
             if (m.type === 'state-cluster') {
               const isHov = hover === `state:${m.state}`;
               const r = isHov ? 14 : 12;
+              const issueColor = issueColorFor(m.branches, c);
               return (
                 <g
                   key={`state-cluster-${m.state}`}
@@ -443,6 +495,7 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
                   onClick={() => setZoom({ state: m.state })}
                 >
                   <circle cx={m.x} cy={m.y} r={36} fill="url(#pin-glow)" />
+                  {issueColor && <RadarRipple x={m.x} y={m.y} r={r + 7} color={issueColor} />}
                   <circle cx={m.x} cy={m.y} r={r + 4} fill={dotPaperFill} stroke={c.accent} strokeWidth={1.5} />
                   <circle cx={m.x} cy={m.y} r={r} fill={c.accent} />
                   <text x={m.x} y={m.y + 4} textAnchor="middle" fontSize="13" fontWeight={700}
@@ -464,6 +517,7 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
             if (m.type === 'metro-cluster') {
               const isHov = hover === `metro:${m.metro}`;
               const r = isHov ? 13 : 11;
+              const issueColor = issueColorFor(m.branches, c);
               return (
                 <g
                   key={`metro-cluster-${m.metro}`}
@@ -473,6 +527,7 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
                   onClick={() => setZoom({ state: zoom?.state ?? '', metro: m.metro })}
                 >
                   <circle cx={m.x} cy={m.y} r={32} fill="url(#pin-glow)" />
+                  {issueColor && <RadarRipple x={m.x} y={m.y} r={r + 7} color={issueColor} />}
                   <circle cx={m.x} cy={m.y} r={r + 4} fill={dotPaperFill} stroke={c.accent2} strokeWidth={1.5} />
                   <circle cx={m.x} cy={m.y} r={r} fill={c.accent2} />
                   <text x={m.x} y={m.y + 4} textAnchor="middle" fontSize="12" fontWeight={700}
@@ -496,6 +551,13 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
             const isSel = b.id === selectedId;
             const isHov = hover === b.id;
             const r = isSel ? 9 : isHov ? 8 : 6;
+            const stat = fleetStats[b.id]?.status;
+            const pinFill = stat === 'err' ? c.err
+              : stat === 'warn' ? c.warn
+              : isSel ? c.accent2 : c.accent;
+            const rippleColor = stat === 'err' ? c.err
+              : stat === 'warn' ? c.warn
+              : isSel ? c.accent2 : null;
             return (
               <g
                 key={b.id}
@@ -505,12 +567,9 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
                 onClick={() => onSelect(b.id)}
               >
                 <circle cx={m.x} cy={m.y} r={32} fill="url(#pin-glow)" />
+                {rippleColor && <RadarRipple x={m.x} y={m.y} r={r + 5} color={rippleColor} />}
                 <circle cx={m.x} cy={m.y} r={r + 4} fill={dotPaperFill} />
-                <circle cx={m.x} cy={m.y} r={r} fill={isSel ? c.accent2 : c.accent}>
-                  {isSel && (
-                    <animate attributeName="r" values={`${r};${r + 3};${r}`} dur="2s" repeatCount="indefinite" />
-                  )}
-                </circle>
+                <circle cx={m.x} cy={m.y} r={r} fill={pinFill} />
                 <text x={m.x} y={m.y - 18} textAnchor="middle" fontSize="11" fontWeight={isSel ? 700 : 600}
                   fill={c.text} style={{ pointerEvents: 'none', paintOrder: 'stroke', stroke: labelStrokeBg, strokeWidth: 3 }}>
                   {b.name}

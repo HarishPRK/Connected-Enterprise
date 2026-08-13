@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEscape } from './Toast';
 import {
-  LayoutDashboard, Router, Laptop, Siren, Shuffle, PackagePlus,
-  Sparkles, Settings, Search, ArrowRight, MapPin, Building2,
-  AlertOctagon, FileSearch, GitBranch, Layers, TrendingUp, CloudCog, ShieldCheck, Gauge,
+  LayoutDashboard, Laptop, Siren, Shuffle, PackagePlus,
+  Sparkles, Settings, Search, ArrowRight, MapPin,
+  AlertOctagon, FileSearch, GitBranch, Layers, TrendingUp, CloudCog, ShieldCheck, Video, Box,
 } from 'lucide-react';
 import { branches } from '../data/mock';
 
@@ -32,15 +32,14 @@ export function CommandPalette({ open, onClose, onBranchChange }: CommandPalette
 
   const items: Item[] = useMemo(() => [
     { id: 'go-overview',     group: 'Navigate', label: 'Open Overview',                  icon: LayoutDashboard, run: () => nav('/') },
-    { id: 'go-fleet',        group: 'Navigate', label: 'Open Fleet',                     icon: Building2,       run: () => nav('/fleet') },
-    { id: 'go-conn',         group: 'Navigate', label: 'Open Connectivity',              icon: Router,          run: () => nav('/connectivity') },
     { id: 'go-it',           group: 'Navigate', label: 'Open IT Devices',                icon: Laptop,          run: () => nav('/it-devices') },
     { id: 'go-ot',           group: 'Navigate', label: 'Open OT Devices',                icon: Siren,           run: () => nav('/ot-devices') },
+    { id: 'go-gateway-twin', group: 'Navigate', label: 'Open Gateway Twin',              icon: Box,             run: () => nav('/gateway-twin') },
+    { id: 'go-video',       group: 'Navigate', label: 'Open Video Analytics',            icon: Video,           run: () => nav('/video-analytics') },
     { id: 'go-dps',          group: 'Routing',  label: 'Open Dynamic Path Selection',    icon: GitBranch,       run: () => nav('/path-selection') },
     { id: 'go-aar',          group: 'Routing',  label: 'Open Application Aware Routing', icon: Layers,          run: () => nav('/app-routing') },
     { id: 'go-offerings',    group: 'Insights', label: 'Open Service Offerings',         icon: CloudCog,        run: () => nav('/service-offerings') },
     { id: 'go-costinsights', group: 'Insights', label: 'Open Cost Insights',             icon: TrendingUp,      run: () => nav('/cost-insights') },
-    { id: 'go-cmdcenter',    group: 'Insights', label: 'Open Command Center',            icon: Gauge,           run: () => nav('/command-center') },
     { id: 'go-incidents',    group: 'Operate',  label: 'Open Incidents',                 icon: AlertOctagon,    run: () => nav('/incidents') },
     { id: 'go-security',     group: 'Operate',  label: 'Open Security',                  icon: ShieldCheck,     run: () => nav('/security') },
     { id: 'go-audit',        group: 'Operate',  label: 'Open Audit Log',                 icon: FileSearch,      run: () => nav('/audit') },

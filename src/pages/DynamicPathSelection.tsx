@@ -3176,6 +3176,26 @@ function IpsecFlowSvg({
     ? inferUnderlay(activeIfname)
     : null;
 
+  // ── Failover cinematic ──
+  // When the live active tunnel flips underlays, choreograph the moment for
+  // ~2.6s: red flash on the failed underlay, a bright one-shot sweep along the
+  // gateway → new-underlay leg, and a banner naming the transition.
+  const [cine, setCine] = useState<{ from: Underlay; to: Underlay; key: number } | null>(null);
+  const prevUnderlayRef = useRef<Underlay | null>(null);
+  useEffect(() => {
+    const prev = prevUnderlayRef.current;
+    prevUnderlayRef.current = activeUnderlayOf;
+    if (isTarget || !prev || !activeUnderlayOf || prev === activeUnderlayOf) return;
+    setCine({ from: prev, to: activeUnderlayOf, key: Date.now() });
+  }, [activeUnderlayOf, isTarget]);
+  // Dismiss on the cinematic's own lifecycle so a mid-play view toggle or a
+  // rapid flap always re-arms the timer instead of stranding the overlay.
+  useEffect(() => {
+    if (!cine) return;
+    const timer = window.setTimeout(() => setCine(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [cine]);
+
   const tunnelCarry = (
     underlay: Underlay,
     idx: number,
@@ -3680,6 +3700,19 @@ function IpsecFlowSvg({
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
+                  {/* Density scales with load: the busiest carrier earns a
+                      third particle so heavy paths visibly stream. */}
+                  {maxRate > 0 && rateOf(t.ifname) / maxRate > 0.55 && (
+                    <circle r={3} fill={flowColor} opacity={0.7}>
+                      <animateMotion
+                        dur={`${flowDur(t.ifname)}s`}
+                        begin="0.28s"
+                        repeatCount="indefinite"
+                      >
+                        <mpath href={`#${pid}`} />
+                      </animateMotion>
+                    </circle>
+                  )}
                 </>
               )}
             </g>
@@ -3742,6 +3775,19 @@ function IpsecFlowSvg({
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
+                  {/* Density scales with load: the busiest carrier earns a
+                      third particle so heavy paths visibly stream. */}
+                  {maxRate > 0 && rateOf(t.ifname) / maxRate > 0.55 && (
+                    <circle r={3} fill={flowColor} opacity={0.7}>
+                      <animateMotion
+                        dur={`${flowDur(t.ifname)}s`}
+                        begin="0.28s"
+                        repeatCount="indefinite"
+                      >
+                        <mpath href={`#${pid}`} />
+                      </animateMotion>
+                    </circle>
+                  )}
                 </>
               )}
             </g>
@@ -3827,6 +3873,19 @@ function IpsecFlowSvg({
                       <mpath href={`#${pid}`} />
                     </animateMotion>
                   </circle>
+                  {/* Density scales with load: the busiest carrier earns a
+                      third particle so heavy paths visibly stream. */}
+                  {maxRate > 0 && rateOf(t.ifname) / maxRate > 0.55 && (
+                    <circle r={3} fill={flowColor} opacity={0.7}>
+                      <animateMotion
+                        dur={`${flowDur(t.ifname)}s`}
+                        begin="0.28s"
+                        repeatCount="indefinite"
+                      >
+                        <mpath href={`#${pid}`} />
+                      </animateMotion>
+                    </circle>
+                  )}
                 </>
               )}
             </g>
@@ -4308,7 +4367,100 @@ function IpsecFlowSvg({
           sub="public egress · SaaS"
           illustration={<InternetIllustration tint={INT_COLOR} />}
         />
+
+        {/* ─── Failover cinematic overlay — one-shot, on top of everything ─── */}
+        {cine &&
+          (() => {
+            const oldBoxY = cine.from === "fiber" ? FIBER_Y : CELL_Y;
+            const newEnd = cine.to === "fiber" ? fiberLeft : cellLeft;
+            const sweepD = beziD(gwRight, newEnd);
+            const sweepId = `ipsec-failover-sweep-${cine.key}`;
+            const sweepColor = cine.to === "fiber" ? FIBER_COLOR : CELL_COLOR;
+            return (
+              <g key={cine.key} pointerEvents="none">
+                {/* Red flash framing the underlay that just failed */}
+                <rect
+                  x={COL_UNDERLAY.x - 6}
+                  y={oldBoxY - 6}
+                  width={COL_UNDERLAY.w + 12}
+                  height={UNDERLAY_H + 12}
+                  rx={14}
+                  fill="none"
+                  stroke={c.err}
+                  strokeWidth={2.5}
+                >
+                  <animate
+                    attributeName="stroke-opacity"
+                    values="0;1;0.2;1;0.15;0"
+                    dur="1.6s"
+                    fill="freeze"
+                  />
+                </rect>
+                {/* Bright sweep along gateway → the newly active underlay */}
+                <path
+                  id={sweepId}
+                  d={sweepD}
+                  fill="none"
+                  stroke={sweepColor}
+                  strokeWidth={3.5}
+                  strokeLinecap="round"
+                  opacity={0}
+                >
+                  <animate
+                    attributeName="opacity"
+                    values="0;0.85;0"
+                    dur="1.5s"
+                    begin="0.35s"
+                    fill="freeze"
+                  />
+                </path>
+                <circle r={6} fill={sweepColor} filter="url(#ipsec-flow-glow)" opacity={0}>
+                  <animate
+                    attributeName="opacity"
+                    values="0;1;1;0"
+                    dur="2.1s"
+                    begin="0.35s"
+                    fill="freeze"
+                  />
+                  <animateMotion dur="0.85s" begin="0.35s" repeatCount={2}>
+                    <mpath href={`#${sweepId}`} />
+                  </animateMotion>
+                </circle>
+              </g>
+            );
+          })()}
       </svg>
+
+      {/* Failover banner — names the transition while the cinematic plays. */}
+      {cine && (
+        <div
+          key={`fo-banner-${cine.key}`}
+          className="ipsec-failover-banner"
+          style={
+            cine.to === "fiber"
+              ? {
+                  borderColor: `${c.ok}66`,
+                  background: `linear-gradient(135deg, ${c.ok}1f, transparent), var(--panel-solid)`,
+                  boxShadow: `0 10px 30px rgba(0,0,0,0.35), 0 0 24px ${c.ok}33`,
+                }
+              : {
+                  borderColor: `${c.err}66`,
+                  background: `linear-gradient(135deg, ${c.err}1f, transparent), var(--panel-solid)`,
+                  boxShadow: `0 10px 30px rgba(0,0,0,0.35), 0 0 24px ${c.err}33`,
+                }
+          }
+        >
+          <Zap size={13} color={cine.to === "fiber" ? c.ok : c.err} />
+          <span>
+            {cine.to === "fiber" ? "Failback" : "Failover"} —{" "}
+            {cine.from === "fiber" ? "Fiber" : "5G"} →{" "}
+            {cine.to === "fiber" ? "Fiber" : "5G"}
+          </span>
+          <span className="ipsec-failover-sub">
+            traffic re-routed via {m.active_tunnel || "active tunnel"}
+          </span>
+        </div>
+      )}
 
       {/* Hover tooltip — rich per-tunnel metric card following the pointer. */}
       {hover &&

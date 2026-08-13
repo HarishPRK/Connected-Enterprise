@@ -421,6 +421,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
             branch={branch}
             devices={branchDevices}
             onSelectBranch={onSelectBranch}
+            liveGatewayOnline={usingFailover ? ipsec.connected : undefined}
           />
         </div>
 
