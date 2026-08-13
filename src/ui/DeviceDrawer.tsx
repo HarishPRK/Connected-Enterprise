@@ -40,7 +40,7 @@ export function DeviceDrawer({
         <Stat label="Connected for"  value={formatConnectedFor(device.connectedForHours)} />
       </div>
 
-      {supportsEnergyMetering(device) && <MeteringCard t={device.telemetry} />}
+      <MeteringCard device={device} t={device.telemetry} />
 
       {/* ── Diagnostics panel — justifies the status with concrete signals ── */}
       <div className="card" style={{ marginTop: 16, padding: 14, gap: 10 }}>
@@ -94,23 +94,40 @@ function supportsEnergyMetering(device: Device): boolean {
   return device.kind === 'shelly' || device.kind === 'matter' || device.conn === 'poe';
 }
 
-function MeteringCard({ t }: { t?: DeviceTelemetry }) {
-  if (!t) {
+function MeteringCard({ device, t }: { device: Device; t?: DeviceTelemetry }) {
+  const supportsMetering = supportsEnergyMetering(device);
+  const tiles = t ? meteringTiles(t) : [];
+  const rating = t ? energyRatingFor(t.apowerW) : null;
+  const hasElectricalReadings = tiles.length > 0 || rating != null;
+
+  if (!supportsMetering) {
     return (
       <div className="card" style={{ marginTop: 16, padding: 14, gap: 8 }}>
         <div className="card-title"><Zap size={13} /> Energy &amp; power</div>
         <div style={{ color: 'var(--text-dim)', fontSize: 12.5 }}>
-          Waiting for live power-meter telemetry from the device.
+          Not reported by this device.
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          This device supports metering; readings will appear when its gateway feed is connected.
+          Live power draw and energy ratings require a power-meter capable device or gateway feed.
         </div>
       </div>
     );
   }
-  const tiles = meteringTiles(t);
-  const rating = energyRatingFor(t.apowerW);
-  if (tiles.length === 0 && !rating) return null;
+
+  if (!t || !hasElectricalReadings) {
+    return (
+      <div className="card" style={{ marginTop: 16, padding: 14, gap: 8 }}>
+        <div className="card-title"><Zap size={13} /> Energy &amp; power</div>
+        <div style={{ color: 'var(--text-dim)', fontSize: 12.5 }}>
+          Power-meter feed unavailable.
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          Network telemetry is live, but this device is not currently publishing active power, voltage, current, or energy readings.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card" style={{ marginTop: 16, padding: 14, gap: 12 }}>
       <div className="card-title"><Zap size={13} /> Energy &amp; power</div>

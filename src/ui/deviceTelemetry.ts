@@ -83,6 +83,9 @@ export function telemetryHealth(d: Device): DeviceHealth | null {
   if (t.currentA != null) parts.push(`${t.currentA.toFixed(3)} A`);
   if (t.voltageV != null) parts.push(`${t.voltageV.toFixed(1)} V`);
   if (t.energyWhTotal != null) parts.push(formatEnergy(t.energyWhTotal));
+  const meterCapable = d.kind === 'shelly' || d.kind === 'matter' || d.conn === 'poe';
+  const hasElectricalReadings = t.apowerW != null || t.currentA != null || t.voltageV != null || t.energyWhTotal != null;
+  if (meterCapable && !hasElectricalReadings) parts.unshift('power meter unavailable');
   if (t.rssiDbm != null) parts.push(`RSSI ${t.rssiDbm} dBm`);
   if (t.rxBytes != null || t.txBytes != null) {
     parts.push(`↓${formatBytes(t.rxBytes ?? 0)} · ↑${formatBytes(t.txBytes ?? 0)}`);
@@ -173,7 +176,7 @@ export function telemetryHealth(d: Device): DeviceHealth | null {
 
   if (signals.length === 0) return null;
   return {
-    summary: parts.length ? `Live metering · ${parts.join(' · ')}` : 'Live device telemetry',
+    summary: parts.length ? `${hasElectricalReadings ? 'Live metering' : 'Live telemetry'} · ${parts.join(' · ')}` : 'Live device telemetry',
     signals,
   };
 }
