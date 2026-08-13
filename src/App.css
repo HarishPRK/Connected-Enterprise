@@ -3796,6 +3796,56 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
   white-space: nowrap;
 }
 .kpi-trend-sub { color: var(--text-muted); font-weight: 500; }
+.kpi-wan-card { gap: 8px; }
+.kpi-window-label {
+  margin-left: auto;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.kpi-wan-rates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: auto;
+}
+.kpi-wan-rate {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.kpi-wan-rate-up { color: var(--accent2); }
+.kpi-wan-number {
+  overflow: hidden;
+  color: var(--text);
+  font-size: clamp(18px, 1.15vw, 23px);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kpi-wan-unit {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.kpi-wan-meta {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ───── Modal ───── */
 .modal-backdrop {

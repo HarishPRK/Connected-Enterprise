@@ -1,9 +1,14 @@
-import { Activity, Building2, Cpu, ShieldAlert, TrendingUp, TrendingDown } from 'lucide-react';
+import {
+  Activity, ArrowDown, ArrowUp, Building2, Cpu, ShieldAlert,
+  TrendingUp, TrendingDown,
+} from 'lucide-react';
 import { Sparkline } from './Sparkline';
 import { branches, fleetStats } from '../../data/mock';
 import { useThemeColors } from '../../ui/Theme';
 import { useLiveData } from '../../ui/LiveData';
 import { AnimatedNumber } from '../../ui/AnimatedNumber';
+import type { WidgetDataState } from './WanWidget';
+import type { WanDirectionalRate } from '../../types';
 
 interface Kpi {
   label: string;
@@ -42,11 +47,15 @@ function hashSeed(s: string): number {
 }
 
 export function KpiStrip({
-  branchId, liveThroughputMbps, liveAlertsCount, livePlanoMode,
+  branchId, liveWanTraffic, liveAlertsCount, livePlanoMode,
 }: {
   branchId?: string;
-  /** Optional override from real IPsec WAN telemetry (Plano only). */
-  liveThroughputMbps?: number | null;
+  /** Latest valid directional rate from one exact branch/topic. */
+  liveWanTraffic?: {
+    rate: WanDirectionalRate | null;
+    state: WidgetDataState;
+    interfaceName?: string | null;
+  };
   /** Optional override = count of tunnels present but unreachable. */
   liveAlertsCount?: number | null;
   /** When viewing Plano with a live IPsec feed, scope the fleet-style "branches
@@ -65,14 +74,9 @@ export function KpiStrip({
   const stats = branchId ? fleetStats[branchId] : undefined;
   const seed = branchId ? hashSeed(branchId) : 0;
 
-  // Throughput resolution order:
-  //   1. real WAN-delta from the IPsec ingest (when supplied)
-  //   2. the branch's mock value
-  //   3. the global synthetic ticker
-  const throughputValue =
-    liveThroughputMbps != null ? liveThroughputMbps
-    : stats              ? stats.throughputMbps
-    :                      liveThroughput;
+  // Legacy fallback is used only for branches with no configured live WAN
+  // source. A configured live source never falls back to synthetic traffic.
+  const throughputValue = stats ? stats.throughputMbps : liveThroughput;
   const throughputSeries = stats
     ? stats.throughputSeries
     : sineSeries(12, 400, 80, seed);
@@ -96,7 +100,7 @@ export function KpiStrip({
     : -25;
 
   const onlineBranches = Object.values(fleetStats).filter((s) => s.status !== 'off').length;
-  const throughputDelta = liveThroughputMbps != null ? 0 : 8.4;
+  const throughputDelta = 8.4;
 
   const total = stats?.totalDevices ?? 0;
   const kpis: Kpi[] = [
@@ -157,22 +161,20 @@ export function KpiStrip({
       series: sineSeries(12, stats ? stats.uptimePct : 99, 0.4, seed + 2),
       accentKey: 'ok',
     },
-    {
+    ...(!liveWanTraffic ? [{
       label: 'Throughput',
       num: throughputValue,
-      // Auto-scale units so an idle gateway reads as "85 Kbps" instead of
-      // collapsing to "0.0 Mbps". The animated number still interpolates in
-      // Mbps space (n), so the format function just picks the right unit.
-      format: (n) => {
+      format: (n: number) => {
         if (n < 0.001) return '—';
-        if (n < 1)     return `${(n * 1000).toFixed(0)} Kbps`;
-        if (n < 10)    return `${n.toFixed(2)} Mbps`;
+        if (n < 1) return `${(n * 1000).toFixed(0)} Kbps`;
+        if (n < 10) return `${n.toFixed(2)} Mbps`;
         return `${Math.round(n)} Mbps`;
       },
-      icon: TrendingUp, delta: throughputDelta,
+      icon: TrendingUp,
+      delta: throughputDelta,
       series: throughputSeries,
-      accentKey: 'accent3',
-    },
+      accentKey: 'accent3' as const,
+    }] : []),
   ];
   return (
     <div className="kpi-strip">
@@ -216,6 +218,82 @@ export function KpiStrip({
           </div>
         );
       })}
+      {liveWanTraffic && (
+        <WanTrafficKpi
+          rate={liveWanTraffic.rate}
+          state={liveWanTraffic.state}
+          interfaceName={liveWanTraffic.interfaceName}
+        />
+      )}
     </div>
   );
+}
+
+function formatWanRate(value: number): string {
+  if (!Number.isFinite(value)) return '—';
+  if (value < 0.01) return value === 0 ? '0.00' : '<0.01';
+  if (value < 10) return value.toFixed(2);
+  if (value < 1_000) return value.toFixed(1);
+  return Math.round(value).toLocaleString();
+}
+
+function WanTrafficKpi({
+  rate,
+  state,
+  interfaceName,
+}: {
+  rate: WanDirectionalRate | null;
+  state: WidgetDataState;
+  interfaceName?: string | null;
+}) {
+  const c = useThemeColors();
+  const showRate = state === 'live' && rate !== null;
+  const meta = showRate
+    ? `${interfaceName || 'WAN interface'} · latest ${formatInterval(rate.spanSeconds)} counter interval`
+    : state === 'stale'
+        ? 'WAN telemetry is stale'
+        : state === 'loading'
+          ? 'Waiting for the next gateway counter sample…'
+          : 'WAN telemetry unavailable';
+
+  return (
+    <div className="kpi-card kpi-wan-card">
+      <div className="kpi-top">
+        <div
+          className="kpi-icon"
+          style={{
+            background: `linear-gradient(135deg, ${hexAlpha(c.accent3, 0.22)}, transparent)`,
+            color: c.accent3,
+          }}
+        >
+          <Activity size={16} />
+        </div>
+        <div className="kpi-label">WAN traffic</div>
+        <span className="kpi-window-label">live rate</span>
+      </div>
+      <div
+        className="kpi-wan-rates"
+        aria-label={showRate
+          ? `Download ${formatWanRate(rate.rxMbps)} megabits per second; upload ${formatWanRate(rate.txMbps)} megabits per second`
+          : meta}
+      >
+        <div className="kpi-wan-rate">
+          <ArrowDown size={14} aria-hidden="true" />
+          <span className="kpi-wan-number">{showRate ? formatWanRate(rate.rxMbps) : '—'}</span>
+          <span className="kpi-wan-unit">Mbps</span>
+        </div>
+        <div className="kpi-wan-rate kpi-wan-rate-up">
+          <ArrowUp size={14} aria-hidden="true" />
+          <span className="kpi-wan-number">{showRate ? formatWanRate(rate.txMbps) : '—'}</span>
+          <span className="kpi-wan-unit">Mbps</span>
+        </div>
+      </div>
+      <div className="kpi-wan-meta">{meta}</div>
+    </div>
+  );
+}
+
+function formatInterval(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  return seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
 }

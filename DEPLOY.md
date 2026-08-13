@@ -100,6 +100,7 @@ AWS_REGION=us-east-1
 AWS_BEARER_TOKEN_BEDROCK=bedrock-api-key-PASTE-YOURS-HERE
 AGENT_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0
 IOT_IPSEC_TOPICS=rdk/ipsec/metrics,prpl/ipsec/metrics,prplhome/ipsec/metrics
+IOT_IPSEC_DEVICE_TOPICS=rdk/ipsec/metrics,prplhome/ipsec/metrics
 EOF
 
 chmod 600 .env

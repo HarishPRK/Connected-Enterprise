@@ -33,14 +33,15 @@ npm run dev          # frontend only — Vite on :5174
 
 The Express server uses one AWS IoT connection for both pages. By default it
 subscribes to `rdk/ipsec/metrics`, `prpl/ipsec/metrics`, and
-`prplhome/ipsec/metrics`. The QDR `prplhome` feed is routed to the existing
-McKinney/`prpl` branch: tunnel/WAN fields drive Dynamic Failover, while its
-`wifi.clients[]` block drives IT/OT device inventory and per-client telemetry.
+`prplhome/ipsec/metrics`. For McKinney, `prpl/ipsec/metrics` is authoritative
+for Dynamic Failover, WAN, and tunnel telemetry. `prplhome/ipsec/metrics` is
+authoritative for IT/OT device inventory through its `wifi.clients[]` block.
 
 Override the complete list only when needed:
 
 ```dotenv
 IOT_IPSEC_TOPICS=rdk/ipsec/metrics,prpl/ipsec/metrics,prplhome/ipsec/metrics
+IOT_IPSEC_DEVICE_TOPICS=rdk/ipsec/metrics,prplhome/ipsec/metrics
 ```
 
 ## Gateway Twin live bridge

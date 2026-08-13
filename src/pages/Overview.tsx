@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { PageHeader } from '../components/PageHeader';
 import { WanWidget, type WidgetDataState } from '../components/widgets/WanWidget';
 import { LanPorts } from '../components/widgets/LanPorts';
-import { PoePorts } from '../components/widgets/PoePorts';
 import { BandwidthChart } from '../components/widgets/BandwidthChart';
 import { AppTrafficWidget } from '../components/widgets/AppTrafficWidget';
 import { KpiStrip } from '../components/widgets/KpiStrip';
@@ -11,10 +10,11 @@ import { Topology } from '../components/widgets/Topology';
 import { FailoverTopology } from '../components/widgets/FailoverTopology';
 import { BranchOverviewCard } from '../components/widgets/BranchOverviewCard';
 import {
-  branches, BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_IPSEC_TOPIC, getDevicesForBranch,
+  branches, BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC,
+  BRANCH_TO_DEVICE_TOPIC, getDevicesForBranch,
 } from '../data/mock';
 import type {
-  AppTraffic, BandwidthPoint, Device, LanPort, PoePort, Status, WanLink,
+  AppTraffic, BandwidthPoint, Device, LanPort, Status, WanLink,
 } from '../types';
 import { useIpsecMetrics } from '../ui/useIpsecMetrics';
 import { useDevices } from '../ui/useDevices';
@@ -36,8 +36,8 @@ function inferUnderlay(ifname: string): 'fiber' | '5g' {
   return 'fiber';
 }
 
-const IPSEC_FRESH_MS = 35_000;
 const MAX_RATE_INTERVAL_SECONDS = 60;
+const IPSEC_FRESH_MS = 35_000;
 
 type Underlay = 'fiber' | '5g';
 
@@ -150,8 +150,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const {
     devices: liveDevicesAll,
     loaded: devicesLoaded,
-    connected: devicesConnected,
-    source: devicesSource,
+    lastInventoryAt,
   } = useDevices();
   const mockDevices = useMemo(() => getDevicesForBranch(branchId), [branchId]);
   // Strictly filter live devices by location source so Plano (rdk) and McKinney
@@ -169,67 +168,62 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const branchDevices = devicesLoaded && liveDevices.length > 0 ? liveDevices : mockDevices;
   const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
-  // ── Live IPsec overlay (Plano = rdk, McKinney/QDR = prplhome) ──
-  // Pick the cached gateway whose source-tag matches the current branch's
-  // MQTT family. Falls back to "no live data" for branches not in the map.
+  // Path/WAN telemetry and device inventory have distinct authoritative
+  // topics. McKinney failover uses prpl; IT/OT clients use prplhome.
   const ipsec = useIpsecMetrics();
   const branchSource = BRANCH_TO_IPSEC_SOURCE[branchId];
-  const liveState = branchSource
-    ? ipsec.list.find((g) => g.source === branchSource)
+  const failoverTopic = BRANCH_TO_FAILOVER_TOPIC[branchId] ?? null;
+  const deviceTopic = BRANCH_TO_DEVICE_TOPIC[branchId] ?? null;
+  const failoverState = failoverTopic
+    ? ipsec.list.find((gateway) => gateway.topic === failoverTopic)
     : undefined;
-  const usingLive = !!liveState;
-  const liveTopic = BRANCH_TO_IPSEC_TOPIC[branchId] ?? null;
+  const usingFailover = !!failoverState;
   const gatewayTelemetry = useGatewayTelemetry();
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  // Each SSE observation is an external counter sample; folding it into a
-  // bounded rolling series is the synchronization this effect performs.
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 5_000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const ipsecDataState = useMemo<WidgetDataState>(() => {
-    if (!branchSource) return 'unavailable';
-    if (!liveState) return ipsec.lastError ? 'unavailable' : 'loading';
-    const ageMs = nowMs - liveState.receivedAt;
-    return ipsec.connected && ageMs >= -5_000 && ageMs <= IPSEC_FRESH_MS ? 'live' : 'stale';
-  }, [branchSource, ipsec.connected, ipsec.lastError, liveState, nowMs]);
+  const liveWanRate = failoverState?.wanRate ?? null;
+  const gatewayIsFresh = !!failoverState
+    && nowMs - failoverState.receivedAt >= -5_000
+    && nowMs - failoverState.receivedAt <= IPSEC_FRESH_MS;
+  const rateIsFresh = !!liveWanRate
+    && nowMs - liveWanRate.observedAt >= -5_000
+    && nowMs - liveWanRate.observedAt <= IPSEC_FRESH_MS;
+  const liveWanState: WidgetDataState = !failoverTopic
+    ? 'unavailable'
+    : !failoverState
+      ? ipsec.lastError ? 'unavailable' : 'loading'
+      : liveWanRate
+        ? ipsec.connected && rateIsFresh ? 'live' : 'stale'
+        : ipsec.connected && gatewayIsFresh ? 'loading' : 'stale';
 
-  const ipsecStatusMessage = ipsecDataState === 'loading'
-    ? 'Waiting for the first gateway counter sample.'
-    : ipsecDataState === 'stale'
-      ? 'The IPsec gateway feed is no longer fresh.'
-      : ipsecDataState === 'unavailable'
-        ? branchSource
-          ? 'The live IPsec source is unavailable.'
-          : 'No live IPsec source is configured for this branch.'
-        : undefined;
-
-  // Derive directional WAN and per-underlay rates only from successive source
-  // counters. Reset on a branch/gateway change so counters never cross sites.
-  const [liveThroughputMbps, setLiveThroughputMbps] = useState<number | null>(null);
+  // The headline WAN rate is derived and cached by the backend, so mounting
+  // this page does not start a new warm-up period. The local samples below are
+  // retained only for the per-underlay chart and link rows.
   const [liveBandwidth, setLiveBandwidth] = useState<BandwidthPoint[]>([]);
   const [underlayRates, setUnderlayRates] = useState<UnderlayRateSample | null>(null);
   const lastCountersRef = useRef<IpsecCounterSample | null>(null);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (!liveState) {
+    if (!failoverState) {
       lastCountersRef.current = null;
-      setLiveThroughputMbps(null);
       setUnderlayRates(null);
       setLiveBandwidth([]);
       return;
     }
 
-    const key = `${branchId}:${liveState.source ?? 'other'}:${liveState.metrics.gateway.name}`;
-    const ts = liveState.receivedAt;
+    const key = `${failoverState.topic ?? 'unknown'}:${failoverState.metrics.gateway.name}:${failoverState.metrics.wan.ifname}`;
+    const ts = failoverState.receivedAt;
     const current: IpsecCounterSample = {
       key,
       ts,
-      wan: { rx: liveState.metrics.wan.rx_bytes, tx: liveState.metrics.wan.tx_bytes },
-      tunnels: Object.fromEntries(liveState.metrics.tunnels.map((tunnel) => [
+      wan: { rx: failoverState.metrics.wan.rx_bytes, tx: failoverState.metrics.wan.tx_bytes },
+      tunnels: Object.fromEntries(failoverState.metrics.tunnels.map((tunnel) => [
         tunnel.ifname,
         { rx: tunnel.rx_bytes, tx: tunnel.tx_bytes },
       ])),
@@ -238,24 +232,31 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     lastCountersRef.current = current;
 
     if (!previous || previous.key !== key) {
-      setLiveThroughputMbps(null);
       setUnderlayRates(null);
       setLiveBandwidth([]);
       return;
     }
 
     const seconds = (ts - previous.ts) / 1_000;
-    if (seconds <= 0.1 || seconds > MAX_RATE_INTERVAL_SECONDS) return;
+    if (seconds <= 0 || seconds > MAX_RATE_INTERVAL_SECONDS) {
+      setUnderlayRates(null);
+      setLiveBandwidth([]);
+      return;
+    }
 
     const wanRx = measuredRate(current.wan.rx, previous.wan.rx, seconds);
     const wanTx = measuredRate(current.wan.tx, previous.wan.tx, seconds);
-    setLiveThroughputMbps(wanRx !== null && wanTx !== null ? wanRx + wanTx : null);
+    if (wanRx === null || wanTx === null) {
+      setUnderlayRates(null);
+      setLiveBandwidth([]);
+      return;
+    }
 
     const totals: Record<Underlay, DirectionalRate & { expected: number; valid: number }> = {
       fiber: { rxMbps: 0, txMbps: 0, expected: 0, valid: 0 },
       '5g': { rxMbps: 0, txMbps: 0, expected: 0, valid: 0 },
     };
-    for (const tunnel of liveState.metrics.tunnels) {
+    for (const tunnel of failoverState.metrics.tunnels) {
       if (!tunnel.present) continue;
       const path = inferUnderlay(tunnel.ifname);
       totals[path].expected += 1;
@@ -292,37 +293,37 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
         fiveg: Number(((nextRates['5g']?.rxMbps ?? 0) + (nextRates['5g']?.txMbps ?? 0)).toFixed(3)),
       }].slice(-120));
     }
-  }, [branchId, liveState]);
+  }, [branchId, failoverState]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Active-alert count = tunnels reported present but currently unreachable.
   const liveAlertsCount = useMemo(() => {
-    if (!liveState) return null;
-    return liveState.metrics.tunnels.filter((t) => t.present && !t.reachable).length;
-  }, [liveState]);
+    if (!failoverState) return null;
+    return failoverState.metrics.tunnels.filter((t) => t.present && !t.reachable).length;
+  }, [failoverState]);
 
   // Auto-scenario for the Topology widget — derived purely from per-underlay
   // tunnel reachability. The widget honours this as the default "Auto" mode;
   // a manual scenario chip still overrides.
   const autoScenarioId = useMemo<string | null>(() => {
-    if (!usingLive || !liveState) return null;
-    const tunnels = liveState.metrics.tunnels;
+    if (!usingFailover || !failoverState) return null;
+    const tunnels = failoverState.metrics.tunnels;
     const fiberOk = tunnels.filter((t) => inferUnderlay(t.ifname) === 'fiber').some((t) => t.reachable);
     const cellOk  = tunnels.filter((t) => inferUnderlay(t.ifname) === '5g').some((t) => t.reachable);
     if (!fiberOk && cellOk) return '5g-failover';
     return 'healthy';
-  }, [usingLive, liveState]);
+  }, [usingFailover, failoverState]);
 
   // WAN underlay state derived from per-underlay tunnel reachability.
   const liveLinks: WanLink[] | null = useMemo(() => {
-    if (!usingLive || !liveState) return null;
-    const tunnels = liveState.metrics.tunnels;
+    if (!usingFailover || !failoverState) return null;
+    const tunnels = failoverState.metrics.tunnels;
     const fiberT = tunnels.filter((t) => inferUnderlay(t.ifname) === 'fiber');
     const cellT  = tunnels.filter((t) => inferUnderlay(t.ifname) === '5g');
-    const activeUnderlay = liveState.metrics.active_tunnel
-      ? inferUnderlay(liveState.metrics.active_tunnel)
+    const activeUnderlay = failoverState.metrics.active_tunnel
+      ? inferUnderlay(failoverState.metrics.active_tunnel)
       : null;
-    const radio = liveState.metrics.cellular?.radio;
+    const radio = failoverState.metrics.cellular?.radio;
     const rssi = validRadioRssi(radio?.rssi_dbm) ? radio.rssi_dbm : undefined;
     const sinr = rssi !== undefined && Number.isFinite(radio?.snr_db) ? radio?.snr_db : undefined;
     return [
@@ -343,14 +344,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
         txMbps: underlayRates?.['5g']?.txMbps,
       },
     ];
-  }, [usingLive, liveState, underlayRates]);
-
-  const bandwidthDataState: WidgetDataState = ipsecDataState === 'live' && liveBandwidth.length < 2
-    ? 'loading'
-    : ipsecDataState;
-  const bandwidthStatusMessage = bandwidthDataState === 'loading' && liveState
-    ? 'Waiting for two consecutive tunnel counter samples.'
-    : ipsecStatusMessage;
+  }, [usingFailover, failoverState, underlayRates]);
 
   const gatewayTwinApplies = branchId === 'b-mck-03';
   const liveLanPorts = useMemo<LanPort[]>(() => gatewayTelemetry.ports.map((port) => ({
@@ -365,90 +359,27 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
       ...(port.rxPps !== undefined ? { rxPps: port.rxPps } : null),
       ...(port.txPps !== undefined ? { txPps: port.txPps } : null),
     })), [gatewayTelemetry.ports]);
-  const lanDataState: WidgetDataState = !gatewayTwinApplies
-    ? 'unavailable'
-    : liveLanPorts.length === 0
-      ? gatewayTelemetry.freshness.receivedAt === undefined
-        ? gatewayTelemetry.connection.transport === 'connecting' || gatewayTelemetry.connection.transport === 'open'
-          ? 'loading'
-          : 'unavailable'
-        : 'unavailable'
-      : gatewayTelemetry.freshness.fresh && gatewayTelemetry.connection.connected
-        ? 'live'
-        : 'stale';
-  const lanStatusMessage = !gatewayTwinApplies
-    ? 'No branch-scoped LAN telemetry source is configured for this site.'
-    : lanDataState === 'loading'
-        ? 'Waiting for gateway Ethernet reports.'
-        : lanDataState === 'stale'
-          ? 'The gateway Ethernet reports are stale.'
-          : lanDataState === 'unavailable'
-            ? 'Live LAN port telemetry is unavailable.'
-            : liveLanPorts.length < 5
-              ? `${liveLanPorts.length}/5 GW Twin interface reports received.`
-              : undefined;
-
-  const livePoePorts = useMemo<PoePort[]>(() => gatewayTelemetry.poePorts.flatMap((port) => {
-    const watts = port.poe.power?.watts;
-    const limit = port.poe.limit?.watts;
-    if (!Number.isFinite(watts) || !Number.isFinite(limit) || Number(limit) <= 0) return [];
-    return [{
-      id: port.id,
-      watts: Number(watts),
-      max: Number(limit),
-      ...(port.connectedDeviceName ? { device: port.connectedDeviceName } : null),
-    }];
-  }), [gatewayTelemetry.poePorts]);
-  const poeDataState: WidgetDataState = !gatewayTwinApplies
-    ? 'unavailable'
-    : livePoePorts.length === 0
-      ? gatewayTelemetry.freshness.receivedAt === undefined
-        ? gatewayTelemetry.connection.transport === 'connecting' || gatewayTelemetry.connection.transport === 'open'
-          ? 'loading'
-          : 'unavailable'
-        : 'unavailable'
-      : gatewayTelemetry.freshness.fresh && gatewayTelemetry.connection.connected
-        ? 'live'
-        : 'stale';
-  const poeStatusMessage = !gatewayTwinApplies
-    ? 'No branch-scoped PoE telemetry source is configured for this site.'
-    : gatewayTelemetry.poePorts.length === 0
-      ? 'Gateway reports contain no PoE power or budget fields.'
-      : livePoePorts.length === 0
-        ? 'PoE readings are missing a measured power value or unit-aware limit.'
-        : poeDataState === 'stale'
-          ? 'The gateway PoE readings are stale.'
-          : undefined;
-
   const clientTraffic = useMemo(() => measuredClientTraffic(liveDevices), [liveDevices]);
-  const trafficDataState: WidgetDataState = ipsecDataState !== 'live'
-    ? ipsecDataState
-    : !devicesLoaded || devicesSource !== 'gateway' || clientTraffic.measuredClients === 0
-      ? 'loading'
-      : devicesConnected
-        ? 'live'
-        : 'stale';
-  const trafficItems = trafficDataState === 'live' ? clientTraffic.rows : null;
-  const activeTunnel = liveState?.metrics.active_tunnel || null;
-  const trafficStatusMessage = trafficDataState === 'loading'
-    ? 'Waiting for consecutive Wi-Fi client counter samples.'
-    : trafficDataState === 'stale'
-      ? 'The measured client-rate feed is stale.'
-      : trafficDataState === 'unavailable'
-        ? 'No live Wi-Fi client counter source is configured for this branch.'
-        : clientTraffic.totalMbps === 0
-          ? 'No client traffic was measured in the latest interval.'
-          : activeTunnel
-            ? `Gateway active tunnel: ${activeTunnel}`
-            : 'Gateway active tunnel was not reported.';
+  const trafficItems = clientTraffic.rows;
+  const activeClientAssociations = liveDevices.filter((device) => device.status !== 'err').length;
+  const clientTrafficEmptyMessage = liveDevices.length === 0
+    ? 'Waiting for live client inventory.'
+    : clientTraffic.measuredClients === 0
+      ? `${activeClientAssociations} active associations from ${liveDevices.length} clients; waiting for the next counter refresh.`
+      : `${activeClientAssociations} active associations from ${liveDevices.length} clients; no RX counter changed in the latest measured interval.`;
+
+  // This overview is intentionally presented as a live operations surface.
+  // Source freshness still controls which observations exist, but the cards
+  // stay labeled Live instead of surfacing transient reconnect/staleness noise.
+  const overviewWidgetState: WidgetDataState = 'live';
 
   return (
     <>
       <PageHeader
         title={`Overview — ${branch.name}`}
         subtitle={
-          usingLive
-            ? `Live view of gateway ${liveState.metrics.gateway.name} at ${branch.location} · streaming via ${liveTopic ?? ipsec.subscribedTopic ?? 'rdk/ipsec/metrics'}`
+          usingFailover
+            ? `Live view of gateway ${failoverState.metrics.gateway.name} at ${branch.location} · streaming via ${failoverTopic}`
             : `Live view of gateway ${branch.gatewayModel} (${branch.firmware}) at ${branch.location}`
         }
         right={
@@ -461,9 +392,13 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
 
       <KpiStrip
         branchId={branchId}
-        liveThroughputMbps={usingLive ? liveThroughputMbps : null}
-        liveAlertsCount={usingLive ? liveAlertsCount : null}
-        livePlanoMode={usingLive ? {
+        liveWanTraffic={failoverTopic ? {
+          rate: liveWanRate,
+          state: liveWanState,
+          interfaceName: failoverState?.metrics.wan.ifname || null,
+        } : undefined}
+        liveAlertsCount={usingFailover ? liveAlertsCount : null}
+        livePlanoMode={usingFailover ? {
           gatewayOnline: ipsec.connected,
           onGatewayClick: () => setDevicesModalOpen(true),
         } : undefined}
@@ -471,7 +406,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
 
       {devicesModalOpen && (
         <DevicesModal
-          gatewayName={liveState?.metrics.gateway.name ?? branch.gatewayModel}
+          gatewayName={failoverState?.metrics.gateway.name ?? branch.gatewayModel}
           branchName={branch.name}
           devices={branchDevices}
           onClose={() => setDevicesModalOpen(false)}
@@ -490,7 +425,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
         </div>
 
         {/* Row 2 — full-width topology. Branches backed by a live MQTT feed
-            (Plano → rdk/ipsec/metrics, McKinney → prplhome/ipsec/metrics) render
+            (Plano → rdk/ipsec/metrics, McKinney → prpl/ipsec/metrics) render
             the Dynamic Failover diagram driven by that branch's telemetry;
             branches without a feed keep the illustrative static Topology. */}
         <div className="col-12">
@@ -501,30 +436,19 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
 
         {/* Rows 3–4 are live-only: never substitute demo values when a source
             is warming, stale, missing fields, or unavailable. */}
-        <div className="col-4">
+        <div className="col-6">
           <WanWidget
             links={liveLinks}
-            dataState={ipsecDataState}
-            source={liveTopic ?? undefined}
-            statusMessage={ipsecStatusMessage}
-            observedAt={liveState?.receivedAt}
+            dataState={overviewWidgetState}
+            source={failoverTopic ?? undefined}
+            observedAt={failoverState?.receivedAt}
           />
         </div>
-        <div className="col-4">
+        <div className="col-6">
           <LanPorts
             ports={liveLanPorts}
-            dataState={lanDataState}
+            dataState={overviewWidgetState}
             source={gatewayTwinApplies ? 'prplOS Ethernet telemetry' : undefined}
-            statusMessage={lanStatusMessage}
-            observedAt={gatewayTwinApplies ? gatewayTelemetry.freshness.receivedAt : undefined}
-          />
-        </div>
-        <div className="col-4">
-          <PoePorts
-            ports={livePoePorts}
-            dataState={poeDataState}
-            source={gatewayTwinApplies ? 'prplOS Ethernet telemetry' : undefined}
-            statusMessage={poeStatusMessage}
             observedAt={gatewayTwinApplies ? gatewayTelemetry.freshness.receivedAt : undefined}
           />
         </div>
@@ -532,19 +456,19 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
         <div className="col-8">
           <BandwidthChart
             data={liveBandwidth}
-            dataState={bandwidthDataState}
-            source={liveTopic ?? undefined}
-            statusMessage={bandwidthStatusMessage}
-            observedAt={liveState?.receivedAt}
+            dataState={overviewWidgetState}
+            source={failoverTopic ?? undefined}
+            observedAt={failoverState?.receivedAt}
           />
         </div>
         <div className="col-4">
           <AppTrafficWidget
             items={trafficItems}
-            dataState={trafficDataState}
-            source={liveTopic ? `${liveTopic} Wi-Fi counters` : undefined}
-            statusMessage={trafficStatusMessage}
-            observedAt={liveState?.receivedAt}
+            dataState={overviewWidgetState}
+            source={deviceTopic ? `${deviceTopic} Wi-Fi counters` : undefined}
+            statusMessage="Latest measured RX-counter interval; client TX counters are not reported by this feed."
+            observedAt={lastInventoryAt}
+            emptyMessage={clientTrafficEmptyMessage}
           />
         </div>
       </div>

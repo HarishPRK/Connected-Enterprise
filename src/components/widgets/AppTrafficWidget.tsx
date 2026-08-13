@@ -9,6 +9,7 @@ import {
 
 export interface AppTrafficWidgetProps extends WidgetDataMeta {
   items: readonly AppTraffic[] | null;
+  emptyMessage?: string;
 }
 
 function formatShare(value: number) {
@@ -27,16 +28,17 @@ export function AppTrafficWidget({
   source,
   statusMessage,
   observedAt,
+  emptyMessage,
 }: AppTrafficWidgetProps) {
   const canShowObservation = dataState === 'live' || dataState === 'stale';
   const visibleItems = canShowObservation ? (items ?? []) : [];
 
   return (
     <Card
-      title="Active Client Traffic"
+      title="Recent Client Traffic"
       sub={(
         <>
-          <div>Share of measured Wi-Fi client throughput</div>
+          <div>Share of latest measured Wi-Fi receive rate</div>
           <WidgetDataNote
             dataState={dataState}
             source={source}
@@ -48,7 +50,11 @@ export function AppTrafficWidget({
       right={<WidgetDataBadge state={dataState} />}
     >
       {visibleItems.length === 0 ? (
-        <WidgetDataEmpty state={dataState} liveLabel="active client traffic" />
+        <WidgetDataEmpty
+          state={dataState}
+          liveLabel="recent client traffic"
+          message={emptyMessage}
+        />
       ) : (
         visibleItems.map((item, index) => {
           const hasShare = Number.isFinite(item.sharePct);
@@ -65,7 +71,7 @@ export function AppTrafficWidget({
               <div
                 className="progress"
                 role="meter"
-                aria-label={`${item.app} share of measured client traffic`}
+                aria-label={`${item.app} share of measured client receive traffic`}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={hasShare ? item.sharePct : undefined}

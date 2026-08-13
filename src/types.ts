@@ -292,13 +292,36 @@ export interface IpsecSnapshot {
   receivedAt: number;
 }
 
+/** Directional WAN traffic derived from two consecutive cumulative byte
+ * counter observations on one exact MQTT topic, gateway, and interface. */
+export interface WanDirectionalRate {
+  /** Bytes received by the WAN interface, converted to megabits per second. */
+  rxMbps: number;
+  /** Bytes transmitted by the WAN interface, converted to megabits per second. */
+  txMbps: number;
+  /** Actual time between the two gateway counter observations. */
+  spanSeconds: number;
+  /** Two counter observations are used for every published rate. */
+  sampleCount: 2;
+  /** Timestamp supplied by the gateway for the newest counter observation. */
+  sourceTimestampMs: number;
+  /** Server epoch ms when the newest counter observation was received. */
+  observedAt: number;
+}
+
 export interface IpsecGatewayState {
   metrics: IpsecMetrics;
   /** Server epoch ms — the moment WE received the decoded payload. */
   receivedAt: number;
+  /** Exact MQTT topic that produced this state. Topic identity is required
+   *  because multiple feeds can use the same gateway name and source family. */
+  topic: string;
   /** Which MQTT topic family this gateway is publishing under. Drives the
    *  per-branch live-data routing — Plano uses `rdk`, McKinney uses `prpl`. */
   source?: 'rdk' | 'prpl' | 'other';
+  /** Latest valid directional WAN rate, continuously maintained by the
+   *  backend so opening the dashboard does not start a new warm-up window. */
+  wanRate?: WanDirectionalRate;
 }
 
 export type WanPath = '5G' | 'Fiber';

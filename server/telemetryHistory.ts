@@ -23,6 +23,11 @@ interface Sample {
 }
 
 const MAX_SAMPLES = 2880;
+/** Client counters in the current prplhome feed are refreshed about once per
+ * minute even though inventory is re-published every ten seconds. Retain the
+ * last measured interval through that cadence, then report idle if the counter
+ * has not changed for longer than a normal refresh plus jitter. */
+export const CLIENT_RATE_IDLE_AFTER_MS = 90_000;
 const buffers = new Map<string, Sample[]>();
 
 export function recordTelemetry(mac: string, t: DeviceTelemetry | undefined, when = Date.now()): void {
@@ -47,17 +52,41 @@ function rate(prev: number | undefined, next: number | undefined, dtMs: number):
   return +(delta * 8 / (dtMs / 1000) / 1_000_000).toFixed(3);
 }
 
-/** Live rx/tx rate for a device from its two most recent byte samples. */
+function latestMeasuredRate(
+  samples: readonly Sample[],
+  direction: 'rxBytes' | 'txBytes',
+): number | undefined {
+  const observed = samples.filter((sample) => sample[direction] != null);
+  if (observed.length < 2) return undefined;
+
+  // Collapse identical republishes into counter runs. The beginning of each
+  // run is the moment that new counter value first appeared; comparing run
+  // starts measures the real producer update interval instead of a duplicate
+  // ten-second MQTT republish.
+  const runs: { t: number; bytes: number }[] = [];
+  for (const sample of observed) {
+    const bytes = sample[direction];
+    if (bytes == null) continue;
+    const last = runs[runs.length - 1];
+    if (!last || last.bytes !== bytes) runs.push({ t: sample.t, bytes });
+  }
+  if (runs.length < 2) return undefined;
+
+  const current = runs[runs.length - 1];
+  const previous = runs[runs.length - 2];
+  const latestObservation = observed[observed.length - 1];
+  if (latestObservation.t - current.t > CLIENT_RATE_IDLE_AFTER_MS) return 0;
+  return rate(previous.bytes, current.bytes, current.t - previous.t);
+}
+
+/** Latest measured rx/tx rate for a device. Repeated snapshots with unchanged
+ * counters do not overwrite a valid interval with an artificial zero. */
 export function currentRates(mac: string): { rxMbps?: number; txMbps?: number } {
   const buf = buffers.get(mac);
   if (!buf) return {};
-  const withBytes = buf.filter((s) => s.rxBytes != null || s.txBytes != null);
-  if (withBytes.length < 2) return {};
-  const [a, b] = withBytes.slice(-2);
-  const dt = b.t - a.t;
   return {
-    rxMbps: rate(a.rxBytes, b.rxBytes, dt),
-    txMbps: rate(a.txBytes, b.txBytes, dt),
+    rxMbps: latestMeasuredRate(buf, 'rxBytes'),
+    txMbps: latestMeasuredRate(buf, 'txBytes'),
   };
 }
 

@@ -26,7 +26,7 @@ import type { Device, IpsecTunnelMetric } from '../../types';
 import { useIpsecMetrics } from '../../ui/useIpsecMetrics';
 import { useDevices, type DeviceView } from '../../ui/useDevices';
 import { useTheme, useThemeColors } from '../../ui/Theme';
-import { BRANCH_TO_IPSEC_SOURCE } from '../../data/mock';
+import { BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC } from '../../data/mock';
 
 const kindIcon: Record<Device['kind'], React.ComponentType<{ size?: number }>> = {
   laptop: Laptop, desktop: Monitor, printer: Printer, payment: CreditCard,
@@ -82,9 +82,12 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
   const surface = theme === 'dark' ? 'rgba(14,12,32,0.96)' : '#ffffff';
 
   const source = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
+  const failoverTopic = BRANCH_TO_FAILOVER_TOPIC[branchId];
   const gw = useMemo(
-    () => (source ? ipsec.list.find((g) => g.source === source) : ipsec.list[0]),
-    [ipsec.list, source],
+    () => (failoverTopic
+      ? ipsec.list.find((gateway) => gateway.topic === failoverTopic)
+      : ipsec.list[0]),
+    [failoverTopic, ipsec.list],
   );
 
   // STRICT location filter — this branch's fleet only (see memory: Plano/McKinney never mix).
@@ -182,7 +185,7 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
     [],
   );
 
-  const topic = source ? `${source}/ipsec/metrics` : 'the gateway feed';
+  const topic = failoverTopic ?? 'the gateway feed';
 
   if (!gw) {
     return (

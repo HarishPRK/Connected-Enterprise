@@ -25,7 +25,7 @@ import {
 } from 'react';
 import type { ReactNode } from 'react';
 import { useIpsecMetrics } from './useIpsecMetrics';
-import { BRANCH_TO_IPSEC_SOURCE, branches } from '../data/mock';
+import { BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC, branches } from '../data/mock';
 import type {
   AgentStep,
   Incident,
@@ -69,8 +69,12 @@ function prettyName(raw: string): string {
     .map((t) => (/\d/.test(t) || t.length <= 3 ? t.toUpperCase() : t[0].toUpperCase() + t.slice(1)))
     .join(' ');
 }
-function sourceToBranch(source: string): string {
-  const b = Object.keys(BRANCH_TO_IPSEC_SOURCE).find((k) => BRANCH_TO_IPSEC_SOURCE[k] === source);
+function gatewayToBranch(gateway: IpsecGatewayState): string {
+  const topicBranch = Object.keys(BRANCH_TO_FAILOVER_TOPIC)
+    .find((branchId) => BRANCH_TO_FAILOVER_TOPIC[branchId] === gateway.topic);
+  if (topicBranch) return topicBranch;
+  const b = Object.keys(BRANCH_TO_IPSEC_SOURCE)
+    .find((branchId) => BRANCH_TO_IPSEC_SOURCE[branchId] === gateway.source);
   return b ?? branches[0]?.id ?? '';
 }
 
@@ -92,7 +96,7 @@ function detect(
   for (const g of list) {
     const gname = g.metrics.gateway.name || 'gateway';
     const pretty = prettyName(gname);
-    const branchId = sourceToBranch(g.source ?? 'rdk');
+    const branchId = gatewayToBranch(g);
 
     // Stale — measured from when WE last saw a fresh payload (skew-immune).
     const seen = lastSeen[gname];
@@ -197,8 +201,13 @@ function makeIncident(id: string, cond: Cond, now: number): Incident {
 
 export function OpsIncidentsProvider({ children }: { children: ReactNode }) {
   const ipsec = useIpsecMetrics();
-  const listRef = useRef<IpsecGatewayState[]>(ipsec.list);
-  listRef.current = ipsec.list;
+  const configuredTopics = useMemo(() => new Set(Object.values(BRANCH_TO_FAILOVER_TOPIC)), []);
+  const monitoredList = useMemo(
+    () => ipsec.list.filter((gateway) => configuredTopics.has(gateway.topic)),
+    [configuredTopics, ipsec.list],
+  );
+  const listRef = useRef<IpsecGatewayState[]>(monitoredList);
+  listRef.current = monitoredList;
 
   const lastSeenRef = useRef<Record<string, number>>({}); // gateway → client ts of last fresh payload
   const lastRcvRef = useRef<Record<string, number>>({}); // gateway → last receivedAt value
@@ -212,14 +221,14 @@ export function OpsIncidentsProvider({ children }: { children: ReactNode }) {
   // what staleness is measured against (immune to server/client clock skew).
   useEffect(() => {
     const now = Date.now();
-    for (const g of ipsec.list) {
+    for (const g of monitoredList) {
       const gname = g.metrics.gateway.name || 'gateway';
       if (lastRcvRef.current[gname] !== g.receivedAt) {
         lastRcvRef.current[gname] = g.receivedAt;
         lastSeenRef.current[gname] = now;
       }
     }
-  }, [ipsec.list]);
+  }, [monitoredList]);
 
   useEffect(() => {
     const tick = () => {

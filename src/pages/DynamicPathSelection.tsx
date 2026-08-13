@@ -44,8 +44,7 @@ import {
 } from "lucide-react";
 import {
   pathThresholds,
-  BRANCH_TO_IPSEC_SOURCE,
-  BRANCH_TO_IPSEC_TOPIC,
+  BRANCH_TO_FAILOVER_TOPIC,
 } from "../data/mock";
 import type {
   CellularMetrics,
@@ -710,10 +709,9 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   // Scope the live list to the current branch's MQTT source — Plano sees
   // `rdk/...` gateways, McKinney sees `prpl/...` gateways. Branches without
   // a mapped source see the unfiltered list (handy during development).
-  const branchSource = branchId ? BRANCH_TO_IPSEC_SOURCE[branchId] : undefined;
-  const branchTopic = branchId ? BRANCH_TO_IPSEC_TOPIC[branchId] : undefined;
-  const branchList = branchSource
-    ? ipsec.list.filter((g) => g.source === branchSource)
+  const branchTopic = branchId ? BRANCH_TO_FAILOVER_TOPIC[branchId] : undefined;
+  const branchList = branchTopic
+    ? ipsec.list.filter((gateway) => gateway.topic === branchTopic)
     : ipsec.list;
 
   // Effective IPsec data — either the live snapshot, or the captured sample
@@ -2170,6 +2168,7 @@ function fmtBytes(n: number) {
  *  active_tunnel=vti-fiber not matching any physical interface, etc.). */
 export const SAMPLE_IPSEC_GATEWAY: IpsecGatewayState = {
   receivedAt: Date.now(),
+  topic: "sample/ipsec/metrics",
   metrics: {
     timestamp_ms: 1778815945164,
     active_tunnel: "vti-fiber",
@@ -2253,7 +2252,7 @@ export function LiveIpsecCard({
   onToggleSample: () => void;
   effectiveList: IpsecGatewayState[];
   /** Topic the current branch is bound to (e.g. `rdk/ipsec/metrics` for
-   *  Plano, `prplhome/ipsec/metrics` for McKinney/QDR). Falls back to the
+   *  Plano, `prpl/ipsec/metrics` for McKinney/QDR). Falls back to the
    *  server's full subscription list when the branch has no live mapping. */
   branchTopic: string | null;
 }) {

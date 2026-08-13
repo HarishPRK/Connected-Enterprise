@@ -6,7 +6,7 @@ import {
   getDeviceHealth,
   getDevicesForBranch,
   BRANCH_TO_IPSEC_SOURCE,
-  BRANCH_TO_IPSEC_TOPIC,
+  BRANCH_TO_DEVICE_TOPIC,
 } from '../data/mock';
 import type { Device } from '../types';
 import { useDevices, classifyDevice, controlMatterDevice, controlShellyDevice, refreshMatterDevices, type DeviceView } from '../ui/useDevices';
@@ -62,7 +62,7 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
   // with no locationSource (pure seed, before real LAN discovery) are excluded
   // from the live view; the branch-specific mock below backs the empty state.
   const branchSource = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
-  const branchTopic = BRANCH_TO_IPSEC_TOPIC[branchId];
+  const branchTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
   const liveForBranch = useMemo(
     () => (branchSource
       ? liveDevices.filter((d) => d.locationSource === branchSource)

@@ -34,8 +34,8 @@ const VideoAnalyticsPage         = lazy(() => import('./pages/VideoAnalytics').t
 const AgenticAIPage              = lazy(() => import('./pages/AgenticAI').then((m) => ({ default: m.AgenticAIPage })));
 const GatewayTwinPage            = lazy(() => import('./pages/GatewayTwin').then((m) => ({ default: m.GatewayTwinPage })));
 
-// Default branch — McKinney/QDR (backed by prplhome/ipsec/metrics; the server
-// normalises that topic family to the existing `prpl` branch source).
+// Default branch — McKinney/QDR. Path telemetry comes from prpl/ipsec/metrics;
+// IT/OT client inventory comes from prplhome/ipsec/metrics.
 // Falls back to the first configured branch if the id ever drifts.
 const DEFAULT_BRANCH_ID = branches.find((b) => b.id === 'b-mck-03')?.id ?? branches[0].id;
 

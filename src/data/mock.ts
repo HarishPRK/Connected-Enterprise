@@ -13,12 +13,17 @@ import type {
  *  the topic prefix it arrived on). */
 export const BRANCH_TO_IPSEC_SOURCE: Record<string, 'rdk' | 'prpl'> = {
   'b-pln-01': 'rdk',   // Plano  → rdk/ipsec/metrics
-  'b-mck-03': 'prpl',  // McKinney/QDR → prplhome/ipsec/metrics (normalised to prpl)
+  'b-mck-03': 'prpl',  // McKinney feeds share the prpl location tag
 };
 
-/** Exact telemetry topic shown for each live branch. `prplhome` is normalised
- *  to the `prpl` source above so existing branch/device scoping stays stable. */
-export const BRANCH_TO_IPSEC_TOPIC: Record<string, string> = {
+/** Authoritative path/tunnel/WAN telemetry consumed by Dynamic Failover. */
+export const BRANCH_TO_FAILOVER_TOPIC: Record<string, string> = {
+  'b-pln-01': 'rdk/ipsec/metrics',
+  'b-mck-03': 'prpl/ipsec/metrics',
+};
+
+/** Authoritative Wi-Fi client inventory consumed by IT/OT device surfaces. */
+export const BRANCH_TO_DEVICE_TOPIC: Record<string, string> = {
   'b-pln-01': 'rdk/ipsec/metrics',
   'b-mck-03': 'prplhome/ipsec/metrics',
 };

@@ -23,6 +23,10 @@ import {
   type AarFlow, type AarTunnel, type AarRoute, type AarDecision, type AarSnapshot,
 } from './aarProto.js';
 import { gatewayTwinSource } from './gatewayTwinSource.js';
+import {
+  advanceWanTrafficRate,
+  type WanCounterSample,
+} from './wanTrafficRate.js';
 
 const ENDPOINT  = process.env.IOT_ENDPOINT ?? 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';
 const REGION    = process.env.IOT_REGION   ?? process.env.AWS_REGION ?? 'us-east-1';
@@ -47,6 +51,18 @@ const SUBSCRIBE_TOPICS: string[] = (() => {
   const raw = list ?? single ?? DEFAULT_IPSEC_TOPICS.join(',');
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 })();
+
+// Only these IPsec topics are authoritative device/Wi-Fi inventory sources.
+// In McKinney, `prpl/ipsec/metrics` owns failover/WAN telemetry while
+// `prplhome/ipsec/metrics` owns IT/OT client inventory.
+export const DEFAULT_IPSEC_DEVICE_TOPICS = [
+  'rdk/ipsec/metrics',
+  'prplhome/ipsec/metrics',
+] as const;
+const IPSEC_DEVICE_TOPICS = new Set(
+  (process.env.IOT_IPSEC_DEVICE_TOPICS ?? DEFAULT_IPSEC_DEVICE_TOPICS.join(','))
+    .split(',').map((value) => value.trim()).filter(Boolean),
+);
 
 // Application-Aware Routing telemetry topics (proto/aar.proto). The AAR plugin
 // publishes on unprefixed `routing/*` topics. Override with IOT_AAR_TOPICS.
@@ -77,7 +93,7 @@ const pathResultTopic  = (prefix: string) => `${prefix}/path/control/result`;
 // `<prefix>/devices/inventory`. We subscribe and forward the raw payload to
 // deviceSource via the `inventory` event — parsing/classification lives there.
 const INVENTORY_TOPICS: string[] = (
-  process.env.IOT_DEVICE_TOPICS ?? 'rdk/devices/inventory,prpl/devices/inventory'
+  process.env.IOT_DEVICE_TOPICS ?? 'rdk/devices/inventory'
 ).split(',').map((s) => s.trim()).filter(Boolean);
 
 // Matter device list: the Plano gateway's `com.rdk.matter.devicelist` component
@@ -226,6 +242,9 @@ function wifiClientToRawDevice(c: IpsecWifiClient): Record<string, unknown> {
 
 export class IpsecSource extends EventEmitter {
   private gateways = new Map<string, IpsecGatewayState>();
+  /** One latest cumulative-counter baseline per exact WAN stream. Keeping it
+   * server-side means a dashboard reload can use the already-derived rate. */
+  private wanCounterBaselines = new Map<string, WanCounterSample>();
   private connection?: mqtt.MqttClientConnection;
   private started = false;
   private connected = false;
@@ -667,21 +686,20 @@ export class IpsecSource extends EventEmitter {
       // ── Identity ────────────────────────────────────────────────────────
       // proto3 omits empty strings, so `?? 'unknown'` never fires for a field
       // the gateway simply didn't send. Resolve identity against what we
-      // already track for this source rather than forking a phantom
-      // `<source>:unknown` entry that the UI could then select instead of the
-      // real gateway.
+      // already track for this exact topic rather than forking a phantom
+      // entry or merging two topics that happen to publish the same identity.
       const inName = String(metrics.gateway?.name ?? '').trim();
       const inMac  = String(metrics.gateway?.mac  ?? '').trim();
       let gatewayKey: string;
       let prev: IpsecGatewayState | undefined;
       if (inName || inMac) {
-        gatewayKey = `${source}:${(inName || inMac).toLowerCase()}`;
+        gatewayKey = `${topic}:${(inName || inMac).toLowerCase()}`;
         prev = this.gateways.get(gatewayKey);
       } else {
         const latest = [...this.gateways.entries()]
-          .filter(([, s]) => s.source === source)
+          .filter(([, state]) => state.topic === topic)
           .sort((a, b) => b[1].receivedAt - a[1].receivedAt)[0];
-        gatewayKey = latest?.[0] ?? `${source}:unknown`;
+        gatewayKey = latest?.[0] ?? `${topic}:unknown`;
         prev = latest?.[1];
       }
       const prevM = prev?.metrics;
@@ -714,7 +732,7 @@ export class IpsecSource extends EventEmitter {
       const hasWan = !!(metrics.wan && (metrics.wan.ifname || metrics.wan.rx_bytes || metrics.wan.tx_bytes));
       const wan = hasWan
         ? {
-            ifname:     String(metrics.wan?.ifname ?? ''),
+            ifname:     String(metrics.wan?.ifname ?? '') || prevM?.wan.ifname || '',
             link_up:    Boolean(metrics.wan?.link_up),
             rx_bytes:   Number(metrics.wan?.rx_bytes   ?? 0),
             tx_bytes:   Number(metrics.wan?.tx_bytes   ?? 0),
@@ -752,16 +770,49 @@ export class IpsecSource extends EventEmitter {
         cellular: metrics.cellular ?? prevM?.cellular,
       };
 
-      const state: IpsecGatewayState = { metrics: normalised, receivedAt: Date.now(), source };
+      const receivedAt = Date.now();
+      let wanRate = prev?.wanRate;
+      if (hasWan) {
+        const rateKey = `${gatewayKey}:${normalised.wan.ifname}`;
+        if (!normalised.wan.link_up) {
+          this.wanCounterBaselines.delete(rateKey);
+          wanRate = undefined;
+        } else {
+          const update = advanceWanTrafficRate(this.wanCounterBaselines.get(rateKey), {
+            key: rateKey,
+            sourceTimestampMs: Number(metrics.timestamp_ms ?? 0),
+            observedAt: receivedAt,
+            rxBytes: normalised.wan.rx_bytes,
+            txBytes: normalised.wan.tx_bytes,
+          });
+          if (update.accepted) {
+            if (update.baseline) this.wanCounterBaselines.set(rateKey, update.baseline);
+            else this.wanCounterBaselines.delete(rateKey);
+          }
+          if (update.reset) wanRate = undefined;
+          if (update.rate) wanRate = update.rate;
+        }
+      }
+
+      const state: IpsecGatewayState = {
+        metrics: normalised,
+        receivedAt,
+        source,
+        topic,
+        wanRate,
+      };
       this.gateways.set(gatewayKey, state);
       this.emit('update', { gatewayKey, state });
 
       // The per-client Wi-Fi block is a live LAN inventory + link telemetry —
       // forward it to deviceSource as a full source so real clients (laptops,
       // the Shelly, …) populate the Devices pages with measured RSSI/health.
-      if (normalised.wifi && normalised.wifi.clients.length > 0) {
+      if (IPSEC_DEVICE_TOPICS.has(topic)
+        && metrics.wifi
+        && Array.isArray(metrics.wifi.clients)
+        && metrics.wifi.clients.length > 0) {
         // eslint-disable-next-line no-console
-        console.log('[wifi] ' + normalised.wifi.clients.map((c) =>
+        console.log('[wifi] ' + metrics.wifi.clients.map((c) =>
           `${c.hostname || c.mac}: rssi=${c.rssi}dBm snr=${c.snr}dB health=${c.health || 'ok'}`).join(' | '));
         const now = Date.now();
         this.emit('inventory', {
@@ -770,7 +821,7 @@ export class IpsecSource extends EventEmitter {
           // de-duplicates clients by MAC, so one feed cannot clobber the other.
           source: `${topic}:wifi`,
           payload: {
-            devices: normalised.wifi.clients.map((c) => {
+            devices: metrics.wifi.clients.map((c) => {
               const key = c.mac.toUpperCase();
               let first = this.wifiFirstSeen.get(key);
               if (first == null) {
