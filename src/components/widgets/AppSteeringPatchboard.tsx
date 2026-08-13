@@ -69,11 +69,11 @@ interface AppDef {
   weight: number;
 }
 
-// Brand palettes (Teams lavender, Netflix red, M365 flame, Salesforce azure…)
-// picked from each brand's family at a shade that reads on both themes.
+// Application palettes (Teams lavender, surveillance red, M365 flame, Salesforce azure…)
+// use recognizable hues at shades that read on both themes.
 const IT_APPS: AppDef[] = [
   { name: 'Microsoft Teams', cat: 'video',    icon: Video,        color: '#7B83EB', weight: 2.6 },
-  { name: 'Netflix',         cat: 'video',    icon: Clapperboard, color: '#E50914', weight: 2.8 },
+  { name: 'Surveillance',    cat: 'video',    icon: Clapperboard, color: '#E50914', weight: 2.8 },
   { name: 'Microsoft 365',   cat: 'business', icon: Mail,         color: '#D83B01', weight: 2.1 },
   { name: 'VoIP',            cat: 'voice',    icon: PhoneCall,    color: '#06B6D4', weight: 2.3 },
   { name: 'Salesforce',      cat: 'business', icon: Briefcase,    color: '#00A1E0', weight: 2.1 },
