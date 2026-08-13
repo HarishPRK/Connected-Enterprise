@@ -85,7 +85,7 @@ export function LanPorts({
       right={<WidgetDataBadge state={dataState} />}
     >
       {visiblePorts.length === 0 ? (
-        <WidgetDataEmpty state={dataState} liveLabel="LAN port data" />
+        <WidgetDataEmpty state={dataState} liveLabel="LAN port data" skeleton={dataState === 'live'} />
       ) : (
         visiblePorts.map((port) => {
           const activity = portActivity(port);

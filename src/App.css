@@ -3776,6 +3776,168 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
 @media (prefers-reduced-motion: reduce) {
   .kpi-card-alerting { animation: none; }
 }
+/* ─── Wall / TV kiosk mode (Command Center) ───
+   Root attribute mirrors the data-sidebar-collapsed pattern: chrome is
+   removed entirely and content scales up for across-the-room legibility. */
+html[data-wall-mode="true"] .app-shell {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  grid-template-areas: "main";
+}
+html[data-wall-mode="true"] .topbar,
+html[data-wall-mode="true"] .sidebar { display: none; }
+html[data-wall-mode="true"] .main {
+  padding: clamp(20px, 2.5vw, 44px) clamp(24px, 3vw, 56px);
+}
+html[data-wall-mode="true"] .kpi-value { font-size: clamp(28px, 2.6vw, 40px); }
+html[data-wall-mode="true"] .kpi-label { font-size: 12.5px; }
+html[data-wall-mode="true"] .fleet-table th,
+html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
+
+.wall-spotlight {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: clamp(20px, 3vw, 48px);
+  flex-wrap: wrap;
+  padding: 18px 24px 22px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(var(--accent-rgb) / 0.07), transparent 55%),
+    var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: wall-spotlight-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes wall-spotlight-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.wall-spotlight-head { display: flex; align-items: center; gap: 14px; min-width: 220px; }
+.wall-spotlight-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+.wall-spotlight-name {
+  font-size: clamp(22px, 2.2vw, 32px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  line-height: 1.1;
+}
+.wall-spotlight-loc { font-size: 13px; color: var(--text-muted); margin-top: 3px; }
+.wall-spotlight-stats { display: flex; gap: clamp(18px, 2.4vw, 40px); flex-wrap: wrap; flex: 1; }
+.wall-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.wall-stat-value {
+  font-size: clamp(20px, 1.9vw, 28px);
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.wall-spotlight-spark { flex-shrink: 0; }
+.wall-spotlight-progress {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 3px; width: 100%;
+  background: var(--accent);
+  transform-origin: left;
+  opacity: 0.55;
+  animation: wall-progress 15s linear forwards;
+}
+@keyframes wall-progress {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wall-spotlight { animation: none; }
+  .wall-spotlight-progress { animation: none; transform: scaleX(1); opacity: 0.25; }
+}
+
+/* ─── Overview insight strip ─── */
+.insight-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  margin-bottom: clamp(14px, 1.1vw, 22px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(192, 132, 252, 0.06), transparent 40%), var(--panel);
+  backdrop-filter: var(--card-blur);
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+.insight-strip-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.insight-strip-msg {
+  flex: 1;
+  font-size: 12.5px;
+  line-height: 1.45;
+  min-width: 0;
+  animation: insight-in 0.4s ease both;
+}
+@keyframes insight-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.insight-strip-dots { display: inline-flex; gap: 5px; flex-shrink: 0; align-items: center; }
+.insight-strip-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  border: none;
+  padding: 0;
+  min-width: 0;
+  line-height: 0;
+  cursor: pointer;
+}
+.insight-strip-dot.on { transform: scale(1.2); }
+.insight-strip-link {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-3);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .insight-strip-msg { animation: none; }
+}
+
+/* Loading skeleton — shimmering placeholder rows while a live source warms up. */
+.skeleton-row {
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(
+    90deg,
+    var(--panel-2) 25%,
+    color-mix(in srgb, var(--panel-2) 55%, var(--border-strong)) 45%,
+    var(--panel-2) 65%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  0%   { background-position: 175% 0; }
+  100% { background-position: -75% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-row { animation: none; }
+}
+
 /* Failover cinematic banner — floats over the IPsec flow diagram for ~2.6s
    when the active tunnel flips underlays. Tint comes inline (err/ok). */
 .ipsec-failover-banner {

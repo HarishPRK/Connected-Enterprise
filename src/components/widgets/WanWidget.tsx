@@ -1,7 +1,31 @@
+import { useEffect, useState } from 'react';
 import { Radio, Cable } from 'lucide-react';
 import { Card } from '../Card';
 import { StatusBadge } from '../StatusBadge';
 import type { WanLink } from '../../types';
+
+/** Ticking clock for relative-age labels; paused when nothing needs it. */
+function useNow(intervalMs: number, enabled: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
+    return () => window.clearInterval(timer);
+  }, [intervalMs, enabled]);
+  return now;
+}
+
+/** "just now" / "42s ago" / "3m ago"; null beyond an hour (the absolute
+ *  timestamp reads better than "97m ago"). */
+function formatRelativeAge(ms: number): string | null {
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const s = Math.round(ms / 1000);
+  if (s < 10) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return null;
+}
 
 export type WidgetDataState = 'loading' | 'live' | 'stale' | 'unavailable';
 
@@ -70,11 +94,17 @@ export function WidgetDataNote({
   statusMessage,
   observedAt,
 }: WidgetDataMeta) {
+  const date = observedAt == null
+    ? null
+    : observedAt instanceof Date ? observedAt : new Date(observedAt);
+  const validDate = date && !Number.isNaN(date.getTime()) ? date : null;
+  const now = useNow(5_000, validDate !== null);
+  const relative = validDate ? formatRelativeAge(now - validDate.getTime()) : null;
   const observed = formatObservedAt(observedAt);
   const details = [
     statusMessage,
     source ? `Source: ${source}` : null,
-    observed ? `Observed ${observed}` : null,
+    observed ? `Observed ${observed}${relative ? ` (${relative})` : ''}` : null,
   ].filter((detail): detail is string => Boolean(detail));
 
   if (details.length === 0) {
@@ -104,10 +134,14 @@ export function WidgetDataEmpty({
   state,
   liveLabel,
   message: messageOverride,
+  skeleton = false,
 }: {
   state: WidgetDataState;
   liveLabel: string;
   message?: string;
+  /** Render shimmer placeholders even outside 'loading' — for callers whose
+   *  emptiness is a warm-up (first samples pending), not a definitive zero. */
+  skeleton?: boolean;
 }) {
   const message = messageOverride ?? (state === 'loading'
     ? `Connecting to live ${liveLabel}…`
@@ -116,6 +150,35 @@ export function WidgetDataEmpty({
       : state === 'live'
         ? `The live source reported no ${liveLabel}.`
         : `Live ${liveLabel} is unavailable.`);
+
+  // Warm-up gets shimmer placeholders instead of a text box — the layout
+  // holds its shape and the card reads as "arriving", not "broken".
+  if (state === 'loading' || skeleton) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        aria-label={message}
+        style={{
+          minHeight: 92,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          gap: 10,
+          padding: '10px 4px',
+        }}
+      >
+        {[0.92, 0.64, 0.8].map((w, i) => (
+          <div
+            key={i}
+            className="skeleton-row"
+            style={{ width: `${w * 100}%`, animationDelay: `${i * 0.15}s` }}
+          />
+        ))}
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{message}</div>
+      </div>
+    );
+  }
 
   return (
     <div

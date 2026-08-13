@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Activity, ArrowDown, ArrowUp, Building2, CheckCircle2, Cpu, ShieldAlert,
   TrendingUp, TrendingDown, WifiOff,
@@ -330,6 +330,15 @@ function formatWanRate(value: number): string {
   return Math.round(value).toLocaleString();
 }
 
+function formatAge(ms: number): string | null {
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${Math.max(1, s)}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h`;
+}
+
 function WanTrafficKpi({
   rate,
   state,
@@ -340,16 +349,29 @@ function WanTrafficKpi({
   interfaceName?: string | null;
 }) {
   const c = useThemeColors();
-  const showRate = state === 'live' && rate !== null;
+  const isStale = state === 'stale';
+  // Never blank a number the dashboard already knows: a stale feed keeps the
+  // last derived rate visible (dimmed) and signals freshness in the meta line.
+  const showRate = (state === 'live' || isStale) && rate !== null;
+
+  // Tick while stale so "last sample Ns ago" stays honest between renders.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isStale) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 5_000);
+    return () => window.clearInterval(timer);
+  }, [isStale]);
+
+  const staleAge = isStale && rate ? formatAge(now - rate.observedAt) : null;
   const meta = showRate
-    ? `${interfaceName || 'WAN interface'} · latest ${formatInterval(rate.spanSeconds)} counter interval`
+    ? isStale
+      ? `last sample ${staleAge ? `${staleAge} ago` : 'received earlier'} · waiting for fresh telemetry`
+      : `${interfaceName || 'WAN interface'} · latest ${formatInterval(rate.spanSeconds)} counter interval`
     : state === 'stale'
         ? 'WAN telemetry is stale'
         : state === 'loading'
           ? 'Waiting for the next gateway counter sample…'
           : 'WAN telemetry unavailable';
-
-  const isStale = state === 'stale';
   return (
     <div
       className="kpi-card kpi-wan-card"
@@ -378,8 +400,9 @@ function WanTrafficKpi({
       </div>
       <div
         className="kpi-wan-rates"
+        style={isStale ? { opacity: 0.62 } : undefined}
         aria-label={showRate
-          ? `Download ${formatWanRate(rate.rxMbps)} megabits per second; upload ${formatWanRate(rate.txMbps)} megabits per second`
+          ? `Download ${formatWanRate(rate.rxMbps)} megabits per second; upload ${formatWanRate(rate.txMbps)} megabits per second${isStale ? ' (stale)' : ''}`
           : meta}
       >
         <div className="kpi-wan-rate">

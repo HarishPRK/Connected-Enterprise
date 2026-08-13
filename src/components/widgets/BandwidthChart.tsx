@@ -72,6 +72,7 @@ export function BandwidthChart({
         <WidgetDataEmpty
           state={dataState}
           liveLabel="bandwidth samples"
+          skeleton={dataState === 'live'}
           message={validData.length === 1
             ? 'One source sample received. Waiting for another sample to draw the chart.'
             : undefined}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import {
   Activity, AlertTriangle, Building2, DollarSign, Download, Gauge, Laptop,
-  Pencil, Plus, Trash2, Zap,
+  Pencil, Plus, Trash2, Tv, Zap,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
@@ -160,6 +160,49 @@ export function CommandCenterPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CustomKpi | null>(null);
 
+  /* ─── Wall mode: chrome-free kiosk view for NOC/TV displays ─── */
+  const [wallMode, setWallMode] = useState(false);
+  const [spotlightIdx, setSpotlightIdx] = useState(0);
+
+  // Chrome collapse is CSS-driven off a root attribute, mirroring the
+  // existing data-sidebar-collapsed pattern.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (wallMode) root.setAttribute('data-wall-mode', 'true');
+    else root.removeAttribute('data-wall-mode');
+    return () => root.removeAttribute('data-wall-mode');
+  }, [wallMode]);
+
+  // Browser fullscreen follows the toggle. Esc exits fullscreen, which the
+  // fullscreenchange listener translates into leaving wall mode; the keydown
+  // fallback covers environments where the fullscreen request was denied.
+  useEffect(() => {
+    if (!wallMode) return;
+    const el = document.documentElement;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.().catch(() => { /* wall mode still works un-fullscreened */ });
+    }
+    const onFsChange = () => { if (!document.fullscreenElement) setWallMode(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setWallMode(false); };
+    document.addEventListener('fullscreenchange', onFsChange);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      window.removeEventListener('keydown', onKey);
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => { /* ignore */ });
+    };
+  }, [wallMode]);
+
+  // Rotate the spotlighted branch every 15s while on the wall.
+  useEffect(() => {
+    if (!wallMode) return;
+    const timer = window.setInterval(
+      () => setSpotlightIdx((i) => (i + 1) % branches.length),
+      15_000,
+    );
+    return () => window.clearInterval(timer);
+  }, [wallMode]);
+
   useEffect(() => {
     try { localStorage.setItem(COMPARE_KEY, JSON.stringify(compareIds)); } catch { /* ignore quota */ }
   }, [compareIds]);
@@ -260,10 +303,26 @@ export function CommandCenterPage() {
         subtitle={`Fleet posture, head-to-head branch comparison, and your own KPI cards · ${fleet.okBranches}/${fleet.branchCount} branches healthy`}
         right={
           <div className="toolbar ecc-no-print">
+            <button
+              onClick={() => setWallMode((w) => !w)}
+              title="Chrome-free fullscreen view for NOC / TV displays — rotates through branches"
+              style={wallMode ? { background: 'var(--grad-accent-soft)', borderColor: 'var(--accent)' } : undefined}
+            >
+              <Tv size={14} />{wallMode ? 'Exit wall' : 'Wall mode'}
+            </button>
             <button className="primary" onClick={exportPdf}><Download size={14} />Export PDF</button>
           </div>
         }
       />
+
+      {/* Rotating branch spotlight — wall mode only; the key remount restarts
+          the entry animation and the 15s progress bar in step with rotation. */}
+      {wallMode && (
+        <WallSpotlight
+          key={spotlightIdx}
+          branch={branches[spotlightIdx % branches.length]}
+        />
+      )}
 
       {/* Only visible on the printed report */}
       <div className="ecc-print-header">
@@ -359,6 +418,55 @@ export function CommandCenterPage() {
         />
       )}
     </>
+  );
+}
+
+/* ─────────── Wall-mode branch spotlight ─────────── */
+
+function WallSpotlight({ branch }: { branch: Branch }) {
+  const c = useThemeColors();
+  const s = fleetStats[branch.id];
+  if (!s) return null;
+  const statusColor = s.status === 'ok' ? c.ok : s.status === 'warn' ? c.warn : c.err;
+  return (
+    <div className="wall-spotlight">
+      <div className="wall-spotlight-head">
+        <span
+          className="wall-spotlight-dot"
+          style={{ background: statusColor, boxShadow: `0 0 14px ${statusColor}` }}
+        />
+        <div>
+          <div className="wall-spotlight-name">{branch.name}</div>
+          <div className="wall-spotlight-loc">{branch.location} · {branch.gatewayModel}</div>
+        </div>
+      </div>
+      <div className="wall-spotlight-stats">
+        <WallStat label="Health" value={`${Math.round(s.healthScore * 100)}`} tone={statusColor} />
+        <WallStat label="Uptime 30d" value={`${s.uptimePct.toFixed(2)}%`} />
+        <WallStat label="Devices" value={`${s.devicesOnline}/${s.totalDevices}`} />
+        <WallStat label="Alerts" value={`${s.openAlerts}`} tone={s.openAlerts > 0 ? c.warn : c.ok} />
+        <WallStat label="Throughput" value={`${s.throughputMbps} Mbps`} />
+      </div>
+      <div className="wall-spotlight-spark">
+        <Sparkline
+          values={s.throughputSeries}
+          width={220}
+          height={44}
+          stroke={c.accent}
+          fill="rgba(var(--accent-rgb) / 0.16)"
+        />
+      </div>
+      <div className="wall-spotlight-progress" />
+    </div>
+  );
+}
+
+function WallStat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="wall-stat">
+      <div className="wall-stat-label">{label}</div>
+      <div className="wall-stat-value" style={tone ? { color: tone } : undefined}>{value}</div>
+    </div>
   );
 }
 

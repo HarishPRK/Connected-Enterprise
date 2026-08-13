@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PageHeader } from '../components/PageHeader';
+import { InsightStrip } from '../components/widgets/InsightStrip';
 import { WanWidget, type WidgetDataState } from '../components/widgets/WanWidget';
 import { LanPorts } from '../components/widgets/LanPorts';
 import { BandwidthChart } from '../components/widgets/BandwidthChart';
@@ -402,6 +403,18 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
           gatewayOnline: ipsec.connected,
           onGatewayClick: () => setDevicesModalOpen(true),
         } : undefined}
+      />
+
+      <InsightStrip
+        branchName={branch.name}
+        wanState={failoverTopic ? liveWanState : undefined}
+        lastRateAgeMs={liveWanState === 'stale' && liveWanRate ? nowMs - liveWanRate.observedAt : null}
+        tunnels={failoverState?.metrics.tunnels.map((t) => ({
+          ifname: t.ifname, present: t.present, reachable: t.reachable,
+        })) ?? null}
+        activeTunnel={failoverState?.metrics.active_tunnel ?? null}
+        alertsCount={usingFailover ? liveAlertsCount : null}
+        devices={branchDevices}
       />
 
       {devicesModalOpen && (
