@@ -131,7 +131,16 @@ const MATTER_QUERY_CMD = process.env.IOT_MATTER_QUERY_CMD ?? 'UPDATE_DEVICE';
 // `src` reply prefix the device answers on (`<src>/rpc`). The fleet is
 // env-driven — add ids with IOT_SHELLY_DEVICES (comma-separated).
 const SHELLY_DEVICE_IDS: string[] = (
-  process.env.IOT_SHELLY_DEVICES ?? 'shellyplus1pm-cc7b5c844c18'
+  process.env.IOT_SHELLY_DEVICES ?? [
+    'shellyplus1pm-cc7b5c844c18', // existing Coffee Brewer / lab device
+    'shellyplus1pm-c049ef8ce640', // Grinder
+    'shellyplus1pm-c049ef8cb0f4', // Air Fryer
+    'shellyplus1pm-c049ef8cb75c', // Mixer
+    'shellyplus1pm-90380c34cd74', // Instant Pot
+    'shellyplus1pm-c049ef8c9324', // Coffee Brewer
+    'shellyplus1pm-90380c3695a8', // Exhaust
+    'shellyplus1pm-c049ef8ce5c4', // Kettle
+  ].join(',')
 ).split(',').map((s) => s.trim()).filter(Boolean);
 const SHELLY_REPLY_SRC = process.env.IOT_SHELLY_REPLY_SRC ?? 'rdk/shelly/ce-server';
 

@@ -2,7 +2,13 @@ import { Drawer } from './Drawer';
 import { StatusBadge } from '../components/StatusBadge';
 import type { Device, DeviceTelemetry, HealthSignal } from '../types';
 import { getDeviceHealth } from '../data/mock';
-import { telemetryHealth, meteringTiles, formatConnectedFor } from './deviceTelemetry';
+import {
+  telemetryHealth,
+  meteringTiles,
+  formatConnectedFor,
+  energyRatingFor,
+  energyRatingLabel,
+} from './deviceTelemetry';
 import { Activity, Cable, Wifi, Plug, Radio, Stethoscope, CheckCircle2, AlertTriangle, XCircle, Zap } from 'lucide-react';
 
 const connIcon = { wired: Cable, wifi: Wifi, poe: Plug, thread: Radio } as const;
@@ -34,7 +40,7 @@ export function DeviceDrawer({
         <Stat label="Connected for"  value={formatConnectedFor(device.connectedForHours)} />
       </div>
 
-      {device.telemetry && <MeteringCard t={device.telemetry} />}
+      {supportsEnergyMetering(device) && <MeteringCard t={device.telemetry} />}
 
       {/* ── Diagnostics panel — justifies the status with concrete signals ── */}
       <div className="card" style={{ marginTop: 16, padding: 14, gap: 10 }}>
@@ -84,12 +90,51 @@ export function DeviceDrawer({
 }
 
 /** Live power metering — prominent stat tiles from the device's own readings. */
-function MeteringCard({ t }: { t: DeviceTelemetry }) {
+function supportsEnergyMetering(device: Device): boolean {
+  return device.kind === 'shelly' || device.kind === 'matter' || device.conn === 'poe';
+}
+
+function MeteringCard({ t }: { t?: DeviceTelemetry }) {
+  if (!t) {
+    return (
+      <div className="card" style={{ marginTop: 16, padding: 14, gap: 8 }}>
+        <div className="card-title"><Zap size={13} /> Energy &amp; power</div>
+        <div style={{ color: 'var(--text-dim)', fontSize: 12.5 }}>
+          Waiting for live power-meter telemetry from the device.
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          This device supports metering; readings will appear when its gateway feed is connected.
+        </div>
+      </div>
+    );
+  }
   const tiles = meteringTiles(t);
-  if (tiles.length === 0) return null;
+  const rating = energyRatingFor(t.apowerW);
+  if (tiles.length === 0 && !rating) return null;
   return (
     <div className="card" style={{ marginTop: 16, padding: 14, gap: 12 }}>
-      <div className="card-title"><Zap size={13} /> Live power metering</div>
+      <div className="card-title"><Zap size={13} /> Energy &amp; power</div>
+      {rating && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 12px', borderRadius: 10,
+          background: 'rgba(var(--ok-rgb) / 0.08)',
+          border: '1px solid rgba(var(--ok-rgb) / 0.24)',
+        }}>
+          <div>
+            <div className="label">Energy rating · live load band</div>
+            <div style={{ color: 'var(--text-dim)', fontSize: 11.5, marginTop: 3 }}>
+              {energyRatingLabel(rating)}
+            </div>
+          </div>
+          <div style={{
+            color: 'var(--ok)', fontSize: 28, lineHeight: 1, fontWeight: 800,
+            fontVariantNumeric: 'tabular-nums',
+          }} aria-label={`Energy rating ${rating}`}>
+            {rating}
+          </div>
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         {tiles.map((m) => (
           <div className="stat" key={m.label}>
@@ -103,6 +148,11 @@ function MeteringCard({ t }: { t: DeviceTelemetry }) {
       {t.tempC != null && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingTop: 4, borderTop: '1px dashed var(--border)' }}>
           Device temperature {t.tempC.toFixed(1)} °C · readings stream live from the device over MQTT
+        </div>
+      )}
+      {rating && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingTop: 4 }}>
+          Rating is derived from instantaneous active power; it is not an appliance efficiency certification.
         </div>
       )}
     </div>
@@ -131,8 +181,8 @@ function SignalRow({ signal }: { signal: HealthSignal }) {
       padding: '8px 10px',
       borderRadius: 8,
       background: 'var(--surface-1)',
-      borderLeft: `3px solid ${sevColor}`,
       border: '1px solid var(--border)',
+      boxShadow: `inset 0 0 0 1px ${sevColor}`,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
         <span style={{ color: sevColor, display: 'inline-flex', flexShrink: 0 }}>

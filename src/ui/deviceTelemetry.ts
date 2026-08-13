@@ -23,11 +23,38 @@ export function formatEnergy(wh: number): string {
   return `${wh.toFixed(3)} Wh`;
 }
 
+export type EnergyRating = 'A' | 'B' | 'C' | 'D' | 'E';
+
+/**
+ * A live load band derived from instantaneous active power. This is an
+ * operational energy rating, not an appliance efficiency certification — the
+ * latter requires device-class and duty-cycle data that the gateway does not
+ * report.
+ */
+export function energyRatingFor(apowerW?: number): EnergyRating | null {
+  if (apowerW == null || !Number.isFinite(apowerW) || apowerW < 0) return null;
+  if (apowerW <= 5) return 'A';
+  if (apowerW <= 25) return 'B';
+  if (apowerW <= 100) return 'C';
+  if (apowerW <= 500) return 'D';
+  return 'E';
+}
+
+export function energyRatingLabel(rating: EnergyRating): string {
+  return {
+    A: 'Very low live load',
+    B: 'Low live load',
+    C: 'Moderate live load',
+    D: 'High live load',
+    E: 'Very high live load',
+  }[rating];
+}
+
 /** Power / current / voltage / energy as labelled tiles for the drawer's
  *  metering card. Empty when the device reports no electrical data. */
 export function meteringTiles(t: DeviceTelemetry): { label: string; value: string }[] {
   const tiles: { label: string; value: string }[] = [];
-  if (t.apowerW != null) tiles.push({ label: 'Power', value: `${t.apowerW.toFixed(1)} W` });
+  if (t.apowerW != null) tiles.push({ label: 'Live power draw', value: `${t.apowerW.toFixed(1)} W` });
   if (t.currentA != null) tiles.push({ label: 'Current', value: `${t.currentA.toFixed(3)} A` });
   if (t.voltageV != null) tiles.push({ label: 'Voltage', value: `${t.voltageV.toFixed(1)} V` });
   if (t.energyWhTotal != null) tiles.push({ label: 'Energy (total)', value: formatEnergy(t.energyWhTotal) });
