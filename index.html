@@ -6,6 +6,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#fafbff" />
     <title>Connected Enterprise</title>
+    <style>
+      .ce-boot-shell {
+        min-height: 100%;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        color: #0f172a;
+        background: #fafbff;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+      }
+      [data-theme="dark"] .ce-boot-shell { color: #f3f1ff; background: #0c0d1c; }
+      .ce-boot-panel {
+        width: min(520px, 100%);
+        padding: 32px;
+        border: 1px solid rgba(15, 23, 42, 0.14);
+        border-radius: 16px;
+        background: #fff;
+        box-shadow: 0 16px 42px rgba(15, 23, 42, 0.12);
+      }
+      [data-theme="dark"] .ce-boot-panel {
+        border-color: rgba(200, 195, 230, 0.18);
+        background: #25223f;
+        box-shadow: 0 18px 48px rgba(5, 4, 16, 0.5);
+      }
+      .ce-boot-panel h1 { margin: 0 0 10px; font-size: 28px; letter-spacing: -0.02em; }
+      .ce-boot-panel p { margin: 0 0 24px; max-width: 48ch; color: #475569; line-height: 1.6; }
+      [data-theme="dark"] .ce-boot-panel p { color: #c4bee0; }
+      .ce-boot-panel button {
+        min-height: 44px;
+        padding: 10px 18px;
+        border: 0;
+        border-radius: 10px;
+        color: #fff;
+        background: #7158d9;
+        font: 600 15px/1 'Segoe UI', system-ui, sans-serif;
+        cursor: pointer;
+      }
+      .ce-boot-panel button:focus-visible { outline: 3px solid #7cffd4; outline-offset: 3px; }
+    </style>
     <script>
       // Apply saved/preferred theme before first paint to avoid flash.
       (function () {
@@ -23,6 +62,32 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script id="ce-entrypoint" type="module" src="/src/main.tsx"></script>
+    <script>
+      (function () {
+        var shown = false;
+        function showStartupFailure() {
+          var root = document.getElementById('root');
+          if (shown || !root || root.childElementCount > 0) return;
+          shown = true;
+          root.innerHTML = '<main class="ce-boot-shell"><section class="ce-boot-panel" role="alert" aria-live="assertive"><h1>Connected Enterprise couldn\'t start</h1><p>The application files could not be loaded. Check your connection, then reload the page.</p><button type="button" id="ce-boot-reload">Reload application</button></section></main>';
+          document.getElementById('ce-boot-reload').addEventListener('click', function () {
+            window.location.reload();
+          });
+        }
+        window.addEventListener('error', function (event) {
+          if (event.target && event.target.id === 'ce-entrypoint') showStartupFailure();
+        }, true);
+        window.setTimeout(showStartupFailure, 6500);
+      })();
+    </script>
+    <noscript>
+      <main class="ce-boot-shell">
+        <section class="ce-boot-panel" role="alert">
+          <h1>JavaScript is required</h1>
+          <p>Enable JavaScript, then reload Connected Enterprise.</p>
+        </section>
+      </main>
+    </noscript>
   </body>
 </html>
