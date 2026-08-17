@@ -1,5 +1,7 @@
 # Deploying Connected Enterprise to AWS EC2
 
+> **Onboarding security boundary:** the EC2 process listens on HTTP only, but the deployed application is published through the HTTPS ALB origin `https://connectedenterprise.app`. Cognito onboarding must use that canonical HTTPS origin; direct EC2-IP access remains dashboard-only. See [docs/AWS_ONBOARDING.md](docs/AWS_ONBOARDING.md).
+
 End-to-end guide to get the app live on an EC2 instance over **HTTP**. Estimated time: **~20 min**.
 
 Architecture:

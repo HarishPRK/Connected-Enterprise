@@ -1,9 +1,32 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+
+function loopbackOnlyOnboarding(): Plugin {
+  return {
+    name: 'connected-enterprise-loopback-onboarding',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith('/api/onboarding')) {
+          next()
+          return
+        }
+        const address = String(req.socket.remoteAddress ?? '').toLowerCase()
+        const loopback = address === '::1' || address === '127.0.0.1' || address.startsWith('::ffff:127.')
+        if (loopback) {
+          next()
+          return
+        }
+        res.statusCode = 403
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({ error: { code: 'LOCAL_SIMULATOR_ONLY', message: 'Onboarding development routes are available only on this workstation.' } }))
+      })
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [loopbackOnlyOnboarding(), react()],
   build: {
     rollupOptions: {
       output: {
@@ -39,7 +62,7 @@ export default defineConfig({
       // Important for SSE: configure: ... lets us tweak the proxy if needed.
       '/api': {
         target: 'http://localhost:3001',
-        changeOrigin: true,
+        changeOrigin: false,
         ws: false,
       },
     },

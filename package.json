@@ -11,6 +11,9 @@
     "start": "tsx server/index.ts",
     "sim:devices": "tsx scripts/sim-device-inventory.ts",
     "sim:matter": "tsx scripts/sim-matter-list.ts",
+    "sim:gateway": "tsx tools/gateway-simulator/src/index.ts",
+    "check:gateway-simulator": "tsc -p tools/gateway-simulator/tsconfig.json --noEmit",
+    "test:gateway-simulator": "tsx --test tools/gateway-simulator/test/*.test.ts",
     "test:server": "tsx --test server/*.test.ts",
     "lint": "eslint .",
     "preview": "vite preview"

@@ -29,6 +29,12 @@ npm install
 npm run dev          # frontend only — Vite on :5174
 ```
 
+## Gateway onboarding
+
+`/onboarding` now uses a persistent local simulator during development and a separate, JWT-protected AWS control plane when the `VITE_ONBOARDING_*` variables are configured. Profiles are immutable and signed, assignments use monotonic generations, and a deployment is not successful until the gateway reports a healthy apply result.
+
+See [Connected Enterprise onboarding on AWS](docs/AWS_ONBOARDING.md) for the architecture, security invariants, deployment commands, cloud outputs, manufacturing ledger, and gateway MQTT contract.
+
 ## Live IT/OT and Dynamic Failover telemetry
 
 The Express server uses one AWS IoT connection for both pages. By default it

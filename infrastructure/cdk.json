@@ -1,0 +1,9 @@
+{
+  "app": "npx tsx bin/connected-enterprise-onboarding.ts",
+  "context": {
+    "stage": "dev",
+    "allowedOrigins": ["http://localhost:5174", "https://connectedenterprise.app"],
+    "oauthCallbackUrls": ["http://localhost:5174/onboarding", "https://connectedenterprise.app/onboarding"],
+    "oauthLogoutUrls": ["http://localhost:5174/onboarding", "https://connectedenterprise.app/onboarding"]
+  }
+}

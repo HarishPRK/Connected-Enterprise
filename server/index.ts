@@ -23,12 +23,32 @@ import {
   type GatewayTwinTelemetry,
   type GatewayTwinUpstreamState,
 } from './gatewayTwinSource.js';
+import { createOnboardingRouter } from './onboardingRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+const configuredOrigins = new Set(
+  String(process.env.CORS_ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
+const developmentOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || configuredOrigins.has(origin) || (process.env.NODE_ENV !== 'production' && developmentOrigin.test(origin))) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Origin is not allowed by CORS policy'));
+  },
+  credentials: false,
+  methods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key', 'X-CE-Device-Status-Token'],
+  maxAge: 600,
+}));
 
 // gzip everything compressible (the built JS bundle is ~1.2 MB → ~350 KB on the
 // wire, CSS ~89 KB → ~16 KB). CRITICAL: never compress the Server-Sent-Events
@@ -46,6 +66,8 @@ app.use(compression({
 }));
 
 app.use(express.json({ limit: '256kb' }));
+
+app.use('/api/onboarding', await createOnboardingRouter());
 
 const llm = makeLLM();
 

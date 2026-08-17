@@ -1,0 +1,38 @@
+{
+  "name": "connected-enterprise-onboarding-infrastructure",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "synth": "cdk synth ConnectedEnterpriseOnboarding-dev",
+    "diff": "cdk diff ConnectedEnterpriseOnboarding-dev",
+    "deploy": "cdk deploy ConnectedEnterpriseOnboarding-dev --require-approval broadening",
+    "demo:prepare-certificate-handoff": "tsx scripts/prepare-trusted-user-certificate-demo.ts",
+    "demo:run-certificate-handoff": "tsx scripts/run-trusted-user-certificate-demo.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/client-iot": "^3.0.0",
+    "@aws-sdk/client-iot-data-plane": "^3.0.0",
+    "@aws-sdk/client-kms": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@aws-sdk/lib-dynamodb": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "aws-cdk-lib": "^2.0.0",
+    "constructs": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^24.0.0",
+    "aws-cdk": "^2.0.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.0.0",
+    "typescript": "~6.0.2"
+  }
+}

@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://connected-enterprise.example/schemas/gateway-profile-v1.schema.json",
+  "title": "Connected Enterprise Gateway Profile v1",
+  "$defs": {
+    "secretsManagerReference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 768,
+      "pattern": "^(?:secretsmanager://[A-Za-z0-9_+=.@-]+(?:/[A-Za-z0-9_+=.@-]+)*|arn:(?:aws|aws-us-gov|aws-cn|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):secretsmanager:[a-z0-9-]{3,32}:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+)$"
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "network", "management"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "description": { "type": "string", "maxLength": 500 },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "models": { "type": "array", "maxItems": 50, "items": { "type": "string", "minLength": 1, "maxLength": 80 }, "uniqueItems": true },
+        "minimumFirmware": { "type": "string", "maxLength": 80 },
+        "maximumFirmware": { "type": "string", "maxLength": 80 },
+        "dataModelVersion": { "type": "string", "maxLength": 80 }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lan", "wan"],
+      "properties": {
+        "lan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["address", "prefixLength"],
+          "properties": {
+            "address": { "type": "string", "format": "ipv4" },
+            "prefixLength": { "type": "integer", "minimum": 8, "maximum": 30 },
+            "mtu": { "type": "integer", "minimum": 576, "maximum": 9216 }
+          }
+        },
+        "wan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "enum": ["dhcp", "pppoe", "static", "cellular"] },
+            "address": { "type": "string", "format": "ipv4" },
+            "prefixLength": { "type": "integer", "minimum": 0, "maximum": 32 },
+            "gateway": { "type": "string", "format": "ipv4" },
+            "mtu": { "type": "integer", "minimum": 576, "maximum": 9216 },
+            "accessTechnology": { "type": "string", "maxLength": 80 }
+          }
+        },
+        "dhcp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "poolStart": { "type": "string", "format": "ipv4" },
+            "poolEnd": { "type": "string", "format": "ipv4" },
+            "leaseSeconds": { "type": "integer", "minimum": 60, "maximum": 2592000 }
+          }
+        },
+        "dns": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "servers": { "type": "array", "maxItems": 8, "items": { "type": "string", "format": "ipv4" }, "uniqueItems": true },
+            "searchDomains": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 253 }, "uniqueItems": true },
+            "cacheEnabled": { "type": "boolean" }
+          }
+        },
+        "vlans": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name"],
+            "properties": {
+              "id": { "type": "integer", "minimum": 1, "maximum": 4094 },
+              "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "bridge": { "type": "string", "maxLength": 64 },
+              "ports": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 64 }, "uniqueItems": true }
+            }
+          }
+        },
+        "failover": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "primary": { "type": "string", "maxLength": 64 },
+            "backup": { "type": "string", "maxLength": 64 },
+            "probeTargets": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 253 }, "uniqueItems": true },
+            "failureThreshold": { "type": "integer", "minimum": 1, "maximum": 20 },
+            "recoveryThreshold": { "type": "integer", "minimum": 1, "maximum": 20 }
+          }
+        }
+      }
+    },
+    "firewall": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultInbound": { "enum": ["allow", "deny"] },
+        "defaultOutbound": { "enum": ["allow", "deny"] },
+        "rules": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "action", "direction"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[A-Za-z0-9._-]+$" },
+              "action": { "enum": ["allow", "deny", "reject"] },
+              "direction": { "enum": ["inbound", "outbound", "forward"] },
+              "protocol": { "enum": ["any", "tcp", "udp", "icmp"] },
+              "source": { "type": "string", "maxLength": 128 },
+              "destination": { "type": "string", "maxLength": 128 },
+              "destinationPorts": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 32 } }
+            }
+          }
+        }
+      }
+    },
+    "tunnels": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "remoteEndpoint", "secretRef"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[A-Za-z0-9._-]+$" },
+          "type": { "enum": ["ipsec", "wireguard"] },
+          "remoteEndpoint": { "type": "string", "minLength": 1, "maxLength": 253 },
+          "localNetworks": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 64 } },
+          "remoteNetworks": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 64 } },
+          "secretRef": { "$ref": "#/$defs/secretsManagerReference" }
+        }
+      }
+    },
+    "wifi": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "radios": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "band", "enabled"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$" },
+              "band": { "enum": ["2.4ghz", "5ghz", "6ghz"] },
+              "enabled": { "type": "boolean" },
+              "channel": {
+                "oneOf": [
+                  { "const": "auto" },
+                  { "type": "integer", "minimum": 1, "maximum": 233 }
+                ]
+              },
+              "channelWidthMHz": { "enum": [20, 40, 80, 160, 320] },
+              "transmitPowerPercent": { "type": "integer", "minimum": 1, "maximum": 100 },
+              "countryCode": { "type": "string", "pattern": "^[A-Z]{2}$" },
+              "dfsEnabled": { "type": "boolean" }
+            }
+          }
+        },
+        "ssids": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "security", "secretRef"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "maxLength": 32 },
+              "security": { "enum": ["wpa2-personal", "wpa3-personal", "wpa2-enterprise", "wpa3-enterprise"] },
+              "secretRef": { "$ref": "#/$defs/secretsManagerReference" },
+              "vlanId": { "type": "integer", "minimum": 1, "maximum": 4094 },
+              "hidden": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "management": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["telemetryEnabled", "loggingLevel"],
+      "properties": {
+        "telemetryEnabled": { "type": "boolean" },
+        "loggingLevel": { "enum": ["error", "warn", "info", "debug"] },
+        "ntpServers": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 253 }, "uniqueItems": true },
+        "uspEnabled": { "type": "boolean" },
+        "driftDetection": { "type": "boolean" }
+      }
+    },
+    "features": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z0-9._-]{1,80}$" },
+      "additionalProperties": { "type": "boolean" },
+      "maxProperties": 100
+    }
+  }
+}
