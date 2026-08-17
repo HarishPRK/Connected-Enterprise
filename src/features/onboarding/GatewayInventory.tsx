@@ -224,7 +224,7 @@ export function GatewayInventory({
         <div className="ce-onb-empty-state">
           <span className="ce-onb-empty-icon"><Box size={25} aria-hidden="true" /></span>
           <h3>No gateways assigned {selectedSite ? 'to this site' : 'yet'}</h3>
-          <p>Verify a factory identity, choose an authorized site, and assign an immutable profile.</p>
+          <p>Verify a factory serial, choose an authorized site, and assign an immutable profile.</p>
           {canVerifyDevice && (
             <button type="button" className="primary" onClick={onVerifyDevice}>
               <PackagePlus size={15} aria-hidden="true" />Verify first device

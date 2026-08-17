@@ -7,13 +7,12 @@ import {
   Cpu,
   FileLock2,
   Fingerprint,
-  KeyRound,
   MapPin,
   PackageCheck,
   ShieldCheck,
   TriangleAlert,
 } from 'lucide-react';
-import { createIdempotencyKey, startOnboardingOperation, verifyDeviceClaim } from './api';
+import { createIdempotencyKey, startOnboardingOperation, verifyFactorySerial } from './api';
 import { ProfileParameterEditor } from './ProfileParameterEditor';
 import type {
   GatewayModel,
@@ -32,26 +31,13 @@ interface OnboardingWizardProps {
 }
 
 const WIZARD_STEPS = [
-  { id: 'verify', label: 'Verify device' },
+  { id: 'verify', label: 'Verify serial' },
   { id: 'site', label: 'Assign site' },
   { id: 'profile', label: 'Select profile' },
   { id: 'review', label: 'Review & activate' },
 ] as const;
 
 const SERIAL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/;
-const ACTIVATION_CODE_PATTERN = /^[A-Za-z0-9._:-]{16,256}$/;
-
-function isRepeatedPattern(value: string): boolean {
-  return (value + value).indexOf(value, 1) !== value.length;
-}
-
-function isValidActivationCode(value: string): boolean {
-  return ACTIVATION_CODE_PATTERN.test(value)
-    && /[A-Za-z]/.test(value)
-    && /[0-9]/.test(value)
-    && new Set(value).size >= 8
-    && !isRepeatedPattern(value);
-}
 
 function formatDateTime(value: string): string {
   const date = new Date(value);
@@ -75,7 +61,6 @@ export function OnboardingWizard({
 }: OnboardingWizardProps) {
   const [step, setStep] = useState(0);
   const [serialNumber, setSerialNumber] = useState('');
-  const [activationCode, setActivationCode] = useState('');
   const [verification, setVerification] = useState<VerificationResult>();
   const [siteId, setSiteId] = useState('');
   const [profileVersionId, setProfileVersionId] = useState('');
@@ -97,7 +82,6 @@ export function OnboardingWizard({
     setVerification(undefined);
     setSiteId('');
     setProfileVersionId('');
-    setActivationCode('');
     setError(undefined);
     setVerifyKey(createIdempotencyKey('verify'));
     setOperationKey(createIdempotencyKey('activate'));
@@ -106,31 +90,25 @@ export function OnboardingWizard({
   const verify = async (event: React.FormEvent) => {
     event.preventDefault();
     const serial = serialNumber.trim().toUpperCase();
-    const proof = activationCode;
     if (!SERIAL_PATTERN.test(serial)) {
       setError('Enter the complete factory serial number using letters, numbers, hyphens, periods, or underscores.');
-      return;
-    }
-    if (!isValidActivationCode(proof)) {
-      setError('Enter the exact high-entropy 16–256 character activation code using only letters, numbers, dots, underscores, colons, or hyphens.');
       return;
     }
 
     setBusy(true);
     setError(undefined);
     try {
-      const result = await verifyDeviceClaim(serial, proof, verifyKey);
+      const result = await verifyFactorySerial(serial, verifyKey);
       const preferred = result.allowedSites.find((site) => site.id === preferredSiteId) ?? result.allowedSites[0];
       const profilesForDevice = compatibleProfiles(profiles, result.identity.modelId);
       setSerialNumber(result.identity.serialNumber);
-      setActivationCode('');
       setVerification(result);
       setSiteId(preferred?.id ?? '');
       setProfileVersionId(profilesForDevice[0]?.id ?? '');
       setOperationKey(createIdempotencyKey('activate'));
       setStep(1);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Device verification failed. Check the serial and one-time code.');
+      setError(cause instanceof Error ? cause.message : 'Registration authorization failed. Check the factory serial.');
     } finally {
       setBusy(false);
     }
@@ -172,9 +150,9 @@ export function OnboardingWizard({
             <ArrowLeft size={14} aria-hidden="true" />Gateway inventory
           </button>
           <h2 id="onboarding-wizard-title">Secure gateway activation</h2>
-          <p>Verify factory identity, assign an authorized site, and deploy one immutable profile version.</p>
+          <p>Verify the factory serial, assign an authorized site, and deploy one immutable profile version.</p>
         </div>
-        <span className="ce-onb-security-mark"><ShieldCheck size={16} aria-hidden="true" />Hardware-backed identity</span>
+        <span className="ce-onb-security-mark"><ShieldCheck size={16} aria-hidden="true" />Authenticated registration</span>
       </div>
 
       <nav aria-label="Gateway activation progress" className="ce-onb-stepper">
@@ -208,8 +186,8 @@ export function OnboardingWizard({
               <div className="ce-onb-panel-title">
                 <span className="ce-onb-panel-icon"><Fingerprint size={20} aria-hidden="true" /></span>
                 <div>
-                  <h3>Prove physical possession</h3>
-                  <p>The server verifies manufacturing inventory and reserves this identity once.</p>
+                  <h3>Authorize factory serial</h3>
+                  <p>The server checks tenant manufacturing inventory and reserves this serial once.</p>
                 </div>
               </div>
 
@@ -217,14 +195,14 @@ export function OnboardingWizard({
                 <div className="ce-onb-verified-identity">
                   <CheckCircle2 size={20} aria-hidden="true" />
                   <div>
-                    <strong>{verification.identity.serialNumber} is verified</strong>
+                    <strong>{verification.identity.serialNumber} is authorized</strong>
                     <span>Reservation valid until {formatDateTime(verification.expiresAt)}</span>
                   </div>
-                  <button type="button" onClick={resetVerification}>Verify another</button>
+                  <button type="button" onClick={resetVerification}>Check another serial</button>
                 </div>
               ) : (
                 <fieldset disabled={busy}>
-                  <legend className="ce-onb-sr-only">Factory device proof</legend>
+                  <legend className="ce-onb-sr-only">Factory serial registration</legend>
                   <label>
                     <span>Factory serial number</span>
                     <input
@@ -243,29 +221,6 @@ export function OnboardingWizard({
                     />
                     <small id="serial-help">Use the serial printed on the gateway chassis or trusted shipment record.</small>
                   </label>
-                  <label>
-                    <span>One-time activation code</span>
-                    <span className="ce-onb-password-field">
-                      <KeyRound size={15} aria-hidden="true" />
-                      <input
-                        type="password"
-                        value={activationCode}
-                        onChange={(event) => {
-                          setActivationCode(event.target.value);
-                          setError(undefined);
-                          setVerifyKey(createIdempotencyKey('verify'));
-                        }}
-                        autoComplete="one-time-code"
-                        spellCheck={false}
-                        placeholder="Enter the single-use code"
-                        aria-describedby="activation-help"
-                        minLength={16}
-                        maxLength={256}
-                        required
-                      />
-                    </span>
-                    <small id="activation-help">The code is sent only to the verification endpoint and cleared immediately after success.</small>
-                  </label>
                 </fieldset>
               )}
 
@@ -276,9 +231,9 @@ export function OnboardingWizard({
                     Continue <ArrowRight size={14} aria-hidden="true" />
                   </button>
                 ) : (
-                  <button type="submit" className="primary" disabled={busy || !serialNumber.trim() || !activationCode}>
+                  <button type="submit" className="primary" disabled={busy || !serialNumber.trim()}>
                     {busy ? <span className="ce-onb-spinner" aria-hidden="true" /> : <Fingerprint size={15} aria-hidden="true" />}
-                    {busy ? 'Verifying…' : 'Verify device'}
+                    {busy ? 'Checking…' : 'Authorize registration'}
                   </button>
                 )}
               </div>
@@ -286,14 +241,14 @@ export function OnboardingWizard({
 
             <aside className="ce-onb-trust-panel" aria-label="Verification safeguards">
               <ShieldCheck size={24} aria-hidden="true" />
-              <h3>What verification establishes</h3>
+              <h3>What authorization establishes</h3>
               <ul>
                 <li>Serial exists in tenant manufacturing inventory</li>
-                <li>Activation proof has not been consumed</li>
+                <li>Serial is available for a new registration</li>
                 <li>Model and hardware revision come from the server</li>
                 <li>Only server-authorized sites become selectable</li>
               </ul>
-              <p>Claim certificates, private keys, AWS credentials, and ownership tokens are never requested here.</p>
+              <p>Bootstrap certificates, private keys, AWS credentials, and ownership tokens are never requested here.</p>
             </aside>
           </div>
         )}
@@ -303,11 +258,11 @@ export function OnboardingWizard({
             <div className="ce-onb-authoritative-device">
               <span className="ce-onb-panel-icon"><Cpu size={20} aria-hidden="true" /></span>
               <div>
-                <small>Verified factory identity</small>
+                <small>Authorized factory serial</small>
                 <strong>{verification.identity.serialNumber}</strong>
                 <span>{model ? `${model.vendor} ${model.name}` : verification.identity.modelId} · hardware {verification.identity.hardwareRevision}</span>
               </div>
-              <span className="ce-onb-status" data-tone="ok"><span aria-hidden="true" />Verified</span>
+              <span className="ce-onb-status" data-tone="ok"><span aria-hidden="true" />Authorized</span>
             </div>
 
             <fieldset className="ce-onb-radio-grid">
@@ -417,8 +372,8 @@ export function OnboardingWizard({
             </div>
 
             <dl className="ce-onb-review-grid">
-              <div><dt>Factory identity</dt><dd>{verification.identity.serialNumber}</dd><span>{model?.name ?? verification.identity.modelId} · hardware {verification.identity.hardwareRevision}</span></div>
-              <div><dt>Authorized site</dt><dd>{siteLabel(selectedSite)}</dd><span>Returned by claim verification</span></div>
+              <div><dt>Factory serial</dt><dd>{verification.identity.serialNumber}</dd><span>{model?.name ?? verification.identity.modelId} · hardware {verification.identity.hardwareRevision}</span></div>
+              <div><dt>Authorized site</dt><dd>{siteLabel(selectedSite)}</dd><span>Returned by serial authorization</span></div>
               <div><dt>Profile version</dt><dd>{profileVersionLabel(selectedProfile)}</dd><span>Schema {selectedProfile.schemaVersion} · immutable</span></div>
               <div><dt>Verification expires</dt><dd>{formatDateTime(verification.expiresAt)}</dd><span>Single-use reservation</span></div>
             </dl>

@@ -11,7 +11,17 @@ import {
   SIGNING_KEY_ID,
   TABLE_NAME,
 } from './shared/config.js';
-import { auditSk, ddb, deploymentSk, gatewaySk, operationSk, serialPk, tenantPk } from './shared/ddb.js';
+import {
+  auditSk,
+  bootstrapCertificatePk,
+  ddb,
+  deploymentSk,
+  gatewaySk,
+  operationSk,
+  outboxSk,
+  serialPk,
+  tenantPk,
+} from './shared/ddb.js';
 
 const CONFIG_REQUEST_SUFFIX = '/config/request';
 const CONFIG_RESPONSE_SUFFIX = '/config/response';
@@ -54,7 +64,7 @@ export async function handler(event: ConfigRequestEvent, context: Context): Prom
   const { brokerPrincipal, thingName } = configBrokerIdentity(event);
 
   const locatedGateway = await gatewayForThing(thingName);
-  const gateway = await finalizePermanentIdentity(locatedGateway, thingName, brokerPrincipal);
+  const gateway = await finalizePermanentIdentity(locatedGateway, thingName, brokerPrincipal, context);
   const tenantId = requiredStoredString(gateway.tenantId, 'gateway tenantId');
   const gatewayId = requiredStoredString(gateway.gatewayId, 'gateway gatewayId');
   const certificateId = requiredStoredString(gateway.certificateId, 'gateway certificateId');
@@ -180,6 +190,7 @@ async function finalizePermanentIdentity(
   gateway: Record<string, unknown>,
   thingName: string,
   brokerCertificateId: string,
+  context: Context,
 ): Promise<Record<string, unknown>> {
   const tenantId = requiredStoredString(gateway.tenantId, 'gateway tenantId');
   const gatewayId = requiredStoredString(gateway.gatewayId, 'gateway gatewayId');
@@ -207,13 +218,44 @@ async function finalizePermanentIdentity(
     || manufacturing.thingName !== thingName) {
     throw new Error('Manufacturing identity binding is inconsistent');
   }
+  if (manufacturing.claimMechanism !== 'PRELOADED_UNIQUE_BOOTSTRAP') {
+    throw new Error('Manufacturing bootstrap mechanism is inconsistent');
+  }
+  const bootstrapCertificateId = requiredCertificateId(
+    manufacturing.bootstrapCertificateId,
+    'manufacturing bootstrapCertificateId',
+  );
+  if (bootstrapCertificateId === brokerCertificateId) {
+    throw new Error('Bootstrap and operational certificates must be different');
+  }
+  const bootstrapBindingKey = { PK: bootstrapCertificatePk(bootstrapCertificateId), SK: 'BINDING' };
+  const bootstrapBinding = (await ddb.send(new GetCommand({
+    TableName: TABLE_NAME,
+    Key: bootstrapBindingKey,
+    ConsistentRead: true,
+  }))).Item;
+  if (!bootstrapBinding
+    || bootstrapBinding.entityType !== 'BOOTSTRAP_CERTIFICATE_BINDING'
+    || bootstrapBinding.bootstrapCertificateId !== bootstrapCertificateId
+    || bootstrapBinding.serialNumber !== serialNumber
+    || bootstrapBinding.tenantId !== tenantId) {
+    throw new Error('Global bootstrap certificate binding is inconsistent');
+  }
 
   if (manufacturing.state === 'PROVISIONED') {
     if (gateway.certificateStatus !== 'ACTIVE') throw new Error('Provisioned gateway certificate is not active');
+    if (!['DEACTIVATING', 'INACTIVE'].includes(String(manufacturing.bootstrapCertificateStatus))) {
+      throw new Error('Provisioned gateway bootstrap certificate is not being retired');
+    }
+    if (!['DEACTIVATING', 'INACTIVE'].includes(String(bootstrapBinding.status))) {
+      throw new Error('Global bootstrap certificate binding is not being retired');
+    }
     return gateway;
   }
   if (manufacturing.state !== 'PROVISIONING'
     || manufacturing.operationId !== operationId
+    || manufacturing.bootstrapCertificateStatus !== 'ACTIVE'
+    || bootstrapBinding.status !== 'ACTIVE'
     || gateway.state !== 'IDENTITY_PROVISIONING'
     || gateway.certificateStatus !== 'PENDING_ACTIVATION') {
     throw new Error('Gateway is not awaiting permanent identity activation');
@@ -221,19 +263,36 @@ async function finalizePermanentIdentity(
 
   const now = new Date().toISOString();
   const tenantKey = tenantPk(tenantId);
+  const bootstrapDeactivationOutboxId = `bootstrap_${context.awsRequestId}`.slice(0, 128);
   try {
     await ddb.send(new TransactWriteCommand({ TransactItems: [
       {
         Update: {
           TableName: TABLE_NAME,
+          Key: bootstrapBindingKey,
+          UpdateExpression: 'SET #status = :deactivating, deactivationRequestedAt = if_not_exists(deactivationRequestedAt, :now), updatedAt = :now',
+          ConditionExpression: 'entityType = :entity AND bootstrapCertificateId = :bootstrapCertificateId AND serialNumber = :serialNumber AND tenantId = :tenantId AND #status = :active',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: {
+            ':entity': 'BOOTSTRAP_CERTIFICATE_BINDING', ':bootstrapCertificateId': bootstrapCertificateId,
+            ':serialNumber': serialNumber, ':tenantId': tenantId, ':active': 'ACTIVE',
+            ':deactivating': 'DEACTIVATING', ':now': now,
+          },
+        },
+      },
+      {
+        Update: {
+          TableName: TABLE_NAME,
           Key: manufacturingKey,
-          UpdateExpression: 'SET #state = :provisioned, certificateStatus = :active, provisionedAt = if_not_exists(provisionedAt, :now), updatedAt = :now',
-          ConditionExpression: '#state = :provisioning AND tenantId = :tenantId AND gatewayId = :gatewayId AND operationId = :operationId AND certificateId = :certificateId AND thingName = :thingName',
+          UpdateExpression: 'SET #state = :provisioned, certificateStatus = :active, bootstrapCertificateStatus = :bootstrapDeactivating, bootstrapDeactivationRequestedAt = if_not_exists(bootstrapDeactivationRequestedAt, :now), provisionedAt = if_not_exists(provisionedAt, :now), updatedAt = :now',
+          ConditionExpression: '#state = :provisioning AND tenantId = :tenantId AND gatewayId = :gatewayId AND operationId = :operationId AND certificateId = :certificateId AND thingName = :thingName AND claimMechanism = :claimMechanism AND bootstrapCertificateId = :bootstrapCertificateId AND bootstrapCertificateStatus = :bootstrapActive',
           ExpressionAttributeNames: { '#state': 'state' },
           ExpressionAttributeValues: {
             ':provisioning': 'PROVISIONING', ':provisioned': 'PROVISIONED', ':active': 'ACTIVE',
             ':tenantId': tenantId, ':gatewayId': gatewayId, ':operationId': operationId,
             ':certificateId': brokerCertificateId, ':thingName': thingName, ':now': now,
+            ':claimMechanism': 'PRELOADED_UNIQUE_BOOTSTRAP', ':bootstrapCertificateId': bootstrapCertificateId,
+            ':bootstrapActive': 'ACTIVE', ':bootstrapDeactivating': 'DEACTIVATING',
           },
         },
       },
@@ -271,17 +330,47 @@ async function finalizePermanentIdentity(
           },
         },
       },
+      {
+        Put: {
+          TableName: TABLE_NAME,
+          Item: {
+            PK: tenantKey,
+            SK: outboxSk(now, bootstrapDeactivationOutboxId),
+            entityType: 'OUTBOX',
+            outboxId: bootstrapDeactivationOutboxId,
+            eventType: 'DEACTIVATE_BOOTSTRAP_CERTIFICATE',
+            state: 'PENDING',
+            tenantId,
+            gatewayId,
+            operationId,
+            serialNumber,
+            thingName,
+            certificateId: brokerCertificateId,
+            bootstrapCertificateId,
+            createdAt: now,
+            updatedAt: now,
+          },
+          ConditionExpression: 'attribute_not_exists(PK)',
+        },
+      },
     ] }));
   } catch (error) {
     // A duplicate first request can lose the transaction race. Accept it only
     // after a consistent reread proves the exact same identity won the CAS.
-    const [freshGateway, freshManufacturing] = await Promise.all([
+    const [freshGateway, freshManufacturing, freshBootstrapBinding] = await Promise.all([
       ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: { PK: tenantKey, SK: gatewaySk(gatewayId) }, ConsistentRead: true })),
       ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: manufacturingKey, ConsistentRead: true })),
+      ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: bootstrapBindingKey, ConsistentRead: true })),
     ]);
     if (freshManufacturing.Item?.state === 'PROVISIONED'
       && freshManufacturing.Item.certificateId === brokerCertificateId
       && freshManufacturing.Item.thingName === thingName
+      && freshManufacturing.Item.bootstrapCertificateId === bootstrapCertificateId
+      && ['DEACTIVATING', 'INACTIVE'].includes(String(freshManufacturing.Item.bootstrapCertificateStatus))
+      && freshBootstrapBinding.Item?.bootstrapCertificateId === bootstrapCertificateId
+      && freshBootstrapBinding.Item.serialNumber === serialNumber
+      && freshBootstrapBinding.Item.tenantId === tenantId
+      && ['DEACTIVATING', 'INACTIVE'].includes(String(freshBootstrapBinding.Item.status))
       && freshGateway.Item?.certificateStatus === 'ACTIVE'
       && freshGateway.Item.certificateId === brokerCertificateId
       && freshGateway.Item.thingName === thingName) {
@@ -297,6 +386,13 @@ async function finalizePermanentIdentity(
     lastAuthenticatedAt: now,
     updatedAt: now,
   };
+}
+
+function requiredCertificateId(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/i.test(value)) {
+    throw new Error(`${label} must be an AWS IoT certificate ID`);
+  }
+  return value;
 }
 
 async function gatewayForThing(thingName: string): Promise<Record<string, unknown>> {

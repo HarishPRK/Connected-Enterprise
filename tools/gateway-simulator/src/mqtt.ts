@@ -13,9 +13,7 @@ export interface FleetProvisioningInput {
   endpoint: string;
   templateName: string;
   serialNumber: string;
-  hardwareId: string;
-  hardwareProof: string;
-  claimCredentials: MqttCredentialPaths;
+  bootstrapCredentials: MqttCredentialPaths;
   csrPem: string;
   persistIssuedCertificate: (certificatePem: string) => Promise<void>;
   onProgress?: (event: FleetProvisioningProgress) => void;
@@ -33,9 +31,19 @@ export interface FleetProvisioningResult {
   certificateId: string;
 }
 
+export const CLAIM_CLIENT_ID_PREFIX = 'claim-';
+
+export function createClaimClientId(): string {
+  return `${CLAIM_CLIENT_ID_PREFIX}${randomUUID().replace(/-/g, '')}`;
+}
+
+export function registrationParameters(serialNumber: string): { SerialNumber: string } {
+  return { SerialNumber: serialNumber };
+}
+
 export async function fleetProvision(input: FleetProvisioningInput): Promise<FleetProvisioningResult> {
-  const bootstrapClientId = `bootstrap-${randomUUID().replace(/-/g, '')}`;
-  const connection = createConnection(input.endpoint, bootstrapClientId, input.claimCredentials);
+  const bootstrapClientId = createClaimClientId();
+  const connection = createConnection(input.endpoint, bootstrapClientId, input.bootstrapCredentials);
   const identity = iotidentity.IotIdentityClientv2.newFromMqtt311(connection, {
     maxRequestResponseSubscriptions: 6,
     maxStreamingSubscriptions: 2,
@@ -64,11 +72,7 @@ export async function fleetProvision(input: FleetProvisioningInput): Promise<Fle
         return await fleetOperation(() => identity.registerThing({
           templateName: input.templateName,
           certificateOwnershipToken: ownershipToken,
-          parameters: {
-            SerialNumber: input.serialNumber,
-            HardwareId: input.hardwareId,
-            HardwareProof: input.hardwareProof,
-          },
+          parameters: registrationParameters(input.serialNumber),
         }), 'RegisterThing');
       },
     );

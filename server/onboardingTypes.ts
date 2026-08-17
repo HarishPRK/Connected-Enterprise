@@ -88,7 +88,6 @@ export interface ManufacturingRecord {
   modelId: string;
   hardwareRevision: string;
   manufacturingBatch: string;
-  activationProofHash: string;
   state: 'CLAIMABLE' | 'RESERVED' | 'PROVISIONING' | 'CLAIMED' | 'RETIRED';
   allowedSiteIds: string[];
   reservedByVerificationId?: string;

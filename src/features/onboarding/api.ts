@@ -97,15 +97,14 @@ export function fetchOnboardingSnapshot(signal?: AbortSignal): Promise<Onboardin
   return getJson<OnboardingSnapshot>('/api/onboarding/snapshot', signal);
 }
 
-export function verifyDeviceClaim(
+export function verifyFactorySerial(
   serialNumber: string,
-  activationCode: string,
   idempotencyKey: string,
   signal?: AbortSignal,
 ): Promise<VerificationResult> {
   return postJson<VerificationResult>(
     '/api/onboarding/claims/verify',
-    { serialNumber, activationCode },
+    { serialNumber },
     idempotencyKey,
     signal,
   );

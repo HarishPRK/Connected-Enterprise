@@ -12,6 +12,7 @@ export const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 export const tenantPk = (tenantId: string): string => `TENANT#${tenantId}`;
 export const userPk = (subject: string): string => `USER#${subject}`;
 export const serialPk = (serialNumber: string): string => `SERIAL#${normalizeSerial(serialNumber)}`;
+export const bootstrapCertificatePk = (certificateId: string): string => `BOOTSTRAPCERT#${certificateId}`;
 export const profileSk = (profileId: string): string => `PROFILE#${profileId}`;
 export const profileVersionSk = (profileId: string, version: number): string =>
   `PROFILE_VERSION#${profileId}#${String(version).padStart(10, '0')}`;

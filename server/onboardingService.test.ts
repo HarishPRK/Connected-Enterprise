@@ -14,7 +14,6 @@ async function setup(options: { simulateDevice?: boolean } = {}) {
     now: () => new Date(current),
     transitionMs: 1_000,
     simulateDevice: options.simulateDevice ?? false,
-    activationPepper: 'test-only-pepper',
   });
   return {
     service,
@@ -27,12 +26,11 @@ async function setup(options: { simulateDevice?: boolean } = {}) {
 async function verifiedGateway(service: OnboardingService, key = 'verify-key-0001') {
   return service.verifyClaim(tenantA, {
     serialNumber: 'CE-GW-840021',
-    activationCode: 'LOCAL-ONBOARD-2026',
   }, key);
 }
 
 describe('OnboardingService', () => {
-  it('consumes a one-time proof, starts a monotonic deployment, and reaches applied healthy', async () => {
+  it('reserves an authorized factory serial, starts a monotonic deployment, and reaches applied healthy', async () => {
     const { service, advance } = await setup({ simulateDevice: true });
     const verification = await verifiedGateway(service);
     const snapshot = await service.getSnapshot(tenantA);
@@ -80,21 +78,20 @@ describe('OnboardingService', () => {
     await assert.rejects(
       service.verifyClaim(tenantA, {
         serialNumber: 'CE-GW-840022',
-        activationCode: 'LOCAL-ONBOARD-2027',
       }, 'verify-replay-01'),
       (error: unknown) => error instanceof OnboardingError && error.code === 'IDEMPOTENCY_CONFLICT',
     );
   });
 
-  it('enforces the canonical manufacturing serial and exact high-entropy proof grammar', async () => {
+  it('enforces the factory serial grammar', async () => {
     const { service } = await setup();
-    for (const input of [
-      { serialNumber: 'A', activationCode: 'LOCAL-ONBOARD-2026' },
-      { serialNumber: 'CE-GW-840021', activationCode: ' LOCAL-ONBOARD-2026' },
-      { serialNumber: 'CE-GW-840021', activationCode: 'AAAAAAAAAAAAAAAA' },
-    ]) {
+    for (const [index, serialNumber] of [
+      'A',
+      'CE GW 840021',
+      `CE-${'G'.repeat(126)}`,
+    ].entries()) {
       await assert.rejects(
-        service.verifyClaim(tenantA, input, `invalid-contract-${input.serialNumber}-${input.activationCode.length}`),
+        service.verifyClaim(tenantA, { serialNumber }, `invalid-serial-${index}`),
         (error: unknown) => error instanceof OnboardingError && error.code === 'INVALID_CLAIM_INPUT',
       );
     }
@@ -119,7 +116,6 @@ describe('OnboardingService', () => {
     await assert.rejects(
       service.verifyClaim(tenantB, {
         serialNumber: 'CE-GW-840021',
-        activationCode: 'LOCAL-ONBOARD-2026',
       }, 'verify-tenant-b1'),
       (error: unknown) => error instanceof OnboardingError && error.code === 'CLAIM_NOT_VERIFIED',
     );

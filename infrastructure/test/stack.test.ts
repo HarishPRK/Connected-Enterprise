@@ -9,7 +9,7 @@ import { Match, Template } from 'aws-cdk-lib/assertions';
 import { ConnectedEnterpriseOnboardingStack, requireUrlList } from '../lib/connected-enterprise-onboarding-stack.js';
 import { validateUiProfileParameters } from '../lambda/shared/ui-profile.js';
 import { assertProfileCompatibility, assertProfileLineageModel } from '../lambda/shared/compatibility.js';
-import { assertUniqueActivationCodes, assertUniqueCanonicalSerials, requireActivationCode, requireCanonicalSerial, requireHardwareId } from '../lambda/shared/manufacturing-credentials.js';
+import { assertUniqueCanonicalSerials, requireCanonicalSerial } from '../lambda/shared/manufacturing-credentials.js';
 
 process.env.TABLE_NAME ??= 'connected-enterprise-onboarding-unit-test';
 process.env.IOT_DATA_ENDPOINT ??= 'example-ats.iot.us-east-1.amazonaws.com';
@@ -167,7 +167,7 @@ test('Cognito is a hosted authorization-code PKCE SPA with V2 tenant claims', ()
   template.hasOutput('CognitoHostedUiBaseUrl', {});
 });
 
-test('Fleet Provisioning is CSR-only, hook-gated, exclusive, and uses a named policy', () => {
+test('Fleet Provisioning accepts both certificate APIs, remains hook-gated and exclusive, and uses named policies', () => {
   const template = synthesized();
   const rendered = template.toJSON() as { Resources: Record<string, { Type: string; Properties?: Record<string, unknown> }> };
   const fleet = Object.values(rendered.Resources).find((resource) => resource.Type === 'AWS::IoT::ProvisioningTemplate');
@@ -180,6 +180,7 @@ test('Fleet Provisioning is CSR-only, hook-gated, exclusive, and uses a named po
   const provisioningTemplateBody = fleet.Properties.TemplateBody;
   assert.ok(typeof provisioningTemplateBody === 'string', 'Fleet provisioning template body is JSON text');
   const parsedProvisioningTemplate = JSON.parse(provisioningTemplateBody) as {
+    Parameters: Record<string, { Type: string; Default?: string }>;
     Resources: {
       certificate: { Type: string; Properties: Record<string, unknown> };
       thing: {
@@ -190,6 +191,11 @@ test('Fleet Provisioning is CSR-only, hook-gated, exclusive, and uses a named po
       policy: { Type: string; Properties: Record<string, unknown> };
     };
   };
+  assert.deepEqual(parsedProvisioningTemplate.Parameters.SerialNumber, { Type: 'String' });
+  assert.deepEqual(parsedProvisioningTemplate.Parameters.HardwareId, { Type: 'String', Default: '' },
+    'legacy HardwareId is optional and ignored by the serial-only hook');
+  assert.deepEqual(parsedProvisioningTemplate.Parameters.HardwareProof, { Type: 'String', Default: '' },
+    'legacy HardwareProof is optional and ignored by the serial-only hook');
   const thingTemplate = parsedProvisioningTemplate.Resources.thing;
   assert.equal(thingTemplate.Type, 'AWS::IoT::Thing');
   assert.deepEqual(thingTemplate.Properties.AttributePayload, {
@@ -219,11 +225,53 @@ test('Fleet Provisioning is CSR-only, hook-gated, exclusive, and uses a named po
   const policies = Object.values(rendered.Resources).filter((resource) => resource.Type === 'AWS::IoT::Policy');
   const bootstrap = policies.find((resource) => resource.Properties?.PolicyName === 'ConnectedEnterpriseGatewayBootstrap-dev-v1');
   const operational = policies.find((resource) => resource.Properties?.PolicyName === 'ConnectedEnterpriseGatewayOperational-dev-v1');
-  assert.ok(bootstrap, 'unattached bootstrap policy is synthesized');
+  assert.ok(bootstrap, 'per-device bootstrap policy is synthesized for manufacturing attachment');
   assert.ok(operational, 'operational policy is synthesized');
   const bootstrapJson = JSON.stringify(bootstrap);
+  assert.match(bootstrapJson, /certificates\/create\/json/);
   assert.match(bootstrapJson, /create-from-csr/);
-  assert.doesNotMatch(bootstrapJson, /CreateKeysAndCertificate/);
+  const resolvedBootstrapPolicy = resolvePolicyIntrinsics(bootstrap.Properties?.PolicyDocument) as {
+    Statement: Array<{ Action: string | string[]; Resource: string | string[]; Sid?: string }>;
+  };
+  const bootstrapConnect = resolvedBootstrapPolicy.Statement.find((statement) =>
+    (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes('iot:Connect'));
+  assert.equal(bootstrapConnect?.Sid, 'ConnectWithRandomClaimClientId');
+  assert.equal(bootstrapConnect?.Resource, 'arn:aws:iot:us-east-1:111122223333:client/claim-*');
+  const bootstrapResourcesFor = (action: string) => {
+    const statement = resolvedBootstrapPolicy.Statement.find((candidate) =>
+      (Array.isArray(candidate.Action) ? candidate.Action : [candidate.Action]).includes(action));
+    assert.ok(statement, `bootstrap ${action} statement is present`);
+    return Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource];
+  };
+  assert.deepEqual(bootstrapResourcesFor('iot:Publish'), [
+    'arn:aws:iot:us-east-1:111122223333:topic/$aws/certificates/create/json',
+    'arn:aws:iot:us-east-1:111122223333:topic/$aws/certificates/create-from-csr/json',
+    'arn:aws:iot:us-east-1:111122223333:topic/$aws/provisioning-templates/CEOnboarding-dev/provision/json',
+  ]);
+  assert.deepEqual(bootstrapResourcesFor('iot:Subscribe'), [
+    'arn:aws:iot:us-east-1:111122223333:topicfilter/$aws/certificates/create/json/accepted',
+    'arn:aws:iot:us-east-1:111122223333:topicfilter/$aws/certificates/create/json/rejected',
+    'arn:aws:iot:us-east-1:111122223333:topicfilter/$aws/certificates/create-from-csr/json/accepted',
+    'arn:aws:iot:us-east-1:111122223333:topicfilter/$aws/certificates/create-from-csr/json/rejected',
+    'arn:aws:iot:us-east-1:111122223333:topicfilter/$aws/provisioning-templates/CEOnboarding-dev/provision/json/accepted',
+    'arn:aws:iot:us-east-1:111122223333:topicfilter/$aws/provisioning-templates/CEOnboarding-dev/provision/json/rejected',
+  ]);
+  assert.deepEqual(bootstrapResourcesFor('iot:Receive'), [
+    'arn:aws:iot:us-east-1:111122223333:topic/$aws/certificates/create/json/accepted',
+    'arn:aws:iot:us-east-1:111122223333:topic/$aws/certificates/create/json/rejected',
+    'arn:aws:iot:us-east-1:111122223333:topic/$aws/certificates/create-from-csr/json/accepted',
+    'arn:aws:iot:us-east-1:111122223333:topic/$aws/certificates/create-from-csr/json/rejected',
+    'arn:aws:iot:us-east-1:111122223333:topic/$aws/provisioning-templates/CEOnboarding-dev/provision/json/accepted',
+    'arn:aws:iot:us-east-1:111122223333:topic/$aws/provisioning-templates/CEOnboarding-dev/provision/json/rejected',
+  ]);
+  for (const action of ['iot:Publish', 'iot:Subscribe', 'iot:Receive']) {
+    assert.ok(bootstrapResourcesFor(action).every((resource) => !resource.includes('*')),
+      `${action} uses only exact provisioning topics`);
+  }
+  template.hasResourceProperties('AWS::Lambda::Function', {
+    FunctionName: 'connected-enterprise-onboarding-dev-pre-provision',
+    Environment: { Variables: { BOOTSTRAP_CLIENT_ID_PREFIX: 'claim-' } },
+  });
   const operationalJson = JSON.stringify(operational);
   assert.match(operationalJson, /shadow\/name\/configuration\/\*/);
   assert.doesNotMatch(operationalJson, /shadow\/name\/config\/\*/);
@@ -333,6 +381,70 @@ test('Fleet Provisioning is CSR-only, hook-gated, exclusive, and uses a named po
     if (statement === registerThingStatement) continue;
     assert.ok(resourcesForStatement(statement).every((resource) => resource !== '*'),
       `${actionsFor(statement).join(', ')} remains resource-scoped`);
+  }
+});
+
+test('pre-provisioning validates the client ID against its configured prefix', () => {
+  const preHook = fs.readFileSync(path.join(process.cwd(), 'lambda', 'pre-provision-hook.ts'), 'utf8');
+  assert.match(preHook, /process\.env\.BOOTSTRAP_CLIENT_ID_PREFIX/);
+  assert.match(preHook, /clientId\.startsWith\(BOOTSTRAP_CLIENT_ID_PREFIX\)/);
+  assert.doesNotMatch(preHook, /clientId\.startsWith\(['"](?:bootstrap|claim)-/);
+});
+
+test('preloaded unique bootstrap onboarding retains exact certificate, tenant, and state fences', () => {
+  const api = fs.readFileSync(path.join(process.cwd(), 'lambda', 'api-handler.ts'), 'utf8');
+  const preHook = fs.readFileSync(path.join(process.cwd(), 'lambda', 'pre-provision-hook.ts'), 'utf8');
+  const config = fs.readFileSync(path.join(process.cwd(), 'lambda', 'iot-config-handler.ts'), 'utf8');
+  const outbox = fs.readFileSync(path.join(process.cwd(), 'lambda', 'outbox-handler.ts'), 'utf8');
+  const ddb = fs.readFileSync(path.join(process.cwd(), 'lambda', 'shared', 'ddb.ts'), 'utf8');
+
+  assert.match(api, /requireRole\(context, 'platform_admin', 'tenant_admin', 'operator'\)/);
+  assert.match(api, /canonicalJson\(\{ route: event\.routeKey, serialNumber \}\)/);
+  assert.match(api, /tenantAuthorized/);
+  assert.match(api, /#state = :reserved/);
+  assert.match(api, /PRELOADED_UNIQUE_BOOTSTRAP/);
+  assert.match(api, /bootstrapCertificateId = :bootstrapCertificateId/);
+  assert.match(api, /bootstrapCertificateStatus = :bootstrapCertificateActive/);
+  assert.doesNotMatch(api, /body\.activationCode|validatedActivationCode|hardwareProofDigest|safeDigestEqual/);
+
+  assert.match(preHook, /event\.templateArn !== EXPECTED_TEMPLATE_ARN/);
+  assert.match(preHook, /record\.bootstrapCertificateId !== claimCertificateId/);
+  assert.match(preHook, /PRELOADED_UNIQUE_BOOTSTRAP/);
+  assert.match(preHook, /bootstrapCertificateStatus !== 'ACTIVE'/);
+  assert.match(preHook, /bootstrapCertificatePk\(claimCertificateId\)/);
+  assert.match(preHook, /BOOTSTRAP_CERTIFICATE_BINDING/);
+  assert.match(preHook, /verificationExpiresAtEpoch >= :nowEpoch/);
+  assert.match(preHook, /ENROLLMENT_PENDING/);
+  assert.match(preHook, /deploymentSk\(record\.gatewayId, 1\)/);
+  assert.match(preHook, /VERIFICATION#/);
+  assert.doesNotMatch(preHook, /HardwareId|HardwareProof|hardwareId|hardwareProof|requireHardwareId/);
+  for (const source of [api, preHook, config, outbox]) {
+    assert.doesNotMatch(source, /TRUSTED_USER_FIVE_MINUTE|trustedClaimExpiresAtEpoch|trustedClaimIssuedAt|CreateProvisioningClaimCommand/);
+  }
+  assert.match(config, /eventType: 'DEACTIVATE_BOOTSTRAP_CERTIFICATE'/);
+  assert.match(config, /bootstrapCertificateStatus = :bootstrapDeactivating/);
+  assert.match(config, /Key: bootstrapBindingKey/);
+  assert.match(config, /#status = :deactivating/);
+  assert.match(outbox, /newStatus: 'INACTIVE'/);
+  assert.match(outbox, /BOOTSTRAP_CERTIFICATE_DEACTIVATED/);
+  assert.match(outbox, /bootstrapCertificatePk\(bootstrapCertificateId\)/);
+  assert.match(outbox, /#status = :inactive/);
+  assert.match(outbox, /FAILED_RETRYABLE/);
+  assert.match(ddb, /BOOTSTRAPCERT#/);
+
+  const rendered = synthesized().toJSON() as {
+    Resources: Record<string, { Type: string; Properties?: Record<string, unknown> }>;
+  };
+  for (const functionName of [
+    'connected-enterprise-onboarding-dev-api',
+    'connected-enterprise-onboarding-dev-pre-provision',
+  ]) {
+    const lambdaFunction = Object.values(rendered.Resources).find((resource) =>
+      resource.Type === 'AWS::Lambda::Function' && resource.Properties?.FunctionName === functionName);
+    assert.ok(lambdaFunction?.Properties, `${functionName} is synthesized`);
+    const environment = lambdaFunction.Properties.Environment as { Variables?: Record<string, unknown> } | undefined;
+    assert.equal('HARDWARE_PROOF_SECRET_ARN' in (environment?.Variables ?? {}), false,
+      `${functionName} has no hardware-proof secret access`);
   }
 });
 
@@ -595,14 +707,7 @@ test('immutable profile lineage rejects a model change', () => {
   assert.throws(() => assertProfileLineageModel('edge-pro', 'edge-compact'), /cannot change gateway model/);
 });
 
-test('manufacturing credentials share exact runtime/import boundaries', () => {
-  assert.equal(requireActivationCode('LOCAL-ONBOARD-2026'), 'LOCAL-ONBOARD-2026');
-  assert.equal(requireHardwareId('TPM:EDGE-840021'), 'TPM:EDGE-840021');
-  assert.throws(() => requireActivationCode(`A1bcdefg${'x'.repeat(292)}`), /16-256/);
-  assert.throws(() => requireActivationCode('LOCAL+ONBOARD+2026'), /16-256/);
-  assert.throws(() => requireActivationCode('LOCAL-ONBOARD-2026 '), /16-256/);
-  assert.throws(() => requireActivationCode('AB12AB12AB12AB12'), /uniqueness/);
-  assert.throws(() => assertUniqueActivationCodes(['LOCAL-ONBOARD-2026', 'LOCAL-ONBOARD-2026']), /repeated/);
+test('manufacturing serials share exact runtime/import boundaries', () => {
   assert.equal(requireCanonicalSerial('CE-GW-840021'), 'CE-GW-840021');
   assert.throws(() => requireCanonicalSerial(' ce-gw-840021 '), /canonical uppercase/);
   assert.throws(() => requireCanonicalSerial('CE+GW+840021'), /invalid/);

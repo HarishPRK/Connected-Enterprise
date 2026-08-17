@@ -44,7 +44,7 @@ export function OnboardingAuthBoundary({ children }: { children: ReactNode }) {
     <div className="ce-onb-page">
       <PageHeader
         title="Gateway Onboarding"
-        subtitle="Verify hardware identity, assign immutable profiles, and confirm device health."
+        subtitle="Verify factory serials, assign immutable profiles, and confirm device health."
       />
       <section className="ce-onb-auth-gate" aria-labelledby="onboarding-auth-title">
         <span className={`ce-onb-auth-mark${state === 'error' ? ' is-error' : ''}`}>
@@ -76,7 +76,7 @@ export function OnboardingAuthBoundary({ children }: { children: ReactNode }) {
             <LogIn size={16} aria-hidden="true" />{state === 'error' ? 'Start a fresh sign-in' : 'Sign in with Cognito'}
           </button>
         )}
-        <small>No claim certificates, private keys, activation codes, or AWS credentials are stored in the browser session.</small>
+        <small>No bootstrap certificates, private keys, or AWS credentials are stored in the browser session.</small>
       </section>
     </div>
   );

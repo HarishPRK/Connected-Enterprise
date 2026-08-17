@@ -9,8 +9,8 @@
     "synth": "cdk synth ConnectedEnterpriseOnboarding-dev",
     "diff": "cdk diff ConnectedEnterpriseOnboarding-dev",
     "deploy": "cdk deploy ConnectedEnterpriseOnboarding-dev --require-approval broadening",
-    "demo:prepare-certificate-handoff": "tsx scripts/prepare-trusted-user-certificate-demo.ts",
-    "demo:run-certificate-handoff": "tsx scripts/run-trusted-user-certificate-demo.ts"
+    "bootstrap:bind-certificate": "tsx scripts/bind-unique-bootstrap-certificate.ts",
+    "demo:run-preloaded-bootstrap": "tsx scripts/run-unique-bootstrap-certificate-demo.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.0.0",

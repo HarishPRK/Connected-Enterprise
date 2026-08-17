@@ -47,7 +47,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     <div className="ce-onb-page">
       <PageHeader
         title="Gateway Onboarding"
-        subtitle="Verify hardware identity, assign immutable profiles, and confirm device health."
+        subtitle="Verify factory serials, assign immutable profiles, and confirm device health."
         right={snapshot && (
           <div className="ce-onb-page-context">
             <span><ShieldCheck size={13} aria-hidden="true" />{snapshot.tenant.name}</span>

@@ -29,12 +29,12 @@ import {
   tenantPk,
 } from './shared/ddb.js';
 import { errorResponse, idempotencyKey, json, parseJsonBody } from './shared/http.js';
-import { activationCode as validatedActivationCode, hardwareProofDigest, newId, safeDigestEqual, sha256 } from './shared/crypto.js';
+import { newId, sha256 } from './shared/crypto.js';
 import { canonicalJson, signManifest, validateProfile } from './shared/profile.js';
 import { INITIAL_OPERATION_STEPS, publicOperation } from './shared/models.js';
 import { validateUiProfileParameters } from './shared/ui-profile.js';
 import { assertProfileCompatibility, assertProfileLineageModel } from './shared/compatibility.js';
-import { HARDWARE_PROOF_KEY_VERSION, HARDWARE_PROOF_SCHEME, normalizePresentedSerial } from './shared/manufacturing-credentials.js';
+import { normalizePresentedSerial } from './shared/manufacturing-credentials.js';
 
 const s3 = new S3Client({});
 const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
@@ -127,8 +127,7 @@ async function verifyDevice(
   const body = parseJsonBody<Record<string, unknown>>(event, 32 * 1024);
   const serialNumber = normalizePresentedSerial(body.serialNumber);
   const key = idempotencyKey(event);
-  const activationCode = validatedActivationCode(body.activationCode);
-  const requestHash = sha256(canonicalJson({ route: event.routeKey, serialNumber, activationCodeHash: sha256(activationCode) }));
+  const requestHash = sha256(canonicalJson({ route: event.routeKey, serialNumber }));
   const existing = await existingIdempotency(context.tenantId, event.routeKey, key, requestHash);
   if (existing) return json(existing.statusCode ?? 200, existing.response);
 
@@ -139,21 +138,17 @@ async function verifyDevice(
   }));
   const record = manufacturingResult.Item;
   if (!record) throw new NotFoundError('Gateway identity was not found in manufacturing inventory');
-  if (record.credentialScheme !== HARDWARE_PROOF_SCHEME || record.credentialKeyVersion !== HARDWARE_PROOF_KEY_VERSION) {
-    throw new ConflictError('Gateway manufacturing credential scheme is unsupported');
-  }
+  const bootstrapCertificateId = requirePreloadedBootstrap(record);
   if (!['AVAILABLE', 'CLAIMABLE', 'RESERVED'].includes(String(record.state))) throw new ConflictError('Gateway identity is not available for verification');
-  if (record.tenantId && record.tenantId !== context.tenantId) {
-    throw new NotFoundError('Gateway identity was not found in manufacturing inventory');
-  }
-  if (Array.isArray(record.allowedTenantIds) && !record.allowedTenantIds.includes(context.tenantId)) {
+  const allowedTenantIds = Array.isArray(record.allowedTenantIds) ? record.allowedTenantIds : [];
+  const tenantAuthorized = record.tenantId === context.tenantId
+    || (record.tenantId === undefined && allowedTenantIds.includes(context.tenantId));
+  if (!tenantAuthorized) {
     throw new NotFoundError('Gateway identity was not found in manufacturing inventory');
   }
   if (record.state === 'RESERVED' && Number(record.verificationExpiresAtEpoch ?? 0) >= Math.floor(Date.now() / 1000)) {
     throw new ConflictError('Gateway identity already has an active one-time reservation');
   }
-  const proofDigest = await hardwareProofDigest(serialNumber, activationCode);
-  if (!safeDigestEqual(record.hardwareProofDigest, proofDigest)) throw new NotFoundError('Gateway identity could not be verified');
 
   const sites = await queryTenantEntityPrefix(context.tenantId, 'SITE#', 'SITE', 250);
   const allowedSiteIds = Array.isArray(record.allowedSiteIds) ? record.allowedSiteIds as string[] : sites.map((site) => String(site.siteId));
@@ -169,7 +164,7 @@ async function verifyDevice(
     identity: {
       serialNumber,
       modelId: record.modelId ?? record.model,
-      hardwareRevision: record.hardwareRevision ?? record.hardwareId,
+      hardwareRevision: record.hardwareRevision ?? 'UNKNOWN',
       manufacturingBatch: record.manufacturingBatch ?? 'UNKNOWN',
     },
     allowedSites,
@@ -183,10 +178,21 @@ async function verifyDevice(
         TableName: TABLE_NAME,
         Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
         UpdateExpression: 'SET #state = :reserved, tenantId = :tenantId, verificationId = :verificationId, verificationExpiresAtEpoch = :expires, updatedAt = :now',
-        ConditionExpression: '#state = :available OR #state = :claimable OR (#state = :reserved AND tenantId = :tenantId AND verificationExpiresAtEpoch < :nowEpoch)',
+        ConditionExpression: [
+          'entityType = :manufacturing',
+          'serialNumber = :serialNumber',
+          '(tenantId = :tenantId OR (attribute_not_exists(tenantId) AND contains(allowedTenantIds, :tenantId)))',
+          'claimMechanism = :claimMechanism',
+          'bootstrapCertificateId = :bootstrapCertificateId',
+          'bootstrapCertificateStatus = :bootstrapCertificateActive',
+          '(#state = :available OR #state = :claimable OR (#state = :reserved AND tenantId = :tenantId AND verificationExpiresAtEpoch < :nowEpoch))',
+        ].join(' AND '),
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':available': 'AVAILABLE', ':claimable': 'CLAIMABLE', ':reserved': 'RESERVED', ':tenantId': context.tenantId,
+          ':manufacturing': 'MANUFACTURING', ':serialNumber': serialNumber,
+          ':claimMechanism': 'PRELOADED_UNIQUE_BOOTSTRAP', ':bootstrapCertificateId': bootstrapCertificateId,
+          ':bootstrapCertificateActive': 'ACTIVE',
           ':verificationId': verificationId, ':expires': expiresAtEpoch, ':now': now, ':nowEpoch': nowEpoch,
         },
       },
@@ -203,7 +209,7 @@ async function verifyDevice(
       },
     },
     { Put: { TableName: TABLE_NAME, Item: idem, ConditionExpression: 'attribute_not_exists(PK)' } },
-    { Put: { TableName: TABLE_NAME, Item: auditItem(context, 'GATEWAY_VERIFIED', serialNumber, now), ConditionExpression: 'attribute_not_exists(PK)' } },
+    { Put: { TableName: TABLE_NAME, Item: auditItem(context, 'GATEWAY_SERIAL_RESERVED', serialNumber, now), ConditionExpression: 'attribute_not_exists(PK)' } },
   ] }));
   return json(201, response);
 }
@@ -241,6 +247,7 @@ async function createOperation(
     throw new ConflictError('Gateway verification is missing, expired, or belongs to another tenant');
   }
   if ((Number(record.verificationExpiresAtEpoch) || 0) < Math.floor(Date.now() / 1000)) throw new ConflictError('Gateway verification expired');
+  const bootstrapCertificateId = requirePreloadedBootstrap(record);
   if (!site.Item || site.Item.entityType !== 'SITE') throw new NotFoundError('Site not found');
   if (!profileVersion) throw new NotFoundError('Profile version not found');
   const authoritativeModelId = String(record.modelId ?? record.model ?? '');
@@ -265,7 +272,7 @@ async function createOperation(
     PK: tenantPk(context.tenantId), SK: operationSk(operationId), entityType: 'OPERATION', tenantId: context.tenantId,
     operationId, gatewayId, serialNumber, siteId, profileVersionId, deliveryMode,
     type: 'ONBOARD', operationStatus: 'IN_PROGRESS', state: 'CLAIM_ACCEPTED', deploymentGeneration: 1,
-    timeline: [{ state: 'CLAIM_ACCEPTED', at: now, detail: 'Ownership and the one-time activation proof were verified.' }],
+    timeline: [{ state: 'CLAIM_ACCEPTED', at: now, detail: 'An authenticated operator reserved the tenant-bound serial inventory record.' }],
     status: 'WAITING_FOR_DEVICE', steps, createdAt: now, updatedAt: now,
     GSI3PK: `${tenantPk(context.tenantId)}#OPERATION`, GSI3SK: `${now}#${operationId}`,
   };
@@ -286,12 +293,14 @@ async function createOperation(
         TableName: TABLE_NAME,
         Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
         UpdateExpression: 'SET #state = :enrollmentPending, gatewayId = :gatewayId, operationId = :operationId, siteId = :siteId, profileVersionId = :profileVersionId, deliveryMode = :deliveryMode, thingName = :thingName, signedDescriptor = :descriptor, updatedAt = :now',
-        ConditionExpression: '#state = :reserved AND tenantId = :tenantId AND verificationId = :verificationId AND verificationExpiresAtEpoch = :expires',
+        ConditionExpression: '#state = :reserved AND tenantId = :tenantId AND verificationId = :verificationId AND verificationExpiresAtEpoch = :expires AND claimMechanism = :claimMechanism AND bootstrapCertificateId = :bootstrapCertificateId AND bootstrapCertificateStatus = :bootstrapCertificateActive',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':reserved': 'RESERVED', ':enrollmentPending': 'ENROLLMENT_PENDING', ':tenantId': context.tenantId,
           ':verificationId': verificationId, ':expires': verificationExpiry, ':gatewayId': gatewayId,
           ':operationId': operationId, ':siteId': siteId, ':profileVersionId': profileVersionId,
+          ':claimMechanism': 'PRELOADED_UNIQUE_BOOTSTRAP', ':bootstrapCertificateId': bootstrapCertificateId,
+          ':bootstrapCertificateActive': 'ACTIVE',
           ':deliveryMode': deliveryMode, ':thingName': thingName, ':descriptor': signedDescriptor, ':now': now,
         },
       },
@@ -314,8 +323,8 @@ async function createOperation(
         TableName: TABLE_NAME,
         Item: {
           PK: tenantPk(context.tenantId), SK: gatewaySk(gatewayId), entityType: 'GATEWAY', tenantId: context.tenantId,
-          gatewayId, thingName, serialNumber, hardwareId: record.hardwareId, manufacturer: record.manufacturer,
-          model: record.model, modelId: record.modelId ?? record.model, hardwareRevision: record.hardwareRevision ?? record.hardwareId,
+          gatewayId, thingName, serialNumber, manufacturer: record.manufacturer,
+          model: record.model, modelId: record.modelId ?? record.model, hardwareRevision: record.hardwareRevision ?? 'UNKNOWN',
           siteId, state: 'PENDING', certificateState: 'PENDING', health: 'UNKNOWN', generation: 1, desiredGeneration: 1,
           desiredProfileVersionId: profileVersionId, operationId, signedDescriptor, createdAt: now, updatedAt: now,
           GSI1PK: `THING#${thingName}`, GSI1SK: tenantPk(context.tenantId),
@@ -329,6 +338,20 @@ async function createOperation(
     { Put: { TableName: TABLE_NAME, Item: auditItem(context, 'ONBOARDING_OPERATION_CREATED', operationId, now), ConditionExpression: 'attribute_not_exists(PK)' } },
   ] }));
   return json(202, response);
+}
+
+function requirePreloadedBootstrap(record: Record<string, unknown>): string {
+  if (record.claimMechanism !== 'PRELOADED_UNIQUE_BOOTSTRAP') {
+    throw new ConflictError('Gateway does not have a preloaded unique bootstrap identity');
+  }
+  if (record.bootstrapCertificateStatus !== 'ACTIVE') {
+    throw new ConflictError('Gateway bootstrap certificate is not active');
+  }
+  const certificateId = record.bootstrapCertificateId;
+  if (typeof certificateId !== 'string' || !/^[a-f0-9]{64}$/i.test(certificateId)) {
+    throw new ConflictError('Gateway bootstrap certificate binding is missing or invalid');
+  }
+  return certificateId;
 }
 
 async function getOperation(event: APIGatewayProxyEventV2WithJWTAuthorizer, tenantId: string) {

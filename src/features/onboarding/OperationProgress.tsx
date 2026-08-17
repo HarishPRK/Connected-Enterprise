@@ -32,8 +32,8 @@ interface LifecycleMilestone {
 }
 
 const ONBOARD_MILESTONES: LifecycleMilestone[] = [
-  { state: 'CLAIM_ACCEPTED', label: 'Claim accepted', description: 'One-time verification was consumed for this tenant.' },
-  { state: 'CSR_VERIFIED', label: 'Hardware proof verified', description: 'The device-bound signing request passed validation.' },
+  { state: 'CLAIM_ACCEPTED', label: 'Registration authorized', description: 'The factory serial reservation was accepted for this tenant.' },
+  { state: 'CSR_VERIFIED', label: 'Certificate request accepted', description: 'The gateway certificate request passed validation.' },
   { state: 'OPERATIONAL_IDENTITY_ISSUED', label: 'Operational identity issued', description: 'A per-device identity was attached to the authoritative Thing.' },
   { state: 'PROFILE_STAGED', label: 'Profile staged', description: 'The immutable assignment manifest is ready for the gateway.' },
   { state: 'APPLYING', label: 'Applying configuration', description: 'The gateway is applying the candidate transaction with its watchdog armed.' },

@@ -182,7 +182,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
 
     const hardwareProofPepper = new secretsmanager.Secret(this, 'HardwareProofPepper', {
       secretName: `connected-enterprise/onboarding/${stage}/hardware-proof-pepper`,
-      description: 'Server-side HMAC pepper for one-time manufacturing hardware proofs; never a fleet claim private key',
+      description: 'Reserved for a future hardware-proof migration; not used by the preloaded-bootstrap runtime',
       encryptionKey: dataKey,
       generateSecretString: {
         secretStringTemplate: JSON.stringify({ purpose: 'manufacturing-hardware-proof-v1' }),
@@ -308,14 +308,12 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
         TABLE_NAME: table.tableName,
         ARTIFACT_BUCKET: artifactBucket.bucketName,
         SIGNING_KEY_ID: signingKey.keyArn,
-        HARDWARE_PROOF_SECRET_ARN: hardwareProofPepper.secretArn,
         STAGE: stage,
       },
     });
     table.grantReadWriteData(apiFunction);
     artifactBucket.grantReadWrite(apiFunction);
     signingKey.grantSign(apiFunction);
-    hardwareProofPepper.grantRead(apiFunction);
 
     const jwtAuthorizer = new apigwv2Authorizers.HttpJwtAuthorizer(
       'CognitoJwtAuthorizer',
@@ -425,6 +423,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
 
     const fleetTemplateName = `CEOnboarding-${stage}`;
     const fleetTemplateArn = iotArn(`provisioningtemplate/${fleetTemplateName}`);
+    const bootstrapClientIdPrefix = 'claim-';
     const preProvisionFunction = new lambdaNodejs.NodejsFunction(this, 'PreProvisionFunction', {
       ...functionDefaults,
       functionName: `connected-enterprise-onboarding-${stage}-pre-provision`,
@@ -435,19 +434,17 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       logGroup: logGroup('pre-provision', logs.RetentionDays.THREE_MONTHS),
       environment: {
         TABLE_NAME: table.tableName,
-        HARDWARE_PROOF_SECRET_ARN: hardwareProofPepper.secretArn,
         PROVISIONING_TEMPLATE_ARN: fleetTemplateArn,
-        BOOTSTRAP_CLIENT_ID_PREFIX: 'bootstrap-',
+        BOOTSTRAP_CLIENT_ID_PREFIX: bootstrapClientIdPrefix,
         AWS_ACCOUNT_ID: Aws.ACCOUNT_ID,
         STAGE: stage,
       },
     });
     table.grantReadWriteData(preProvisionFunction);
-    hardwareProofPepper.grantRead(preProvisionFunction);
 
     const provisioningRole = new iam.Role(this, 'FleetProvisioningRole', {
       roleName: `connected-enterprise-onboarding-${stage}-fleet-provisioning`,
-      description: 'Dev-only IoT Fleet Provisioning registration role for the gateway simulator',
+      description: 'Dev-only IoT Fleet Provisioning registration role for unique preloaded gateway bootstrap identities',
       assumedBy: new iam.ServicePrincipal('iot.amazonaws.com', {
         conditions: {
           StringEquals: { 'aws:SourceAccount': Aws.ACCOUNT_ID },
@@ -533,8 +530,8 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     const templateBody = JSON.stringify({
       Parameters: {
         SerialNumber: { Type: 'String' },
-        HardwareId: { Type: 'String' },
-        HardwareProof: { Type: 'String' },
+        HardwareId: { Type: 'String', Default: '' },
+        HardwareProof: { Type: 'String', Default: '' },
         ThingName: { Type: 'String', Default: 'hook-must-override' },
         GatewayId: { Type: 'String', Default: 'hook-must-override' },
         TenantId: { Type: 'String', Default: 'hook-must-override' },
@@ -567,7 +564,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     });
     const fleetTemplate = new iot.CfnProvisioningTemplate(this, 'FleetProvisioningTemplate', {
       templateName: fleetTemplateName,
-      description: 'CSR-only gateway enrollment; parameters are authorized and overridden by the pre-provision hook',
+      description: 'Serial enrollment from a unique preloaded bootstrap certificate; ownership parameters are authorized and overridden by the pre-provision hook',
       enabled: true,
       provisioningRoleArn: provisioningRole.roleArn,
       preProvisioningHook: { payloadVersion: '2020-04-01', targetArn: preProvisionFunction.functionArn },
@@ -588,12 +585,13 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
         Version: '2012-10-17',
         Statement: [
           {
-            Sid: 'ConnectWithRandomBootstrapClientId', Effect: 'Allow', Action: 'iot:Connect',
-            Resource: iotArn('client/bootstrap-*'),
+            Sid: 'ConnectWithRandomClaimClientId', Effect: 'Allow', Action: 'iot:Connect',
+            Resource: iotArn(`client/${bootstrapClientIdPrefix}*`),
           },
           {
-            Sid: 'PublishOnlyCsrAndRegisterThing', Effect: 'Allow', Action: 'iot:Publish',
+            Sid: 'PublishOnlyCertificateCreationAndRegisterThing', Effect: 'Allow', Action: 'iot:Publish',
             Resource: [
+              iotArn('topic/$aws/certificates/create/json'),
               iotArn('topic/$aws/certificates/create-from-csr/json'),
               iotArn(`topic/$aws/provisioning-templates/${fleetTemplateName}/provision/json`),
             ],
@@ -601,6 +599,8 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
           {
             Sid: 'SubscribeOnlyProvisioningResponses', Effect: 'Allow', Action: 'iot:Subscribe',
             Resource: [
+              iotArn('topicfilter/$aws/certificates/create/json/accepted'),
+              iotArn('topicfilter/$aws/certificates/create/json/rejected'),
               iotArn('topicfilter/$aws/certificates/create-from-csr/json/accepted'),
               iotArn('topicfilter/$aws/certificates/create-from-csr/json/rejected'),
               iotArn(`topicfilter/$aws/provisioning-templates/${fleetTemplateName}/provision/json/accepted`),
@@ -610,6 +610,8 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
           {
             Sid: 'ReceiveOnlyProvisioningResponses', Effect: 'Allow', Action: 'iot:Receive',
             Resource: [
+              iotArn('topic/$aws/certificates/create/json/accepted'),
+              iotArn('topic/$aws/certificates/create/json/rejected'),
               iotArn('topic/$aws/certificates/create-from-csr/json/accepted'),
               iotArn('topic/$aws/certificates/create-from-csr/json/rejected'),
               iotArn(`topic/$aws/provisioning-templates/${fleetTemplateName}/provision/json/accepted`),
@@ -875,7 +877,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     new CfnOutput(this, 'ControlPlaneTableName', { value: table.tableName });
     new CfnOutput(this, 'ArtifactBucketName', { value: artifactBucket.bucketName });
     new CfnOutput(this, 'ProfileSigningKeyArn', { value: signingKey.keyArn, description: 'Public-key export is an explicit operator step; no private key exists outside KMS' });
-    new CfnOutput(this, 'HardwareProofSecretArn', { value: hardwareProofPepper.secretArn, description: 'Use only from the controlled manufacturing import workflow' });
+    new CfnOutput(this, 'HardwareProofSecretArn', { value: hardwareProofPepper.secretArn, description: 'Reserved for a future hardware-proof migration; unused by current onboarding Lambdas' });
     new CfnOutput(this, 'IotConfigAsyncFailureQueueUrl', { value: configAsyncFailureQueue.queueUrl });
     new CfnOutput(this, 'IotStatusAsyncFailureQueueUrl', { value: statusAsyncFailureQueue.queueUrl });
     new CfnOutput(this, 'IotDataEndpoint', { value: iotDataEndpoint });
@@ -883,7 +885,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     new CfnOutput(this, 'OperationalPolicyName', { value: operationalPolicyName });
     new CfnOutput(this, 'BootstrapClaimPolicyName', {
       value: bootstrapClaimPolicyName,
-      description: 'Created unattached. Attach only to a separately controlled per-batch claim certificate; this stack never generates or exports its private key.',
+      description: 'Bootstrap policy attached individually to each unique preloaded gateway certificate by the manufacturing bootstrap process.',
     });
     new CfnOutput(this, 'ConfigShadowName', { value: 'configuration' });
     new CfnOutput(this, 'ProfileApplyJobTemplateArn', { value: jobTemplate.attrArn });

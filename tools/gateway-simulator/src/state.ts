@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { chmod, lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { AppliedState, VerifiedArtifacts } from './protocol.js';
 import { isRecord, parseJsonObject } from './protocol.js';
 
@@ -8,11 +8,11 @@ const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 
 export interface PersistedIdentity {
-  version: 1;
+  version: 1 | 2;
   endpoint: string;
   templateName: string;
   serialNumber: string;
-  hardwareId: string;
+  hardwareId?: string;
   thingName: string;
   certificateId: string;
   certificateFile: string;
@@ -36,8 +36,8 @@ export interface SimulatorStatePaths {
 
 export function statePaths(root: string, serialNumber: string): SimulatorStatePaths {
   if (!serialNumber.trim()) throw new Error('Serial number is required for simulator state');
-  // --state-dir is the exact per-device directory. This lets operators keep the
-  // temporary trusted-user provisioning claim beside generated device state.
+  // --state-dir is the exact per-device directory. The unique, pre-flashed
+  // bootstrap credential pair lives beside the generated operational state.
   const device = resolve(root);
   return {
     root: device,
@@ -61,16 +61,71 @@ export async function initializeState(paths: SimulatorStatePaths): Promise<void>
   await makePrivate(paths.profileDirectory);
 }
 
+export interface BootstrapCredentialPaths {
+  certificate: string;
+  privateKey: string;
+}
+
+/** Validates the unique pre-flashed bootstrap credential pair without copying it. */
+export async function assertBootstrapCredentials(
+  paths: SimulatorStatePaths,
+  credentials: BootstrapCredentialPaths,
+): Promise<void> {
+  const associated = associatedBootstrapCredentials(paths, credentials);
+  await Promise.all([
+    assertSafeBootstrapFile(paths, associated.certificate, 'bootstrap certificate', false),
+    assertSafeBootstrapFile(paths, associated.privateKey, 'bootstrap private key', false),
+  ]);
+  await Promise.all([
+    requirePem(associated.certificate, 'CERTIFICATE'),
+    requirePrivateKey(associated.privateKey),
+    makePrivate(associated.certificate),
+    makePrivate(associated.privateKey),
+  ]);
+}
+
+/**
+ * Retires the exact simulator-scoped bootstrap credential pair. Callers invoke
+ * this only after the permanent identity has authenticated and its signed
+ * configuration response has been accepted.
+ */
+export async function retireBootstrapCredentials(
+  paths: SimulatorStatePaths,
+  credentials: BootstrapCredentialPaths,
+): Promise<boolean> {
+  const associated = associatedBootstrapCredentials(paths, credentials);
+  // Retire the secret first. If deletion fails, leave the public certificate in
+  // place rather than risk retaining a reusable private key by deleting in parallel.
+  const privateKeyPresent = await assertSafeBootstrapFile(
+    paths,
+    associated.privateKey,
+    'bootstrap private key',
+    true,
+  );
+  const privateKeyRemoved = privateKeyPresent ? await unlinkIfPresent(associated.privateKey) : false;
+  const certificatePresent = await assertSafeBootstrapFile(
+    paths,
+    associated.certificate,
+    'bootstrap certificate',
+    true,
+  );
+  const certificateRemoved = certificatePresent ? await unlinkIfPresent(associated.certificate) : false;
+  return privateKeyRemoved || certificateRemoved;
+}
+
 export async function loadIdentity(paths: SimulatorStatePaths): Promise<PersistedIdentity | undefined> {
   const text = await readOptional(paths.identity);
   if (text === undefined) return undefined;
   const value = parseJsonObject(text, 'Simulator identity state');
+  const version = value.version === 1 || value.version === 2
+    ? value.version
+    : fail('Unsupported simulator identity version');
   const identity: PersistedIdentity = {
-    version: value.version === 1 ? 1 : fail('Unsupported simulator identity version'),
+    version,
     endpoint: storedString(value.endpoint, 'identity endpoint'),
     templateName: storedString(value.templateName, 'identity templateName'),
     serialNumber: storedString(value.serialNumber, 'identity serialNumber'),
-    hardwareId: storedString(value.hardwareId, 'identity hardwareId'),
+    ...(version === 1 ? { hardwareId: storedString(value.hardwareId, 'identity hardwareId') } : {}),
     thingName: storedString(value.thingName, 'identity thingName'),
     certificateId: storedString(value.certificateId, 'identity certificateId'),
     certificateFile: storedString(value.certificateFile, 'identity certificateFile'),
@@ -84,7 +139,7 @@ export async function loadIdentity(paths: SimulatorStatePaths): Promise<Persiste
   }
   await Promise.all([
     requirePem(paths.certificate, 'CERTIFICATE'),
-    requirePem(paths.privateKey, 'PRIVATE KEY'),
+    requirePrivateKey(paths.privateKey),
     makePrivate(paths.identity),
     makePrivate(paths.certificate),
     makePrivate(paths.privateKey),
@@ -126,14 +181,14 @@ export async function commitProvisionedIdentity(
   // Validate both staged credentials before moving either one. A failure leaves
   // the recoverable key/certificate pair together in the protected staging area.
   await Promise.all([
-    requirePem(staging.privateKey, 'PRIVATE KEY'),
+    requirePrivateKey(staging.privateKey),
     requirePem(staging.certificate, 'CERTIFICATE'),
   ]);
   await rename(staging.privateKey, paths.privateKey);
   await rename(staging.certificate, paths.certificate);
   await Promise.all([makePrivate(paths.privateKey), makePrivate(paths.certificate)]);
   const persisted: PersistedIdentity = {
-    version: 1,
+    version: 2,
     ...identity,
     certificateFile: 'device-certificate.pem',
     privateKeyFile: 'device-private-key.pem',
@@ -255,6 +310,90 @@ async function readOptional(path: string): Promise<string | undefined> {
 async function requirePem(path: string, label: string): Promise<void> {
   const value = await readFile(path, 'utf8');
   assertPemText(value, label, `Credential file ${path}`);
+}
+
+async function requirePrivateKey(path: string): Promise<void> {
+  const value = await readFile(path, 'utf8');
+  if (!/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/.test(value)
+    || !/-----END (?:RSA |EC )?PRIVATE KEY-----/.test(value)) {
+    throw new Error(`Credential file ${path} is not a PRIVATE KEY PEM`);
+  }
+}
+
+async function unlinkIfPresent(path: string): Promise<boolean> {
+  try {
+    await unlink(path);
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function associatedBootstrapCredentials(
+  paths: SimulatorStatePaths,
+  credentials: BootstrapCredentialPaths,
+): BootstrapCredentialPaths {
+  const certificate = associatedFile(paths.device, credentials.certificate, 'bootstrap certificate');
+  const privateKey = associatedFile(paths.device, credentials.privateKey, 'bootstrap private key');
+  if (samePath(certificate, privateKey)) throw new Error('Bootstrap certificate and private key must be different files');
+  const protectedPaths = [
+    paths.identity,
+    paths.certificate,
+    paths.privateKey,
+    paths.activeProfile,
+    paths.activeManifest,
+    paths.applied,
+  ];
+  if (protectedPaths.some((path) => samePath(path, certificate) || samePath(path, privateKey))) {
+    throw new Error('Bootstrap credentials overlap protected operational simulator state');
+  }
+  return { certificate, privateKey };
+}
+
+function associatedFile(deviceDirectory: string, value: string, label: string): string {
+  const path = resolve(value);
+  const child = relative(deviceDirectory, path);
+  if (!child || isAbsolute(child) || child.startsWith('..') || dirname(child) !== '.') {
+    throw new Error(`${label} is not directly associated with this per-device state directory`);
+  }
+  return path;
+}
+
+async function assertSafeBootstrapFile(
+  paths: SimulatorStatePaths,
+  path: string,
+  label: string,
+  allowMissing: boolean,
+): Promise<boolean> {
+  let metadata: Awaited<ReturnType<typeof lstat>>;
+  try {
+    metadata = await lstat(path);
+  } catch (error) {
+    if (allowMissing && isNodeError(error) && error.code === 'ENOENT') return false;
+    throw error;
+  }
+  if (metadata.isSymbolicLink() || !metadata.isFile()) {
+    throw new Error(`${label} must be a regular file, not a symlink, junction, or directory`);
+  }
+  if (metadata.nlink !== 1) {
+    throw new Error(`${label} must not be a hard-linked file`);
+  }
+  const [realDeviceDirectory, realCredential] = await Promise.all([
+    realpath(paths.device),
+    realpath(path),
+  ]);
+  const child = relative(realDeviceDirectory, realCredential);
+  if (!child || isAbsolute(child) || child.startsWith('..') || dirname(child) !== '.') {
+    throw new Error(`${label} resolves outside this per-device state directory`);
+  }
+  return true;
+}
+
+function samePath(left: string, right: string): boolean {
+  return process.platform === 'win32'
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
 }
 
 function assertPemText(value: string, label: string, source: string): void {

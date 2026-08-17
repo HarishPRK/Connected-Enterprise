@@ -16,7 +16,6 @@ describe('onboarding HTTP API', () => {
     app.use('/api/onboarding', await createOnboardingRouter({
       repository: new MemoryOnboardingRepository(),
       simulateDevice: false,
-      activationPepper: 'route-test-pepper',
       allowDevelopmentOperator: true,
     }));
     server = await new Promise<Server>((resolve) => {
@@ -52,7 +51,7 @@ describe('onboarding HTTP API', () => {
     const response = await fetch(`${baseUrl}/claims/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ serialNumber: 'CE-GW-840021', activationCode: 'LOCAL-ONBOARD-2026' }),
+      body: JSON.stringify({ serialNumber: 'CE-GW-840021' }),
     });
     assert.equal(response.status, 428);
     const body = await response.json() as { error: { code: string } };
@@ -69,7 +68,6 @@ describe('onboarding HTTP API', () => {
       body: JSON.stringify({
         tenantId: 'tenant_other',
         serialNumber: 'CE-GW-840021',
-        activationCode: 'LOCAL-ONBOARD-2026',
       }),
     });
     assert.equal(response.status, 201);

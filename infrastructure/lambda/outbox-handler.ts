@@ -21,11 +21,21 @@ import {
   JOB_TEMPLATE_ARN,
   TABLE_NAME,
 } from './shared/config.js';
-import { auditSk, ddb, deploymentSk, gatewaySk, operationSk, serialPk, tenantPk } from './shared/ddb.js';
+import {
+  auditSk,
+  bootstrapCertificatePk,
+  ddb,
+  deploymentSk,
+  gatewaySk,
+  operationSk,
+  serialPk,
+  tenantPk,
+} from './shared/ddb.js';
 
 const CONFIG_SHADOW_NAME = 'configuration';
 
-type OutboxEventType = 'UPDATE_CONFIG_SHADOW' | 'CREATE_JOB' | 'CLEAR_CONFIG_SHADOW' | 'DECOMMISSION_GATEWAY';
+type OutboxEventType = 'UPDATE_CONFIG_SHADOW' | 'CREATE_JOB' | 'CLEAR_CONFIG_SHADOW'
+  | 'DEACTIVATE_BOOTSTRAP_CERTIFICATE' | 'DECOMMISSION_GATEWAY';
 export type DeliveryFenceDisposition = 'CURRENT' | 'SUPERSEDED' | 'DELIVERY_OBSERVED';
 
 interface OutboxItem extends Record<string, unknown> {
@@ -41,6 +51,7 @@ interface OutboxItem extends Record<string, unknown> {
   operationId?: string;
   serialNumber?: string;
   certificateId?: string;
+  bootstrapCertificateId?: string;
   generation?: number;
   profileVersionId?: string;
   rollbackProfileVersionId?: string;
@@ -97,6 +108,8 @@ async function processRecord(record: DynamoDBRecord, context: Context): Promise<
       if (!await acquireRollbackClearFence(outbox, context)) return;
       await assertRollbackClearFence(outbox);
       reference = await clearConfigurationShadow(outbox);
+    } else if (outbox.eventType === 'DEACTIVATE_BOOTSTRAP_CERTIFICATE') {
+      reference = await deactivateBootstrapCertificate(outbox);
     } else {
       reference = await decommissionGateway(outbox);
     }
@@ -518,8 +531,76 @@ async function decommissionGateway(outbox: OutboxItem): Promise<Record<string, u
   return { action: 'DECOMMISSION', certificateId, certificateStatus: 'REVOKED', connectionClosed: true };
 }
 
+async function deactivateBootstrapCertificate(outbox: OutboxItem): Promise<Record<string, unknown>> {
+  const bootstrapCertificateId = requiredCertificateId(
+    outbox.bootstrapCertificateId,
+    'outbox bootstrapCertificateId',
+  );
+  const operationalCertificateId = requiredCertificateId(outbox.certificateId, 'outbox certificateId');
+  if (bootstrapCertificateId === operationalCertificateId) {
+    throw new Error('Bootstrap and operational certificates must be different');
+  }
+  const serialNumber = requiredString(outbox.serialNumber, 'outbox serialNumber', 128);
+  const [gatewayResult, manufacturingResult, bindingResult] = await Promise.all([
+    ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: tenantPk(outbox.tenantId), SK: gatewaySk(outbox.gatewayId) },
+      ConsistentRead: true,
+    })),
+    ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
+      ConsistentRead: true,
+    })),
+    ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: bootstrapCertificatePk(bootstrapCertificateId), SK: 'BINDING' },
+      ConsistentRead: true,
+    })),
+  ]);
+  const gateway = gatewayResult.Item;
+  const manufacturing = manufacturingResult.Item;
+  const binding = bindingResult.Item;
+  if (!gateway
+    || gateway.entityType !== 'GATEWAY'
+    || gateway.tenantId !== outbox.tenantId
+    || gateway.gatewayId !== outbox.gatewayId
+    || gateway.thingName !== outbox.thingName
+    || gateway.certificateId !== operationalCertificateId
+    || !manufacturing
+    || manufacturing.entityType !== 'MANUFACTURING'
+    || !['PROVISIONED', 'DECOMMISSIONING', 'DECOMMISSIONED'].includes(String(manufacturing.state))
+    || manufacturing.tenantId !== outbox.tenantId
+    || manufacturing.gatewayId !== outbox.gatewayId
+    || manufacturing.operationId !== outbox.operationId
+    || manufacturing.thingName !== outbox.thingName
+    || manufacturing.certificateId !== operationalCertificateId
+    || manufacturing.claimMechanism !== 'PRELOADED_UNIQUE_BOOTSTRAP'
+    || manufacturing.bootstrapCertificateId !== bootstrapCertificateId
+    || manufacturing.bootstrapCertificateStatus !== 'DEACTIVATING'
+    || !binding
+    || binding.entityType !== 'BOOTSTRAP_CERTIFICATE_BINDING'
+    || binding.bootstrapCertificateId !== bootstrapCertificateId
+    || binding.serialNumber !== serialNumber
+    || binding.tenantId !== outbox.tenantId
+    || binding.status !== 'DEACTIVATING') {
+    throw new Error('Bootstrap deactivation outbox does not match the confirmed permanent identity');
+  }
+
+  await iot.send(new UpdateCertificateCommand({ certificateId: bootstrapCertificateId, newStatus: 'INACTIVE' }));
+  return {
+    action: 'DEACTIVATE_BOOTSTRAP_CERTIFICATE',
+    bootstrapCertificateId,
+    bootstrapCertificateStatus: 'INACTIVE',
+  };
+}
+
 async function markSent(outbox: OutboxItem, reference: Record<string, unknown>, context: Context): Promise<void> {
   const now = new Date().toISOString();
+  if (outbox.eventType === 'DEACTIVATE_BOOTSTRAP_CERTIFICATE') {
+    await markBootstrapDeactivationSent(outbox, reference, context, now);
+    return;
+  }
   if (outbox.eventType !== 'DECOMMISSION_GATEWAY') {
     const leaseId = requiredString(outbox.dispatchLeaseId, 'dispatch lease', 128);
     const generation = positiveInteger(outbox.generation, 'outbox generation');
@@ -656,6 +737,109 @@ async function markSent(outbox: OutboxItem, reference: Record<string, unknown>, 
 
 }
 
+async function markBootstrapDeactivationSent(
+  outbox: OutboxItem,
+  reference: Record<string, unknown>,
+  context: Context,
+  now: string,
+): Promise<void> {
+  const bootstrapCertificateId = requiredCertificateId(
+    outbox.bootstrapCertificateId,
+    'outbox bootstrapCertificateId',
+  );
+  const operationalCertificateId = requiredCertificateId(outbox.certificateId, 'outbox certificateId');
+  const serialNumber = requiredString(outbox.serialNumber, 'outbox serialNumber', 128);
+  const tenantKey = tenantPk(outbox.tenantId);
+  const auditId = `iot_${context.awsRequestId}`;
+  try {
+    await ddb.send(new TransactWriteCommand({ TransactItems: [
+      {
+        Update: {
+          TableName: TABLE_NAME,
+          Key: { PK: outbox.PK, SK: outbox.SK },
+          UpdateExpression: 'SET #state = :sent, externalReference = :reference, sentAt = :now, updatedAt = :now, attempts = if_not_exists(attempts, :zero) + :one REMOVE lastError, failedAt',
+          ConditionExpression: '#state = :pending AND outboxId = :outboxId',
+          ExpressionAttributeNames: { '#state': 'state' },
+          ExpressionAttributeValues: {
+            ':pending': 'PENDING', ':sent': 'SENT', ':reference': reference, ':now': now,
+            ':zero': 0, ':one': 1, ':outboxId': outbox.outboxId,
+          },
+        },
+      },
+      {
+        Update: {
+          TableName: TABLE_NAME,
+          Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
+          UpdateExpression: 'SET bootstrapCertificateStatus = :inactive, bootstrapDeactivatedAt = if_not_exists(bootstrapDeactivatedAt, :now), updatedAt = :now',
+          ConditionExpression: 'entityType = :manufacturing AND (#state = :provisioned OR #state = :decommissioning OR #state = :decommissioned) AND tenantId = :tenantId AND gatewayId = :gatewayId AND operationId = :operationId AND thingName = :thingName AND certificateId = :certificateId AND claimMechanism = :claimMechanism AND bootstrapCertificateId = :bootstrapCertificateId AND bootstrapCertificateStatus = :deactivating',
+          ExpressionAttributeNames: { '#state': 'state' },
+          ExpressionAttributeValues: {
+            ':manufacturing': 'MANUFACTURING', ':provisioned': 'PROVISIONED',
+            ':decommissioning': 'DECOMMISSIONING', ':decommissioned': 'DECOMMISSIONED', ':tenantId': outbox.tenantId,
+            ':gatewayId': outbox.gatewayId, ':operationId': outbox.operationId, ':thingName': outbox.thingName,
+            ':certificateId': operationalCertificateId, ':claimMechanism': 'PRELOADED_UNIQUE_BOOTSTRAP',
+            ':bootstrapCertificateId': bootstrapCertificateId, ':deactivating': 'DEACTIVATING',
+            ':inactive': 'INACTIVE', ':now': now,
+          },
+        },
+      },
+      {
+        Update: {
+          TableName: TABLE_NAME,
+          Key: { PK: bootstrapCertificatePk(bootstrapCertificateId), SK: 'BINDING' },
+          UpdateExpression: 'SET #status = :inactive, deactivatedAt = if_not_exists(deactivatedAt, :now), updatedAt = :now',
+          ConditionExpression: 'entityType = :entity AND bootstrapCertificateId = :bootstrapCertificateId AND serialNumber = :serialNumber AND tenantId = :tenantId AND #status = :deactivating',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: {
+            ':entity': 'BOOTSTRAP_CERTIFICATE_BINDING', ':bootstrapCertificateId': bootstrapCertificateId,
+            ':serialNumber': serialNumber, ':tenantId': outbox.tenantId,
+            ':deactivating': 'DEACTIVATING', ':inactive': 'INACTIVE', ':now': now,
+          },
+        },
+      },
+      {
+        ConditionCheck: {
+          TableName: TABLE_NAME,
+          Key: { PK: tenantKey, SK: gatewaySk(outbox.gatewayId) },
+          ConditionExpression: 'entityType = :gateway AND tenantId = :tenantId AND gatewayId = :gatewayId AND thingName = :thingName AND certificateId = :certificateId',
+          ExpressionAttributeValues: {
+            ':gateway': 'GATEWAY', ':tenantId': outbox.tenantId, ':gatewayId': outbox.gatewayId,
+            ':thingName': outbox.thingName, ':certificateId': operationalCertificateId,
+          },
+        },
+      },
+      {
+        Put: {
+          TableName: TABLE_NAME,
+          Item: {
+            PK: tenantKey,
+            SK: auditSk(now, auditId),
+            entityType: 'AUDIT',
+            auditId,
+            tenantId: outbox.tenantId,
+            actorSubject: 'SYSTEM#OUTBOX',
+            actorRole: 'SYSTEM',
+            action: 'BOOTSTRAP_CERTIFICATE_DEACTIVATED',
+            targetId: outbox.gatewayId,
+            details: { thingName: outbox.thingName, bootstrapCertificateId },
+            outcome: 'SUCCESS',
+            createdAt: now,
+          },
+          ConditionExpression: 'attribute_not_exists(PK)',
+        },
+      },
+    ] }));
+  } catch (error) {
+    if (errorName(error) !== 'TransactionCanceledException') throw error;
+    const result = await ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: outbox.PK, SK: outbox.SK },
+      ConsistentRead: true,
+    }));
+    if (result.Item?.state !== 'SENT') throw error;
+  }
+}
+
 async function markFailed(outbox: OutboxItem, error: unknown): Promise<void> {
   const now = new Date().toISOString();
   const message = sanitizedError(error);
@@ -743,6 +927,9 @@ function outboxItem(value: Record<string, unknown>, expectedPk: string, expected
   if (value.operationId != null) item.operationId = requiredString(value.operationId, 'outbox operationId', 128);
   if (value.serialNumber != null) item.serialNumber = requiredString(value.serialNumber, 'outbox serialNumber', 128);
   if (value.certificateId != null) item.certificateId = requiredString(value.certificateId, 'outbox certificateId', 128);
+  if (value.bootstrapCertificateId != null) {
+    item.bootstrapCertificateId = requiredCertificateId(value.bootstrapCertificateId, 'outbox bootstrapCertificateId');
+  }
   if (value.generation != null) item.generation = positiveInteger(value.generation, 'outbox generation');
   if (value.profileVersionId != null) {
     item.profileVersionId = requiredString(value.profileVersionId, 'outbox profileVersionId', 128);
@@ -759,7 +946,8 @@ function outboxItem(value: Record<string, unknown>, expectedPk: string, expected
 }
 
 function outboxEventType(value: unknown): OutboxEventType {
-  if (value === 'UPDATE_CONFIG_SHADOW' || value === 'CREATE_JOB' || value === 'CLEAR_CONFIG_SHADOW' || value === 'DECOMMISSION_GATEWAY') return value;
+  if (value === 'UPDATE_CONFIG_SHADOW' || value === 'CREATE_JOB' || value === 'CLEAR_CONFIG_SHADOW'
+    || value === 'DEACTIVATE_BOOTSTRAP_CERTIFICATE' || value === 'DECOMMISSION_GATEWAY') return value;
   throw new Error('Unsupported outbox event type');
 }
 
@@ -780,6 +968,12 @@ function requiredString(value: unknown, label: string, maxLength: number): strin
     throw new Error(`Missing or invalid ${label}`);
   }
   return value;
+}
+
+function requiredCertificateId(value: unknown, label: string): string {
+  const certificateId = requiredString(value, label, 128);
+  if (!/^[a-f0-9]{64}$/i.test(certificateId)) throw new Error(`${label} must be an AWS IoT certificate ID`);
+  return certificateId;
 }
 
 function positiveInteger(value: unknown, label: string): number {

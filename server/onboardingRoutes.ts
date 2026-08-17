@@ -15,7 +15,6 @@ interface RouterOptions {
   dataFile?: string;
   transitionMs?: number;
   simulateDevice?: boolean;
-  activationPepper?: string;
   allowDevelopmentOperator?: boolean;
 }
 
@@ -91,7 +90,6 @@ export async function createOnboardingRouter(options: RouterOptions = {}): Promi
     transitionMs: options.transitionMs ?? (Number.isFinite(configuredStepMs) ? configuredStepMs : 900),
     simulateDevice: options.simulateDevice
       ?? (process.env.ONBOARDING_SIMULATE_DEVICE ?? (process.env.NODE_ENV === 'production' ? 'false' : 'true')) === 'true',
-    activationPepper: options.activationPepper || process.env.ONBOARDING_ACTIVATION_PEPPER || undefined,
     mode: 'local-simulator',
   });
   const router = express.Router();
@@ -120,7 +118,6 @@ export async function createOnboardingRouter(options: RouterOptions = {}): Promi
   router.post('/claims/verify', async (req, res) => {
     const result = await service.verifyClaim(context(req), {
       serialNumber: req.body?.serialNumber,
-      activationCode: req.body?.activationCode,
     }, idempotencyKey(req));
     res.status(201).json(result);
   });

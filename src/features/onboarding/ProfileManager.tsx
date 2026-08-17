@@ -163,7 +163,7 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
           <ShieldCheck size={18} aria-hidden="true" />
           <div>
             <strong>Secret-safe by design</strong>
-            <span>Credential fields accept references only. Passwords, private keys, claim material, and ownership tokens never enter this UI.</span>
+            <span>Credential fields accept references only. Passwords, private keys, bootstrap credentials, and ownership tokens never enter this UI.</span>
           </div>
         </div>
 

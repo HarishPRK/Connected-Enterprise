@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { isIP } from 'node:net';
 import type { OnboardingRepository } from './onboardingStore.js';
@@ -36,8 +36,8 @@ const GATEWAY_MODELS: GatewayModel[] = [
 ];
 
 const ONBOARD_STEPS: ReadonlyArray<{ state: OnboardingState; detail: string }> = [
-  { state: 'CLAIM_ACCEPTED', detail: 'One-time activation proof consumed.' },
-  { state: 'CSR_VERIFIED', detail: 'Hardware-backed certificate request verified.' },
+  { state: 'CLAIM_ACCEPTED', detail: 'Factory serial registration authorized.' },
+  { state: 'CSR_VERIFIED', detail: 'Gateway certificate request accepted.' },
   { state: 'OPERATIONAL_IDENTITY_ISSUED', detail: 'Unique operational identity activated.' },
   { state: 'PROFILE_STAGED', detail: 'Signed immutable profile staged for this gateway.' },
   { state: 'APPLYING', detail: 'Gateway is applying the configuration transaction.' },
@@ -60,19 +60,6 @@ const PROFILE_DEPLOY_STEPS: ReadonlyArray<{ state: OnboardingState; detail: stri
 ];
 
 const SERIAL_PATTERN = /^[A-Z0-9][A-Z0-9._-]{2,127}$/;
-const ACTIVATION_CODE_PATTERN = /^[A-Za-z0-9._:-]{16,256}$/;
-
-function isRepeatedPattern(value: string): boolean {
-  return (value + value).indexOf(value, 1) !== value.length;
-}
-
-function isValidActivationCode(value: string): boolean {
-  return ACTIVATION_CODE_PATTERN.test(value)
-    && /[A-Za-z]/.test(value)
-    && /[0-9]/.test(value)
-    && new Set(value).size >= 8
-    && !isRepeatedPattern(value);
-}
 
 export class OnboardingError extends Error {
   constructor(
@@ -91,7 +78,6 @@ interface OnboardingServiceOptions {
   now?: () => Date;
   transitionMs?: number;
   simulateDevice?: boolean;
-  activationPepper?: string;
   mode?: 'local-simulator' | 'aws';
 }
 
@@ -223,12 +209,6 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function safeHashEquals(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left, 'hex');
-  const rightBuffer = Buffer.from(right, 'hex');
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
-}
-
 function iso(date: Date): string {
   return date.toISOString();
 }
@@ -248,10 +228,6 @@ function slug(value: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-}
-
-function activationHash(serialNumber: string, activationCode: string, pepper: string): string {
-  return sha256(`${pepper}\u0000${serialNumber.trim().toUpperCase()}\u0000${activationCode}`);
 }
 
 function newAudit(
@@ -404,7 +380,6 @@ export class OnboardingService {
   private readonly now: () => Date;
   private readonly transitionMs: number;
   private readonly simulateDevice: boolean;
-  private readonly activationPepper: string;
   private readonly mode: 'local-simulator' | 'aws';
 
   private constructor(
@@ -416,7 +391,6 @@ export class OnboardingService {
     this.now = options.now ?? (() => new Date());
     this.transitionMs = Math.max(50, options.transitionMs ?? 900);
     this.simulateDevice = options.simulateDevice ?? true;
-    this.activationPepper = options.activationPepper ?? 'connected-enterprise-local-only-pepper';
     this.mode = options.mode ?? 'local-simulator';
     this.events.setMaxListeners(100);
   }
@@ -442,17 +416,16 @@ export class OnboardingService {
 
   async verifyClaim(
     context: OperatorContext,
-    input: { serialNumber: string; activationCode: string },
+    input: { serialNumber: string },
     idempotencyKey: string,
   ): Promise<VerificationResult> {
     assertIdempotencyKey(idempotencyKey);
     const serialNumber = String(input.serialNumber ?? '').trim().toUpperCase();
-    const activationCode = String(input.activationCode ?? '');
-    if (!SERIAL_PATTERN.test(serialNumber) || !isValidActivationCode(activationCode)) {
-      throw new OnboardingError(400, 'INVALID_CLAIM_INPUT', 'Enter a valid serial number and one-time activation code.');
+    if (!SERIAL_PATTERN.test(serialNumber)) {
+      throw new OnboardingError(400, 'INVALID_CLAIM_INPUT', 'Enter a valid factory serial number.');
     }
 
-    const request = { serialNumber, activationCodeHash: sha256(activationCode) };
+    const request = { serialNumber };
     const outcome = await this.transaction((database) => {
       const tenant = this.ensureTenant(database, context.tenantId);
       const storageKey = `${context.tenantId}:verify-claim:${idempotencyKey}`;
@@ -466,12 +439,10 @@ export class OnboardingService {
       }
       this.expireReservations(tenant, this.now());
       const record = tenant.manufacturing.find((candidate) => candidate.serialNumber === serialNumber);
-      const presentedHash = activationHash(serialNumber, activationCode, this.activationPepper);
       const valid = Boolean(
         record
           && record.tenantId === context.tenantId
-          && record.state === 'CLAIMABLE'
-          && safeHashEquals(record.activationProofHash, presentedHash),
+          && record.state === 'CLAIMABLE',
       );
 
       if (!valid || !record) {
@@ -483,7 +454,7 @@ export class OnboardingService {
           sha256(serialNumber).slice(0, 16),
           'DENIED',
           iso(this.now()),
-          'Invalid, expired, already-used, or unauthorized activation proof.',
+          'Factory serial is not registered, available, or authorized for this tenant.',
         ));
         return { denied: true as const };
       }
@@ -544,7 +515,7 @@ export class OnboardingService {
       throw new OnboardingError(
         401,
         'CLAIM_NOT_VERIFIED',
-        'The activation proof could not be verified. Check the label or request a new one-time code.',
+        'Registration is not authorized for this factory serial.',
       );
     }
     this.emit(context.tenantId, 'ClaimVerified', outcome.value.verificationId);
@@ -668,7 +639,7 @@ export class OnboardingService {
         }
         const manufacturing = tenant.manufacturing.find((candidate) => candidate.serialNumber === verification.serialNumber);
         if (!manufacturing || manufacturing.reservedByVerificationId !== verification.id) {
-          throw new OnboardingError(409, 'CLAIM_RESERVATION_LOST', 'The one-time claim reservation is no longer valid.');
+          throw new OnboardingError(409, 'CLAIM_RESERVATION_LOST', 'The device registration reservation is no longer valid.');
         }
         const existingGateway = tenant.gateways.find((candidate) => candidate.serialNumber === verification.serialNumber);
         if (existingGateway && existingGateway.state !== 'DECOMMISSIONED') {
@@ -1006,8 +977,8 @@ export class OnboardingService {
     const developmentTenantId = process.env.ONBOARDING_DEV_TENANT_ID ?? 'tenant_demo';
     const manufacturing: ManufacturingRecord[] = tenantId === developmentTenantId
       ? [
-          this.seedManufacturing(tenantId, 'CE-GW-840021', 'edge-pro', 'rev-d', 'BATCH-2026-08-A', 'LOCAL-ONBOARD-2026', sites.map((site) => site.id)),
-          this.seedManufacturing(tenantId, 'CE-GW-840022', 'edge-compact', 'rev-b', 'BATCH-2026-08-B', 'LOCAL-ONBOARD-2027', sites.slice(0, 2).map((site) => site.id)),
+          this.seedManufacturing(tenantId, 'CE-GW-840021', 'edge-pro', 'rev-d', 'BATCH-2026-08-A', sites.map((site) => site.id)),
+          this.seedManufacturing(tenantId, 'CE-GW-840022', 'edge-compact', 'rev-b', 'BATCH-2026-08-B', sites.slice(0, 2).map((site) => site.id)),
         ]
       : [];
     const tenant: TenantState = {
@@ -1056,7 +1027,6 @@ export class OnboardingService {
     modelId: string,
     hardwareRevision: string,
     manufacturingBatch: string,
-    activationCode: string,
     allowedSiteIds: string[],
   ): ManufacturingRecord {
     return {
@@ -1065,7 +1035,6 @@ export class OnboardingService {
       modelId,
       hardwareRevision,
       manufacturingBatch,
-      activationProofHash: activationHash(serialNumber, activationCode, this.activationPepper),
       state: 'CLAIMABLE',
       allowedSiteIds,
     };
