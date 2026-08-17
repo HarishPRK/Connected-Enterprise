@@ -397,7 +397,7 @@ async function assertWindowsPrivateAcl(path: string, label: string): Promise<voi
     '[pscustomobject]@{ Identity = $_.IdentityReference.Value; Type = $_.AccessControlType.ToString(); Rights = $_.FileSystemRights.ToString() }',
     '}',
     '$items | ConvertTo-Json -Compress',
-  ].join(' ');
+  ].join('\n');
   const { stdout } = await execFile(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(aclScript, 'utf16le').toString('base64')],
