@@ -22,6 +22,7 @@ const args = process.argv.slice(2);
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..', '..');
 const execFile = promisify(execFileCallback);
+let cachedWindowsPrincipal: string | undefined;
 
 await main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
@@ -391,6 +392,9 @@ async function validateStateDirectory(value: string, serialNumber: string): Prom
 }
 
 async function assertWindowsPrivateAcl(path: string, label: string): Promise<void> {
+  const systemRoot = process.env.SystemRoot;
+  if (!systemRoot) throw new Error(`Unable to validate ${label} Windows ACL`);
+  const windowsPowerShellModulePath = resolve(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules');
   const aclScript = [
     "$ErrorActionPreference = 'Stop'",
     '$items = (Get-Acl -LiteralPath $env:CE_BOOTSTRAP_ACL_TARGET).Access | ForEach-Object {',
@@ -403,7 +407,11 @@ async function assertWindowsPrivateAcl(path: string, label: string): Promise<voi
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(aclScript, 'utf16le').toString('base64')],
     {
       windowsHide: true,
-      env: { ...process.env, CE_BOOTSTRAP_ACL_TARGET: path },
+      env: {
+        ...process.env,
+        PSModulePath: windowsPowerShellModulePath,
+        CE_BOOTSTRAP_ACL_TARGET: path,
+      },
     },
   );
   let parsed: unknown;
@@ -431,7 +439,6 @@ async function assertWindowsPrivateAcl(path: string, label: string): Promise<voi
   if (!currentUserAllowed) throw new Error(`${label} does not grant the current Windows user access`);
 }
 
-let cachedWindowsPrincipal: string | undefined;
 async function currentWindowsPrincipal(): Promise<string> {
   if (cachedWindowsPrincipal) return cachedWindowsPrincipal;
   const { stdout } = await execFile('whoami.exe', [], { windowsHide: true });
