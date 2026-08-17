@@ -315,6 +315,48 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     artifactBucket.grantReadWrite(apiFunction);
     signingKey.grantSign(apiFunction);
 
+    const publicDeviceTestFunction = new lambdaNodejs.NodejsFunction(this, 'PublicDeviceTestFunction', {
+      ...functionDefaults,
+      functionName: `connected-enterprise-onboarding-${stage}-public-device-test`,
+      entry: entry('public-device-test-handler.ts'),
+      handler: 'handler',
+      timeout: Duration.seconds(3),
+      memorySize: 256,
+      reservedConcurrentExecutions: 5,
+      logGroup: logGroup('public-device-test'),
+      environment: { STAGE: stage },
+    });
+
+    const gatewayConfigPullRoleName = `connected-enterprise-onboarding-${stage}-gateway-config-pull`;
+    const deviceConfigHttpFunction = new lambdaNodejs.NodejsFunction(this, 'DeviceConfigHttpFunction', {
+      ...functionDefaults,
+      functionName: `connected-enterprise-onboarding-${stage}-device-config-http`,
+      entry: entry('device-config-http-handler.ts'),
+      handler: 'handler',
+      timeout: Duration.seconds(10),
+      reservedConcurrentExecutions: 50,
+      logGroup: logGroup('device-config-http', logs.RetentionDays.THREE_MONTHS),
+      environment: {
+        TABLE_NAME: table.tableName,
+        ARTIFACT_BUCKET: artifactBucket.bucketName,
+        SIGNING_KEY_ID: signingKey.keyArn,
+        AWS_ACCOUNT_ID: Aws.ACCOUNT_ID,
+        GATEWAY_CONFIG_ROLE_NAME: gatewayConfigPullRoleName,
+        STAGE: stage,
+      },
+    });
+    deviceConfigHttpFunction.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'ReadAndRecordAuthorizedConfigurationDelivery',
+      actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:TransactWriteItems'],
+      resources: [table.tableArn, `${table.tableArn}/index/GSI1`],
+    }));
+    deviceConfigHttpFunction.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'PresignOnlyImmutableProfileArtifacts',
+      actions: ['s3:GetObject'],
+      resources: [artifactBucket.arnForObjects('*')],
+    }));
+    dataKey.grantDecrypt(deviceConfigHttpFunction);
+
     const jwtAuthorizer = new apigwv2Authorizers.HttpJwtAuthorizer(
       'CognitoJwtAuthorizer',
       userPool.userPoolProviderUrl,
@@ -344,6 +386,16 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     const apiIntegration = new apigwv2Integrations.HttpLambdaIntegration('ApiIntegration', apiFunction, {
       payloadFormatVersion: apigwv2.PayloadFormatVersion.VERSION_2_0,
     });
+    const publicDeviceTestIntegration = new apigwv2Integrations.HttpLambdaIntegration(
+      'PublicDeviceTestIntegration',
+      publicDeviceTestFunction,
+      { payloadFormatVersion: apigwv2.PayloadFormatVersion.VERSION_2_0 },
+    );
+    const deviceConfigHttpIntegration = new apigwv2Integrations.HttpLambdaIntegration(
+      'DeviceConfigHttpIntegration',
+      deviceConfigHttpFunction,
+      { payloadFormatVersion: apigwv2.PayloadFormatVersion.VERSION_2_0 },
+    );
     const addJwtRoute = (path: string, method: apigwv2.HttpMethod) => httpApi.addRoutes({
       path, methods: [method], authorizer: jwtAuthorizer, integration: apiIntegration,
     });
@@ -358,7 +410,26 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     addJwtRoute('/profiles', apigwv2.HttpMethod.POST);
     addJwtRoute('/profiles/{profileId}/versions', apigwv2.HttpMethod.POST);
     addJwtRoute('/gateways/{gatewayId}/assignments', apigwv2.HttpMethod.POST);
+    const [publicDeviceTestRoute] = httpApi.addRoutes({
+      path: '/device/v1/test/ping',
+      methods: [apigwv2.HttpMethod.GET],
+      integration: publicDeviceTestIntegration,
+    });
+    if (!publicDeviceTestRoute) throw new Error('Public device test route was not created');
+    const deviceConfigRoutePath = '/device/v1/things/{thingName}/certificates/{certificateId}/configuration';
+    const [deviceConfigRoute] = httpApi.addRoutes({
+      path: deviceConfigRoutePath,
+      methods: [apigwv2.HttpMethod.GET],
+      authorizer: new apigwv2Authorizers.HttpIamAuthorizer(),
+      integration: deviceConfigHttpIntegration,
+    });
+    if (!deviceConfigRoute) throw new Error('Secured device configuration route was not created');
     const cfnDefaultStage = httpApi.defaultStage?.node.defaultChild as apigwv2.CfnStage;
+    // API Gateway rejects RouteSettings for a route that has not been created
+    // yet. CloudFormation otherwise considers the stage and route independent,
+    // so make their deployment order explicit.
+    cfnDefaultStage.addResourceDependency(publicDeviceTestRoute.node.defaultChild as apigwv2.CfnRoute);
+    cfnDefaultStage.addResourceDependency(deviceConfigRoute.node.defaultChild as apigwv2.CfnRoute);
     cfnDefaultStage.accessLogSettings = {
       // `LogGroup.logGroupArn` includes a trailing `:*`, while API Gateway
       // persists the destination as the base log-group ARN. Render that base
@@ -371,6 +442,10 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       }),
     };
     cfnDefaultStage.defaultRouteSettings = { throttlingBurstLimit: 100, throttlingRateLimit: 50 };
+    cfnDefaultStage.addPropertyOverride('RouteSettings', {
+      'GET /device/v1/test/ping': { ThrottlingBurstLimit: 5, ThrottlingRateLimit: 2 },
+      [`GET ${deviceConfigRoutePath}`]: { ThrottlingBurstLimit: 100, ThrottlingRateLimit: 50 },
+    });
 
     const operationalPolicyName = `ConnectedEnterpriseGatewayOperational-${stage}-v1`;
     const thingVariable = '${iot:Connection.Thing.ThingName}';
@@ -411,6 +486,54 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
         ],
       },
     });
+
+    const gatewayConfigRoleAliasName = `GatewayConfigPull-${stage}`;
+    const gatewayConfigCredentialsPolicyName = `ConnectedEnterpriseGatewayConfigCredentials-${stage}-v1`;
+    const gatewayConfigRoleAliasArn = iotArn(`rolealias/${gatewayConfigRoleAliasName}`);
+    const credentialsThingName = '${credentials-iot:ThingName}';
+    const credentialsCertificateId = '${credentials-iot:AwsCertificateId}';
+    const gatewayConfigPullRole = new iam.Role(this, 'GatewayConfigPullRole', {
+      roleName: gatewayConfigPullRoleName,
+      description: 'IoT credential-provider role for a gateway to retrieve only its own signed configuration assignment',
+      assumedBy: new iam.ServicePrincipal('credentials.iot.amazonaws.com', {
+        conditions: {
+          StringEquals: { 'aws:SourceAccount': Aws.ACCOUNT_ID },
+          ArnEquals: { 'aws:SourceArn': gatewayConfigRoleAliasArn },
+        },
+      }),
+      maxSessionDuration: Duration.hours(1),
+    });
+    gatewayConfigPullRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'InvokeOnlyOwnConfigurationRoute',
+      actions: ['execute-api:Invoke'],
+      resources: [httpApi.arnForExecuteApi(
+        'GET',
+        `/device/v1/things/${credentialsThingName}/certificates/${credentialsCertificateId}/configuration`,
+        '$default',
+      )],
+    }));
+    const gatewayConfigRoleAlias = new iot.CfnRoleAlias(this, 'GatewayConfigPullRoleAlias', {
+      roleAlias: gatewayConfigRoleAliasName,
+      roleArn: gatewayConfigPullRole.roleArn,
+      credentialDurationSeconds: 900,
+      tags: [
+        { key: 'Stage', value: stage },
+        { key: 'Service', value: 'ConnectedEnterpriseGatewayConfigPull' },
+      ],
+    });
+    const gatewayConfigCredentialsPolicy = new iot.CfnPolicy(this, 'GatewayConfigCredentialsPolicy', {
+      policyName: gatewayConfigCredentialsPolicyName,
+      policyDocument: {
+        Version: '2012-10-17',
+        Statement: [{
+          Sid: 'AssumeOnlyGatewayConfigPullRole',
+          Effect: 'Allow',
+          Action: 'iot:AssumeRoleWithCertificate',
+          Resource: gatewayConfigRoleAliasArn,
+        }],
+      },
+    });
+    gatewayConfigCredentialsPolicy.node.addDependency(gatewayConfigRoleAlias);
 
     const thingType = new iot.CfnThingType(this, 'GatewayThingType', {
       thingTypeName: `ConnectedEnterpriseGateway-${stage}`,
@@ -489,7 +612,10 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     provisioningRole.addToPolicy(new iam.PolicyStatement({
       sid: 'ReadExistingOperationalPolicy',
       actions: ['iot:GetPolicy'],
-      resources: [iotArn(`policy/${operationalPolicyName}`)],
+      resources: [
+        iotArn(`policy/${operationalPolicyName}`),
+        iotArn(`policy/${gatewayConfigCredentialsPolicyName}`),
+      ],
     }));
     provisioningRole.addToPolicy(new iam.PolicyStatement({
       sid: 'UseExactGroupAndType',
@@ -560,6 +686,10 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
           OverrideSettings: { AttributePayload: 'REPLACE', ThingTypeName: 'REPLACE', ThingGroups: 'REPLACE' },
         },
         policy: { Type: 'AWS::IoT::Policy', Properties: { PolicyName: operationalPolicyName } },
+        configCredentialsPolicy: {
+          Type: 'AWS::IoT::Policy',
+          Properties: { PolicyName: gatewayConfigCredentialsPolicyName },
+        },
       },
     });
     const fleetTemplate = new iot.CfnProvisioningTemplate(this, 'FleetProvisioningTemplate', {
@@ -570,7 +700,14 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       preProvisioningHook: { payloadVersion: '2020-04-01', targetArn: preProvisionFunction.functionArn },
       templateBody,
     });
-    fleetTemplate.node.addDependency(operationalPolicy, thingType, thingGroup, provisioningRole);
+    fleetTemplate.node.addDependency(
+      operationalPolicy,
+      gatewayConfigCredentialsPolicy,
+      gatewayConfigRoleAlias,
+      thingType,
+      thingGroup,
+      provisioningRole,
+    );
     preProvisionFunction.addPermission('AllowExactFleetTemplateHook', {
       principal: new iam.ServicePrincipal('iot.amazonaws.com'),
       action: 'lambda:InvokeFunction',
@@ -638,6 +775,21 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       })]),
     });
     const iotDataEndpoint = endpointLookup.getResponseField('endpointAddress');
+    const credentialProviderEndpointLookup = new cr.AwsCustomResource(this, 'IotCredentialProviderEndpointLookup', {
+      installLatestAwsSdk: false,
+      onCreate: {
+        service: 'Iot', action: 'describeEndpoint', parameters: { endpointType: 'iot:CredentialProvider' },
+        physicalResourceId: cr.PhysicalResourceId.fromResponse('endpointAddress'),
+      },
+      onUpdate: {
+        service: 'Iot', action: 'describeEndpoint', parameters: { endpointType: 'iot:CredentialProvider' },
+        physicalResourceId: cr.PhysicalResourceId.fromResponse('endpointAddress'),
+      },
+      policy: cr.AwsCustomResourcePolicy.fromStatements([new iam.PolicyStatement({
+        actions: ['iot:DescribeEndpoint'], resources: ['*'],
+      })]),
+    });
+    const iotCredentialProviderEndpoint = credentialProviderEndpointLookup.getResponseField('endpointAddress');
 
     const jobTemplate = new iot.CfnJobTemplate(this, 'ProfileApplyJobTemplate', {
       jobTemplateId: `connected-enterprise-profile-apply-${stage}-v1`,
@@ -825,7 +977,16 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       evaluationPeriods: 1,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
-    const lambdaErrors = [apiFunction, preProvisionFunction, iotConfigFunction, iotStatusFunction, outboxFunction];
+    const lambdaErrors = [
+      apiFunction,
+      preProvisionFunction,
+      iotConfigFunction,
+      iotStatusFunction,
+      outboxFunction,
+      // Keep existing positions stable so adding this function does not
+      // replace every previously deployed Lambda alarm.
+      deviceConfigHttpFunction,
+    ];
     lambdaErrors.forEach((fn, index) => new cloudwatch.Alarm(this, `LambdaErrorsAlarm${index}`, {
       alarmName: `${fn.functionName}-errors`,
       metric: fn.metricErrors({ period: Duration.minutes(5), statistic: 'Sum' }),
@@ -867,7 +1028,15 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     configAsyncDlqAlarm.node.addDependency(iotConfigFunction);
     statusAsyncDlqAlarm.node.addDependency(iotStatusFunction);
 
-    new CfnOutput(this, 'ApiUrl', { value: httpApi.apiEndpoint, description: 'JWT-protected onboarding HTTP API base URL' });
+    new CfnOutput(this, 'ApiUrl', { value: httpApi.apiEndpoint, description: 'Onboarding HTTP API base URL; business routes require JWT authorization' });
+    new CfnOutput(this, 'PublicDeviceTestUrl', {
+      value: `${httpApi.apiEndpoint}/device/v1/test/ping`,
+      description: 'Unauthenticated dev-only static gateway HTTP connectivity probe; never returns configuration data',
+    });
+    new CfnOutput(this, 'DeviceConfigurationUrlTemplate', {
+      value: `${httpApi.apiEndpoint}${deviceConfigRoutePath}`,
+      description: 'AWS_IAM-protected signed configuration endpoint; Thing and certificate path values are bound by IoT-issued credentials',
+    });
     new CfnOutput(this, 'CognitoIssuer', { value: userPool.userPoolProviderUrl, description: 'JWT issuer used by API Gateway' });
     new CfnOutput(this, 'CognitoUserPoolId', { value: userPool.userPoolId });
     new CfnOutput(this, 'CognitoSpaClientId', { value: userPoolClient.userPoolClientId, description: 'Public SPA client (authorization code + PKCE; no secret)' });
@@ -881,6 +1050,9 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     new CfnOutput(this, 'IotConfigAsyncFailureQueueUrl', { value: configAsyncFailureQueue.queueUrl });
     new CfnOutput(this, 'IotStatusAsyncFailureQueueUrl', { value: statusAsyncFailureQueue.queueUrl });
     new CfnOutput(this, 'IotDataEndpoint', { value: iotDataEndpoint });
+    new CfnOutput(this, 'IotCredentialProviderEndpoint', { value: iotCredentialProviderEndpoint });
+    new CfnOutput(this, 'GatewayConfigRoleAliasName', { value: gatewayConfigRoleAliasName });
+    new CfnOutput(this, 'GatewayConfigCredentialsPolicyName', { value: gatewayConfigCredentialsPolicyName });
     new CfnOutput(this, 'FleetProvisioningTemplateName', { value: fleetTemplateName });
     new CfnOutput(this, 'OperationalPolicyName', { value: operationalPolicyName });
     new CfnOutput(this, 'BootstrapClaimPolicyName', {

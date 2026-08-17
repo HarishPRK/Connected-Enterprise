@@ -99,13 +99,15 @@ async function main(): Promise<void> {
   assertEqual(record.demoExpectedProfileVersionId, profileVersionId, 'prepared profile version');
   assertEqual(record.demoExpectedDeliveryMode, deliveryMode, 'prepared delivery mode');
   const verificationId = requireSafeIdentifier(requireString(record.verificationId, 'manufacturing verificationId'), 'manufacturing verificationId');
-  const verificationExpiry = requirePositiveInteger(record.verificationExpiresAtEpoch, 'manufacturing verification expiry');
+  const enrollmentAuthorizedAt = requireIsoTimestamp(
+    requireString(record.enrollmentAuthorizedAt, 'manufacturing enrollmentAuthorizedAt'),
+    'manufacturing enrollmentAuthorizedAt',
+  );
   const generation = requirePositiveInteger(record.generation ?? 1, 'manufacturing generation');
   if (generation !== 1) throw new Error('Initial onboarding must use generation 1');
-  if (verificationExpiry <= Math.floor(Date.now() / 1000)) throw new Error('The UI enrollment reservation has expired');
 
   const tenantKey = `TENANT#${tenantId}`;
-  const [gateway, operation, deployment, verification, bootstrapBinding] = await Promise.all([
+  const [gateway, operation, deployment, bootstrapBinding] = await Promise.all([
     ddb.send(new GetCommand({ TableName: tableName, Key: { PK: tenantKey, SK: `GATEWAY#${gatewayId}` }, ConsistentRead: true })),
     ddb.send(new GetCommand({ TableName: tableName, Key: { PK: tenantKey, SK: `OPERATION#${operationId}` }, ConsistentRead: true })),
     ddb.send(new GetCommand({
@@ -113,7 +115,6 @@ async function main(): Promise<void> {
       Key: { PK: tenantKey, SK: `DEPLOYMENT#${gatewayId}#${String(generation).padStart(12, '0')}` },
       ConsistentRead: true,
     })),
-    ddb.send(new GetCommand({ TableName: tableName, Key: { PK: tenantKey, SK: `VERIFICATION#${verificationId}` }, ConsistentRead: true })),
     ddb.send(new GetCommand({
       TableName: tableName,
       Key: { PK: `BOOTSTRAPCERT#${bootstrapCertificateId}`, SK: 'BINDING' },
@@ -124,10 +125,9 @@ async function main(): Promise<void> {
     ...(gateway.Item ? { gateway: gateway.Item } : {}),
     ...(operation.Item ? { operation: operation.Item } : {}),
     ...(deployment.Item ? { deployment: deployment.Item } : {}),
-    ...(verification.Item ? { verification: verification.Item } : {}),
   }, {
     tenantId, gatewayId, operationId, serialNumber, thingName, siteId, profileVersionId,
-    verificationId, verificationExpiry, generation, deliveryMode,
+    verificationId, enrollmentAuthorizedAt, generation, deliveryMode,
   });
   validateBootstrapBinding(bootstrapBinding.Item, {
     bootstrapCertificateId, bootstrapCertificateArn, serialNumber, tenantId,
@@ -288,7 +288,6 @@ function validateEnrollmentState(
     gateway?: Record<string, unknown>;
     operation?: Record<string, unknown>;
     deployment?: Record<string, unknown>;
-    verification?: Record<string, unknown>;
   },
   expected: {
     tenantId: string;
@@ -299,7 +298,7 @@ function validateEnrollmentState(
     siteId: string;
     profileVersionId: string;
     verificationId: string;
-    verificationExpiry: number;
+    enrollmentAuthorizedAt: string;
     generation: number;
     deliveryMode: 'SHADOW';
   },
@@ -329,12 +328,6 @@ function validateEnrollmentState(
   assertCommon(deployment, expected, ['tenantId', 'gatewayId', 'operationId', 'profileVersionId', 'generation']);
   assertEqual(deployment.deliveryMode, expected.deliveryMode, 'deployment delivery mode');
 
-  const verification = records.verification;
-  if (!verification || verification.entityType !== 'VERIFICATION' || verification.state !== 'CONSUMED') {
-    throw new Error('UI verification was not consumed by the activation operation');
-  }
-  assertCommon(verification, expected, ['tenantId', 'verificationId', 'serialNumber']);
-  assertEqual(verification.expiresAtEpoch, expected.verificationExpiry, 'verification expiry');
 }
 
 function validateBootstrapBinding(
@@ -509,6 +502,14 @@ function requireCertificateId(value: string): string {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value) throw new Error(`Missing ${label}`);
+  return value;
+}
+
+function requireIsoTimestamp(value: string, label: string): string {
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) {
+    throw new Error(`Missing or invalid ${label}`);
+  }
   return value;
 }
 

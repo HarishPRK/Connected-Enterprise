@@ -1,0 +1,644 @@
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { GetCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import type {
+  APIGatewayProxyEventV2WithIAMAuthorizer,
+  APIGatewayProxyStructuredResultV2,
+  Context,
+} from 'aws-lambda';
+import {
+  ARTIFACT_BUCKET,
+  AWS_ACCOUNT_ID,
+  AWS_REGION_NAME,
+  SIGNING_KEY_ID,
+  TABLE_NAME,
+} from './shared/config.js';
+import {
+  auditSk,
+  ddb,
+  deploymentSk,
+  gatewaySk,
+  operationSk,
+  tenantPk,
+} from './shared/ddb.js';
+import { canonicalJson } from './shared/profile.js';
+
+const ROUTE_KEY = 'GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration';
+const GATEWAY_CONFIG_ROLE_NAME = process.env.GATEWAY_CONFIG_ROLE_NAME?.trim() ?? '';
+const URL_TTL_SECONDS = 5 * 60;
+const THING_NAME_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
+const CERTIFICATE_ID_PATTERN = /^[a-f0-9]{64}$/i;
+const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
+const SIGNATURE_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+const ACTIVE_GATEWAY_STATES = new Set([
+  'PERMANENT_IDENTITY_ACTIVE',
+  'PROFILE_AVAILABLE',
+  'PROFILE_DELIVERED',
+  'APPLYING',
+  'HEALTH_CHECK',
+  'APPLIED_HEALTHY',
+  'FAILED',
+  'ROLLING_BACK',
+  'ROLLED_BACK',
+]);
+const DELIVERY_GATEWAY_STATES = new Set([
+  'PERMANENT_IDENTITY_ACTIVE',
+  'PROFILE_AVAILABLE',
+]);
+const DELIVERY_DEPLOYMENT_STATES = new Set([
+  'WAITING_FOR_DEVICE',
+  'PROFILE_AVAILABLE',
+]);
+const FORWARD_DELIVERY_STATES = new Set([
+  'PROFILE_DELIVERED',
+  'APPLYING',
+  'HEALTH_CHECK',
+  'APPLIED_HEALTHY',
+  'FAILED',
+  'ROLLING_BACK',
+  'ROLLED_BACK',
+]);
+const ACTIVE_OPERATION_STATES = new Set([
+  'CLAIM_ACCEPTED',
+  'CSR_VERIFIED',
+  'OPERATIONAL_IDENTITY_ISSUED',
+  'PROFILE_STAGED',
+  'APPLYING',
+  'HEALTH_CHECK',
+  'APPLIED_HEALTHY',
+  'FAILED',
+  'ROLLING_BACK',
+  'ROLLED_BACK',
+]);
+const DELIVERY_OPERATION_STATES = new Set([
+  'CSR_VERIFIED',
+  'OPERATIONAL_IDENTITY_ISSUED',
+]);
+
+type Item = Record<string, unknown>;
+type TransactItems = NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']>;
+
+export interface DeviceConfigurationDependencies {
+  queryGatewayByThing(thingName: string): Promise<Item[]>;
+  getItem(key: { PK: string; SK: string }): Promise<Item | undefined>;
+  transactWrite(items: TransactItems): Promise<void>;
+  presignArtifact(key: string, expiresIn: number): Promise<string>;
+  now(): Date;
+}
+
+interface AuthorizedRequest {
+  thingName: string;
+  certificateId: string;
+  generation: number;
+  requestId: string;
+}
+
+interface ConfigurationAuthority {
+  gateway: Item;
+  deployment: Item;
+  operation: Item;
+  tenantId: string;
+  gatewayId: string;
+  operationId: string;
+  certificatePrincipal: string;
+  generation: number;
+  profileVersionId: string;
+  descriptor: Item;
+  objectKey: string;
+  manifestKey: string;
+}
+
+class DeviceConfigurationError extends Error {
+  constructor(
+    readonly statusCode: 400 | 403 | 409,
+    readonly code: 'INVALID_REQUEST' | 'DEVICE_NOT_AUTHORIZED' | 'CONFIGURATION_NOT_AVAILABLE',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+const s3 = new S3Client({});
+
+const productionDependencies: DeviceConfigurationDependencies = {
+  async queryGatewayByThing(thingName) {
+    const result = await ddb.send(new QueryCommand({
+      TableName: TABLE_NAME,
+      IndexName: 'GSI1',
+      KeyConditionExpression: 'GSI1PK = :thing',
+      ExpressionAttributeValues: { ':thing': `THING#${thingName}` },
+      Limit: 2,
+    }));
+    return result.Items ?? [];
+  },
+  async getItem(key) {
+    return (await ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: key,
+      ConsistentRead: true,
+    }))).Item;
+  },
+  async transactWrite(items) {
+    await ddb.send(new TransactWriteCommand({ TransactItems: items }));
+  },
+  async presignArtifact(key, expiresIn) {
+    if (!ARTIFACT_BUCKET) throw new Error('Artifact bucket is not configured');
+    return getSignedUrl(s3, new GetObjectCommand({
+      Bucket: ARTIFACT_BUCKET,
+      Key: key,
+      ResponseContentType: 'application/json',
+    }), { expiresIn });
+  },
+  now: () => new Date(),
+};
+
+export function createDeviceConfigurationHandler(
+  dependencies: DeviceConfigurationDependencies = productionDependencies,
+) {
+  return async (
+    event: APIGatewayProxyEventV2WithIAMAuthorizer,
+    context: Context,
+  ): Promise<APIGatewayProxyStructuredResultV2> => {
+    const requestId = safeRequestId(event.requestContext?.requestId) ?? context.awsRequestId;
+    try {
+      const request = authorizedRequest(event, requestId);
+      const authority = await configurationAuthority(request, dependencies);
+      const issuedAt = dependencies.now();
+      const expiresAt = new Date(issuedAt.getTime() + URL_TTL_SECONDS * 1000).toISOString();
+      const [profileUrl, manifestUrl] = await Promise.all([
+        dependencies.presignArtifact(authority.objectKey, URL_TTL_SECONDS),
+        dependencies.presignArtifact(authority.manifestKey, URL_TTL_SECONDS),
+      ]);
+
+      await recordHttpDelivery(authority, request, context, dependencies);
+
+      return json(200, {
+        type: 'SIGNED_PROFILE_ASSIGNMENT',
+        requestId,
+        gatewayId: authority.gatewayId,
+        thingName: request.thingName,
+        generation: request.generation,
+        profileVersionId: authority.profileVersionId,
+        descriptor: authority.descriptor,
+        artifacts: {
+          profile: {
+            url: profileUrl,
+            sha256: authority.descriptor.profileSha256,
+            expiresAt,
+          },
+          manifest: { url: manifestUrl, expiresAt },
+        },
+        issuedAt: issuedAt.toISOString(),
+      }, requestId);
+    } catch (error) {
+      if (error instanceof DeviceConfigurationError) {
+        return json(error.statusCode, {
+          error: error.message,
+          code: error.code,
+          requestId,
+        }, requestId);
+      }
+      // Never log the event, SigV4 headers, temporary credentials, or signed URLs.
+      console.error(JSON.stringify({
+        level: 'error',
+        requestId,
+        error: error instanceof Error ? error.name : 'UnknownError',
+      }));
+      return json(500, {
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+        requestId,
+      }, requestId);
+    }
+  };
+}
+
+export const handler = createDeviceConfigurationHandler();
+
+function authorizedRequest(
+  event: APIGatewayProxyEventV2WithIAMAuthorizer,
+  requestId: string,
+): AuthorizedRequest {
+  if (event.routeKey !== ROUTE_KEY) throw invalidRequest('Route not found');
+  const iam = event.requestContext?.authorizer?.iam;
+  if (!iam || typeof iam.userArn !== 'string' || !iam.userArn || typeof iam.accessKey !== 'string' || !iam.accessKey) {
+    throw unauthorized();
+  }
+  if (AWS_ACCOUNT_ID && iam.accountId !== AWS_ACCOUNT_ID) throw unauthorized();
+  const expectedRolePrefix = `arn:aws:sts::${AWS_ACCOUNT_ID}:assumed-role/${GATEWAY_CONFIG_ROLE_NAME}/`;
+  if (!AWS_ACCOUNT_ID
+    || !GATEWAY_CONFIG_ROLE_NAME
+    || !iam.userArn.startsWith(expectedRolePrefix)
+    || iam.userArn.length <= expectedRolePrefix.length) {
+    throw unauthorized();
+  }
+
+  const thingName = event.pathParameters?.thingName;
+  const certificateId = event.pathParameters?.certificateId;
+  if (typeof thingName !== 'string' || !THING_NAME_PATTERN.test(thingName)) {
+    throw invalidRequest('Invalid device configuration request');
+  }
+  if (typeof certificateId !== 'string' || !CERTIFICATE_ID_PATTERN.test(certificateId)) {
+    throw invalidRequest('Invalid device configuration request');
+  }
+
+  const queryEntries = [...new URLSearchParams(event.rawQueryString).entries()];
+  if (queryEntries.length !== 1 || queryEntries[0]?.[0] !== 'generation') {
+    throw invalidRequest('Exactly one generation query parameter is required');
+  }
+  const generationText = queryEntries[0][1];
+  if (event.queryStringParameters?.generation !== generationText) {
+    throw invalidRequest('Exactly one generation query parameter is required');
+  }
+  if (typeof generationText !== 'string' || !/^[1-9][0-9]{0,11}$/.test(generationText)) {
+    throw invalidRequest('A positive generation query parameter is required');
+  }
+  const generation = Number(generationText);
+  if (!Number.isSafeInteger(generation)) throw invalidRequest('A positive generation query parameter is required');
+
+  return { thingName, certificateId, generation, requestId };
+}
+
+async function configurationAuthority(
+  request: AuthorizedRequest,
+  dependencies: DeviceConfigurationDependencies,
+): Promise<ConfigurationAuthority> {
+  const matches = await dependencies.queryGatewayByThing(request.thingName);
+  if (matches.length !== 1) throw unauthorized();
+  const located = matches[0];
+  if (!located
+    || located.entityType !== 'GATEWAY'
+    || typeof located.PK !== 'string'
+    || typeof located.SK !== 'string'
+    || located.GSI1PK !== `THING#${request.thingName}`) {
+    throw unauthorized();
+  }
+
+  // GSI reads are eventually consistent. Always authorize against a fresh,
+  // strongly consistent base-table read so decommissioning takes effect here.
+  const gateway = await dependencies.getItem({ PK: located.PK, SK: located.SK });
+  if (!gateway || gateway.entityType !== 'GATEWAY') throw unauthorized();
+
+  const tenantId = requiredStoredString(gateway.tenantId, unauthorized);
+  const gatewayId = requiredStoredString(gateway.gatewayId, unauthorized);
+  const certificatePrincipal = requiredStoredString(gateway.certificatePrincipal, unauthorized);
+  const expectedPk = tenantPk(tenantId);
+  const expectedSk = gatewaySk(gatewayId);
+  const expectedPrincipal = `arn:aws:iot:${AWS_REGION_NAME}:${AWS_ACCOUNT_ID}:cert/${request.certificateId}`;
+  if (gateway.PK !== expectedPk
+    || gateway.SK !== expectedSk
+    || gateway.thingName !== request.thingName
+    || gateway.certificateId !== request.certificateId
+    || certificatePrincipal !== expectedPrincipal
+    || gateway.certificateStatus !== 'ACTIVE'
+    || !ACTIVE_GATEWAY_STATES.has(String(gateway.state))) {
+    throw unauthorized();
+  }
+
+  const desiredGeneration = positiveStoredInteger(gateway.desiredGeneration, unavailable);
+  if (desiredGeneration !== request.generation) throw unavailable();
+  const desiredProfileVersionId = requiredStoredString(gateway.desiredProfileVersionId, unavailable);
+  const descriptor = assignmentDescriptor(gateway.signedDescriptor, {
+    tenantId,
+    gatewayId,
+    thingName: request.thingName,
+    generation: request.generation,
+    profileVersionId: desiredProfileVersionId,
+  });
+  const objectKey = artifactKey(descriptor.objectKey, tenantId);
+  const manifestKey = artifactKey(descriptor.manifestKey, tenantId);
+
+  const deployment = await dependencies.getItem({
+    PK: expectedPk,
+    SK: deploymentSk(gatewayId, request.generation),
+  });
+  const operationId = requiredStoredString(deployment?.operationId, unavailable);
+  if (!deployment
+    || deployment.entityType !== 'DEPLOYMENT'
+    || deployment.PK !== expectedPk
+    || deployment.SK !== deploymentSk(gatewayId, request.generation)
+    || deployment.tenantId !== tenantId
+    || deployment.gatewayId !== gatewayId
+    || deployment.generation !== request.generation
+    || deployment.profileVersionId !== desiredProfileVersionId
+    || gateway.operationId !== operationId
+    || !isRecord(deployment.descriptor)
+    || canonicalJson(deployment.descriptor) !== canonicalJson(descriptor)) {
+    throw unavailable();
+  }
+
+  const operation = await dependencies.getItem({ PK: expectedPk, SK: operationSk(operationId) });
+  if (!operation
+    || operation.entityType !== 'OPERATION'
+    || operation.PK !== expectedPk
+    || operation.SK !== operationSk(operationId)
+    || operation.tenantId !== tenantId
+    || operation.operationId !== operationId
+    || operation.gatewayId !== gatewayId
+    || operation.profileVersionId !== desiredProfileVersionId
+    || operation.deploymentGeneration !== request.generation
+    || !ACTIVE_OPERATION_STATES.has(String(operation.state))) {
+    throw unavailable();
+  }
+
+  return {
+    gateway,
+    deployment,
+    operation,
+    tenantId,
+    gatewayId,
+    operationId,
+    certificatePrincipal,
+    generation: request.generation,
+    profileVersionId: desiredProfileVersionId,
+    descriptor,
+    objectKey,
+    manifestKey,
+  };
+}
+
+async function recordHttpDelivery(
+  authority: ConfigurationAuthority,
+  request: AuthorizedRequest,
+  context: Context,
+  dependencies: DeviceConfigurationDependencies,
+): Promise<void> {
+  const now = dependencies.now().toISOString();
+  const gatewayState = String(authority.gateway.state);
+  const deploymentState = String(authority.deployment.status);
+  const transitionGateway = DELIVERY_GATEWAY_STATES.has(gatewayState);
+  const transitionDeployment = DELIVERY_DEPLOYMENT_STATES.has(deploymentState);
+  const transitionOperation = DELIVERY_OPERATION_STATES.has(String(authority.operation.state));
+  const tenantKey = tenantPk(authority.tenantId);
+
+  // Once this exact generation has been delivered, later polls are read-only.
+  // This avoids permanent audit growth and DDB write amplification across a
+  // large fleet while the strong reads above still reauthorize every request.
+  if (!transitionGateway && !transitionDeployment && !transitionOperation) return;
+
+  const transaction: TransactItems = [
+    {
+      Update: {
+        TableName: TABLE_NAME,
+        Key: { PK: tenantKey, SK: gatewaySk(authority.gatewayId) },
+        UpdateExpression: transitionGateway
+          ? 'SET #state = :delivered, lastAuthenticatedAt = :now, lastConfigRequestAt = :now, updatedAt = :now'
+          : 'SET lastAuthenticatedAt = :now, lastConfigRequestAt = :now, updatedAt = :now',
+        ConditionExpression: [
+          'entityType = :gateway',
+          '#state = :observedState',
+          'certificateStatus = :active',
+          'thingName = :thingName',
+          'certificateId = :certificateId',
+          'certificatePrincipal = :certificatePrincipal',
+          'desiredGeneration = :generation',
+          'desiredProfileVersionId = :profileVersionId',
+          'operationId = :operationId',
+          'signedDescriptor = :descriptor',
+        ].join(' AND '),
+        ExpressionAttributeNames: { '#state': 'state' },
+        ExpressionAttributeValues: {
+          ':gateway': 'GATEWAY',
+          ':observedState': gatewayState,
+          ':active': 'ACTIVE',
+          ':thingName': request.thingName,
+          ':certificateId': request.certificateId,
+          ':certificatePrincipal': authority.certificatePrincipal,
+          ':generation': authority.generation,
+          ':profileVersionId': authority.profileVersionId,
+          ':operationId': authority.operationId,
+          ':descriptor': authority.descriptor,
+          ':delivered': 'PROFILE_DELIVERED',
+          ':now': now,
+        },
+      },
+    },
+    {
+      Update: {
+        TableName: TABLE_NAME,
+        Key: { PK: tenantKey, SK: deploymentSk(authority.gatewayId, authority.generation) },
+        UpdateExpression: transitionDeployment
+          ? 'SET #status = :delivered, deliveredAt = if_not_exists(deliveredAt, :now), lastDeliveredAt = :now, updatedAt = :now'
+          : 'SET lastDeliveredAt = :now, updatedAt = :now',
+        ConditionExpression: [
+          'entityType = :deployment',
+          '#status = :observedStatus',
+          'gatewayId = :gatewayId',
+          'generation = :generation',
+          'profileVersionId = :profileVersionId',
+          'operationId = :operationId',
+          'descriptor = :descriptor',
+        ].join(' AND '),
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: {
+          ':deployment': 'DEPLOYMENT',
+          ':observedStatus': deploymentState,
+          ':gatewayId': authority.gatewayId,
+          ':generation': authority.generation,
+          ':profileVersionId': authority.profileVersionId,
+          ':operationId': authority.operationId,
+          ':descriptor': authority.descriptor,
+          ':delivered': 'PROFILE_DELIVERED',
+          ':now': now,
+        },
+      },
+    },
+  ];
+
+  if (transitionOperation) {
+    transaction.push({
+      Update: {
+        TableName: TABLE_NAME,
+        Key: { PK: tenantKey, SK: operationSk(authority.operationId) },
+        UpdateExpression: 'SET operationStatus = :inProgress, #state = :profileStaged, deploymentGeneration = :generation, updatedAt = :now, steps[1] = :identityStep, steps[2] = :profileStep, timeline = list_append(if_not_exists(timeline, :empty), :events)',
+        ConditionExpression: 'entityType = :operation AND gatewayId = :gatewayId AND profileVersionId = :profileVersionId AND #state = :observedState',
+        ExpressionAttributeNames: { '#state': 'state' },
+        ExpressionAttributeValues: {
+          ':operation': 'OPERATION',
+          ':gatewayId': authority.gatewayId,
+          ':profileVersionId': authority.profileVersionId,
+          ':observedState': authority.operation.state,
+          ':inProgress': 'IN_PROGRESS',
+          ':profileStaged': 'PROFILE_STAGED',
+          ':generation': authority.generation,
+          ':now': now,
+          ':empty': [],
+          ':events': [{
+            state: 'PROFILE_STAGED',
+            detail: `Signed profile generation ${authority.generation} delivered over authenticated HTTPS.`,
+            at: now,
+          }],
+          ':identityStep': {
+            key: 'identity',
+            label: 'Permanent identity provisioned',
+            status: 'complete',
+            detail: 'Permanent certificate authenticated by AWS IoT credentials provider.',
+            timestamp: now,
+          },
+          ':profileStep': {
+            key: 'profile',
+            label: 'Signed profile delivered',
+            status: 'complete',
+            detail: `Signed profile generation ${authority.generation} delivered.`,
+            timestamp: now,
+          },
+        },
+      },
+    });
+  }
+
+  const auditId = `http_${context.awsRequestId}`.slice(0, 160);
+  transaction.push({
+    Put: {
+      TableName: TABLE_NAME,
+      Item: {
+        PK: tenantKey,
+        SK: auditSk(now, auditId),
+        entityType: 'AUDIT',
+        auditId,
+        tenantId: authority.tenantId,
+        actorSubject: authority.certificatePrincipal,
+        actorRole: 'DEVICE',
+        action: 'SIGNED_PROFILE_DELIVERED_HTTP',
+        targetId: authority.gatewayId,
+        details: {
+          generation: authority.generation,
+          profileVersionId: authority.profileVersionId,
+          thingName: request.thingName,
+        },
+        outcome: 'SUCCESS',
+        createdAt: now,
+      },
+      ConditionExpression: 'attribute_not_exists(PK)',
+    },
+  });
+
+  try {
+    await dependencies.transactWrite(transaction);
+  } catch (error) {
+    // Concurrent pulls can race on the first delivery transition. Accept the
+    // loser only if consistent rereads prove this exact assignment moved
+    // forward and the certificate is still active.
+    const [gateway, deployment] = await Promise.all([
+      dependencies.getItem({ PK: tenantKey, SK: gatewaySk(authority.gatewayId) }),
+      dependencies.getItem({ PK: tenantKey, SK: deploymentSk(authority.gatewayId, authority.generation) }),
+    ]);
+    if (gateway?.certificateStatus === 'ACTIVE'
+      && gateway.certificateId === request.certificateId
+      && gateway.thingName === request.thingName
+      && gateway.desiredGeneration === authority.generation
+      && gateway.desiredProfileVersionId === authority.profileVersionId
+      && gateway.operationId === authority.operationId
+      && isRecord(gateway.signedDescriptor)
+      && canonicalJson(gateway.signedDescriptor) === canonicalJson(authority.descriptor)
+      && FORWARD_DELIVERY_STATES.has(String(gateway.state))
+      && deployment?.gatewayId === authority.gatewayId
+      && deployment.generation === authority.generation
+      && deployment.profileVersionId === authority.profileVersionId
+      && deployment.operationId === authority.operationId
+      && isRecord(deployment.descriptor)
+      && canonicalJson(deployment.descriptor) === canonicalJson(authority.descriptor)
+      && FORWARD_DELIVERY_STATES.has(String(deployment.status))) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function assignmentDescriptor(
+  value: unknown,
+  expected: {
+    tenantId: string;
+    gatewayId: string;
+    thingName: string;
+    generation: number;
+    profileVersionId: string;
+  },
+): Item {
+  if (!isRecord(value)) throw unavailable();
+  const descriptor = value;
+  if (descriptor.kind !== 'gateway-profile-assignment'
+    || descriptor.tenantId !== expected.tenantId
+    || descriptor.gatewayId !== expected.gatewayId
+    || descriptor.thingName !== expected.thingName
+    || descriptor.generation !== expected.generation
+    || descriptor.profileVersionId !== expected.profileVersionId
+    || typeof descriptor.profileSha256 !== 'string'
+    || !CHECKSUM_PATTERN.test(descriptor.profileSha256)
+    || typeof descriptor.signature !== 'string'
+    || !SIGNATURE_PATTERN.test(descriptor.signature)
+    || descriptor.signingAlgorithm !== 'ECDSA_SHA_256'
+    || !SIGNING_KEY_ID
+    || descriptor.signingKeyId !== SIGNING_KEY_ID) {
+    throw unavailable();
+  }
+  const issuedAt = typeof descriptor.issuedAt === 'string' ? Date.parse(descriptor.issuedAt) : Number.NaN;
+  const expiresAt = typeof descriptor.expiresAt === 'string' ? Date.parse(descriptor.expiresAt) : Number.NaN;
+  if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || expiresAt <= Date.now() || issuedAt >= expiresAt) {
+    throw unavailable();
+  }
+  return descriptor;
+}
+
+function artifactKey(value: unknown, tenantId: string): string {
+  if (typeof value !== 'string' || !value) throw unavailable();
+  const expectedPrefix = `tenants/${tenantId}/profiles/`;
+  if (!value.startsWith(expectedPrefix)
+    || value.startsWith('/')
+    || value.includes('\\')
+    || value.split('/').some((part) => part === '..')) {
+    throw unavailable();
+  }
+  return value;
+}
+
+function requiredStoredString(
+  value: unknown,
+  errorFactory: () => DeviceConfigurationError,
+): string {
+  if (typeof value !== 'string' || !value) throw errorFactory();
+  return value;
+}
+
+function positiveStoredInteger(
+  value: unknown,
+  errorFactory: () => DeviceConfigurationError,
+): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw errorFactory();
+  return value;
+}
+
+function isRecord(value: unknown): value is Item {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function invalidRequest(message: string): DeviceConfigurationError {
+  return new DeviceConfigurationError(400, 'INVALID_REQUEST', message);
+}
+
+function unauthorized(): DeviceConfigurationError {
+  return new DeviceConfigurationError(403, 'DEVICE_NOT_AUTHORIZED', 'Device is not authorized');
+}
+
+function unavailable(): DeviceConfigurationError {
+  return new DeviceConfigurationError(409, 'CONFIGURATION_NOT_AVAILABLE', 'Configuration is not available');
+}
+
+function safeRequestId(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : undefined;
+}
+
+function json(statusCode: number, body: unknown, requestId: string): APIGatewayProxyStructuredResultV2 {
+  return {
+    statusCode,
+    headers: {
+      'cache-control': 'no-store',
+      'content-type': 'application/json; charset=utf-8',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'no-referrer',
+      'x-request-id': requestId,
+    },
+    body: JSON.stringify(body),
+  };
+}

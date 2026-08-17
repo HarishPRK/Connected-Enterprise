@@ -29,7 +29,7 @@ interface ManufacturingRecord extends Record<string, unknown> {
   siteId?: string;
   profileVersionId?: string;
   verificationId?: string;
-  verificationExpiresAtEpoch?: number;
+  enrollmentAuthorizedAt?: string;
   claimMechanism?: string;
   bootstrapCertificateId?: string;
   bootstrapCertificateStatus?: string;
@@ -69,7 +69,6 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
     if (record.claimMechanism !== PRELOADED_BOOTSTRAP_MECHANISM) return deny('preloaded unique bootstrap mechanism required');
     if (record.bootstrapCertificateId !== claimCertificateId) return deny('bootstrap certificate is not authorized for this identity');
     if (record.bootstrapCertificateStatus !== 'ACTIVE') return deny('bootstrap certificate is not active for enrollment');
-    const nowEpoch = Math.floor(Date.now() / 1000);
     const thingName = record.thingName ?? `gw-${sha256(serialNumber).slice(0, 24)}`;
     const idempotentRetry = ((record.state === 'PROVISIONING' && record.certificateStatus !== 'REVOKING')
       || (record.state === 'PROVISIONED' && record.certificateStatus === 'ACTIVE'))
@@ -78,16 +77,17 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
     if (idempotentRetry) {
       return allow(thingName, record.gatewayId, record.tenantId, serialNumber);
     }
-    if (record.state !== 'ENROLLMENT_PENDING' || typeof record.verificationId !== 'string' || !record.verificationId) {
+    if (record.state !== 'ENROLLMENT_PENDING'
+      || typeof record.verificationId !== 'string' || !record.verificationId
+      || typeof record.enrollmentAuthorizedAt !== 'string' || !record.enrollmentAuthorizedAt) {
       return deny('server-side enrollment reservation is missing');
     }
     if (!record.tenantId || !record.gatewayId || !record.operationId || !record.siteId
       || !record.profileVersionId || !record.deliveryMode) {
       return deny('ownership reservation is incomplete');
     }
-    if ((record.verificationExpiresAtEpoch ?? 0) < nowEpoch) return deny('verification expired');
     const verificationId = record.verificationId;
-    const verificationExpiry = record.verificationExpiresAtEpoch;
+    const enrollmentAuthorizedAt = record.enrollmentAuthorizedAt;
 
     const certificatePrincipal = `arn:aws:iot:${AWS_REGION_NAME}:${AWS_ACCOUNT_ID}:cert/${certificateId}`;
     const now = new Date().toISOString();
@@ -98,7 +98,7 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
             Update: {
               TableName: TABLE_NAME,
               Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
-              UpdateExpression: 'SET #state = :provisioning, certificateId = :certificateId, certificatePrincipal = :principal, thingName = :thingName, verificationConsumedAt = :now, updatedAt = :now REMOVE verificationId, verificationExpiresAtEpoch',
+              UpdateExpression: 'SET #state = :provisioning, certificateId = :certificateId, certificatePrincipal = :principal, thingName = :thingName, verificationConsumedAt = :now, updatedAt = :now REMOVE verificationId',
               ConditionExpression: [
                 'entityType = :manufacturingEntity',
                 '#state = :enrollmentPending',
@@ -113,8 +113,7 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
                 'bootstrapCertificateId = :bootstrapCertificateId',
                 'bootstrapCertificateStatus = :bootstrapCertificateActive',
                 'verificationId = :verificationId',
-                'verificationExpiresAtEpoch = :verificationExpiry',
-                'verificationExpiresAtEpoch >= :nowEpoch',
+                'enrollmentAuthorizedAt = :enrollmentAuthorizedAt',
                 '(attribute_not_exists(certificateId) OR certificateId = :certificateId)',
               ].join(' AND '),
               ExpressionAttributeNames: { '#state': 'state' },
@@ -122,7 +121,7 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
                 ':enrollmentPending': 'ENROLLMENT_PENDING',
                 ':provisioning': 'PROVISIONING',
                 ':verificationId': verificationId,
-                ':verificationExpiry': verificationExpiry,
+                ':enrollmentAuthorizedAt': enrollmentAuthorizedAt,
                 ':tenantId': record.tenantId,
                 ':manufacturingEntity': 'MANUFACTURING',
                 ':gatewayId': record.gatewayId,
@@ -133,7 +132,6 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
                 ':claimMechanism': PRELOADED_BOOTSTRAP_MECHANISM,
                 ':bootstrapCertificateId': claimCertificateId,
                 ':bootstrapCertificateActive': 'ACTIVE',
-                ':nowEpoch': nowEpoch,
                 ':certificateId': certificateId,
                 ':principal': certificatePrincipal,
                 ':thingName': thingName,
@@ -228,18 +226,6 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
                 ':entity': 'DEPLOYMENT', ':tenantId': record.tenantId, ':gatewayId': record.gatewayId,
                 ':operationId': record.operationId, ':profileVersionId': record.profileVersionId,
                 ':deliveryMode': record.deliveryMode, ':generation': 1, ':waiting': 'WAITING_FOR_DEVICE',
-              },
-            },
-          },
-          {
-            ConditionCheck: {
-              TableName: TABLE_NAME,
-              Key: { PK: tenantKey, SK: `VERIFICATION#${verificationId}` },
-              ConditionExpression: 'entityType = :entity AND tenantId = :tenantId AND verificationId = :verificationId AND serialNumber = :serialNumber AND expiresAtEpoch = :verificationExpiry AND #state = :consumed',
-              ExpressionAttributeNames: { '#state': 'state' },
-              ExpressionAttributeValues: {
-                ':entity': 'VERIFICATION', ':tenantId': record.tenantId, ':verificationId': verificationId,
-                ':serialNumber': serialNumber, ':verificationExpiry': verificationExpiry, ':consumed': 'CONSUMED',
               },
             },
           },

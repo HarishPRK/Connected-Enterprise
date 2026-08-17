@@ -126,7 +126,7 @@ test('encrypted LogGroups wait for a namespace-scoped CloudWatch Logs KMS grant'
   );
 
   const logGroups = Object.entries(rendered.Resources).filter(([, resource]) => resource.Type === 'AWS::Logs::LogGroup');
-  assert.equal(logGroups.length, 7, 'every application/API LogGroup is explicitly declared');
+  assert.equal(logGroups.length, 9, 'every application/API LogGroup is explicitly declared');
   for (const [logicalId, resource] of logGroups) {
     assert.deepEqual(resource.Properties?.KmsKeyId, { 'Fn::GetAtt': [dataKeyLogicalId, 'Arn'] },
       `${logicalId} uses the DataKey`);
@@ -189,6 +189,7 @@ test('Fleet Provisioning accepts both certificate APIs, remains hook-gated and e
         OverrideSettings: Record<string, string>;
       };
       policy: { Type: string; Properties: Record<string, unknown> };
+      configCredentialsPolicy: { Type: string; Properties: Record<string, unknown> };
     };
   };
   assert.deepEqual(parsedProvisioningTemplate.Parameters.SerialNumber, { Type: 'String' });
@@ -221,12 +222,18 @@ test('Fleet Provisioning accepts both certificate APIs, remains hook-gated and e
   assert.deepEqual(parsedProvisioningTemplate.Resources.policy.Properties, {
     PolicyName: 'ConnectedEnterpriseGatewayOperational-dev-v1',
   });
+  assert.deepEqual(parsedProvisioningTemplate.Resources.configCredentialsPolicy.Properties, {
+    PolicyName: 'ConnectedEnterpriseGatewayConfigCredentials-dev-v1',
+  });
 
   const policies = Object.values(rendered.Resources).filter((resource) => resource.Type === 'AWS::IoT::Policy');
   const bootstrap = policies.find((resource) => resource.Properties?.PolicyName === 'ConnectedEnterpriseGatewayBootstrap-dev-v1');
   const operational = policies.find((resource) => resource.Properties?.PolicyName === 'ConnectedEnterpriseGatewayOperational-dev-v1');
+  const configCredentials = policies.find((resource) =>
+    resource.Properties?.PolicyName === 'ConnectedEnterpriseGatewayConfigCredentials-dev-v1');
   assert.ok(bootstrap, 'per-device bootstrap policy is synthesized for manufacturing attachment');
   assert.ok(operational, 'operational policy is synthesized');
+  assert.ok(configCredentials, 'separate credential-provider policy is synthesized');
   const bootstrapJson = JSON.stringify(bootstrap);
   assert.match(bootstrapJson, /certificates\/create\/json/);
   assert.match(bootstrapJson, /create-from-csr/);
@@ -405,6 +412,10 @@ test('preloaded unique bootstrap onboarding retains exact certificate, tenant, a
   assert.match(api, /PRELOADED_UNIQUE_BOOTSTRAP/);
   assert.match(api, /bootstrapCertificateId = :bootstrapCertificateId/);
   assert.match(api, /bootstrapCertificateStatus = :bootstrapCertificateActive/);
+  assert.match(api, /verificationExpiresAtEpoch < :nowEpoch/);
+  assert.match(api, /verificationExpiresAtEpoch >= :nowEpoch/);
+  assert.match(api, /enrollmentAuthorizedAt = :now/);
+  assert.match(api, /REMOVE verificationExpiresAtEpoch/);
   assert.doesNotMatch(api, /body\.activationCode|validatedActivationCode|hardwareProofDigest|safeDigestEqual/);
 
   assert.match(preHook, /event\.templateArn !== EXPECTED_TEMPLATE_ARN/);
@@ -413,10 +424,10 @@ test('preloaded unique bootstrap onboarding retains exact certificate, tenant, a
   assert.match(preHook, /bootstrapCertificateStatus !== 'ACTIVE'/);
   assert.match(preHook, /bootstrapCertificatePk\(claimCertificateId\)/);
   assert.match(preHook, /BOOTSTRAP_CERTIFICATE_BINDING/);
-  assert.match(preHook, /verificationExpiresAtEpoch >= :nowEpoch/);
+  assert.match(preHook, /enrollmentAuthorizedAt = :enrollmentAuthorizedAt/);
   assert.match(preHook, /ENROLLMENT_PENDING/);
   assert.match(preHook, /deploymentSk\(record\.gatewayId, 1\)/);
-  assert.match(preHook, /VERIFICATION#/);
+  assert.doesNotMatch(preHook, /verificationExpiresAtEpoch|VERIFICATION#|verification expired/);
   assert.doesNotMatch(preHook, /HardwareId|HardwareProof|hardwareId|hardwareProof|requireHardwareId/);
   for (const source of [api, preHook, config, outbox]) {
     assert.doesNotMatch(source, /TRUSTED_USER_FIVE_MINUTE|trustedClaimExpiresAtEpoch|trustedClaimIssuedAt|CreateProvisioningClaimCommand/);
@@ -613,6 +624,152 @@ test('HTTP API declares exact JWT routes so Lambda receives exact routeKey value
   }
   const rendered = JSON.stringify(template.toJSON());
   assert.doesNotMatch(rendered, /ANY \/\{proxy\+\}/);
+});
+
+test('public gateway HTTP probe is isolated, throttled, and is the only unauthenticated route', () => {
+  const template = synthesized();
+  template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
+    RouteKey: 'GET /device/v1/test/ping',
+    AuthorizationType: 'NONE',
+  });
+  template.hasResourceProperties('AWS::ApiGatewayV2::Stage', {
+    RouteSettings: {
+      'GET /device/v1/test/ping': {
+        ThrottlingBurstLimit: 5,
+        ThrottlingRateLimit: 2,
+      },
+    },
+  });
+  template.hasResourceProperties('AWS::Lambda::Function', {
+    FunctionName: 'connected-enterprise-onboarding-dev-public-device-test',
+    ReservedConcurrentExecutions: 5,
+    Timeout: 3,
+  });
+
+  const rendered = template.toJSON() as {
+    Resources: Record<string, { Type: string; Properties?: Record<string, unknown>; DependsOn?: string | string[] }>;
+  };
+  const routes = Object.values(rendered.Resources)
+    .filter((resource) => resource.Type === 'AWS::ApiGatewayV2::Route')
+    .map((resource) => resource.Properties ?? {});
+  const publicRoutes = routes.filter((route) => route.AuthorizationType === 'NONE');
+  assert.deepEqual(publicRoutes.map((route) => route.RouteKey), ['GET /device/v1/test/ping']);
+  const publicRouteEntry = Object.entries(rendered.Resources).find(([, resource]) =>
+    resource.Type === 'AWS::ApiGatewayV2::Route'
+    && resource.Properties?.RouteKey === 'GET /device/v1/test/ping');
+  assert.ok(publicRouteEntry, 'public probe route is synthesized');
+  const defaultStage = Object.values(rendered.Resources).find((resource) =>
+    resource.Type === 'AWS::ApiGatewayV2::Stage');
+  assert.ok(defaultStage, 'HTTP API default stage is synthesized');
+  const stageDependencies = Array.isArray(defaultStage.DependsOn)
+    ? defaultStage.DependsOn
+    : [defaultStage.DependsOn].filter((value): value is string => typeof value === 'string');
+  assert.ok(stageDependencies.includes(publicRouteEntry[0]),
+    'stage route throttling waits until the public route exists');
+
+  const publicFunction = Object.values(rendered.Resources).find((resource) =>
+    resource.Type === 'AWS::Lambda::Function'
+    && resource.Properties?.FunctionName === 'connected-enterprise-onboarding-dev-public-device-test');
+  assert.ok(publicFunction, 'dedicated public probe Lambda is synthesized');
+  const roleLogicalId = (publicFunction.Properties?.Role as { 'Fn::GetAtt': [string, string] })['Fn::GetAtt'][0];
+  const publicRole = rendered.Resources[roleLogicalId];
+  if (!publicRole) assert.fail('public probe execution role is synthesized');
+  assert.equal(publicRole.Type, 'AWS::IAM::Role');
+  assert.equal(publicRole.Properties?.Policies, undefined, 'public probe receives no inline data-access policy');
+  assert.equal(JSON.stringify(publicRole.Properties?.ManagedPolicyArns ?? []).includes('AWSLambdaBasicExecutionRole'), true);
+  assert.deepEqual(publicFunction.Properties?.Environment, { Variables: { STAGE: 'dev' } });
+  const publicRolePolicies = Object.values(rendered.Resources).filter((resource) =>
+    resource.Type === 'AWS::IAM::Policy'
+    && JSON.stringify(resource.Properties?.Roles ?? []).includes(`\"Ref\":\"${roleLogicalId}\"`));
+  const publicPermissions = JSON.stringify(publicRolePolicies);
+  assert.doesNotMatch(publicPermissions, /dynamodb:|s3:|secretsmanager:|kms:(?:Decrypt|Sign)/i,
+    'public probe cannot read control-plane data, secrets, artifacts, or signing keys');
+});
+
+test('fleet configuration pull uses one exact IoT credential role and an AWS_IAM route', () => {
+  const template = synthesized();
+  template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
+    RouteKey: 'GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration',
+    AuthorizationType: 'AWS_IAM',
+  });
+  template.hasResourceProperties('AWS::Lambda::Function', {
+    FunctionName: 'connected-enterprise-onboarding-dev-device-config-http',
+    ReservedConcurrentExecutions: 50,
+    Timeout: 10,
+    Environment: {
+      Variables: Match.objectLike({
+        GATEWAY_CONFIG_ROLE_NAME: 'connected-enterprise-onboarding-dev-gateway-config-pull',
+      }),
+    },
+  });
+  template.hasResourceProperties('AWS::IoT::RoleAlias', {
+    RoleAlias: 'GatewayConfigPull-dev',
+    CredentialDurationSeconds: 900,
+  });
+  template.hasOutput('DeviceConfigurationUrlTemplate', {});
+  template.hasOutput('IotCredentialProviderEndpoint', {});
+  template.hasOutput('GatewayConfigRoleAliasName', {});
+  template.hasOutput('GatewayConfigCredentialsPolicyName', {});
+
+  const rendered = template.toJSON() as {
+    Resources: Record<string, { Type: string; Properties?: Record<string, unknown>; DependsOn?: string | string[] }>;
+  };
+  const configRouteEntry = Object.entries(rendered.Resources).find(([, resource]) =>
+    resource.Type === 'AWS::ApiGatewayV2::Route'
+    && resource.Properties?.RouteKey === 'GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration');
+  assert.ok(configRouteEntry, 'secured configuration route is synthesized');
+  const stage = Object.values(rendered.Resources).find((resource) => resource.Type === 'AWS::ApiGatewayV2::Stage');
+  assert.ok(stage?.Properties, 'default stage is synthesized');
+  const stageDependencies = Array.isArray(stage.DependsOn)
+    ? stage.DependsOn
+    : [stage.DependsOn].filter((value): value is string => typeof value === 'string');
+  assert.ok(stageDependencies.includes(configRouteEntry[0]), 'stage waits for secured route before applying throttling');
+  assert.deepEqual((stage.Properties.RouteSettings as Record<string, unknown>)[configRouteEntry[1].Properties?.RouteKey as string], {
+    ThrottlingBurstLimit: 100,
+    ThrottlingRateLimit: 50,
+  });
+
+  const roleEntry = Object.entries(rendered.Resources).find(([, resource]) =>
+    resource.Type === 'AWS::IAM::Role'
+    && resource.Properties?.RoleName === 'connected-enterprise-onboarding-dev-gateway-config-pull');
+  assert.ok(roleEntry, 'shared gateway configuration role is synthesized');
+  const roleTrust = JSON.stringify(resolvePolicyIntrinsics(roleEntry[1].Properties?.AssumeRolePolicyDocument));
+  assert.match(roleTrust, /credentials\.iot\.amazonaws\.com/);
+  assert.match(roleTrust, /aws:SourceAccount/);
+  assert.match(roleTrust, /111122223333/);
+  assert.match(roleTrust, /aws:SourceArn/);
+  assert.match(roleTrust, /rolealias\/GatewayConfigPull-dev/);
+
+  const rolePolicies = Object.values(rendered.Resources).filter((resource) =>
+    resource.Type === 'AWS::IAM::Policy'
+    && JSON.stringify(resource.Properties?.Roles ?? []).includes(`\"Ref\":\"${roleEntry[0]}\"`));
+  assert.equal(rolePolicies.length, 1, 'gateway role has one least-privilege policy');
+  const invokePolicy = JSON.stringify(rolePolicies[0]);
+  assert.match(invokePolicy, /execute-api:Invoke/);
+  assert.match(invokePolicy, /\$default\/GET\/device\/v1\/things/);
+  assert.match(invokePolicy, /\$\{credentials-iot:ThingName\}/);
+  assert.match(invokePolicy, /\$\{credentials-iot:AwsCertificateId\}/);
+  assert.doesNotMatch(invokePolicy, /dynamodb:|s3:|iot:Publish|secretsmanager:/i);
+
+  const configPolicy = Object.values(rendered.Resources).find((resource) =>
+    resource.Type === 'AWS::IoT::Policy'
+    && resource.Properties?.PolicyName === 'ConnectedEnterpriseGatewayConfigCredentials-dev-v1');
+  assert.ok(configPolicy?.Properties, 'config credential IoT policy is synthesized');
+  const resolvedConfigPolicy = resolvePolicyIntrinsics(configPolicy.Properties.PolicyDocument) as {
+    Statement: Array<{ Action: string; Effect: string; Resource: string }>;
+  };
+  assert.deepEqual(resolvedConfigPolicy.Statement, [{
+    Sid: 'AssumeOnlyGatewayConfigPullRole',
+    Effect: 'Allow',
+    Action: 'iot:AssumeRoleWithCertificate',
+    Resource: 'arn:aws:iot:us-east-1:111122223333:rolealias/GatewayConfigPull-dev',
+  }]);
+
+  const customResources = Object.values(rendered.Resources)
+    .filter((resource) => resource.Type === 'Custom::AWS')
+    .map((resource) => JSON.stringify(resource.Properties));
+  assert.ok(customResources.some((resource) => resource.includes('iot:CredentialProvider')),
+    'credential-provider endpoint is looked up at deployment');
 });
 
 test('HTTP API renders drift-stable CORS and access-log properties', () => {

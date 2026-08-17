@@ -259,6 +259,7 @@ async function createOperation(
   const thingName = `gw-${sha256(serialNumber).slice(0, 24)}`;
   const operationId = newId('op');
   const now = new Date().toISOString();
+  const nowEpoch = Math.floor(Date.now() / 1000);
   const steps = INITIAL_OPERATION_STEPS.map((step, index) => index === 0 ? { ...step, timestamp: now } : step);
   const signedDescriptor = await signAssignmentDescriptor({
     tenantId: context.tenantId,
@@ -292,12 +293,13 @@ async function createOperation(
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
-        UpdateExpression: 'SET #state = :enrollmentPending, gatewayId = :gatewayId, operationId = :operationId, siteId = :siteId, profileVersionId = :profileVersionId, deliveryMode = :deliveryMode, thingName = :thingName, signedDescriptor = :descriptor, updatedAt = :now',
-        ConditionExpression: '#state = :reserved AND tenantId = :tenantId AND verificationId = :verificationId AND verificationExpiresAtEpoch = :expires AND claimMechanism = :claimMechanism AND bootstrapCertificateId = :bootstrapCertificateId AND bootstrapCertificateStatus = :bootstrapCertificateActive',
+        UpdateExpression: 'SET #state = :enrollmentPending, gatewayId = :gatewayId, operationId = :operationId, siteId = :siteId, profileVersionId = :profileVersionId, deliveryMode = :deliveryMode, thingName = :thingName, signedDescriptor = :descriptor, enrollmentAuthorizedAt = :now, updatedAt = :now REMOVE verificationExpiresAtEpoch',
+        ConditionExpression: '#state = :reserved AND tenantId = :tenantId AND verificationId = :verificationId AND verificationExpiresAtEpoch = :expires AND verificationExpiresAtEpoch >= :nowEpoch AND claimMechanism = :claimMechanism AND bootstrapCertificateId = :bootstrapCertificateId AND bootstrapCertificateStatus = :bootstrapCertificateActive',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':reserved': 'RESERVED', ':enrollmentPending': 'ENROLLMENT_PENDING', ':tenantId': context.tenantId,
           ':verificationId': verificationId, ':expires': verificationExpiry, ':gatewayId': gatewayId,
+          ':nowEpoch': nowEpoch,
           ':operationId': operationId, ':siteId': siteId, ':profileVersionId': profileVersionId,
           ':claimMechanism': 'PRELOADED_UNIQUE_BOOTSTRAP', ':bootstrapCertificateId': bootstrapCertificateId,
           ':bootstrapCertificateActive': 'ACTIVE',
