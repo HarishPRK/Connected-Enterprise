@@ -35,11 +35,16 @@ const ONBOARD_MILESTONES: LifecycleMilestone[] = [
   { state: 'CLAIM_ACCEPTED', label: 'Registration authorized', description: 'The factory serial reservation was accepted for this tenant.' },
   { state: 'CSR_VERIFIED', label: 'Certificate request accepted', description: 'The gateway certificate request passed validation.' },
   { state: 'OPERATIONAL_IDENTITY_ISSUED', label: 'Operational identity issued', description: 'A per-device identity was attached to the authoritative Thing.' },
+];
+
+const PROFILE_VALIDATION_MILESTONES: LifecycleMilestone[] = [
   { state: 'PROFILE_STAGED', label: 'Profile staged', description: 'The immutable assignment manifest is ready for the gateway.' },
   { state: 'APPLYING', label: 'Applying configuration', description: 'The gateway is applying the candidate transaction with its watchdog armed.' },
   { state: 'HEALTH_CHECK', label: 'Validating health', description: 'Management connectivity and network services are being confirmed.' },
   { state: 'APPLIED_HEALTHY', label: 'Applied healthy', description: 'The gateway acknowledged the exact version and passed health checks.' },
 ];
+
+const ONBOARD_OPERATION_MILESTONES = [...ONBOARD_MILESTONES, ...PROFILE_VALIDATION_MILESTONES];
 
 const DECOMMISSION_MILESTONES: LifecycleMilestone[] = [
   { state: 'DECOMMISSIONING', label: 'Decommission requested', description: 'The gateway has entered a protected retirement workflow.' },
@@ -60,6 +65,56 @@ function formatTimestamp(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(undefined, { timeStyle: 'medium' }).format(date);
+}
+
+function hasReachedMilestone(operation: OnboardingOperation, state: OnboardingState): boolean {
+  if (operation.timeline.some((entry) => entry.state === state)) return true;
+  if (operation.status === 'SUCCEEDED') return true;
+  const currentIndex = ONBOARD_OPERATION_MILESTONES.findIndex((milestone) => milestone.state === operation.state);
+  const targetIndex = ONBOARD_OPERATION_MILESTONES.findIndex((milestone) => milestone.state === state);
+  return currentIndex >= targetIndex && targetIndex >= 0;
+}
+
+function MilestoneList({
+  milestones,
+  operation,
+  label,
+}: {
+  milestones: LifecycleMilestone[];
+  operation: OnboardingOperation;
+  label: string;
+}) {
+  const activeIndex = milestones.findIndex((milestone) => milestone.state === operation.state);
+
+  return (
+    <ol className="ce-onb-milestones" aria-label={label}>
+      {milestones.map((milestone, index) => {
+        const timeline = [...operation.timeline].reverse().find((entry) => entry.state === milestone.state);
+        const current = operation.status === 'IN_PROGRESS' && milestone.state === operation.state;
+        const complete = operation.status === 'SUCCEEDED'
+          ? activeIndex === -1 || index <= activeIndex
+          : Boolean(timeline) && !current;
+        return (
+          <li key={milestone.state} data-state={complete ? 'complete' : current ? 'current' : 'pending'}>
+            <span className="ce-onb-milestone-mark">
+              {complete
+                ? <Check size={14} aria-hidden="true" />
+                : current
+                  ? <LoaderCircle size={15} aria-hidden="true" />
+                  : <span aria-hidden="true" />}
+            </span>
+            <div>
+              <strong>{milestone.label}</strong>
+              <span>{timeline?.detail ?? milestone.description}</span>
+            </div>
+            <time dateTime={timeline?.at}>
+              {timeline ? formatTimestamp(timeline.at) : complete ? 'Completed' : current ? 'In progress' : 'Waiting'}
+            </time>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 export function OperationProgress({
@@ -96,12 +151,24 @@ export function OperationProgress({
     ? DECOMMISSION_MILESTONES
     : operation.type === 'PROFILE_DEPLOY'
       ? PROFILE_DEPLOY_MILESTONES
-      : ONBOARD_MILESTONES;
-  const activeIndex = milestones.findIndex((milestone) => milestone.state === operation.state);
+      : ONBOARD_OPERATION_MILESTONES;
   const site = sites.find((candidate) => candidate.id === operation.siteId);
   const healthy = isOperationHealthy(operation);
   const failed = operation.status === 'FAILED';
   const rolledBack = operation.state === 'ROLLED_BACK' || operation.failure?.rolledBack;
+  const onboardingComplete = operation.type === 'ONBOARD'
+    && hasReachedMilestone(operation, 'OPERATIONAL_IDENTITY_ISSUED');
+  const profileValidationStarted = operation.type === 'ONBOARD'
+    && hasReachedMilestone(operation, 'PROFILE_STAGED');
+  const summaryLabel = healthy
+    ? 'Configuration applied and healthy'
+    : failed
+      ? rolledBack ? 'Activation failed; known-good profile restored' : 'Operation needs attention'
+      : operation.type === 'ONBOARD' && onboardingComplete
+        ? profileValidationStarted
+          ? 'Gateway onboarded; profile validation in progress'
+          : 'Gateway onboarding complete'
+        : milestones.find((milestone) => milestone.state === operation.state)?.label ?? operation.state.replace(/_/g, ' ');
 
   return (
     <section className="ce-onb-operation" aria-labelledby="operation-progress-title">
@@ -115,7 +182,7 @@ export function OperationProgress({
               ? 'Gateway decommissioning'
               : operation.type === 'PROFILE_DEPLOY'
                 ? 'Profile deployment progress'
-                : 'Secure activation progress'}
+                : 'Gateway onboarding and profile validation'}
           </h2>
           <p>{operation.serialNumber} · {site ? `${site.name}, ${site.location}` : operation.siteId}</p>
         </div>
@@ -141,44 +208,64 @@ export function OperationProgress({
             </span>
             <div>
               <small>Operation {operation.id}</small>
-              <strong>
-                {healthy
-                  ? 'Configuration applied and healthy'
-                  : failed
-                    ? rolledBack ? 'Activation failed; known-good profile restored' : 'Operation needs attention'
-                    : milestones.find((milestone) => milestone.state === operation.state)?.label ?? operation.state.replace(/_/g, ' ')}
-              </strong>
+              <strong>{summaryLabel}</strong>
               <span>Deployment generation {operation.deploymentGeneration}</span>
             </div>
           </div>
 
-          <ol className="ce-onb-milestones">
-            {milestones.map((milestone, index) => {
-              const timeline = [...operation.timeline].reverse().find((entry) => entry.state === milestone.state);
-              const complete = operation.status === 'SUCCEEDED'
-                ? activeIndex === -1 || index <= activeIndex
-                : Boolean(timeline) && index < activeIndex;
-              const current = operation.status === 'IN_PROGRESS' && milestone.state === operation.state;
-              return (
-                <li key={milestone.state} data-state={complete ? 'complete' : current ? 'current' : 'pending'}>
-                  <span className="ce-onb-milestone-mark">
-                    {complete
-                      ? <Check size={14} aria-hidden="true" />
-                      : current
-                        ? <LoaderCircle size={15} aria-hidden="true" />
-                        : <span aria-hidden="true" />}
-                  </span>
-                  <div>
-                    <strong>{milestone.label}</strong>
-                    <span>{timeline?.detail ?? milestone.description}</span>
+          {operation.type === 'ONBOARD' ? (
+            <div className="ce-onb-phase-stack">
+              <section className="ce-onb-phase" aria-labelledby="gateway-onboarding-phase-title">
+                <div className="ce-onb-phase-head">
+                  <div className="ce-onb-phase-heading">
+                    <span className="ce-onb-phase-mark" data-state={onboardingComplete ? 'complete' : failed ? 'error' : 'current'}>
+                      {onboardingComplete
+                        ? <CheckCircle2 size={18} aria-hidden="true" />
+                        : <ShieldCheck size={18} aria-hidden="true" />}
+                    </span>
+                    <div>
+                      <strong id="gateway-onboarding-phase-title">Gateway onboarding</strong>
+                      <span>{onboardingComplete ? 'Permanent operational identity established.' : 'Authorizing the serial and establishing permanent identity.'}</span>
+                    </div>
                   </div>
-                  <time dateTime={timeline?.at}>
-                    {timeline ? formatTimestamp(timeline.at) : complete ? 'Completed' : current ? 'In progress' : 'Waiting'}
-                  </time>
-                </li>
-              );
-            })}
-          </ol>
+                  <span className="ce-onb-status" data-tone={onboardingComplete ? 'ok' : failed ? 'err' : 'warn'}>
+                    <span aria-hidden="true" />
+                    {onboardingComplete ? 'Complete' : failed ? 'Needs attention' : 'In progress'}
+                  </span>
+                </div>
+                <MilestoneList milestones={ONBOARD_MILESTONES} operation={operation} label="Gateway onboarding milestones" />
+              </section>
+
+              <section className="ce-onb-phase" aria-labelledby="profile-validation-phase-title">
+                <div className="ce-onb-phase-head">
+                  <div className="ce-onb-phase-heading">
+                    <span
+                      className="ce-onb-phase-mark"
+                      data-state={healthy ? 'complete' : failed && onboardingComplete ? 'error' : profileValidationStarted ? 'current' : 'pending'}
+                    >
+                      {healthy
+                        ? <CheckCircle2 size={18} aria-hidden="true" />
+                        : <FileCheck2 size={18} aria-hidden="true" />}
+                    </span>
+                    <div>
+                      <strong id="profile-validation-phase-title">Profile deployment &amp; validation</strong>
+                      <span>{healthy ? 'Assigned configuration applied and health validated.' : 'Delivering the assigned profile and waiting for device validation.'}</span>
+                    </div>
+                  </div>
+                  <span
+                    className="ce-onb-status"
+                    data-tone={healthy ? 'ok' : failed && onboardingComplete ? 'err' : profileValidationStarted ? 'warn' : 'neutral'}
+                  >
+                    <span aria-hidden="true" />
+                    {healthy ? 'Complete' : failed && onboardingComplete ? 'Needs attention' : profileValidationStarted ? 'In progress' : 'Next'}
+                  </span>
+                </div>
+                <MilestoneList milestones={PROFILE_VALIDATION_MILESTONES} operation={operation} label="Profile deployment and validation milestones" />
+              </section>
+            </div>
+          ) : (
+            <MilestoneList milestones={milestones} operation={operation} label="Operation milestones" />
+          )}
 
           {(operation.state === 'ROLLING_BACK' || operation.state === 'ROLLED_BACK') && (
             <div className="ce-onb-alert is-warning">
