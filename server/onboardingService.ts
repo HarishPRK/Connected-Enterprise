@@ -995,25 +995,73 @@ export class OnboardingService {
   async assignProfile(
     context: OperatorContext,
     gatewayId: string,
-    input: { profileVersionId: string; deliveryMode?: 'SHADOW' | 'JOB' },
+    input: {
+      profileVersionId: string;
+      deliveryMode?: 'PULL' | 'SHADOW' | 'JOB';
+      supersedeGeneration?: number;
+    },
     idempotencyKey: string,
   ): Promise<OnboardingOperation> {
     assertIdempotencyKey(idempotencyKey);
+    const deliveryMode = input.deliveryMode ?? 'PULL';
+    if (!['PULL', 'SHADOW', 'JOB'].includes(deliveryMode)) {
+      throw new OnboardingError(400, 'INVALID_DELIVERY_MODE', 'Delivery mode must be PULL, SHADOW, or JOB.');
+    }
+    if (input.supersedeGeneration != null
+      && (!Number.isSafeInteger(input.supersedeGeneration) || input.supersedeGeneration < 1)) {
+      throw new OnboardingError(
+        400,
+        'INVALID_SUPERSEDE_GENERATION',
+        'supersedeGeneration must be a positive integer.',
+      );
+    }
     const normalizedInput = {
       gatewayId: String(gatewayId ?? '').trim(),
       profileVersionId: String(input.profileVersionId ?? '').trim(),
-      deliveryMode: input.deliveryMode === 'JOB' ? 'JOB' as const : 'SHADOW' as const,
+      deliveryMode,
+      supersedeGeneration: input.supersedeGeneration,
     };
     const operation = await this.transaction((database) => {
       const tenant = this.ensureTenant(database, context.tenantId);
       return this.idempotent(database, context, `assign-profile:${normalizedInput.gatewayId}`, idempotencyKey, normalizedInput, () => {
         const gateway = tenant.gateways.find((candidate) => candidate.id === normalizedInput.gatewayId);
         if (!gateway) throw new OnboardingError(404, 'GATEWAY_NOT_FOUND', 'Gateway not found.');
-        if (gateway.state !== 'ACTIVE' || gateway.health !== 'HEALTHY' || gateway.certificateState !== 'ACTIVE') {
-          throw new OnboardingError(409, 'GATEWAY_NOT_STABLE', 'Gateway must be applied healthy with an active certificate before a profile deployment.');
-        }
-        if (tenant.operations.some((candidate) => candidate.gatewayId === gateway.id && candidate.status === 'IN_PROGRESS')) {
-          throw new OnboardingError(409, 'GATEWAY_OPERATION_ACTIVE', 'Another gateway operation is already in progress.');
+        const activeOperations = tenant.operations.filter(
+          (candidate) => candidate.gatewayId === gateway.id && candidate.status === 'IN_PROGRESS',
+        );
+        const activeOperation = activeOperations[0];
+        let supersededOperation: OnboardingOperation | undefined;
+        if (activeOperations.length > 0) {
+          const safelySupersedable = activeOperations.length === 1
+            && gateway.state === 'ACTIVE'
+            && gateway.health === 'APPLYING'
+            && gateway.certificateState === 'ACTIVE'
+            && activeOperation.type === 'PROFILE_DEPLOY'
+            && activeOperation.state === 'PROFILE_STAGED'
+            && activeOperation.deploymentGeneration === gateway.deploymentGeneration
+            && activeOperation.profileVersionId === gateway.profileVersionId;
+          if (!safelySupersedable) {
+            throw new OnboardingError(409, 'GATEWAY_OPERATION_ACTIVE', 'Another gateway operation is already in progress.');
+          }
+          if (normalizedInput.supersedeGeneration !== gateway.deploymentGeneration) {
+            throw new OnboardingError(
+              409,
+              'SUPERSEDE_GENERATION_MISMATCH',
+              `supersedeGeneration must exactly match current generation ${gateway.deploymentGeneration}.`,
+            );
+          }
+          supersededOperation = activeOperation;
+        } else {
+          if (normalizedInput.supersedeGeneration != null) {
+            throw new OnboardingError(
+              409,
+              'SUPERSEDE_GENERATION_MISMATCH',
+              'No in-progress profile deployment matches supersedeGeneration.',
+            );
+          }
+          if (gateway.state !== 'ACTIVE' || gateway.health !== 'HEALTHY' || gateway.certificateState !== 'ACTIVE') {
+            throw new OnboardingError(409, 'GATEWAY_NOT_STABLE', 'Gateway must be applied healthy with an active certificate before a profile deployment.');
+          }
         }
         const profile = tenant.profiles.find((candidate) => candidate.id === normalizedInput.profileVersionId);
         if (!profile) throw new OnboardingError(404, 'PROFILE_NOT_FOUND', 'Selected profile version is unavailable.');
@@ -1025,8 +1073,24 @@ export class OnboardingService {
         }
 
         const createdAt = iso(this.now());
-        const previousProfileVersionId = gateway.profileVersionId;
+        const previousProfileVersionId = supersededOperation?.previousProfileVersionId ?? gateway.profileVersionId;
         const deploymentGeneration = gateway.deploymentGeneration + 1;
+        if (supersededOperation) {
+          this.transitionOperation(
+            tenant,
+            supersededOperation,
+            'FAILED',
+            createdAt,
+            `Profile generation ${supersededOperation.deploymentGeneration} was superseded by generation ${deploymentGeneration}.`,
+          );
+          supersededOperation.status = 'FAILED';
+          supersededOperation.failure = {
+            code: 'PROFILE_ASSIGNMENT_SUPERSEDED',
+            message: 'Profile assignment was superseded by a newer profile deployment.',
+            rolledBack: false,
+          };
+          delete supersededOperation.nextTransitionAt;
+        }
         gateway.profileVersionId = profile.id;
         gateway.deploymentGeneration = deploymentGeneration;
         gateway.health = 'APPLYING';
@@ -1049,15 +1113,28 @@ export class OnboardingService {
           nextTransitionAt: addMilliseconds(createdAt, this.transitionMs),
         };
         tenant.operations.push(value);
-        tenant.audit.push(newAudit(context.tenantId, context.actorId, 'PROFILE_ASSIGN', 'operation', value.id, 'SUCCESS', createdAt));
-        tenant.outbox.push(newOutbox(
+        tenant.audit.push(newAudit(
           context.tenantId,
-          normalizedInput.deliveryMode === 'JOB' ? 'ProfileJobRequested' : 'ProfileShadowUpdateRequested',
+          context.actorId,
+          'PROFILE_ASSIGN',
+          'operation',
           value.id,
+          'SUCCESS',
           createdAt,
-          { gatewayId: gateway.id, thingName: gateway.thingName, profileVersionId: profile.id },
-          deploymentGeneration,
+          supersededOperation
+            ? `Superseded unconfirmed generation ${supersededOperation.deploymentGeneration}.`
+            : undefined,
         ));
+        if (normalizedInput.deliveryMode !== 'PULL') {
+          tenant.outbox.push(newOutbox(
+            context.tenantId,
+            normalizedInput.deliveryMode === 'JOB' ? 'ProfileJobRequested' : 'ProfileShadowUpdateRequested',
+            value.id,
+            createdAt,
+            { gatewayId: gateway.id, thingName: gateway.thingName, profileVersionId: profile.id },
+            deploymentGeneration,
+          ));
+        }
         return value;
       });
     });

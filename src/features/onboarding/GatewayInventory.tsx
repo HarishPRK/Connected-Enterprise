@@ -16,6 +16,10 @@ import {
 import { Modal } from '../../ui/Modal';
 import { useToast } from '../../ui/Toast';
 import { createIdempotencyKey, decommissionGateway, deployProfileToGateway } from './api';
+import {
+  canSupersedeUnconfirmedProfileAssignment,
+  compatibleProfileVersions,
+} from './gatewayProfileDeploymentEligibility';
 import type {
   Gateway,
   GatewayModel,
@@ -112,7 +116,7 @@ export function GatewayInventory({
   const [idempotencyKey, setIdempotencyKey] = useState(() => createIdempotencyKey('decommission'));
   const [deployTarget, setDeployTarget] = useState<Gateway>();
   const [deployProfileId, setDeployProfileId] = useState('');
-  const [deliveryMode, setDeliveryMode] = useState<'SHADOW' | 'JOB'>('SHADOW');
+  const [deliveryMode, setDeliveryMode] = useState<'PULL' | 'SHADOW' | 'JOB'>('PULL');
   const [deploying, setDeploying] = useState(false);
   const [deployError, setDeployError] = useState<string>();
   const [deployIdempotencyKey, setDeployIdempotencyKey] = useState(() => createIdempotencyKey('profile-deploy'));
@@ -166,14 +170,25 @@ export function GatewayInventory({
   };
 
   const compatibleDeployProfiles = deployTarget
-    ? profiles.filter((profile) => profile.modelId === deployTarget.modelId && profile.id !== deployTarget.profileVersionId)
+    ? compatibleProfileVersions(profiles, deployTarget)
     : [];
+  const deployTargetOperation = deployTarget ? operationFor(deployTarget, operations) : undefined;
+  const deployTargetActiveOperation = deployTargetOperation?.status === 'IN_PROGRESS'
+    ? deployTargetOperation
+    : undefined;
+  const deployTargetLegacyMigration = deployTarget
+    ? canMigrateLegacyAssignment(deployTarget, deployTargetActiveOperation)
+    : false;
+  const supersedesUnconfirmedProfile = deployTarget
+    ? canSupersedeUnconfirmedProfileAssignment(deployTarget, deployTargetActiveOperation)
+    : false;
+  const replacesUnconfirmedProfile = deployTargetLegacyMigration || supersedesUnconfirmedProfile;
 
   const openDeploy = (gateway: Gateway) => {
-    const compatible = profiles.filter((profile) => profile.modelId === gateway.modelId && profile.id !== gateway.profileVersionId);
+    const compatible = compatibleProfileVersions(profiles, gateway);
     setDeployTarget(gateway);
     setDeployProfileId(compatible[0]?.id ?? '');
-    setDeliveryMode('SHADOW');
+    setDeliveryMode('PULL');
     setDeployError(undefined);
     setDeployIdempotencyKey(createIdempotencyKey('profile-deploy'));
   };
@@ -195,6 +210,7 @@ export function GatewayInventory({
         deployProfileId,
         deliveryMode,
         deployIdempotencyKey,
+        replacesUnconfirmedProfile ? deployTarget.deploymentGeneration : undefined,
       );
       const selectedProfile = profiles.find((profile) => profile.id === deployProfileId);
       setDeployTarget(undefined);
@@ -258,9 +274,11 @@ export function GatewayInventory({
             const gatewayOperation = operationFor(gateway, operations);
             const activeOperation = gatewayOperation?.status === 'IN_PROGRESS' ? gatewayOperation : undefined;
             const legacyAssignmentCanMigrate = canMigrateLegacyAssignment(gateway, activeOperation);
+            const unconfirmedProfileCanSupersede = canSupersedeUnconfirmedProfileAssignment(gateway, activeOperation);
             const gatewayCanDecommission = gateway.certificateState === 'ACTIVE'
               && (gateway.state === 'ACTIVE' || gateway.state === 'ROLLED_BACK' || gateway.state === 'FAILED');
             const gatewayCanDeploy = legacyAssignmentCanMigrate
+              || unconfirmedProfileCanSupersede
               || (gateway.certificateState === 'ACTIVE'
                 && ((gateway.state === 'ACTIVE' && gateway.health === 'HEALTHY') || gateway.state === 'ROLLED_BACK'));
             return (
@@ -295,12 +313,12 @@ export function GatewayInventory({
                       {activeOperation ? 'View progress' : 'View operation'}
                     </button>
                   )}
-                  {canDeployProfile && gatewayCanDeploy && (!activeOperation || legacyAssignmentCanMigrate) && (
+                  {canDeployProfile && gatewayCanDeploy && (!activeOperation || legacyAssignmentCanMigrate || unconfirmedProfileCanSupersede) && (
                     <button
                       type="button"
                       onClick={() => openDeploy(gateway)}
-                      title={legacyAssignmentCanMigrate
-                        ? `Create signed generation ${gateway.deploymentGeneration + 1} without reprovisioning this gateway`
+                      title={legacyAssignmentCanMigrate || unconfirmedProfileCanSupersede
+                        ? `Create signed generation ${gateway.deploymentGeneration + 1} and supersede the unconfirmed generation ${gateway.deploymentGeneration}`
                         : undefined}
                     >
                       <CloudUpload size={14} aria-hidden="true" />Deploy profile
@@ -352,6 +370,14 @@ export function GatewayInventory({
                 <span>The backend creates a new device generation. The gateway must verify the signature and report the exact version and checksum healthy.</span>
               </div>
             </div>
+            {replacesUnconfirmedProfile && (
+              <div className="ce-onb-alert is-warning" role="note">
+                <TriangleAlert size={17} aria-hidden="true" />
+                <span>
+                  Generation {deployTarget.deploymentGeneration} was delivered but never confirmed applied. This assignment will supersede it and create generation {deployTarget.deploymentGeneration + 1}; it will not mark the old profile healthy.
+                </span>
+              </div>
+            )}
             {compatibleDeployProfiles.length === 0 ? (
               <div className="ce-onb-alert is-warning" role="status">
                 <TriangleAlert size={17} aria-hidden="true" />
@@ -368,12 +394,16 @@ export function GatewayInventory({
                   </select>
                 </label>
                 <label>
-                  <span>Delivery control</span>
-                  <select value={deliveryMode} onChange={(event) => setDeliveryMode(event.target.value as 'SHADOW' | 'JOB')} disabled={deploying}>
-                    <option value="SHADOW">Named Shadow · immediate convergence</option>
-                    <option value="JOB">IoT Job · tracked controlled rollout</option>
+                  <span>Gateway retrieval</span>
+                  <select value={deliveryMode} onChange={(event) => setDeliveryMode(event.target.value as 'PULL' | 'SHADOW' | 'JOB')} disabled={deploying}>
+                    <option value="PULL">HTTPS polling · API Gateway</option>
+                    <option value="SHADOW">Named Shadow · compatibility mode</option>
+                    <option value="JOB">IoT Job · compatibility mode</option>
                   </select>
                 </label>
+                <p>
+                  With HTTPS polling, the gateway pulls the signed generation from API Gateway. No MQTT topic acknowledgement is awaited by this deployment action.
+                </p>
                 <p>
                   Target <strong>{deployTarget.serialNumber}</strong> is currently on generation {deployTarget.deploymentGeneration}.
                 </p>

@@ -155,13 +155,18 @@ export async function decommissionGateway(
 export async function deployProfileToGateway(
   gatewayId: string,
   profileVersionId: string,
-  deliveryMode: 'SHADOW' | 'JOB',
+  deliveryMode: 'PULL' | 'SHADOW' | 'JOB',
   idempotencyKey: string,
+  supersedeGeneration?: number,
   signal?: AbortSignal,
 ): Promise<OnboardingOperation> {
   const result = await postJson<{ operation: OnboardingOperation }>(
     `/api/onboarding/gateways/${encodeURIComponent(gatewayId)}/assignments`,
-    { profileVersionId, deliveryMode },
+    {
+      profileVersionId,
+      deliveryMode,
+      ...(supersedeGeneration === undefined ? {} : { supersedeGeneration }),
+    },
     idempotencyKey,
     signal,
   );

@@ -152,6 +152,7 @@ export async function createOnboardingRouter(options: RouterOptions = {}): Promi
     const operation = await service.assignProfile(context(req), req.params.gatewayId, {
       profileVersionId: req.body?.profileVersionId,
       deliveryMode: req.body?.deliveryMode,
+      supersedeGeneration: req.body?.supersedeGeneration,
     }, idempotencyKey(req));
     res.status(202).json({ operation });
   });

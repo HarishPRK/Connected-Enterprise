@@ -1150,21 +1150,29 @@ test('assignment, retry leases, and decommission are generation and manufacturin
   });
 });
 
-test('legacy delivered assignments are migrated only from an exact lease-free delivery authority', async () => {
-  const { legacyAssignmentMigrationAuthority } = await import('../lambda/api-handler.js');
+test('delivered profile deployments are superseded only from exact lease-free assignment authority', async () => {
+  const {
+    assertProfileAssignmentSupersedeConfirmation,
+    profileAssignmentSupersedeAuthority,
+    profileDeliveryMode,
+  } = await import('../lambda/api-handler.js');
   const nowEpoch = 1_800_000_000;
   const descriptor = {
     kind: 'gateway-profile-assignment',
+    tenantId: 'tenant-a',
     gatewayId: 'gateway-a',
     thingName: 'gw-device-a',
     generation: 1,
     profileVersionId: 'pv-1',
+    configurationClaim: { kind: 'gateway-configuration-claim' },
     signature: 'legacy-signature',
   };
   const gateway = {
     entityType: 'GATEWAY',
+    tenantId: 'tenant-a',
     gatewayId: 'gateway-a',
     thingName: 'gw-device-a',
+    certificateId: 'certificate-a',
     certificateStatus: 'ACTIVE',
     state: 'PROFILE_DELIVERED',
     generation: 1,
@@ -1176,6 +1184,7 @@ test('legacy delivered assignments are migrated only from an exact lease-free de
   };
   const deployment = {
     entityType: 'DEPLOYMENT',
+    tenantId: 'tenant-a',
     gatewayId: 'gateway-a',
     generation: 1,
     profileVersionId: 'pv-1',
@@ -1185,7 +1194,9 @@ test('legacy delivered assignments are migrated only from an exact lease-free de
   };
   const operation = {
     entityType: 'OPERATION',
+    tenantId: 'tenant-a',
     operationId: 'op-1',
+    type: 'PROFILE_DEPLOY',
     gatewayId: 'gateway-a',
     deploymentGeneration: 1,
     profileVersionId: 'pv-1',
@@ -1193,32 +1204,81 @@ test('legacy delivered assignments are migrated only from an exact lease-free de
     state: 'PROFILE_STAGED',
   };
 
+  const modernAuthority = profileAssignmentSupersedeAuthority(gateway, deployment, operation, nowEpoch);
   assert.deepEqual(
-    legacyAssignmentMigrationAuthority(gateway, deployment, operation, nowEpoch),
-    { descriptor, operationId: 'op-1', profileVersionId: 'pv-1' },
+    modernAuthority,
+    {
+      descriptor,
+      operationId: 'op-1',
+      operationType: 'PROFILE_DEPLOY',
+      profileVersionId: 'pv-1',
+      tenantId: 'tenant-a',
+      thingName: 'gw-device-a',
+      certificateId: 'certificate-a',
+      requiresExplicitConfirmation: true,
+    },
+  );
+  const legacyDescriptor: Record<string, unknown> = { ...descriptor };
+  delete legacyDescriptor.configurationClaim;
+  const legacyAuthority = profileAssignmentSupersedeAuthority(
+      { ...gateway, signedDescriptor: legacyDescriptor },
+      { ...deployment, descriptor: legacyDescriptor },
+      { ...operation, type: 'ONBOARD' },
+      nowEpoch,
+    );
+  assert.equal(legacyAuthority.requiresExplicitConfirmation, false);
+  assert.equal(legacyAuthority.operationType, 'ONBOARD');
+  assert.throws(
+    () => assertProfileAssignmentSupersedeConfirmation(modernAuthority, 1, undefined),
+    /must exactly match current generation 1/,
+  );
+  assert.throws(
+    () => assertProfileAssignmentSupersedeConfirmation(modernAuthority, 1, 2),
+    /must exactly match current generation 1/,
+  );
+  assert.doesNotThrow(() => assertProfileAssignmentSupersedeConfirmation(modernAuthority, 1, 1));
+  assert.doesNotThrow(() => assertProfileAssignmentSupersedeConfirmation(legacyAuthority, 1, undefined));
+  assert.throws(
+    () => assertProfileAssignmentSupersedeConfirmation(legacyAuthority, 1, 2),
+    /must exactly match current generation 1/,
   );
   const rejectedAuthorities: Array<[Record<string, unknown>, Record<string, unknown>, Record<string, unknown>]> = [
     [{ ...gateway, certificateStatus: 'INACTIVE' }, deployment, operation],
     [{ ...gateway, dispatchLeaseExpiresAtEpoch: nowEpoch }, deployment, operation],
-    [{ ...gateway, signedDescriptor: { ...descriptor, configurationClaim: {} } }, deployment, operation],
     [{ ...gateway, signedDescriptor: undefined }, deployment, operation],
+    [{ ...gateway, tenantId: 'tenant-racing' }, deployment, operation],
+    [gateway, { ...deployment, descriptor: { ...descriptor, profileVersionId: 'pv-racing' } }, operation],
     [gateway, { ...deployment, status: 'APPLIED_HEALTHY' }, operation],
+    [gateway, deployment, { ...operation, type: 'DECOMMISSION' }],
+    [gateway, deployment, { ...operation, type: 'ONBOARD' }],
+    [{ ...gateway, signedDescriptor: legacyDescriptor }, { ...deployment, descriptor: legacyDescriptor }, operation],
     [gateway, deployment, { ...operation, operationStatus: 'SUCCEEDED' }],
     [gateway, deployment, { ...operation, operationId: 'op-racing' }],
   ];
   for (const authority of rejectedAuthorities) {
     assert.throws(
-      () => legacyAssignmentMigrationAuthority(...authority, nowEpoch),
-      /cannot be migrated safely/,
+      () => profileAssignmentSupersedeAuthority(...authority, nowEpoch),
+      /cannot be superseded safely/,
     );
   }
+
+  assert.equal(profileDeliveryMode(undefined), 'PULL');
+  assert.equal(profileDeliveryMode('PULL'), 'PULL');
+  assert.equal(profileDeliveryMode('SHADOW'), 'SHADOW');
+  assert.equal(profileDeliveryMode('JOB'), 'JOB');
+  assert.throws(() => profileDeliveryMode('MQTT'), /must be PULL, SHADOW, or JOB/);
 
   const api = fs.readFileSync(path.join(process.cwd(), 'lambda', 'api-handler.ts'), 'utf8');
   assert.match(api, /#status = :superseded[\s\S]*':superseded': 'SUPERSEDED'/);
   assert.match(api, /#descriptor = :descriptor[\s\S]*'#descriptor': 'descriptor'/);
   assert.doesNotMatch(api, / AND descriptor = :descriptor/);
-  assert.match(api, /code: 'LEGACY_ASSIGNMENT_SUPERSEDED'/);
+  assert.match(api, /code: 'PROFILE_ASSIGNMENT_SUPERSEDED'/);
   assert.match(api, /supersededByGeneration/);
+  assert.match(api, /supersedeGeneration[^\n]*requestHash|requestHash[\s\S]*supersedeGeneration/);
+  assert.match(api, /supersedeGeneration !== currentGeneration/);
+  assert.match(api, /supersedeGeneration does not match an unconfirmed profile assignment/);
+  assert.match(api, /#type = :operationType/);
+  assert.match(api, /deliveryMode === 'PULL' \? \[\] : \[\{/);
   assert.match(api, /#state IN \(:healthy, :rolledBack\)/);
 });
 

@@ -9,14 +9,16 @@ const tenantB: OperatorContext = { tenantId: 'tenant_other', actorId: 'operator_
 
 async function setup(options: { simulateDevice?: boolean } = {}) {
   let current = new Date('2026-08-16T12:00:00.000Z');
+  const repository = new MemoryOnboardingRepository();
   const service = await OnboardingService.create({
-    repository: new MemoryOnboardingRepository(),
+    repository,
     now: () => new Date(current),
     transitionMs: 1_000,
     simulateDevice: options.simulateDevice ?? false,
   });
   return {
     service,
+    repository,
     advance(milliseconds: number) {
       current = new Date(current.getTime() + milliseconds);
     },
@@ -423,6 +425,84 @@ describe('OnboardingService', () => {
     const updatedGateway = (await service.getSnapshot(tenantA)).gateways[0];
     assert.equal(updatedGateway.profileVersionId, successor.id);
     assert.equal(updatedGateway.deploymentGeneration, 2);
+  });
+
+  it('supersedes only the exact unconfirmed profile generation and keeps pull delivery broker-free', async () => {
+    const { service, repository, advance } = await setup({ simulateDevice: true });
+    const verification = await verifiedGateway(service);
+    const initial = (await service.getSnapshot(tenantA)).profiles.find(
+      (candidate) => candidate.modelId === verification.identity.modelId,
+    );
+    assert.ok(initial);
+    const onboard = await service.startOnboarding(tenantA, {
+      verificationId: verification.verificationId,
+      siteId: verification.allowedSites[0].id,
+      profileVersionId: initial.id,
+    }, 'onboard-supersede-01');
+    advance(10_000);
+    await service.reconcileAll();
+    assert.equal((await service.getOperation(tenantA, onboard.id)).status, 'SUCCEEDED');
+
+    const generationTwoProfile = await service.createProfile(tenantA, {
+      name: initial.name,
+      description: initial.description,
+      modelId: initial.modelId,
+      baseProfileVersionId: initial.id,
+      schemaVersion: 2,
+      parameters: { ...initial.parameters, wanMtu: 1492 },
+      changeNote: 'Stage generation two for explicit supersession',
+    }, 'profile-supersede-v2');
+    const gateway = (await service.getSnapshot(tenantA)).gateways[0];
+    const generationTwo = await service.assignProfile(tenantA, gateway.id, {
+      profileVersionId: generationTwoProfile.id,
+      deliveryMode: 'PULL',
+    }, 'assign-supersede-02');
+
+    const generationThreeProfile = await service.createProfile(tenantA, {
+      name: initial.name,
+      description: initial.description,
+      modelId: initial.modelId,
+      baseProfileVersionId: generationTwoProfile.id,
+      schemaVersion: 2,
+      parameters: { ...generationTwoProfile.parameters, wanMtu: 1480 },
+      changeNote: 'Replace the unconfirmed generation two candidate',
+    }, 'profile-supersede-v3');
+    await assert.rejects(
+      service.assignProfile(tenantA, gateway.id, {
+        profileVersionId: generationThreeProfile.id,
+        deliveryMode: 'PULL',
+      }, 'assign-supersede-missing'),
+      (error: unknown) => error instanceof OnboardingError && error.code === 'SUPERSEDE_GENERATION_MISMATCH',
+    );
+    await assert.rejects(
+      service.assignProfile(tenantA, gateway.id, {
+        profileVersionId: generationThreeProfile.id,
+        deliveryMode: 'PULL',
+        supersedeGeneration: 1,
+      }, 'assign-supersede-stale'),
+      (error: unknown) => error instanceof OnboardingError && error.code === 'SUPERSEDE_GENERATION_MISMATCH',
+    );
+
+    const generationThree = await service.assignProfile(tenantA, gateway.id, {
+      profileVersionId: generationThreeProfile.id,
+      deliveryMode: 'PULL',
+      supersedeGeneration: 2,
+    }, 'assign-supersede-03');
+    assert.equal(generationThree.deploymentGeneration, 3);
+    assert.equal(generationThree.previousProfileVersionId, initial.id);
+    const superseded = await service.getOperation(tenantA, generationTwo.id);
+    assert.equal(superseded.status, 'FAILED');
+    assert.equal(superseded.state, 'FAILED');
+    assert.equal(superseded.failure?.code, 'PROFILE_ASSIGNMENT_SUPERSEDED');
+    assert.equal(superseded.failure?.rolledBack, false);
+    assert.equal(superseded.timeline.at(-1)?.state, 'FAILED');
+
+    const database = await repository.load();
+    assert.ok(database);
+    const brokerNotifications = database.tenants[tenantA.tenantId].outbox.filter(
+      (event) => event.type === 'ProfileJobRequested' || event.type === 'ProfileShadowUpdateRequested',
+    );
+    assert.deepEqual(brokerNotifications, []);
   });
 
   it('decommissions by certificate deactivation without deleting audit history', async () => {

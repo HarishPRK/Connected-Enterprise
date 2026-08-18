@@ -182,7 +182,7 @@ The stack outputs `IotCredentialProviderEndpoint`, `GatewayConfigRoleAliasName`,
 
 The device must reject stale generations, expired integrity claims, incompatible models/firmware, invalid signatures, hash mismatches, and rollback attempts without explicit signed authorization.
 
-Profile reassignment uses `POST /api/onboarding/gateways/{gatewayId}/assignments` with `profileVersionId` and `deliveryMode` (`SHADOW` for immediate convergence or `JOB` for a controlled rollout). The control plane always creates a new operation and monotonic generation. Inventory reports the last attested applied profile separately from any in-flight desired profile.
+Profile reassignment uses `POST /api/onboarding/gateways/{gatewayId}/assignments` with `profileVersionId` and `deliveryMode`. `PULL` is the default HTTPS-only mode and creates no Shadow/Job outbox event; `SHADOW` and `JOB` remain optional compatibility notification modes. The control plane always creates a new operation and monotonic generation. An operator may replace an exact unconfirmed profile assignment by also sending `supersedeGeneration` equal to the current generation; the old deployment is atomically marked superseded and is never represented as successfully applied. Inventory reports the last attested applied profile separately from any in-flight desired profile.
 
 ## Operational gates before production
 

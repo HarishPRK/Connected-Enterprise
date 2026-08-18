@@ -46,10 +46,17 @@ const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
 const VERIFICATION_TTL_SECONDS = 15 * 60;
 const ASSIGNABLE_GATEWAY_STATES = new Set(['APPLIED_HEALTHY', 'ROLLED_BACK']);
 
-interface LegacyAssignmentMigration {
+type ProfileDeliveryMode = 'PULL' | 'SHADOW' | 'JOB';
+
+interface SupersededProfileAssignment {
   descriptor: Record<string, unknown>;
   operationId: string;
+  operationType: 'ONBOARD' | 'PROFILE_DEPLOY';
   profileVersionId: string;
+  tenantId: string;
+  thingName: string;
+  certificateId: string;
+  requiresExplicitConfirmation: boolean;
 }
 
 interface IdempotencyRecord extends Record<string, unknown> {
@@ -714,9 +721,12 @@ async function assignProfile(
   const gatewayId = normalizeIdentifier(event.pathParameters?.gatewayId, 'gatewayId');
   const body = parseJsonBody<Record<string, unknown>>(event, 32 * 1024);
   const profileVersionId = normalizeIdentifier(body.profileVersionId, 'profileVersionId');
-  const deliveryMode = body.deliveryMode === 'JOB' ? 'JOB' : 'SHADOW';
+  const deliveryMode = profileDeliveryMode(body.deliveryMode);
+  const supersedeGeneration = optionalPositiveInteger(body.supersedeGeneration, 'supersedeGeneration');
   const key = idempotencyKey(event);
-  const requestHash = sha256(canonicalJson({ route: event.routeKey, gatewayId, profileVersionId, deliveryMode }));
+  const requestHash = sha256(canonicalJson({
+    route: event.routeKey, gatewayId, profileVersionId, deliveryMode, supersedeGeneration,
+  }));
   const existing = await existingIdempotency(context.tenantId, event.routeKey, key, requestHash);
   if (existing) return json(existing.statusCode ?? 202, existing.response);
   const [gatewayResult, profileVersion] = await Promise.all([
@@ -738,11 +748,11 @@ async function assignProfile(
   if (Number(gateway.dispatchLeaseExpiresAtEpoch ?? 0) >= assignmentNowEpoch) {
     throw new ConflictError('Gateway has an active profile-delivery lease');
   }
-  let legacyMigration: LegacyAssignmentMigration | undefined;
+  let supersededAssignment: SupersededProfileAssignment | undefined;
   if (currentGatewayState === 'PROFILE_DELIVERED') {
     if (!Number.isSafeInteger(currentGeneration) || currentGeneration < 1
       || typeof gateway.operationId !== 'string' || !gateway.operationId) {
-      throw new ConflictError('Legacy profile assignment cannot be migrated safely');
+      throw new ConflictError('Profile assignment cannot be superseded safely');
     }
     const [deploymentResult, operationResult] = await Promise.all([
       ddb.send(new GetCommand({
@@ -756,14 +766,24 @@ async function assignProfile(
         ConsistentRead: true,
       })),
     ]);
-    legacyMigration = legacyAssignmentMigrationAuthority(
+    supersededAssignment = profileAssignmentSupersedeAuthority(
       gateway,
       deploymentResult.Item ?? {},
       operationResult.Item ?? {},
       assignmentNowEpoch,
     );
-  } else if (!ASSIGNABLE_GATEWAY_STATES.has(currentGatewayState)) {
-    throw new ConflictError('Gateway is not in a stable state that permits profile assignment');
+    assertProfileAssignmentSupersedeConfirmation(
+      supersededAssignment,
+      currentGeneration,
+      supersedeGeneration,
+    );
+  } else {
+    if (supersedeGeneration != null) {
+      throw new ConflictError('supersedeGeneration does not match an unconfirmed profile assignment');
+    }
+    if (!ASSIGNABLE_GATEWAY_STATES.has(currentGatewayState)) {
+      throw new ConflictError('Gateway is not in a stable state that permits profile assignment');
+    }
   }
   const generation = currentGeneration + 1;
   const now = new Date().toISOString();
@@ -812,8 +832,8 @@ async function assignProfile(
         TableName: TABLE_NAME,
         Key: { PK: tenantPk(context.tenantId), SK: gatewaySk(gatewayId) },
         UpdateExpression: 'SET generation = :generation, desiredGeneration = :generation, desiredProfileVersionId = :versionId, signedDescriptor = :descriptor, operationId = :operationId, #state = :available, health = :applying, updatedAt = :now',
-        ConditionExpression: legacyMigration
-          ? 'entityType = :gateway AND generation = :current AND desiredGeneration = :current AND desiredProfileVersionId = :legacyProfileVersionId AND operationId = :legacyOperationId AND signedDescriptor = :legacyDescriptor AND #state = :currentState AND certificateStatus = :active AND (attribute_not_exists(dispatchLeaseExpiresAtEpoch) OR dispatchLeaseExpiresAtEpoch < :nowEpoch)'
+        ConditionExpression: supersededAssignment
+          ? 'entityType = :gateway AND tenantId = :tenantId AND gatewayId = :gatewayId AND thingName = :thingName AND certificateId = :certificateId AND generation = :current AND desiredGeneration = :current AND desiredProfileVersionId = :supersededProfileVersionId AND operationId = :supersededOperationId AND signedDescriptor = :supersededDescriptor AND #state = :currentState AND certificateStatus = :active AND (attribute_not_exists(dispatchLeaseExpiresAtEpoch) OR dispatchLeaseExpiresAtEpoch < :nowEpoch)'
           : 'entityType = :gateway AND generation = :current AND #state = :currentState AND #state IN (:healthy, :rolledBack) AND certificateStatus = :active AND (attribute_not_exists(dispatchLeaseExpiresAtEpoch) OR dispatchLeaseExpiresAtEpoch < :nowEpoch)',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
@@ -821,10 +841,14 @@ async function assignProfile(
           ':generation': generation, ':versionId': profileVersionId, ':descriptor': descriptor,
           ':operationId': operationId, ':available': 'PROFILE_AVAILABLE', ':applying': 'APPLYING', ':now': now,
           ':active': 'ACTIVE', ':nowEpoch': assignmentNowEpoch,
-          ...(legacyMigration ? {
-            ':legacyProfileVersionId': legacyMigration.profileVersionId,
-            ':legacyOperationId': legacyMigration.operationId,
-            ':legacyDescriptor': legacyMigration.descriptor,
+          ...(supersededAssignment ? {
+            ':tenantId': supersededAssignment.tenantId,
+            ':gatewayId': gatewayId,
+            ':thingName': supersededAssignment.thingName,
+            ':certificateId': supersededAssignment.certificateId,
+            ':supersededProfileVersionId': supersededAssignment.profileVersionId,
+            ':supersededOperationId': supersededAssignment.operationId,
+            ':supersededDescriptor': supersededAssignment.descriptor,
           } : {
             ':healthy': 'APPLIED_HEALTHY',
             ':rolledBack': 'ROLLED_BACK',
@@ -832,18 +856,19 @@ async function assignProfile(
         },
       },
     },
-    ...(legacyMigration ? [
+    ...(supersededAssignment ? [
       {
         Update: {
           TableName: TABLE_NAME,
           Key: { PK: tenantPk(context.tenantId), SK: deploymentSk(gatewayId, currentGeneration) },
           UpdateExpression: 'SET #status = :superseded, supersededAt = :now, supersededByGeneration = :nextGeneration, supersededByOperationId = :nextOperationId, updatedAt = :now',
-          ConditionExpression: 'entityType = :deployment AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND #descriptor = :descriptor AND #status = :delivered',
+          ConditionExpression: 'entityType = :deployment AND tenantId = :tenantId AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND #descriptor = :descriptor AND #status = :delivered',
           ExpressionAttributeNames: { '#descriptor': 'descriptor', '#status': 'status' },
           ExpressionAttributeValues: {
             ':deployment': 'DEPLOYMENT', ':gatewayId': gatewayId, ':generation': currentGeneration,
-            ':profileVersionId': legacyMigration.profileVersionId, ':operationId': legacyMigration.operationId,
-            ':descriptor': legacyMigration.descriptor, ':delivered': 'PROFILE_DELIVERED',
+            ':tenantId': supersededAssignment.tenantId,
+            ':profileVersionId': supersededAssignment.profileVersionId, ':operationId': supersededAssignment.operationId,
+            ':descriptor': supersededAssignment.descriptor, ':delivered': 'PROFILE_DELIVERED',
             ':superseded': 'SUPERSEDED', ':nextGeneration': generation, ':nextOperationId': operationId, ':now': now,
           },
         },
@@ -851,24 +876,25 @@ async function assignProfile(
       {
         Update: {
           TableName: TABLE_NAME,
-          Key: { PK: tenantPk(context.tenantId), SK: operationSk(legacyMigration.operationId) },
+          Key: { PK: tenantPk(context.tenantId), SK: operationSk(supersededAssignment.operationId) },
           UpdateExpression: 'SET operationStatus = :failed, #state = :failed, supersededAt = :now, supersededByGeneration = :nextGeneration, supersededByOperationId = :nextOperationId, failure = :failure, updatedAt = :now, timeline = list_append(if_not_exists(timeline, :empty), :events)',
-          ConditionExpression: 'entityType = :operation AND operationId = :operationId AND gatewayId = :gatewayId AND deploymentGeneration = :generation AND profileVersionId = :profileVersionId AND operationStatus = :inProgress AND #state = :profileStaged',
-          ExpressionAttributeNames: { '#state': 'state' },
+          ConditionExpression: 'entityType = :operation AND tenantId = :tenantId AND operationId = :operationId AND #type = :operationType AND gatewayId = :gatewayId AND deploymentGeneration = :generation AND profileVersionId = :profileVersionId AND operationStatus = :inProgress AND #state = :profileStaged',
+          ExpressionAttributeNames: { '#state': 'state', '#type': 'type' },
           ExpressionAttributeValues: {
-            ':operation': 'OPERATION', ':operationId': legacyMigration.operationId, ':gatewayId': gatewayId,
-            ':generation': currentGeneration, ':profileVersionId': legacyMigration.profileVersionId,
+            ':operation': 'OPERATION', ':tenantId': supersededAssignment.tenantId,
+            ':operationId': supersededAssignment.operationId, ':operationType': supersededAssignment.operationType, ':gatewayId': gatewayId,
+            ':generation': currentGeneration, ':profileVersionId': supersededAssignment.profileVersionId,
             ':inProgress': 'IN_PROGRESS', ':profileStaged': 'PROFILE_STAGED', ':failed': 'FAILED',
             ':nextGeneration': generation, ':nextOperationId': operationId, ':now': now, ':empty': [],
             ':failure': {
-              code: 'LEGACY_ASSIGNMENT_SUPERSEDED',
-              message: 'Legacy assignment was superseded by a signed inline-configuration assignment.',
+              code: 'PROFILE_ASSIGNMENT_SUPERSEDED',
+              message: 'Profile assignment was superseded by a newer profile deployment.',
               rolledBack: false,
             },
             ':events': [{
               state: 'FAILED',
               at: now,
-              detail: `Legacy generation ${currentGeneration} was superseded by generation ${generation}.`,
+              detail: `Profile generation ${currentGeneration} was superseded by generation ${generation}.`,
             }],
           },
         },
@@ -876,7 +902,7 @@ async function assignProfile(
     ] : []),
     { Put: { TableName: TABLE_NAME, Item: deployment, ConditionExpression: 'attribute_not_exists(PK)' } },
     { Put: { TableName: TABLE_NAME, Item: operation, ConditionExpression: 'attribute_not_exists(PK)' } },
-    {
+    ...(deliveryMode === 'PULL' ? [] : [{
       Put: {
         TableName: TABLE_NAME,
         Item: {
@@ -887,28 +913,37 @@ async function assignProfile(
         },
         ConditionExpression: 'attribute_not_exists(PK)',
       },
-    },
+    }]),
     { Put: { TableName: TABLE_NAME, Item: idempotencyItem(context.tenantId, event.routeKey, key, requestHash, response, 202), ConditionExpression: 'attribute_not_exists(PK)' } },
     { Put: { TableName: TABLE_NAME, Item: auditItem(context, 'PROFILE_ASSIGNED', deploymentId, now, {
       gatewayId, generation, profileVersionId, deliveryMode,
-      ...(legacyMigration ? { supersededLegacyGeneration: currentGeneration } : {}),
+      ...(supersededAssignment ? {
+        supersededGeneration: currentGeneration,
+        supersedeGeneration,
+        supersededOperationId: supersededAssignment.operationId,
+      } : {}),
     }), ConditionExpression: 'attribute_not_exists(PK)' } },
   ] }));
   return json(202, response);
 }
 
-export function legacyAssignmentMigrationAuthority(
+export function profileAssignmentSupersedeAuthority(
   gateway: Record<string, unknown>,
   deployment: Record<string, unknown>,
   operation: Record<string, unknown>,
   nowEpoch: number,
-): LegacyAssignmentMigration {
+): SupersededProfileAssignment {
   const conflict = (): never => {
-    throw new ConflictError('Legacy profile assignment cannot be migrated safely');
+    throw new ConflictError('Profile assignment cannot be superseded safely');
   };
+  const tenantId = typeof gateway.tenantId === 'string' && gateway.tenantId ? gateway.tenantId : conflict();
   const gatewayId = typeof gateway.gatewayId === 'string' && gateway.gatewayId ? gateway.gatewayId : conflict();
   const thingName = typeof gateway.thingName === 'string' && gateway.thingName ? gateway.thingName : conflict();
+  const certificateId = typeof gateway.certificateId === 'string' && gateway.certificateId ? gateway.certificateId : conflict();
   const operationId = typeof gateway.operationId === 'string' && gateway.operationId ? gateway.operationId : conflict();
+  const operationType = operation.type === 'ONBOARD' || operation.type === 'PROFILE_DEPLOY'
+    ? operation.type
+    : conflict();
   const profileVersionId = typeof gateway.desiredProfileVersionId === 'string' && gateway.desiredProfileVersionId
     ? gateway.desiredProfileVersionId
     : conflict();
@@ -917,24 +952,32 @@ export function legacyAssignmentMigrationAuthority(
   const leaseValue = gateway.dispatchLeaseExpiresAtEpoch;
   const leaseExpiresAtEpoch = Number(leaseValue ?? 0);
   const descriptor = gateway.signedDescriptor;
-  if (gateway.state !== 'PROFILE_DELIVERED'
+  if (gateway.entityType !== 'GATEWAY'
+    || gateway.state !== 'PROFILE_DELIVERED'
     || gateway.certificateStatus !== 'ACTIVE'
     || !Number.isSafeInteger(generation) || generation < 1
     || desiredGeneration !== generation
     || (leaseValue != null && !Number.isSafeInteger(leaseExpiresAtEpoch))
     || leaseExpiresAtEpoch >= nowEpoch
-    || descriptor == null || typeof descriptor !== 'object' || Array.isArray(descriptor)
-    || Object.hasOwn(descriptor, 'configurationClaim')) {
+    || descriptor == null || typeof descriptor !== 'object' || Array.isArray(descriptor)) {
     return conflict();
   }
   const signedDescriptor = descriptor as Record<string, unknown>;
-  if (signedDescriptor.gatewayId !== gatewayId
+  const hasConfigurationClaim = Object.hasOwn(signedDescriptor, 'configurationClaim');
+  if ((operationType === 'ONBOARD' && hasConfigurationClaim)
+    || (operationType === 'PROFILE_DEPLOY' && !hasConfigurationClaim)) {
+    return conflict();
+  }
+  if (signedDescriptor.kind !== 'gateway-profile-assignment'
+    || signedDescriptor.tenantId !== tenantId
+    || signedDescriptor.gatewayId !== gatewayId
     || signedDescriptor.thingName !== thingName
     || Number(signedDescriptor.generation) !== generation
     || signedDescriptor.profileVersionId !== profileVersionId) {
     return conflict();
   }
   if (deployment.entityType !== 'DEPLOYMENT'
+    || deployment.tenantId !== tenantId
     || deployment.gatewayId !== gatewayId
     || Number(deployment.generation) !== generation
     || deployment.profileVersionId !== profileVersionId
@@ -945,6 +988,7 @@ export function legacyAssignmentMigrationAuthority(
     return conflict();
   }
   if (operation.entityType !== 'OPERATION'
+    || operation.tenantId !== tenantId
     || operation.operationId !== operationId
     || operation.gatewayId !== gatewayId
     || Number(operation.deploymentGeneration) !== generation
@@ -953,7 +997,27 @@ export function legacyAssignmentMigrationAuthority(
     || operation.state !== 'PROFILE_STAGED') {
     return conflict();
   }
-  return { descriptor: signedDescriptor, operationId, profileVersionId };
+  return {
+    descriptor: signedDescriptor,
+    operationId,
+    operationType,
+    profileVersionId,
+    tenantId,
+    thingName,
+    certificateId,
+    requiresExplicitConfirmation: hasConfigurationClaim,
+  };
+}
+
+export function assertProfileAssignmentSupersedeConfirmation(
+  assignment: Pick<SupersededProfileAssignment, 'requiresExplicitConfirmation'>,
+  currentGeneration: number,
+  supersedeGeneration: number | undefined,
+): void {
+  if ((assignment.requiresExplicitConfirmation && supersedeGeneration == null)
+    || (supersedeGeneration != null && supersedeGeneration !== currentGeneration)) {
+    throw new ConflictError(`supersedeGeneration must exactly match current generation ${currentGeneration}`);
+  }
 }
 
 async function queryTenantEntityPrefix(
@@ -1136,6 +1200,20 @@ function optionalText(value: unknown, label: string, maxLength: number): string 
   if (value == null || value === '') return undefined;
   if (typeof value !== 'string' || value.trim().length > maxLength) throw new InputError(`${label} must not exceed ${maxLength} characters`);
   return value.trim();
+}
+
+export function profileDeliveryMode(value: unknown): ProfileDeliveryMode {
+  if (value == null || value === '') return 'PULL';
+  if (value === 'PULL' || value === 'SHADOW' || value === 'JOB') return value;
+  throw new InputError('deliveryMode must be PULL, SHADOW, or JOB');
+}
+
+function optionalPositiveInteger(value: unknown, label: string): number | undefined {
+  if (value == null || value === '') return undefined;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new InputError(`${label} must be a positive integer`);
+  }
+  return value;
 }
 
 export function publicGateway(item: Record<string, unknown>) {
