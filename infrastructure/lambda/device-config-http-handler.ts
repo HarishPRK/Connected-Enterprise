@@ -25,6 +25,7 @@ import {
   canonicalJson,
   type GatewayConfigurationClaimInput,
 } from './shared/profile.js';
+import { INITIAL_OPERATION_STEPS } from './shared/models.js';
 import {
   finalizePermanentIdentity,
   PermanentIdentityFinalizationError,
@@ -66,8 +67,11 @@ const FORWARD_DELIVERY_STATES = new Set([
   'ROLLING_BACK',
   'ROLLED_BACK',
 ]);
+const ACTIVE_DEPLOYMENT_STATES = new Set([
+  ...DELIVERY_DEPLOYMENT_STATES,
+  ...FORWARD_DELIVERY_STATES,
+]);
 const ACTIVE_OPERATION_STATES = new Set([
-  'CLAIM_ACCEPTED',
   'CSR_VERIFIED',
   'OPERATIONAL_IDENTITY_ISSUED',
   'PROFILE_STAGED',
@@ -82,6 +86,23 @@ const DELIVERY_OPERATION_STATES = new Set([
   'CSR_VERIFIED',
   'OPERATIONAL_IDENTITY_ISSUED',
 ]);
+const FORWARD_OPERATION_STATES = new Set([
+  'PROFILE_STAGED',
+  'APPLYING',
+  'HEALTH_CHECK',
+  'APPLIED_HEALTHY',
+  'FAILED',
+  'ROLLING_BACK',
+  'ROLLED_BACK',
+]);
+const OPERATION_TYPES = new Set(['ONBOARD', 'PROFILE_DEPLOY']);
+const OPERATION_STATUSES = new Set(['IN_PROGRESS', 'SUCCEEDED', 'FAILED']);
+const OPERATION_STEP_STATUSES = new Set(['pending', 'in_progress', 'complete', 'error']);
+const OPERATION_TIMELINE_STATES = new Set([
+  'CLAIM_ACCEPTED',
+  ...ACTIVE_OPERATION_STATES,
+]);
+const MAX_OPERATION_TIMELINE_EVENTS = 512;
 
 type Item = Record<string, unknown>;
 type TransactItems = NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']>;
@@ -105,6 +126,8 @@ interface ConfigurationAuthority {
   tenantId: string;
   gatewayId: string;
   operationId: string;
+  operationType: string;
+  operationStatus: string;
   certificatePrincipal: string;
   generation: number;
   profileVersionId: string;
@@ -343,22 +366,35 @@ async function configurationAuthority(
     || deployment.generation !== request.generation
     || deployment.profileVersionId !== desiredProfileVersionId
     || gateway.operationId !== operationId
+    || !ACTIVE_DEPLOYMENT_STATES.has(String(deployment.status))
     || !isRecord(deployment.descriptor)
     || canonicalJson(deployment.descriptor) !== canonicalJson(descriptor)) {
     throw unavailable();
   }
 
-  const operation = await dependencies.getItem({ PK: expectedPk, SK: operationSk(operationId) });
-  if (!operation
-    || operation.entityType !== 'OPERATION'
+  const storedOperation = await dependencies.getItem({ PK: expectedPk, SK: operationSk(operationId) });
+  const operationType = requiredStoredString(storedOperation?.type, unavailable);
+  const operationStatus = requiredStoredString(storedOperation?.operationStatus, unavailable);
+  const operationState = requiredStoredString(storedOperation?.state, unavailable);
+  if (!storedOperation
+    || !OPERATION_TYPES.has(operationType)
+    || !validOperationStatus(operationState, operationStatus)
+    || !ACTIVE_OPERATION_STATES.has(operationState)) {
+    throw unavailable();
+  }
+  const operation: Item = {
+    ...storedOperation,
+    steps: canonicalOperationSteps(storedOperation.steps),
+    timeline: canonicalOperationTimeline(storedOperation.timeline),
+  };
+  if (operation.entityType !== 'OPERATION'
     || operation.PK !== expectedPk
     || operation.SK !== operationSk(operationId)
     || operation.tenantId !== tenantId
     || operation.operationId !== operationId
     || operation.gatewayId !== gatewayId
     || operation.profileVersionId !== desiredProfileVersionId
-    || operation.deploymentGeneration !== request.generation
-    || !ACTIVE_OPERATION_STATES.has(String(operation.state))) {
+    || operation.deploymentGeneration !== request.generation) {
     throw unavailable();
   }
 
@@ -369,6 +405,8 @@ async function configurationAuthority(
     tenantId,
     gatewayId,
     operationId,
+    operationType,
+    operationStatus,
     certificatePrincipal,
     generation: request.generation,
     profileVersionId: desiredProfileVersionId,
@@ -563,7 +601,7 @@ async function recordHttpDelivery(
           ':profileVersionId': authority.profileVersionId,
           ':operationId': authority.operationId,
           ':descriptor': authority.descriptor,
-          ':delivered': 'PROFILE_DELIVERED',
+          ...(transitionGateway ? { ':delivered': 'PROFILE_DELIVERED' } : {}),
           ':now': now,
         },
       },
@@ -596,7 +634,7 @@ async function recordHttpDelivery(
           ':profileVersionId': authority.profileVersionId,
           ':operationId': authority.operationId,
           ':descriptor': authority.descriptor,
-          ':delivered': 'PROFILE_DELIVERED',
+          ...(transitionDeployment ? { ':delivered': 'PROFILE_DELIVERED' } : {}),
           ':now': now,
         },
       },
@@ -604,42 +642,72 @@ async function recordHttpDelivery(
   ];
 
   if (transitionOperation) {
+    const observedSteps = canonicalOperationSteps(authority.operation.steps);
+    const observedTimeline = canonicalOperationTimeline(authority.operation.timeline);
+    const nextSteps = observedSteps.map((step) => ({ ...step }));
+    nextSteps[1] = {
+      key: 'identity',
+      label: 'Permanent identity provisioned',
+      status: 'complete',
+      detail: 'Permanent certificate authenticated by AWS IoT credentials provider.',
+      timestamp: now,
+    };
+    nextSteps[2] = {
+      key: 'profile',
+      label: 'Signed profile delivered',
+      status: 'complete',
+      detail: `Signed profile generation ${authority.generation} delivered.`,
+      timestamp: now,
+    };
+    const nextTimeline = [
+      ...observedTimeline.map((entry) => ({ ...entry })),
+      {
+        state: 'PROFILE_STAGED',
+        detail: `Signed profile generation ${authority.generation} delivered over authenticated HTTPS.`,
+        at: now,
+      },
+    ];
     transaction.push({
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: operationSk(authority.operationId) },
-        UpdateExpression: 'SET operationStatus = :inProgress, #state = :profileStaged, deploymentGeneration = :generation, updatedAt = :now, steps[1] = :identityStep, steps[2] = :profileStep, timeline = list_append(if_not_exists(timeline, :empty), :events)',
-        ConditionExpression: 'entityType = :operation AND gatewayId = :gatewayId AND profileVersionId = :profileVersionId AND #state = :observedState',
-        ExpressionAttributeNames: { '#state': 'state' },
+        UpdateExpression: 'SET operationStatus = :inProgress, #state = :profileStaged, deploymentGeneration = :generation, updatedAt = :now, #steps = :nextSteps, #timeline = :nextTimeline',
+        ConditionExpression: [
+          'entityType = :operation',
+          'tenantId = :tenantId',
+          'operationId = :operationId',
+          '#type = :operationType',
+          'gatewayId = :gatewayId',
+          'profileVersionId = :profileVersionId',
+          'deploymentGeneration = :generation',
+          'operationStatus = :observedOperationStatus',
+          '#state = :observedState',
+          '#steps = :observedSteps',
+          '#timeline = :observedTimeline',
+        ].join(' AND '),
+        ExpressionAttributeNames: {
+          '#state': 'state',
+          '#steps': 'steps',
+          '#timeline': 'timeline',
+          '#type': 'type',
+        },
         ExpressionAttributeValues: {
           ':operation': 'OPERATION',
+          ':tenantId': authority.tenantId,
+          ':operationId': authority.operationId,
+          ':operationType': authority.operationType,
           ':gatewayId': authority.gatewayId,
           ':profileVersionId': authority.profileVersionId,
           ':observedState': authority.operation.state,
+          ':observedOperationStatus': authority.operationStatus,
+          ':observedSteps': observedSteps,
+          ':observedTimeline': observedTimeline,
           ':inProgress': 'IN_PROGRESS',
           ':profileStaged': 'PROFILE_STAGED',
           ':generation': authority.generation,
           ':now': now,
-          ':empty': [],
-          ':events': [{
-            state: 'PROFILE_STAGED',
-            detail: `Signed profile generation ${authority.generation} delivered over authenticated HTTPS.`,
-            at: now,
-          }],
-          ':identityStep': {
-            key: 'identity',
-            label: 'Permanent identity provisioned',
-            status: 'complete',
-            detail: 'Permanent certificate authenticated by AWS IoT credentials provider.',
-            timestamp: now,
-          },
-          ':profileStep': {
-            key: 'profile',
-            label: 'Signed profile delivered',
-            status: 'complete',
-            detail: `Signed profile generation ${authority.generation} delivered.`,
-            timestamp: now,
-          },
+          ':nextSteps': nextSteps,
+          ':nextTimeline': nextTimeline,
         },
       },
     });
@@ -674,14 +742,50 @@ async function recordHttpDelivery(
   try {
     await dependencies.transactWrite(transaction);
   } catch (error) {
+    if (!isReconcilableTransactionCancellation(error)) throw error;
     // Concurrent pulls can race on the first delivery transition. Accept the
     // loser only if consistent rereads prove this exact assignment moved
     // forward and the certificate is still active.
-    const [gateway, deployment] = await Promise.all([
+    const [gateway, deployment, operation] = await Promise.all([
       dependencies.getItem({ PK: tenantKey, SK: gatewaySk(authority.gatewayId) }),
       dependencies.getItem({ PK: tenantKey, SK: deploymentSk(authority.gatewayId, authority.generation) }),
+      dependencies.getItem({ PK: tenantKey, SK: operationSk(authority.operationId) }),
     ]);
-    if (gateway?.certificateStatus === 'ACTIVE'
+    if (deliveryRaceResolved({
+      gateway,
+      deployment,
+      operation,
+      authority,
+      request,
+      tenantKey,
+    })) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function deliveryRaceResolved(input: {
+  gateway: Item | undefined;
+  deployment: Item | undefined;
+  operation: Item | undefined;
+  authority: ConfigurationAuthority;
+  request: AuthorizedRequest;
+  tenantKey: string;
+}): boolean {
+  const { gateway, deployment, operation, authority, request, tenantKey } = input;
+  try {
+    canonicalOperationSteps(operation?.steps);
+    canonicalOperationTimeline(operation?.timeline);
+  } catch {
+    return false;
+  }
+  return gateway?.entityType === 'GATEWAY'
+      && gateway.PK === tenantKey
+      && gateway.SK === gatewaySk(authority.gatewayId)
+      && gateway.tenantId === authority.tenantId
+      && gateway.gatewayId === authority.gatewayId
+      && gateway.certificateStatus === 'ACTIVE'
       && gateway.certificateId === request.certificateId
       && gateway.thingName === request.thingName
       && gateway.desiredGeneration === authority.generation
@@ -690,17 +794,130 @@ async function recordHttpDelivery(
       && isRecord(gateway.signedDescriptor)
       && canonicalJson(gateway.signedDescriptor) === canonicalJson(authority.descriptor)
       && FORWARD_DELIVERY_STATES.has(String(gateway.state))
-      && deployment?.gatewayId === authority.gatewayId
+      && deployment?.entityType === 'DEPLOYMENT'
+      && deployment.PK === tenantKey
+      && deployment.SK === deploymentSk(authority.gatewayId, authority.generation)
+      && deployment.tenantId === authority.tenantId
+      && deployment.gatewayId === authority.gatewayId
       && deployment.generation === authority.generation
       && deployment.profileVersionId === authority.profileVersionId
       && deployment.operationId === authority.operationId
       && isRecord(deployment.descriptor)
       && canonicalJson(deployment.descriptor) === canonicalJson(authority.descriptor)
-      && FORWARD_DELIVERY_STATES.has(String(deployment.status))) {
-      return;
+      && FORWARD_DELIVERY_STATES.has(String(deployment.status))
+      && operation?.entityType === 'OPERATION'
+      && operation.PK === tenantKey
+      && operation.SK === operationSk(authority.operationId)
+      && operation.tenantId === authority.tenantId
+      && operation.operationId === authority.operationId
+      && operation.type === authority.operationType
+      && operation.gatewayId === authority.gatewayId
+      && operation.profileVersionId === authority.profileVersionId
+      && operation.deploymentGeneration === authority.generation
+      && OPERATION_STATUSES.has(String(operation.operationStatus))
+      && validOperationStatus(String(operation.state), String(operation.operationStatus))
+      && FORWARD_OPERATION_STATES.has(String(operation.state));
+}
+
+function isReconcilableTransactionCancellation(error: unknown): boolean {
+  if (!isRecord(error) || error.name !== 'TransactionCanceledException') return false;
+  const reasons = error.CancellationReasons;
+  if (reasons === undefined) return false;
+  if (!Array.isArray(reasons)) return false;
+  let hasRaceReason = false;
+  for (const reason of reasons) {
+    if (!isRecord(reason) || typeof reason.Code !== 'string') return false;
+    if (reason.Code === 'None') continue;
+    if (reason.Code === 'ConditionalCheckFailed' || reason.Code === 'TransactionConflict') {
+      hasRaceReason = true;
+      continue;
     }
-    throw error;
+    return false;
   }
+  return hasRaceReason;
+}
+
+function canonicalOperationSteps(value: unknown): Item[] {
+  if (!Array.isArray(value) || value.length !== INITIAL_OPERATION_STEPS.length) throw unavailable();
+  return value.map((candidate, index) => {
+    const template = INITIAL_OPERATION_STEPS[index];
+    if (!template || !isRecord(candidate)
+      || candidate.key !== template.key
+      || candidate.label !== template.label
+      || typeof candidate.status !== 'string'
+      || !OPERATION_STEP_STATUSES.has(candidate.status)
+      || !hasOnlyKeys(candidate, ['key', 'label', 'status', 'detail', 'timestamp'])) {
+      throw unavailable();
+    }
+    const detail = optionalBoundedString(candidate.detail, 2048);
+    const timestamp = optionalIsoTimestamp(candidate.timestamp);
+    return {
+      key: template.key,
+      label: template.label,
+      status: candidate.status,
+      ...(detail ? { detail } : {}),
+      ...(timestamp ? { timestamp } : {}),
+    };
+  });
+}
+
+function canonicalOperationTimeline(value: unknown): Item[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_OPERATION_TIMELINE_EVENTS) {
+    throw unavailable();
+  }
+  return value.map((candidate) => {
+    if (!isRecord(candidate)
+      || typeof candidate.state !== 'string'
+      || !OPERATION_TIMELINE_STATES.has(candidate.state)
+      || !hasOnlyKeys(candidate, ['state', 'at', 'detail', 'operationStatus'])) {
+      throw unavailable();
+    }
+    const at = requiredIsoTimestamp(candidate.at);
+    const detail = requiredBoundedString(candidate.detail, 4096);
+    const operationStatus = candidate.operationStatus === undefined
+      ? undefined
+      : requiredBoundedString(candidate.operationStatus, 32);
+    if (operationStatus && !OPERATION_STATUSES.has(operationStatus)) throw unavailable();
+    return {
+      state: candidate.state,
+      at,
+      detail,
+      ...(operationStatus ? { operationStatus } : {}),
+    };
+  });
+}
+
+function validOperationStatus(state: string, operationStatus: string): boolean {
+  if (!OPERATION_STATUSES.has(operationStatus)) return false;
+  if (state === 'APPLIED_HEALTHY') return operationStatus === 'SUCCEEDED';
+  if (state === 'FAILED' || state === 'ROLLED_BACK') return operationStatus === 'FAILED';
+  return operationStatus === 'IN_PROGRESS';
+}
+
+function hasOnlyKeys(value: Item, allowed: readonly string[]): boolean {
+  const allowedKeys = new Set(allowed);
+  return Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function optionalBoundedString(value: unknown, maxLength: number): string | undefined {
+  if (value === undefined) return undefined;
+  return requiredBoundedString(value, maxLength);
+}
+
+function requiredBoundedString(value: unknown, maxLength: number): string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > maxLength) throw unavailable();
+  return value;
+}
+
+function optionalIsoTimestamp(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return requiredIsoTimestamp(value);
+}
+
+function requiredIsoTimestamp(value: unknown): string {
+  const timestamp = requiredBoundedString(value, 64);
+  if (!Number.isFinite(Date.parse(timestamp))) throw unavailable();
+  return timestamp;
 }
 
 function assignmentDescriptor(

@@ -3,6 +3,7 @@ import type { Context } from 'aws-lambda';
 import { AWS_ACCOUNT_ID, AWS_REGION_NAME, TABLE_NAME } from './shared/config.js';
 import { auditSk, ddb, deploymentSk, gatewaySk, operationSk, outboxSk, tenantPk } from './shared/ddb.js';
 import { INITIAL_OPERATION_STEPS } from './shared/models.js';
+import { canonicalJson } from './shared/profile.js';
 
 const TOPIC_PREFIX = 'ce/v1/gateways/';
 const STATUS_SUFFIX = '/status';
@@ -14,6 +15,20 @@ export type DeviceStatusRecordDisposition = 'APPLIED' | 'STALE_NOOP' | 'QUARANTI
 
 type Item = Record<string, unknown>;
 type TransactItems = NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']>;
+type TransitionEntity = 'gateway' | 'deployment' | 'operation';
+
+const EARLY_STATE_ORDER_BY_ENTITY: Record<TransitionEntity, readonly string[]> = {
+  gateway: ['PERMANENT_IDENTITY_ACTIVE', 'PROFILE_AVAILABLE', 'PROFILE_DELIVERED'],
+  deployment: ['WAITING_FOR_DEVICE', 'PROFILE_AVAILABLE', 'PROFILE_DELIVERED'],
+  // PROFILE_DELIVERED is retained only as an explicit legacy operation
+  // state; current writers use PROFILE_STAGED.
+  operation: ['CSR_VERIFIED', 'OPERATIONAL_IDENTITY_ISSUED', 'PROFILE_STAGED', 'PROFILE_DELIVERED'],
+};
+const EARLY_STATES_BY_ENTITY: Record<TransitionEntity, ReadonlySet<string>> = {
+  gateway: new Set(EARLY_STATE_ORDER_BY_ENTITY.gateway),
+  deployment: new Set(EARLY_STATE_ORDER_BY_ENTITY.deployment),
+  operation: new Set(EARLY_STATE_ORDER_BY_ENTITY.operation),
+};
 
 export interface AuthoritativeDeviceIdentity {
   thingName: string;
@@ -127,6 +142,7 @@ export async function recordAuthoritativeDeviceStatus(
   event: DeviceStatusReport,
   context: Context,
   dependencies: DeviceStatusDependencies = productionDependencies,
+  raceRetriesRemaining = 1,
 ): Promise<DeviceStatusRecordDisposition> {
   const thingName = identity.thingName;
   // Keep the broker-oriented local name for source-level compatibility with
@@ -151,7 +167,13 @@ export async function recordAuthoritativeDeviceStatus(
   if (certificateId !== brokerPrincipal) throw new DeviceStatusAuthorizationError();
   if (gateway.thingName !== thingName) throw new DeviceStatusAuthorizationError();
   if (gateway.certificateStatus !== 'ACTIVE') throw new DeviceStatusAuthorizationError();
-  if (positiveInteger(gateway.desiredGeneration ?? gateway.generation, 'gateway desiredGeneration') !== generation) {
+  let desiredGeneration: number;
+  try {
+    desiredGeneration = positiveInteger(gateway.desiredGeneration, 'gateway desiredGeneration');
+  } catch {
+    throw new DeviceStatusConflictError('Gateway desired generation is missing or invalid');
+  }
+  if (desiredGeneration !== generation) {
     throw new DeviceStatusConflictError('Device status generation is not the authoritative desired generation');
   }
 
@@ -166,14 +188,24 @@ export async function recordAuthoritativeDeviceStatus(
     throw new DeviceStatusConflictError('Authoritative deployment record is missing or inconsistent');
   }
   const profileVersionId = requiredStoredString(deployment.profileVersionId, 'deployment profileVersionId');
-  if (gateway.desiredProfileVersionId != null && gateway.desiredProfileVersionId !== profileVersionId) {
-    throw new DeviceStatusConflictError('Gateway desired profile does not match the authoritative deployment');
-  }
-
   const gatewayState = requiredStoredString(gateway.state, 'gateway state');
   const deploymentStatus = requiredStoredString(deployment.status, 'deployment status');
-  const descriptor = isRecord(deployment.descriptor) ? deployment.descriptor : undefined;
-  const authoritativeChecksum = requiredChecksum(descriptor?.profileSha256, 'deployment descriptor profileSha256');
+  if (!isRecord(deployment.descriptor)) {
+    throw new DeviceStatusConflictError('Authoritative deployment descriptor is missing or invalid');
+  }
+  const descriptor = deployment.descriptor;
+  const assignmentClearedTerminal = gatewayState === 'ROLLED_BACK' || gatewayState === 'QUARANTINED';
+  if (!assignmentClearedTerminal && gateway.desiredProfileVersionId !== profileVersionId) {
+    throw new DeviceStatusConflictError('Gateway desired profile does not match the authoritative deployment');
+  }
+  if (deployment.PK !== tenantPk(tenantId)
+    || deployment.SK !== deploymentSk(gatewayId, generation)
+    || deployment.tenantId !== tenantId
+    || (!assignmentClearedTerminal && (!isRecord(gateway.signedDescriptor)
+      || canonicalJson(gateway.signedDescriptor) !== canonicalJson(descriptor)))) {
+    throw new DeviceStatusConflictError('Authoritative deployment lineage is inconsistent');
+  }
+  const authoritativeChecksum = requiredChecksum(descriptor.profileSha256, 'deployment descriptor profileSha256');
   let reportedChecksum: string | undefined;
   let rollbackProfileVersionId: string | undefined;
   let rollbackProfileChecksum: string | undefined;
@@ -197,75 +229,108 @@ export async function recordAuthoritativeDeviceStatus(
       rollbackProfileChecksum,
     );
   }
-  const dispositions: TransitionDisposition[] = [];
+  let gatewayDisposition: TransitionDisposition;
+  let deploymentDisposition: TransitionDisposition;
   try {
-    dispositions.push(
-      transitionDisposition(gatewayState, status, 'gateway'),
-      transitionDisposition(deploymentStatus, status, 'deployment'),
-    );
+    gatewayDisposition = transitionDisposition(gatewayState, status, 'gateway');
+    deploymentDisposition = transitionDisposition(deploymentStatus, status, 'deployment');
   } catch (error) {
     throw new DeviceStatusConflictError(error instanceof Error ? error.message : undefined);
   }
 
   const operationId = requiredStoredString(deployment.operationId, 'deployment operationId');
+  if (gateway.operationId !== operationId) {
+    throw new DeviceStatusConflictError('Gateway operation does not match the authoritative deployment');
+  }
   const operation = await dependencies.getItem({
     PK: tenantPk(tenantId),
     SK: operationSk(operationId),
   });
-  if (!operation || operation.entityType !== 'OPERATION' || operation.gatewayId !== gatewayId) {
+  if (!operation
+    || operation.entityType !== 'OPERATION'
+    || operation.PK !== tenantPk(tenantId)
+    || operation.SK !== operationSk(operationId)
+    || operation.tenantId !== tenantId
+    || operation.operationId !== operationId
+    || operation.gatewayId !== gatewayId
+    || operation.profileVersionId !== profileVersionId
+    || operation.deploymentGeneration !== generation) {
     throw new DeviceStatusConflictError('Deployment operation record is missing or inconsistent');
   }
+  const operationState = requiredStoredString(operation.state, 'operation state');
+  let operationDisposition: TransitionDisposition;
   try {
-    dispositions.push(transitionDisposition(requiredStoredString(operation.state, 'operation state'), status, 'operation'));
+    operationDisposition = transitionDisposition(operationState, status, 'operation');
   } catch (error) {
     throw new DeviceStatusConflictError(error instanceof Error ? error.message : undefined);
   }
 
-  // IoT Rules invoke Lambdas asynchronously and messages can be delivered out
-  // of order. A same-generation report that is already reflected, or that is
-  // behind any authoritative entity, is a successful stale no-op. This avoids
-  // DLQ noise and, more importantly, prevents terminal-state regression.
-  if (dispositions.includes('STALE_NOOP')) return 'STALE_NOOP';
+  // A record already at the reported state can be omitted while lagging peers
+  // advance atomically. A record beyond the report still makes the whole event
+  // stale, preventing terminal or forward-state regression.
+  const transitions = [
+    { current: gatewayState, disposition: gatewayDisposition },
+    { current: deploymentStatus, disposition: deploymentDisposition },
+    { current: operationState, disposition: operationDisposition },
+  ];
+  if (transitions.some(({ current, disposition }) => disposition === 'STALE_NOOP' && current !== status)) {
+    return 'STALE_NOOP';
+  }
+  const transitionGateway = gatewayDisposition === 'APPLY';
+  const transitionDeployment = deploymentDisposition === 'APPLY';
+  const transitionOperation = operationDisposition === 'APPLY';
+  if (!transitionGateway && !transitionDeployment && !transitionOperation) return 'STALE_NOOP';
 
   const observedAt = dependencies.now();
   const now = observedAt.toISOString();
   const tenantKey = tenantPk(tenantId);
   const errorDetail = detail ?? defaultStatusDetail(status);
   if (status === 'ROLLED_BACK' && !rollbackAttestationValid) {
-    await quarantineInvalidRollback({
-      tenantId, tenantKey, gatewayId, thingName, certificateId, certificatePrincipal, generation,
-      profileVersionId, gatewayState, deploymentStatus, operationId,
-      operationState: requiredStoredString(operation.state, 'operation state'),
-      detail: errorDetail, now, context, dependencies,
-    });
+    try {
+      await quarantineInvalidRollback({
+        tenantId, tenantKey, gatewayId, thingName, certificateId, certificatePrincipal, generation,
+        profileVersionId, descriptor, gatewayState, deploymentStatus, operationId, operationState,
+        detail: errorDetail, now, context, dependencies,
+      });
+    } catch (error) {
+      if (!isConditionalTransactionRace(error)
+        || !await committedQuarantineMatches({
+          tenantId, gatewayId, thingName, certificateId, certificatePrincipal, generation,
+          profileVersionId, operationId, descriptor, dependencies,
+        })) throw error;
+    }
     return 'QUARANTINED';
   }
   const rollbackClearOutboxId = status === 'ROLLED_BACK' ? `rollback_clear_${context.awsRequestId}` : undefined;
   const rollbackLeaseExpiry = status === 'ROLLED_BACK' ? Math.floor(observedAt.getTime() / 1000) + 60 : undefined;
   const gatewayUpdate = gatewayUpdateExpression(status);
   const deploymentUpdate = deploymentUpdateExpression(status);
-  const transaction: TransactItems = [
-    {
+  const transaction: TransactItems = [];
+  if (transitionGateway) transaction.push({
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: gatewaySk(gatewayId) },
         UpdateExpression: gatewayUpdate.expression,
-        ConditionExpression: 'entityType = :gateway AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :certificatePrincipal AND certificateStatus = :active AND desiredGeneration = :generation AND #state = :current',
+        ConditionExpression: 'entityType = :gateway AND tenantId = :tenantId AND gatewayId = :gatewayId AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :certificatePrincipal AND certificateStatus = :active AND desiredGeneration = :generation AND desiredProfileVersionId = :profileVersionId AND operationId = :operationId AND signedDescriptor = :descriptor AND #state = :current',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':gateway': 'GATEWAY',
+          ':tenantId': tenantId,
+          ':gatewayId': gatewayId,
           ':thingName': thingName,
           ':certificateId': certificateId,
           ':certificatePrincipal': certificatePrincipal,
           ':active': 'ACTIVE',
           ':generation': generation,
+          ':profileVersionId': profileVersionId,
+          ':operationId': operationId,
+          ':descriptor': descriptor,
           ':current': gatewayState,
           ':next': status,
           ':health': status === 'APPLIED_HEALTHY' ? 'HEALTHY'
             : status === 'FAILED' || status === 'ROLLING_BACK' || status === 'ROLLED_BACK' ? 'DEGRADED'
               : 'APPLYING',
           ':now': now,
-          ...(status === 'APPLIED_HEALTHY' ? { ':profileVersionId': profileVersionId } : {}),
           ...(status === 'APPLIED_HEALTHY' ? { ':profileChecksum': reportedChecksum } : {}),
           ...(status === 'ROLLED_BACK' ? {
             ':rollbackProfileVersionId': rollbackProfileVersionId,
@@ -276,22 +341,26 @@ export async function recordAuthoritativeDeviceStatus(
           ...(gatewayUpdate.needsError ? { ':deviceError': errorDetail } : {}),
         },
       },
-    },
-    {
+    });
+  if (transitionDeployment) transaction.push({
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: deploymentSk(gatewayId, generation) },
         UpdateExpression: deploymentUpdate.expression,
-        ConditionExpression: 'entityType = :deployment AND gatewayId = :gatewayId AND generation = :generation AND #status = :current',
-        ExpressionAttributeNames: { '#status': 'status', '#error': 'error' },
+        ConditionExpression: 'entityType = :deployment AND tenantId = :tenantId AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND #descriptor = :descriptor AND #status = :current',
+        ExpressionAttributeNames: { '#status': 'status', '#error': 'error', '#descriptor': 'descriptor' },
         ExpressionAttributeValues: {
           ':deployment': 'DEPLOYMENT',
+          ':tenantId': tenantId,
           ':gatewayId': gatewayId,
           ':generation': generation,
+          ':profileVersionId': profileVersionId,
+          ':operationId': operationId,
+          ':descriptor': descriptor,
           ':current': deploymentStatus,
           ':next': status,
           ':now': now,
-          ...(status === 'APPLIED_HEALTHY' ? { ':profileVersionId': profileVersionId, ':profileChecksum': reportedChecksum } : {}),
+          ...(status === 'APPLIED_HEALTHY' ? { ':profileChecksum': reportedChecksum } : {}),
           ...(status === 'ROLLED_BACK' ? {
             ':rollbackProfileVersionId': rollbackProfileVersionId,
             ':rollbackProfileChecksum': rollbackProfileChecksum,
@@ -299,11 +368,9 @@ export async function recordAuthoritativeDeviceStatus(
           ...(deploymentUpdate.needsError ? { ':deviceError': errorDetail } : {}),
         },
       },
-    },
-  ];
+    });
 
-  if (operation && operationId) {
-    const currentOperationState = requiredStoredString(operation.state, 'operation state');
+  if (transitionOperation) {
     const uiStatus = uiOperationStatus(status);
     transaction.push({
       Update: {
@@ -312,19 +379,22 @@ export async function recordAuthoritativeDeviceStatus(
         UpdateExpression: status === 'FAILED' || status === 'ROLLED_BACK'
           ? 'SET operationStatus = :uiStatus, #state = :next, deploymentGeneration = :generation, updatedAt = :now, steps = :steps, timeline = list_append(if_not_exists(timeline, :empty), :events), failure = :failure REMOVE #error'
           : 'SET operationStatus = :uiStatus, #state = :next, deploymentGeneration = :generation, updatedAt = :now, steps = :steps, timeline = list_append(if_not_exists(timeline, :empty), :events) REMOVE #error, failure',
-        ConditionExpression: 'entityType = :operation AND gatewayId = :gatewayId AND #state = :current',
+        ConditionExpression: 'entityType = :operation AND tenantId = :tenantId AND operationId = :operationId AND gatewayId = :gatewayId AND profileVersionId = :profileVersionId AND deploymentGeneration = :generation AND #state = :current',
         ExpressionAttributeNames: { '#state': 'state', '#error': 'error' },
         ExpressionAttributeValues: {
           ':operation': 'OPERATION',
+          ':tenantId': tenantId,
+          ':operationId': operationId,
           ':gatewayId': gatewayId,
-          ':current': currentOperationState,
+          ':profileVersionId': profileVersionId,
+          ':current': operationState,
           ':next': status,
           ':uiStatus': uiStatus,
           ':generation': generation,
           ':now': now,
           ':steps': operationSteps(operation.steps, status, now, detail),
           ':empty': [],
-          ':events': operationTimelineEvents(currentOperationState, status, uiStatus, now, detail),
+          ':events': operationTimelineEvents(operationState, status, uiStatus, now, detail),
           ...((status === 'FAILED' || status === 'ROLLED_BACK') ? {
             ':failure': {
               code: status === 'ROLLED_BACK' ? 'PROFILE_APPLY_ROLLED_BACK' : 'PROFILE_APPLY_FAILED',
@@ -393,8 +463,220 @@ export async function recordAuthoritativeDeviceStatus(
     },
   });
 
-  await dependencies.transactWrite(transaction);
+  try {
+    await dependencies.transactWrite(transaction);
+  } catch (error) {
+    if (!isConditionalTransactionRace(error)) throw error;
+    const recovery = await committedStatusRecovery({
+      tenantId, gatewayId, thingName, certificateId, certificatePrincipal, generation,
+      profileVersionId, operationId, descriptor, status,
+      gatewayState, deploymentStatus, operationState,
+      rollbackProfileVersionId, rollbackProfileChecksum, dependencies,
+    });
+    if (recovery === 'STALE_NOOP') return 'STALE_NOOP';
+    if (recovery === 'RETRY' && raceRetriesRemaining > 0) {
+      return recordAuthoritativeDeviceStatus(identity, event, context, dependencies, raceRetriesRemaining - 1);
+    }
+    throw error;
+  }
   return 'APPLIED';
+}
+
+function isConditionalTransactionRace(error: unknown): boolean {
+  if (!isRecord(error)
+    || error.name !== 'TransactionCanceledException'
+    || !Array.isArray(error.CancellationReasons)) return false;
+
+  let hasRaceReason = false;
+  for (const reason of error.CancellationReasons) {
+    if (!isRecord(reason) || typeof reason.Code !== 'string') return false;
+    if (reason.Code === 'None') continue;
+    if (reason.Code !== 'ConditionalCheckFailed' && reason.Code !== 'TransactionConflict') return false;
+    hasRaceReason = true;
+  }
+  return hasRaceReason;
+}
+
+type ConcurrentStatusRecovery = 'STALE_NOOP' | 'RETRY' | 'MISMATCH';
+
+async function committedStatusRecovery(input: {
+  tenantId: string;
+  gatewayId: string;
+  thingName: string;
+  certificateId: string;
+  certificatePrincipal: string;
+  generation: number;
+  profileVersionId: string;
+  operationId: string;
+  descriptor: Item;
+  status: DeviceStatus;
+  gatewayState: string;
+  deploymentStatus: string;
+  operationState: string;
+  rollbackProfileVersionId: string | undefined;
+  rollbackProfileChecksum: string | undefined;
+  dependencies: DeviceStatusDependencies;
+}): Promise<ConcurrentStatusRecovery> {
+  const tenantKey = tenantPk(input.tenantId);
+  const [gateway, deployment, operation] = await Promise.all([
+    input.dependencies.getItem({ PK: tenantKey, SK: gatewaySk(input.gatewayId) }),
+    input.dependencies.getItem({ PK: tenantKey, SK: deploymentSk(input.gatewayId, input.generation) }),
+    input.dependencies.getItem({ PK: tenantKey, SK: operationSk(input.operationId) }),
+  ]);
+  if (!gateway || !deployment || !operation) return 'MISMATCH';
+
+  const exactGateway = gateway.entityType === 'GATEWAY'
+    && gateway.PK === tenantKey
+    && gateway.SK === gatewaySk(input.gatewayId)
+    && gateway.tenantId === input.tenantId
+    && gateway.gatewayId === input.gatewayId
+    && gateway.thingName === input.thingName
+    && gateway.certificateId === input.certificateId
+    && gateway.certificatePrincipal === input.certificatePrincipal
+    && gateway.certificateStatus === 'ACTIVE'
+    && gateway.desiredGeneration === input.generation
+    && gateway.operationId === input.operationId;
+  const exactDeployment = deployment.entityType === 'DEPLOYMENT'
+    && deployment.PK === tenantKey
+    && deployment.SK === deploymentSk(input.gatewayId, input.generation)
+    && deployment.tenantId === input.tenantId
+    && deployment.gatewayId === input.gatewayId
+    && deployment.generation === input.generation
+    && deployment.profileVersionId === input.profileVersionId
+    && deployment.operationId === input.operationId;
+  const exactOperation = operation.entityType === 'OPERATION'
+    && operation.PK === tenantKey
+    && operation.SK === operationSk(input.operationId)
+    && operation.tenantId === input.tenantId
+    && operation.operationId === input.operationId
+    && operation.gatewayId === input.gatewayId
+    && operation.profileVersionId === input.profileVersionId
+    && operation.deploymentGeneration === input.generation;
+  if (!exactGateway || !exactDeployment || !exactOperation) return 'MISMATCH';
+
+  let authoritativeChecksum: string;
+  let assignmentIntact = false;
+  try {
+    authoritativeChecksum = requiredChecksum(input.descriptor.profileSha256, 'descriptor profileSha256');
+    if (!isRecord(deployment.descriptor)
+      || canonicalJson(deployment.descriptor) !== canonicalJson(input.descriptor)) return 'MISMATCH';
+    assignmentIntact = gateway.desiredProfileVersionId === input.profileVersionId
+      && isRecord(gateway.signedDescriptor)
+      && canonicalJson(gateway.signedDescriptor) === canonicalJson(input.descriptor);
+  } catch {
+    return 'MISMATCH';
+  }
+
+  // A transaction conflict can be reported even when no competing writer
+  // commits. Exact unchanged assignment state is safe for the caller's single
+  // bounded retry; it is not a committed device-status winner.
+  const exactUnchangedState = gateway.state === input.gatewayState
+    && deployment.status === input.deploymentStatus
+    && operation.state === input.operationState;
+  const validEarlyAdvancement = isValidEarlyStateAdvancement('gateway', input.gatewayState, gateway.state)
+    && isValidEarlyStateAdvancement('deployment', input.deploymentStatus, deployment.status)
+    && isValidEarlyStateAdvancement('operation', input.operationState, operation.state);
+  if (assignmentIntact && (exactUnchangedState || validEarlyAdvancement)) return 'RETRY';
+
+  let committedStatus: DeviceStatus;
+  try {
+    committedStatus = deviceStatus(gateway.state);
+  } catch {
+    return 'MISMATCH';
+  }
+  if (deployment.status !== committedStatus || operation.state !== committedStatus) return 'MISMATCH';
+  if (committedStatus !== 'ROLLED_BACK' && !assignmentIntact) return 'MISMATCH';
+
+  if (committedStatus === 'APPLIED_HEALTHY'
+    && !(gateway.appliedGeneration === input.generation
+      && gateway.appliedProfileVersionId === input.profileVersionId
+      && gateway.appliedProfileChecksum === authoritativeChecksum
+      && deployment.appliedProfileVersionId === input.profileVersionId
+      && deployment.appliedProfileChecksum === authoritativeChecksum)) {
+    return 'MISMATCH';
+  }
+  if (committedStatus === 'ROLLED_BACK') {
+    const rollbackProfileVersionId = gateway.rolledBackToProfileVersionId;
+    const rollbackProfileChecksum = gateway.rolledBackToProfileChecksum;
+    if (!(typeof rollbackProfileVersionId === 'string'
+      && typeof rollbackProfileChecksum === 'string'
+      && /^[a-f0-9]{64}$/.test(rollbackProfileChecksum)
+      && gateway.appliedProfileVersionId === rollbackProfileVersionId
+      && gateway.appliedProfileChecksum === rollbackProfileChecksum
+      && deployment.rolledBackToProfileVersionId === rollbackProfileVersionId
+      && deployment.rolledBackToProfileChecksum === rollbackProfileChecksum
+      && (input.status !== 'ROLLED_BACK'
+        || (input.rollbackProfileVersionId === rollbackProfileVersionId
+          && input.rollbackProfileChecksum === rollbackProfileChecksum)))) return 'MISMATCH';
+  }
+
+  return transitionDisposition(committedStatus, input.status, 'gateway') === 'STALE_NOOP'
+    ? 'STALE_NOOP'
+    : 'RETRY';
+}
+
+async function committedQuarantineMatches(input: {
+  tenantId: string;
+  gatewayId: string;
+  thingName: string;
+  certificateId: string;
+  certificatePrincipal: string;
+  generation: number;
+  profileVersionId: string;
+  operationId: string;
+  descriptor: Item;
+  dependencies: DeviceStatusDependencies;
+}): Promise<boolean> {
+  const tenantKey = tenantPk(input.tenantId);
+  const [gateway, deployment, operation] = await Promise.all([
+    input.dependencies.getItem({ PK: tenantKey, SK: gatewaySk(input.gatewayId) }),
+    input.dependencies.getItem({ PK: tenantKey, SK: deploymentSk(input.gatewayId, input.generation) }),
+    input.dependencies.getItem({ PK: tenantKey, SK: operationSk(input.operationId) }),
+  ]);
+  if (!gateway || !deployment || !operation) return false;
+  let descriptorMatches = false;
+  try {
+    descriptorMatches = isRecord(deployment.descriptor)
+      && canonicalJson(deployment.descriptor) === canonicalJson(input.descriptor);
+  } catch {
+    return false;
+  }
+  return gateway.entityType === 'GATEWAY'
+    && gateway.PK === tenantKey
+    && gateway.SK === gatewaySk(input.gatewayId)
+    && gateway.tenantId === input.tenantId
+    && gateway.gatewayId === input.gatewayId
+    && gateway.thingName === input.thingName
+    && gateway.certificateId === input.certificateId
+    && gateway.certificatePrincipal === input.certificatePrincipal
+    && gateway.certificateStatus === 'ACTIVE'
+    && gateway.desiredGeneration === input.generation
+    && gateway.operationId === input.operationId
+    && gateway.state === 'QUARANTINED'
+    && gateway.health === 'DEGRADED'
+    && gateway.desiredProfileVersionId == null
+    && gateway.signedDescriptor == null
+    && deployment.entityType === 'DEPLOYMENT'
+    && deployment.PK === tenantKey
+    && deployment.SK === deploymentSk(input.gatewayId, input.generation)
+    && deployment.tenantId === input.tenantId
+    && deployment.gatewayId === input.gatewayId
+    && deployment.generation === input.generation
+    && deployment.profileVersionId === input.profileVersionId
+    && deployment.operationId === input.operationId
+    && deployment.status === 'FAILED'
+    && descriptorMatches
+    && operation.entityType === 'OPERATION'
+    && operation.PK === tenantKey
+    && operation.SK === operationSk(input.operationId)
+    && operation.tenantId === input.tenantId
+    && operation.operationId === input.operationId
+    && operation.gatewayId === input.gatewayId
+    && operation.profileVersionId === input.profileVersionId
+    && operation.deploymentGeneration === input.generation
+    && operation.state === 'FAILED'
+    && isRecord(operation.failure)
+    && operation.failure.code === 'ROLLBACK_ATTESTATION_FAILED';
 }
 
 async function quarantineInvalidRollback(input: {
@@ -406,6 +688,7 @@ async function quarantineInvalidRollback(input: {
   certificatePrincipal: string;
   generation: number;
   profileVersionId: string;
+  descriptor: Item;
   gatewayState: string;
   deploymentStatus: string;
   operationId: string;
@@ -424,13 +707,16 @@ async function quarantineInvalidRollback(input: {
         TableName: TABLE_NAME,
         Key: { PK: input.tenantKey, SK: gatewaySk(input.gatewayId) },
         UpdateExpression: 'SET #state = :quarantined, health = :degraded, lastError = :error, rollbackRecoveryRequiredAt = :now, dispatchLeaseId = :leaseId, dispatchLeaseGeneration = :generation, dispatchLeaseExpiresAtEpoch = :leaseExpiry, updatedAt = :now REMOVE desiredProfileVersionId, signedDescriptor',
-        ConditionExpression: 'entityType = :gateway AND #state = :current AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :principal AND certificateStatus = :active AND desiredGeneration = :generation',
+        ConditionExpression: 'entityType = :gateway AND tenantId = :tenantId AND gatewayId = :gatewayId AND #state = :current AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :principal AND certificateStatus = :active AND desiredGeneration = :generation AND desiredProfileVersionId = :profileVersionId AND operationId = :operationId AND signedDescriptor = :descriptor',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':gateway': 'GATEWAY', ':current': input.gatewayState, ':quarantined': 'QUARANTINED',
+          ':tenantId': input.tenantId, ':gatewayId': input.gatewayId,
           ':degraded': 'DEGRADED', ':error': 'Rollback target did not match the last known applied profile.',
           ':thingName': input.thingName, ':certificateId': input.certificateId,
           ':principal': input.certificatePrincipal, ':active': 'ACTIVE', ':generation': input.generation,
+          ':profileVersionId': input.profileVersionId, ':operationId': input.operationId,
+          ':descriptor': input.descriptor,
           ':leaseId': outboxId, ':leaseExpiry': leaseExpiry, ':now': input.now,
         },
       },
@@ -440,11 +726,13 @@ async function quarantineInvalidRollback(input: {
         TableName: TABLE_NAME,
         Key: { PK: input.tenantKey, SK: deploymentSk(input.gatewayId, input.generation) },
         UpdateExpression: 'SET #status = :failed, #error = :error, rollbackRecoveryRequiredAt = :now, updatedAt = :now',
-        ConditionExpression: 'entityType = :deployment AND #status = :current AND gatewayId = :gatewayId AND generation = :generation',
-        ExpressionAttributeNames: { '#status': 'status', '#error': 'error' },
+        ConditionExpression: 'entityType = :deployment AND tenantId = :tenantId AND #status = :current AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND #descriptor = :descriptor',
+        ExpressionAttributeNames: { '#status': 'status', '#error': 'error', '#descriptor': 'descriptor' },
         ExpressionAttributeValues: {
           ':deployment': 'DEPLOYMENT', ':current': input.deploymentStatus, ':failed': 'FAILED',
-          ':gatewayId': input.gatewayId, ':generation': input.generation,
+          ':tenantId': input.tenantId, ':gatewayId': input.gatewayId, ':generation': input.generation,
+          ':profileVersionId': input.profileVersionId, ':operationId': input.operationId,
+          ':descriptor': input.descriptor,
           ':error': 'Rollback target attestation failed; recovery is required.', ':now': input.now,
         },
       },
@@ -454,10 +742,12 @@ async function quarantineInvalidRollback(input: {
         TableName: TABLE_NAME,
         Key: { PK: input.tenantKey, SK: operationSk(input.operationId) },
         UpdateExpression: 'SET operationStatus = :failed, #state = :failed, failure = :failure, updatedAt = :now, timeline = list_append(if_not_exists(timeline, :empty), :events)',
-        ConditionExpression: 'entityType = :operation AND #state = :current AND gatewayId = :gatewayId',
+        ConditionExpression: 'entityType = :operation AND tenantId = :tenantId AND operationId = :operationId AND #state = :current AND gatewayId = :gatewayId AND profileVersionId = :profileVersionId AND deploymentGeneration = :generation',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':operation': 'OPERATION', ':current': input.operationState, ':gatewayId': input.gatewayId,
+          ':tenantId': input.tenantId, ':operationId': input.operationId,
+          ':profileVersionId': input.profileVersionId, ':generation': input.generation,
           ':failed': 'FAILED', ':now': input.now, ':empty': [],
           ':failure': { code: 'ROLLBACK_ATTESTATION_FAILED', message: input.detail, rolledBack: false },
           ':events': [{ state: 'FAILED', at: input.now, detail: 'Rollback target could not be validated; gateway quarantined.' }],
@@ -597,11 +887,8 @@ function operationSteps(value: unknown, status: DeviceStatus, now: string, detai
 }
 
 export function transitionDisposition(current: string, next: DeviceStatus, entity: string): TransitionDisposition {
-  const earlyStates = new Set([
-    'CLAIM_ACCEPTED', 'CSR_VERIFIED', 'OPERATIONAL_IDENTITY_ISSUED', 'PROFILE_STAGED',
-    'WAITING_FOR_DEVICE', 'IDENTITY_PROVISIONING', 'PERMANENT_IDENTITY_ACTIVE',
-    'PROFILE_AVAILABLE', 'PROFILE_DELIVERED',
-  ]);
+  const earlyStates = EARLY_STATES_BY_ENTITY[entity as TransitionEntity];
+  if (!earlyStates) throw new Error(`Unknown transition entity ${entity}`);
   if (earlyStates.has(current)) return 'APPLY';
   if (current === next) return 'STALE_NOOP';
   if (current === 'APPLIED_HEALTHY' || current === 'ROLLED_BACK' || current === 'QUARANTINED') return 'STALE_NOOP';
@@ -615,6 +902,18 @@ export function transitionDisposition(current: string, next: DeviceStatus, entit
   if (forward[current]?.has(next)) return 'APPLY';
   if (current in forward) return 'STALE_NOOP';
   throw new Error(`Invalid ${entity} state transition from ${current} to ${next}`);
+}
+
+function isValidEarlyStateAdvancement(
+  entity: TransitionEntity,
+  observed: string,
+  reread: unknown,
+): boolean {
+  if (typeof reread !== 'string') return false;
+  const earlyStates = EARLY_STATES_BY_ENTITY[entity];
+  if (!earlyStates.has(observed) || !earlyStates.has(reread)) return false;
+  const order = EARLY_STATE_ORDER_BY_ENTITY[entity];
+  return order.indexOf(reread) >= order.indexOf(observed);
 }
 
 export function rollbackTargetMatches(

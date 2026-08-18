@@ -101,6 +101,119 @@ function event(
   };
 }
 
+interface CoreHarnessOptions {
+  gatewayState?: string;
+  deploymentStatus?: string;
+  operationState?: string;
+  includeDesiredGeneration?: boolean;
+  onTransact?: (
+    items: unknown[],
+    records: {
+      gateway: Record<string, unknown>;
+      deployment: Record<string, unknown>;
+      operation: Record<string, unknown>;
+    },
+  ) => Promise<void>;
+}
+
+function coreHarness(options: CoreHarnessOptions = {}) {
+  const tenantId = 'tenant-a';
+  const gatewayId = 'gateway-a';
+  const operationId = 'operation-a';
+  const tenantKey = `TENANT#${tenantId}`;
+  const gatewayKey = `GATEWAY#${gatewayId}`;
+  const deploymentKey = `DEPLOYMENT#${gatewayId}#${String(GENERATION).padStart(12, '0')}`;
+  const operationKey = `OPERATION#${operationId}`;
+  const descriptor = { profileSha256: PROFILE_CHECKSUM };
+  const gateway: Record<string, unknown> = {
+    PK: tenantKey,
+    SK: gatewayKey,
+    GSI1PK: `THING#${THING_NAME}`,
+    entityType: 'GATEWAY',
+    tenantId,
+    gatewayId,
+    thingName: THING_NAME,
+    certificateId: CERTIFICATE_ID,
+    certificatePrincipal: `arn:aws:iot:us-east-1:111122223333:cert/${CERTIFICATE_ID}`,
+    certificateStatus: 'ACTIVE',
+    ...(options.includeDesiredGeneration === false ? {} : { desiredGeneration: GENERATION }),
+    desiredProfileVersionId: PROFILE_VERSION_ID,
+    operationId,
+    signedDescriptor: descriptor,
+    state: options.gatewayState ?? 'PROFILE_DELIVERED',
+  };
+  const deployment: Record<string, unknown> = {
+    PK: tenantKey,
+    SK: deploymentKey,
+    entityType: 'DEPLOYMENT',
+    tenantId,
+    gatewayId,
+    generation: GENERATION,
+    profileVersionId: PROFILE_VERSION_ID,
+    operationId,
+    status: options.deploymentStatus ?? 'PROFILE_DELIVERED',
+    descriptor,
+  };
+  const operation: Record<string, unknown> = {
+    PK: tenantKey,
+    SK: operationKey,
+    entityType: 'OPERATION',
+    tenantId,
+    operationId,
+    gatewayId,
+    profileVersionId: PROFILE_VERSION_ID,
+    deploymentGeneration: GENERATION,
+    state: options.operationState ?? 'PROFILE_STAGED',
+    steps: [],
+  };
+  const records = { gateway, deployment, operation };
+  const gatewayLocator = {
+    PK: tenantKey,
+    SK: gatewayKey,
+    GSI1PK: `THING#${THING_NAME}`,
+    entityType: 'GATEWAY',
+  };
+  const items = new Map<string, Record<string, unknown>>([
+    [`${tenantKey}|${gatewayKey}`, gateway],
+    [`${tenantKey}|${deploymentKey}`, deployment],
+    [`${tenantKey}|${operationKey}`, operation],
+  ]);
+  const readKeys: Array<{ PK: string; SK: string }> = [];
+  const transactions: unknown[][] = [];
+  const value: DeviceStatusDependencies = {
+    async queryGatewayByThing() {
+      return [gatewayLocator];
+    },
+    async getItem(key) {
+      readKeys.push(key);
+      return items.get(`${key.PK}|${key.SK}`);
+    },
+    async transactWrite(itemsToWrite) {
+      const captured = itemsToWrite as unknown[];
+      transactions.push(captured);
+      await options.onTransact?.(captured, records);
+    },
+    now: () => new Date('2026-08-17T12:00:00.000Z'),
+  };
+  return {
+    value,
+    records,
+    readKeys,
+    transactions,
+    tenantKey,
+    gatewayKey,
+    deploymentKey,
+    operationKey,
+  };
+}
+
+function transactionCanceled(...codes: string[]): Error {
+  return Object.assign(new Error('transaction canceled'), {
+    name: 'TransactionCanceledException',
+    CancellationReasons: codes.map((Code) => ({ Code })),
+  });
+}
+
 test('HTTP status adapter accepts every supported status and forwards the authoritative identity', async () => {
   const { createDeviceStatusHttpHandler } = await import('../lambda/device-status-http-handler.js');
   const setup = dependencies();
@@ -238,83 +351,25 @@ test('authoritative status core can be called directly without MQTT broker field
     recordAuthoritativeDeviceStatus,
     DeviceStatusAuthorizationError,
   } = await import('../lambda/iot-status-handler.js');
-  const tenantId = 'tenant-a';
-  const gatewayId = 'gateway-a';
-  const operationId = 'operation-a';
-  const tenantKey = `TENANT#${tenantId}`;
-  const deploymentKey = `DEPLOYMENT#${gatewayId}#${String(GENERATION).padStart(12, '0')}`;
-  const operationKey = `OPERATION#${operationId}`;
-  const gatewayKey = `GATEWAY#${gatewayId}`;
-  const gateway = {
-    PK: tenantKey,
-    SK: gatewayKey,
-    GSI1PK: `THING#${THING_NAME}`,
-    entityType: 'GATEWAY',
-    tenantId,
-    gatewayId,
-    thingName: THING_NAME,
-    certificateId: CERTIFICATE_ID,
-    certificatePrincipal: `arn:aws:iot:us-east-1:111122223333:cert/${CERTIFICATE_ID}`,
-    certificateStatus: 'ACTIVE',
-    desiredGeneration: GENERATION,
-    desiredProfileVersionId: PROFILE_VERSION_ID,
-    state: 'PROFILE_DELIVERED',
-  };
-  const gatewayLocator = {
-    PK: tenantKey,
-    SK: gatewayKey,
-    GSI1PK: `THING#${THING_NAME}`,
-    entityType: 'GATEWAY',
-  };
-  const readKeys: Array<{ PK: string; SK: string }> = [];
-  const transactions: unknown[][] = [];
-  const items = new Map<string, Record<string, unknown>>([
-    [`${tenantKey}|${gatewayKey}`, gateway],
-    [`${tenantKey}|${deploymentKey}`, {
-      entityType: 'DEPLOYMENT',
-      gatewayId,
-      generation: GENERATION,
-      profileVersionId: PROFILE_VERSION_ID,
-      operationId,
-      status: 'PROFILE_DELIVERED',
-      descriptor: { profileSha256: PROFILE_CHECKSUM },
-    }],
-    [`${tenantKey}|${operationKey}`, {
-      entityType: 'OPERATION',
-      gatewayId,
-      state: 'PROFILE_STAGED',
-      steps: [],
-    }],
-  ]);
-  const coreDependencies: DeviceStatusDependencies = {
-    async queryGatewayByThing() {
-      return [gatewayLocator];
-    },
-    async getItem(key: { PK: string; SK: string }) {
-      readKeys.push(key);
-      return items.get(`${key.PK}|${key.SK}`);
-    },
-    async transactWrite(value) {
-      transactions.push(value as unknown[]);
-    },
-    now: () => new Date('2026-08-17T12:00:00.000Z'),
-  };
+  const setup = coreHarness();
 
   const disposition = await recordAuthoritativeDeviceStatus(
     { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
     { generation: GENERATION, status: 'APPLYING', detail: 'Applying candidate.' },
     context,
-    coreDependencies,
+    setup.value,
   );
   assert.equal(disposition, 'APPLIED');
-  assert.deepEqual(readKeys[0], { PK: tenantKey, SK: gatewayKey },
+  assert.deepEqual(setup.readKeys[0], { PK: setup.tenantKey, SK: setup.gatewayKey },
     'the eventual GSI locator is reauthorized through a consistent base-record read');
-  assert.equal(transactions.length, 1);
-  assert.equal(transactions[0]?.length, 4, 'gateway, deployment, operation, and audit remain atomic');
-  const gatewayUpdate = transactions[0]?.[0] as {
+  assert.equal(setup.transactions.length, 1);
+  assert.equal(setup.transactions[0]?.length, 4, 'gateway, deployment, operation, and audit remain atomic');
+  const gatewayUpdate = setup.transactions[0]?.[0] as {
     Update?: { ConditionExpression?: string; ExpressionAttributeValues?: Record<string, unknown> };
   };
   assert.match(String(gatewayUpdate.Update?.ConditionExpression), /certificateStatus = :active/);
+  assert.match(String(gatewayUpdate.Update?.ConditionExpression), /signedDescriptor = :descriptor/);
+  assert.match(String(gatewayUpdate.Update?.ConditionExpression), /operationId = :operationId/);
   assert.equal(gatewayUpdate.Update?.ExpressionAttributeValues?.[':active'], 'ACTIVE');
 
   await assert.rejects(
@@ -322,9 +377,351 @@ test('authoritative status core can be called directly without MQTT broker field
       { thingName: THING_NAME, certificateId: 'c'.repeat(64) },
       { generation: GENERATION, status: 'APPLYING' },
       context,
-      coreDependencies,
+      setup.value,
     ),
     DeviceStatusAuthorizationError,
   );
-  assert.equal(transactions.length, 1);
+  assert.equal(setup.transactions.length, 1);
+});
+
+test('authoritative status core fails closed when desiredGeneration is missing', async () => {
+  const {
+    recordAuthoritativeDeviceStatus,
+    DeviceStatusConflictError,
+  } = await import('../lambda/iot-status-handler.js');
+  const setup = coreHarness({ includeDesiredGeneration: false });
+
+  await assert.rejects(
+    recordAuthoritativeDeviceStatus(
+      { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+      { generation: GENERATION, status: 'APPLYING' },
+      context,
+      setup.value,
+    ),
+    DeviceStatusConflictError,
+  );
+  assert.equal(setup.transactions.length, 0);
+});
+
+test('authoritative status core converges mixed states without rewriting records already at the target', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  const setup = coreHarness({
+    gatewayState: 'HEALTH_CHECK',
+    deploymentStatus: 'APPLYING',
+    operationState: 'APPLYING',
+  });
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    { generation: GENERATION, status: 'HEALTH_CHECK' },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'APPLIED');
+  const transaction = setup.transactions[0] as Array<{
+    Update?: {
+      Key?: { SK?: string };
+      ConditionExpression?: string;
+      ExpressionAttributeNames?: Record<string, string>;
+    };
+  }>;
+  const updatedKeys = transaction.flatMap((item) => item.Update?.Key?.SK ? [item.Update.Key.SK] : []);
+  assert.deepEqual(updatedKeys, [setup.deploymentKey, setup.operationKey]);
+  const deploymentUpdate = transaction.find((item) => item.Update?.Key?.SK === setup.deploymentKey)?.Update;
+  const operationUpdate = transaction.find((item) => item.Update?.Key?.SK === setup.operationKey)?.Update;
+  assert.match(String(deploymentUpdate?.ConditionExpression), /tenantId = :tenantId/);
+  assert.match(String(deploymentUpdate?.ConditionExpression), /profileVersionId = :profileVersionId/);
+  assert.match(String(deploymentUpdate?.ConditionExpression), /#descriptor = :descriptor/);
+  assert.equal(deploymentUpdate?.ExpressionAttributeNames?.['#descriptor'], 'descriptor');
+  assert.match(String(operationUpdate?.ConditionExpression), /operationId = :operationId/);
+  assert.match(String(operationUpdate?.ConditionExpression), /deploymentGeneration = :generation/);
+});
+
+test('authoritative status core accepts an exact concurrent duplicate after a conditional race', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  const setup = coreHarness({
+    async onTransact(_items, records) {
+      records.gateway.state = 'APPLYING';
+      records.deployment.status = 'APPLYING';
+      records.operation.state = 'APPLYING';
+      throw transactionCanceled('None', 'TransactionConflict', 'None');
+    },
+  });
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    { generation: GENERATION, status: 'APPLYING' },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'STALE_NOOP');
+  assert.equal(setup.transactions.length, 1);
+  assert.equal(setup.readKeys.length, 6, 'the loser proves the exact committed result with three consistent rereads');
+});
+
+test('a pure transaction conflict retries once when no competing status writer commits', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  let attempts = 0;
+  const setup = coreHarness({
+    async onTransact() {
+      attempts += 1;
+      if (attempts === 1) throw transactionCanceled('TransactionConflict');
+    },
+  });
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    { generation: GENERATION, status: 'APPLYING' },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'APPLIED');
+  assert.equal(setup.transactions.length, 2);
+  assert.equal(setup.readKeys.length, 9,
+    'the conflict reread and bounded retry each reauthorize all three authoritative records');
+});
+
+test('a status transaction retries after config delivery advances only the early gateway records', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  let attempts = 0;
+  const setup = coreHarness({
+    gatewayState: 'PROFILE_AVAILABLE',
+    deploymentStatus: 'PROFILE_AVAILABLE',
+    operationState: 'PROFILE_STAGED',
+    async onTransact(_items, records) {
+      attempts += 1;
+      if (attempts !== 1) return;
+      records.gateway.state = 'PROFILE_DELIVERED';
+      records.deployment.status = 'PROFILE_DELIVERED';
+      throw transactionCanceled('TransactionConflict');
+    },
+  });
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    { generation: GENERATION, status: 'APPLYING' },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'APPLIED');
+  assert.equal(setup.transactions.length, 2);
+  assert.equal(setup.readKeys.length, 9);
+  const retry = setup.transactions[1] as Array<{
+    Update?: { Key?: { SK?: string }; ExpressionAttributeValues?: Record<string, unknown> };
+  }>;
+  assert.equal(retry.find((item) => item.Update?.Key?.SK === setup.gatewayKey)
+    ?.Update?.ExpressionAttributeValues?.[':current'], 'PROFILE_DELIVERED');
+  assert.equal(retry.find((item) => item.Update?.Key?.SK === setup.deploymentKey)
+    ?.Update?.ExpressionAttributeValues?.[':current'], 'PROFILE_DELIVERED');
+  assert.equal(retry.find((item) => item.Update?.Key?.SK === setup.operationKey)
+    ?.Update?.ExpressionAttributeValues?.[':current'], 'PROFILE_STAGED');
+});
+
+test('an APPLYING report becomes stale when a concurrent HEALTH_CHECK report wins', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  const setup = coreHarness({
+    async onTransact(_items, records) {
+      records.gateway.state = 'HEALTH_CHECK';
+      records.deployment.status = 'HEALTH_CHECK';
+      records.operation.state = 'HEALTH_CHECK';
+      throw transactionCanceled('ConditionalCheckFailed');
+    },
+  });
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    { generation: GENERATION, status: 'APPLYING' },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'STALE_NOOP');
+  assert.equal(setup.transactions.length, 1);
+});
+
+test('a HEALTH_CHECK report retries once when a concurrent APPLYING report wins first', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  let attempts = 0;
+  const setup = coreHarness({
+    async onTransact(_items, records) {
+      attempts += 1;
+      if (attempts !== 1) return;
+      records.gateway.state = 'APPLYING';
+      records.deployment.status = 'APPLYING';
+      records.operation.state = 'APPLYING';
+      throw transactionCanceled('ConditionalCheckFailed');
+    },
+  });
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    { generation: GENERATION, status: 'HEALTH_CHECK' },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'APPLIED');
+  assert.equal(setup.transactions.length, 2);
+  const retryGateway = setup.transactions[1]?.[0] as {
+    Update?: { ExpressionAttributeValues?: Record<string, unknown> };
+  };
+  assert.equal(retryGateway.Update?.ExpressionAttributeValues?.[':current'], 'APPLYING');
+  assert.equal(retryGateway.Update?.ExpressionAttributeValues?.[':next'], 'HEALTH_CHECK');
+});
+
+test('a HEALTH_CHECK report becomes stale when an attested APPLIED_HEALTHY report wins', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  const setup = coreHarness({
+    async onTransact(_items, records) {
+      records.gateway.state = 'APPLIED_HEALTHY';
+      records.gateway.appliedGeneration = GENERATION;
+      records.gateway.appliedProfileVersionId = PROFILE_VERSION_ID;
+      records.gateway.appliedProfileChecksum = PROFILE_CHECKSUM;
+      records.deployment.status = 'APPLIED_HEALTHY';
+      records.deployment.appliedProfileVersionId = PROFILE_VERSION_ID;
+      records.deployment.appliedProfileChecksum = PROFILE_CHECKSUM;
+      records.operation.state = 'APPLIED_HEALTHY';
+      throw transactionCanceled('ConditionalCheckFailed');
+    },
+  });
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    { generation: GENERATION, status: 'HEALTH_CHECK' },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'STALE_NOOP');
+  assert.equal(setup.transactions.length, 1);
+});
+
+test('authoritative status core accepts an exact concurrent rollback quarantine', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  const setup = coreHarness({
+    async onTransact(_items, records) {
+      records.gateway.state = 'QUARANTINED';
+      records.gateway.health = 'DEGRADED';
+      delete records.gateway.desiredProfileVersionId;
+      delete records.gateway.signedDescriptor;
+      records.deployment.status = 'FAILED';
+      records.operation.state = 'FAILED';
+      records.operation.failure = { code: 'ROLLBACK_ATTESTATION_FAILED' };
+      throw transactionCanceled('ConditionalCheckFailed');
+    },
+  });
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    {
+      generation: GENERATION,
+      status: 'ROLLED_BACK',
+      profileVersionId: 'pv-untrusted',
+      profileChecksum: 'c'.repeat(64),
+    },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'QUARANTINED');
+  assert.equal(setup.readKeys.length, 6);
+});
+
+test('transaction cancellation recovery rejects every non-race cancellation reason without rereading', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  const nonRaceCodes = ['ValidationError', 'ProvisionedThroughputExceeded', 'ThrottlingError'];
+
+  for (const code of nonRaceCodes) {
+    const cancellation = transactionCanceled('ConditionalCheckFailed', code, 'None');
+    const setup = coreHarness({
+      async onTransact(_items, records) {
+        records.gateway.state = 'APPLYING';
+        records.deployment.status = 'APPLYING';
+        records.operation.state = 'APPLYING';
+        throw cancellation;
+      },
+    });
+
+    await assert.rejects(
+      recordAuthoritativeDeviceStatus(
+        { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+        { generation: GENERATION, status: 'APPLYING' },
+        context,
+        setup.value,
+      ),
+      (error: unknown) => error === cancellation,
+      code,
+    );
+    assert.equal(setup.transactions.length, 1, code);
+    assert.equal(setup.readKeys.length, 3, `${code} must not enter transaction-race recovery`);
+  }
+});
+
+test('terminal rollback records accept stale reports after assignment fields are intentionally cleared', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  const setup = coreHarness({
+    gatewayState: 'ROLLED_BACK',
+    deploymentStatus: 'ROLLED_BACK',
+    operationState: 'ROLLED_BACK',
+  });
+  delete setup.records.gateway.desiredProfileVersionId;
+  delete setup.records.gateway.signedDescriptor;
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    { generation: GENERATION, status: 'APPLYING' },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'STALE_NOOP');
+  assert.equal(setup.transactions.length, 0);
+});
+
+test('authoritative status core never masks nonconditional transaction errors or wrong-lineage winners', async () => {
+  const { recordAuthoritativeDeviceStatus } = await import('../lambda/iot-status-handler.js');
+  const denied = Object.assign(new Error('denied'), { name: 'AccessDeniedException' });
+  const deniedSetup = coreHarness({
+    async onTransact(_items, records) {
+      records.gateway.state = 'APPLYING';
+      records.deployment.status = 'APPLYING';
+      records.operation.state = 'APPLYING';
+      throw denied;
+    },
+  });
+  await assert.rejects(
+    recordAuthoritativeDeviceStatus(
+      { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+      { generation: GENERATION, status: 'APPLYING' },
+      context,
+      deniedSetup.value,
+    ),
+    (error: unknown) => error === denied,
+  );
+  assert.equal(deniedSetup.readKeys.length, 3, 'nonconditional failures do not enter duplicate recovery');
+
+  const race = transactionCanceled('ConditionalCheckFailed');
+  const wrongLineageSetup = coreHarness({
+    async onTransact(_items, records) {
+      records.gateway.state = 'APPLYING';
+      records.deployment.status = 'APPLYING';
+      records.operation.state = 'APPLYING';
+      records.operation.profileVersionId = 'pv-wrong';
+      throw race;
+    },
+  });
+  await assert.rejects(
+    recordAuthoritativeDeviceStatus(
+      { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+      { generation: GENERATION, status: 'APPLYING' },
+      context,
+      wrongLineageSetup.value,
+    ),
+    (error: unknown) => error === race,
+  );
+});
+
+test('transition fences reject early states belonging to another entity', async () => {
+  const { transitionDisposition } = await import('../lambda/iot-status-handler.js');
+  assert.equal(transitionDisposition('PROFILE_DELIVERED', 'APPLYING', 'gateway'), 'APPLY');
+  assert.equal(transitionDisposition('WAITING_FOR_DEVICE', 'APPLYING', 'deployment'), 'APPLY');
+  assert.equal(transitionDisposition('PROFILE_STAGED', 'APPLYING', 'operation'), 'APPLY');
+  assert.throws(() => transitionDisposition('WAITING_FOR_DEVICE', 'APPLYING', 'gateway'));
+  assert.throws(() => transitionDisposition('PERMANENT_IDENTITY_ACTIVE', 'APPLYING', 'deployment'));
+  assert.throws(() => transitionDisposition('CLAIM_ACCEPTED', 'APPLYING', 'operation'));
 });

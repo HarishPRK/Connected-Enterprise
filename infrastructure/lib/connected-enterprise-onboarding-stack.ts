@@ -347,7 +347,9 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     });
     deviceConfigHttpFunction.addToRolePolicy(new iam.PolicyStatement({
       sid: 'ReadAndRecordAuthorizedConfigurationDelivery',
-      actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:TransactWriteItems'],
+      // DynamoDB authorizes transactions using the permissions for each
+      // underlying item action, not a TransactWriteItems IAM action.
+      actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
       resources: [table.tableArn, `${table.tableArn}/index/GSI1`],
     }));
     deviceConfigHttpFunction.addToRolePolicy(new iam.PolicyStatement({
@@ -355,7 +357,12 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       actions: ['s3:GetObject'],
       resources: [artifactBucket.arnForObjects('*')],
     }));
-    dataKey.grantDecrypt(deviceConfigHttpFunction);
+    // DynamoDB uses this customer-managed key on behalf of the caller for
+    // both reads and writes. The configuration Lambda also needs Decrypt for
+    // the immutable S3 profile object, so the complete data-key grant covers
+    // both services without granting access to the separate signing key.
+    dataKey.grantEncryptDecrypt(deviceConfigHttpFunction);
+    dataKey.grant(deviceConfigHttpFunction, 'kms:DescribeKey');
 
     const deviceStatusHttpFunction = new lambdaNodejs.NodejsFunction(this, 'DeviceStatusHttpFunction', {
       ...functionDefaults,
@@ -374,9 +381,11 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     });
     deviceStatusHttpFunction.addToRolePolicy(new iam.PolicyStatement({
       sid: 'ValidateAndRecordAuthorizedConfigurationStatus',
-      actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:TransactWriteItems'],
+      actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
       resources: [table.tableArn, `${table.tableArn}/index/GSI1`],
     }));
+    dataKey.grantEncryptDecrypt(deviceStatusHttpFunction);
+    dataKey.grant(deviceStatusHttpFunction, 'kms:DescribeKey');
 
     const jwtAuthorizer = new apigwv2Authorizers.HttpJwtAuthorizer(
       'CognitoJwtAuthorizer',

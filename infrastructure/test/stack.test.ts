@@ -761,6 +761,28 @@ test('fleet configuration pull and status acknowledgement use one exact IoT cred
     ThrottlingRateLimit: 50,
   });
 
+  const configFunctionEntry = Object.entries(rendered.Resources).find(([, resource]) =>
+    resource.Type === 'AWS::Lambda::Function'
+    && resource.Properties?.FunctionName === 'connected-enterprise-onboarding-dev-device-config-http');
+  assert.ok(configFunctionEntry, 'dedicated configuration Lambda is synthesized');
+  const configRoleLogicalId = (configFunctionEntry[1].Properties?.Role as { 'Fn::GetAtt': [string, string] })['Fn::GetAtt'][0];
+  const configRolePolicies = Object.values(rendered.Resources).filter((resource) =>
+    resource.Type === 'AWS::IAM::Policy'
+    && JSON.stringify(resource.Properties?.Roles ?? []).includes(`\"Ref\":\"${configRoleLogicalId}\"`));
+  const configPermissions = JSON.stringify(configRolePolicies);
+  assert.match(configPermissions, /dynamodb:GetItem/);
+  assert.match(configPermissions, /dynamodb:Query/);
+  assert.match(configPermissions, /dynamodb:PutItem/);
+  assert.match(configPermissions, /dynamodb:UpdateItem/);
+  assert.doesNotMatch(configPermissions, /dynamodb:TransactWriteItems/);
+  assert.match(configPermissions, /index\/GSI1/);
+  assert.match(configPermissions, /kms:Decrypt/);
+  assert.match(configPermissions, /kms:DescribeKey/);
+  assert.match(configPermissions, /kms:Encrypt/);
+  assert.match(configPermissions, /kms:GenerateDataKey\*/);
+  assert.match(configPermissions, /kms:ReEncrypt\*/);
+  assert.doesNotMatch(configPermissions, /kms:Sign|secretsmanager:|iot:/i);
+
   const statusFunctionEntry = Object.entries(rendered.Resources).find(([, resource]) =>
     resource.Type === 'AWS::Lambda::Function'
     && resource.Properties?.FunctionName === 'connected-enterprise-onboarding-dev-device-status-http');
@@ -772,9 +794,16 @@ test('fleet configuration pull and status acknowledgement use one exact IoT cred
   const statusPermissions = JSON.stringify(statusRolePolicies);
   assert.match(statusPermissions, /dynamodb:GetItem/);
   assert.match(statusPermissions, /dynamodb:Query/);
-  assert.match(statusPermissions, /dynamodb:TransactWriteItems/);
+  assert.match(statusPermissions, /dynamodb:PutItem/);
+  assert.match(statusPermissions, /dynamodb:UpdateItem/);
+  assert.doesNotMatch(statusPermissions, /dynamodb:TransactWriteItems/);
   assert.match(statusPermissions, /index\/GSI1/);
-  assert.doesNotMatch(statusPermissions, /s3:|secretsmanager:|kms:(?:Decrypt|Sign)|iot:/i,
+  assert.match(statusPermissions, /kms:Decrypt/);
+  assert.match(statusPermissions, /kms:DescribeKey/);
+  assert.match(statusPermissions, /kms:Encrypt/);
+  assert.match(statusPermissions, /kms:GenerateDataKey\*/);
+  assert.match(statusPermissions, /kms:ReEncrypt\*/);
+  assert.doesNotMatch(statusPermissions, /s3:|secretsmanager:|kms:Sign|iot:/i,
     'status acknowledgement Lambda cannot read profile artifacts, secrets, signing keys, or IoT resources');
 
   const roleEntry = Object.entries(rendered.Resources).find(([, resource]) =>
@@ -966,6 +995,7 @@ test('IoT status transactions bind every DynamoDB expression placeholder for eve
   const originalSend = client.send;
   const checksum = 'a'.repeat(64);
   const rollbackChecksum = 'b'.repeat(64);
+  const descriptor = { profileSha256: checksum };
 
   const record = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -1018,6 +1048,7 @@ test('IoT status transactions bind every DynamoDB expression placeholder for eve
               certificatePrincipal: 'arn:aws:iot:us-east-1:111122223333:cert/certificate-a',
               certificateStatus: 'ACTIVE', thingName: 'gw-device-a', state: 'PROFILE_DELIVERED',
               generation: 1, desiredGeneration: 1, desiredProfileVersionId: 'pv-1',
+              operationId: 'operation-a', signedDescriptor: descriptor,
               appliedProfileVersionId: 'pv-applied', appliedProfileChecksum: rollbackChecksum,
             }],
           };
@@ -1026,12 +1057,15 @@ test('IoT status transactions bind every DynamoDB expression placeholder for eve
           getIndex += 1;
           return getIndex === 1
             ? { Item: {
+              PK: 'TENANT#tenant-a', SK: 'DEPLOYMENT#gateway-a#000000000001', tenantId: 'tenant-a',
               entityType: 'DEPLOYMENT', gatewayId: 'gateway-a', generation: 1,
               profileVersionId: 'pv-1', status: 'PROFILE_DELIVERED', operationId: 'operation-a',
-              descriptor: { profileSha256: checksum },
+              descriptor,
             } }
             : { Item: {
-              entityType: 'OPERATION', gatewayId: 'gateway-a', state: 'PROFILE_DELIVERED', steps: [],
+              PK: 'TENANT#tenant-a', SK: 'OPERATION#operation-a', tenantId: 'tenant-a',
+              entityType: 'OPERATION', operationId: 'operation-a', gatewayId: 'gateway-a',
+              profileVersionId: 'pv-1', deploymentGeneration: 1, state: 'PROFILE_DELIVERED', steps: [],
             } };
         }
         if (command.constructor.name === 'TransactWriteCommand') return {};
@@ -1058,7 +1092,9 @@ test('IoT status transactions bind every DynamoDB expression placeholder for eve
         .map((item) => record(item) && record(item.Update) ? item.Update : undefined)
         .find((update) => record(update?.Key) && String(update.Key.SK).startsWith('DEPLOYMENT#'));
       assert.ok(deploymentUpdate, `${label} deployment update was captured`);
-      assert.deepEqual(deploymentUpdate.ExpressionAttributeNames, { '#status': 'status', '#error': 'error' },
+      assert.deepEqual(deploymentUpdate.ExpressionAttributeNames, {
+        '#status': 'status', '#error': 'error', '#descriptor': 'descriptor',
+      },
         `${label} deployment update maps both reserved names`);
     }
   } finally {
