@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import type {
   APIGatewayProxyEventV2WithIAMAuthorizer,
   Context,
@@ -29,11 +30,35 @@ const OPERATION_KEY = `OPERATION#${OPERATION_ID}`;
 const MANUFACTURING_KEY = `SERIAL#${SERIAL_NUMBER}`;
 const BOOTSTRAP_BINDING_KEY = `BOOTSTRAPCERT#${BOOTSTRAP_CERTIFICATE_ID}`;
 const SIGNING_KEY_ID = process.env.SIGNING_KEY_ID;
+const PROFILE_DOCUMENT = {
+  schemaVersion: 1,
+  modelId: 'ce-gateway-v1',
+  parameters: {
+    dnsCacheEntries: 1000,
+    dnsTcpEnabled: true,
+    lanIpAddress: '10.10.10.1',
+    lanPrefixLength: 24,
+    wanMtu: 1500,
+  },
+};
+const PROFILE_CANONICAL = '{"modelId":"ce-gateway-v1","parameters":{"dnsCacheEntries":1000,"dnsTcpEnabled":true,"lanIpAddress":"10.10.10.1","lanPrefixLength":24,"wanMtu":1500},"schemaVersion":1}';
+const PROFILE_BYTES = Buffer.from(PROFILE_CANONICAL);
+const PROFILE_SHA256 = createHash('sha256').update(PROFILE_BYTES).digest('hex');
+const GATEWAY_METADATA = {
+  gatewayId: GATEWAY_ID,
+  thingName: THING_NAME,
+  serialNumber: SERIAL_NUMBER,
+  modelId: 'ce-gateway-v1',
+  hardwareRevision: 'rev-a',
+  siteId: 'site-a',
+};
+const GATEWAY_METADATA_CANONICAL = `{"gatewayId":"${GATEWAY_ID}","hardwareRevision":"rev-a","modelId":"ce-gateway-v1","serialNumber":"${SERIAL_NUMBER}","siteId":"site-a","thingName":"${THING_NAME}"}`;
+const GATEWAY_METADATA_SHA256 = createHash('sha256').update(GATEWAY_METADATA_CANONICAL).digest('hex');
 
 type Item = Record<string, unknown>;
 
 function assignmentDescriptor(): Item {
-  return {
+  const descriptor: Item = {
     kind: 'gateway-profile-assignment',
     tenantId: TENANT_ID,
     gatewayId: GATEWAY_ID,
@@ -42,8 +67,8 @@ function assignmentDescriptor(): Item {
     profileId: 'profile-a',
     profileVersionId: PROFILE_VERSION_ID,
     profileVersion: 1,
-    schemaVersion: '1.0',
-    profileSha256: 'b'.repeat(64),
+    schemaVersion: 1,
+    profileSha256: PROFILE_SHA256,
     objectKey: `tenants/${TENANT_ID}/profiles/profile-a/versions/1/profile.json`,
     manifestKey: `tenants/${TENANT_ID}/profiles/profile-a/versions/1/manifest.json`,
     issuedAt: '2026-08-17T12:00:00.000Z',
@@ -51,6 +76,27 @@ function assignmentDescriptor(): Item {
     signingKeyId: SIGNING_KEY_ID,
     signature: 'AQID',
     signingAlgorithm: 'ECDSA_SHA_256',
+  };
+  descriptor.configurationClaim = configurationClaim();
+  return descriptor;
+}
+
+function configurationClaim(overrides: Item = {}): Item {
+  return {
+    kind: 'gateway-configuration-claim',
+    claimVersion: 1,
+    gatewayId: GATEWAY_ID,
+    thingName: THING_NAME,
+    gatewayMetadataSha256: GATEWAY_METADATA_SHA256,
+    generation: GENERATION,
+    profileVersionId: PROFILE_VERSION_ID,
+    profileSha256: PROFILE_SHA256,
+    issuedAt: '2026-08-17T12:00:00.000Z',
+    expiresAt: '2099-08-17T12:00:00.000Z',
+    signingKeyId: SIGNING_KEY_ID,
+    signature: 'AQID',
+    signingAlgorithm: 'ECDSA_SHA_256',
+    ...overrides,
   };
 }
 
@@ -66,6 +112,9 @@ function records() {
     gatewayId: GATEWAY_ID,
     serialNumber: SERIAL_NUMBER,
     thingName: THING_NAME,
+    modelId: 'ce-gateway-v1',
+    hardwareRevision: 'rev-a',
+    siteId: 'site-a',
     certificateId: CERTIFICATE_ID,
     certificatePrincipal: `arn:aws:iot:us-east-1:111122223333:cert/${CERTIFICATE_ID}`,
     certificateStatus: 'ACTIVE',
@@ -149,6 +198,8 @@ const context = { awsRequestId: 'lambda-request-1' } as Context;
 
 function fixture(options: {
   firstUse?: boolean;
+  profileArtifact?: Uint8Array;
+  mutateDescriptor?: (descriptor: Item) => void;
   mutateGateway?: (gateway: Item) => void;
   mutateDeployment?: (deployment: Item) => void;
   mutateOperation?: (operation: Item) => void;
@@ -188,6 +239,7 @@ function fixture(options: {
     state.deployment.status = 'WAITING_FOR_DEVICE';
     state.operation.state = 'CSR_VERIFIED';
   }
+  options.mutateDescriptor?.(state.descriptor);
   options.mutateGateway?.(state.gateway);
   options.mutateDeployment?.(state.deployment);
   options.mutateOperation?.(state.operation);
@@ -203,7 +255,7 @@ function fixture(options: {
     items.set(`${BOOTSTRAP_BINDING_KEY}|BINDING`, bootstrapBinding);
   }
   const transactions: unknown[][] = [];
-  const presignedKeys: string[] = [];
+  const loadedProfileKeys: string[] = [];
   const callOrder: string[] = [];
   const dependencies: DeviceConfigurationDependencies = {
     async queryGatewayByThing() {
@@ -233,17 +285,17 @@ function fixture(options: {
         callOrder.push('record-delivery');
       }
     },
-    async presignArtifact(key) {
-      presignedKeys.push(key);
-      callOrder.push(`presign:${key}`);
-      return `https://artifacts.example.test/${encodeURIComponent(key)}?signature=redacted`;
+    async loadProfileArtifact(key) {
+      loadedProfileKeys.push(key);
+      callOrder.push(`load-profile:${key}`);
+      return options.profileArtifact ?? PROFILE_BYTES;
     },
     now: () => new Date('2026-08-17T12:00:00.000Z'),
   };
   return {
     dependencies,
     transactions,
-    presignedKeys,
+    loadedProfileKeys,
     callOrder,
     manufacturing,
     bootstrapBinding,
@@ -251,7 +303,7 @@ function fixture(options: {
   };
 }
 
-test('secured device configuration GET returns the existing signed assignment contract', async () => {
+test('secured device configuration GET returns only device-ready gateway and profile JSON', async () => {
   const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
   const setup = fixture();
   const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
@@ -260,16 +312,23 @@ test('secured device configuration GET returns the existing signed assignment co
   assert.equal(response.headers?.['cache-control'], 'no-store');
   assert.equal(response.headers?.['x-request-id'], 'api-request-1');
   const body = JSON.parse(String(response.body)) as Record<string, unknown>;
-  assert.equal(body.type, 'SIGNED_PROFILE_ASSIGNMENT');
-  assert.equal(body.thingName, THING_NAME);
-  assert.equal(body.gatewayId, GATEWAY_ID);
-  assert.equal(body.generation, GENERATION);
-  assert.equal(body.profileVersionId, PROFILE_VERSION_ID);
-  assert.deepEqual(body.descriptor, setup.descriptor);
-  assert.deepEqual(setup.presignedKeys, [
-    setup.descriptor.objectKey,
-    setup.descriptor.manifestKey,
-  ]);
+  assert.equal(body.type, 'GATEWAY_CONFIGURATION');
+  assert.equal(body.responseVersion, 1);
+  assert.deepEqual(body.gateway, GATEWAY_METADATA);
+  assert.deepEqual(body.assignment, {
+    generation: GENERATION,
+    profileId: 'profile-a',
+    profileVersionId: PROFILE_VERSION_ID,
+    profileVersion: 1,
+    schemaVersion: 1,
+    profileChecksum: PROFILE_SHA256,
+  });
+  assert.deepEqual(body.configuration, PROFILE_DOCUMENT);
+  assert.deepEqual(body.integrity, configurationClaim());
+  assert.deepEqual(setup.loadedProfileKeys, [setup.descriptor.objectKey]);
+
+  const serializedBody = JSON.stringify(body);
+  assert.doesNotMatch(serializedBody, /tenantId|certificateId|certificatePrincipal|operationId|objectKey|manifestKey|artifacts|presigned/i);
 
   assert.equal(setup.transactions.length, 1);
   const transaction = setup.transactions[0];
@@ -281,7 +340,7 @@ test('secured device configuration GET returns the existing signed assignment co
   assert.match(serialized, /SIGNED_PROFILE_DELIVERED_HTTP/);
 });
 
-test('first IAM-authenticated configuration GET finalizes the permanent identity before signing artifacts', async () => {
+test('first IAM-authenticated configuration GET finalizes the permanent identity before exposing the profile', async () => {
   const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
   const setup = fixture({ firstUse: true });
   const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
@@ -301,10 +360,9 @@ test('first IAM-authenticated configuration GET finalizes the permanent identity
   assert.match(serializedFinalization, new RegExp(BOOTSTRAP_CERTIFICATE_ID));
   assert.match(serializedFinalization, new RegExp(CERTIFICATE_ID));
 
-  assert.equal(setup.callOrder[0], 'finalize-identity', 'no signed artifact URL exists before identity activation');
+  assert.equal(setup.callOrder[0], 'finalize-identity', 'profile bytes are not exposed before identity activation');
   assert.deepEqual(setup.callOrder.slice(1), [
-    `presign:${setup.descriptor.objectKey}`,
-    `presign:${setup.descriptor.manifestKey}`,
+    `load-profile:${setup.descriptor.objectKey}`,
     'record-delivery',
   ]);
 });
@@ -322,7 +380,7 @@ test('first configuration GET fails closed when the bootstrap binding is not own
   assert.equal(response.statusCode, 403);
   assert.equal((JSON.parse(String(response.body)) as { code: string }).code, 'DEVICE_NOT_AUTHORIZED');
   assert.deepEqual(setup.transactions, []);
-  assert.deepEqual(setup.presignedKeys, []);
+  assert.deepEqual(setup.loadedProfileKeys, []);
 });
 
 test('secured device configuration GET requires exact IAM context, path identity, and generation', async () => {
@@ -348,7 +406,7 @@ test('secured device configuration GET requires exact IAM context, path identity
   assert.equal(wrongRoleResponse.statusCode, 403);
   assert.equal((JSON.parse(String(wrongRoleResponse.body)) as { code: string }).code, 'DEVICE_NOT_AUTHORIZED');
 
-  assert.deepEqual(setup.presignedKeys, []);
+  assert.deepEqual(setup.loadedProfileKeys, []);
   assert.deepEqual(setup.transactions, []);
 });
 
@@ -368,7 +426,7 @@ test('secured device configuration GET rejects duplicate and unknown query param
     queryStringParameters: { generation: String(GENERATION), debug: 'true' },
   }), context);
   assert.equal(unknown.statusCode, 400);
-  assert.deepEqual(setup.presignedKeys, []);
+  assert.deepEqual(setup.loadedProfileKeys, []);
   assert.deepEqual(setup.transactions, []);
 });
 
@@ -386,11 +444,11 @@ test('secured device configuration GET reauthorizes against the consistent gatew
   const body = JSON.parse(String(response.body)) as { code: string; error: string };
   assert.equal(body.code, 'DEVICE_NOT_AUTHORIZED');
   assert.equal(body.error, 'Device is not authorized');
-  assert.deepEqual(setup.presignedKeys, []);
+  assert.deepEqual(setup.loadedProfileKeys, []);
   assert.deepEqual(setup.transactions, []);
 });
 
-test('secured device configuration GET rejects inconsistent deployment authority before signing URLs', async () => {
+test('secured device configuration GET rejects inconsistent deployment authority before reading the profile', async () => {
   const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
   const setup = fixture({
     mutateDeployment: (deployment) => {
@@ -403,7 +461,7 @@ test('secured device configuration GET rejects inconsistent deployment authority
   const body = JSON.parse(String(response.body)) as { code: string; error: string };
   assert.equal(body.code, 'CONFIGURATION_NOT_AVAILABLE');
   assert.equal(body.error, 'Configuration is not available');
-  assert.deepEqual(setup.presignedKeys, []);
+  assert.deepEqual(setup.loadedProfileKeys, []);
   assert.deepEqual(setup.transactions, []);
 });
 
@@ -425,4 +483,52 @@ test('an applied healthy gateway may repeat a pull read-only without regressing 
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(setup.transactions, [], 'unchanged-generation repeat pulls do not amplify DDB writes or audits');
+});
+
+test('legacy assignments without a persisted compact claim fail closed before delivery', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const setup = fixture({
+    mutateDescriptor: (descriptor) => {
+      delete descriptor.configurationClaim;
+    },
+  });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 409);
+  const body = JSON.parse(String(response.body)) as Record<string, unknown>;
+  assert.equal(body.code, 'CONFIGURATION_NOT_AVAILABLE');
+  assert.equal(body.descriptor, undefined);
+  assert.equal(body.artifacts, undefined);
+  assert.deepEqual(setup.transactions, []);
+});
+
+test('secured device configuration GET rejects profile bytes that do not match the signed checksum', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const setup = fixture({ profileArtifact: Buffer.from('{"tampered":true}') });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 409);
+  assert.equal((JSON.parse(String(response.body)) as { code: string }).code, 'CONFIGURATION_NOT_AVAILABLE');
+  assert.deepEqual(setup.transactions, []);
+});
+
+test('secured device configuration GET rejects non-canonical and oversized profile artifacts', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const nonCanonical = Buffer.from(JSON.stringify(PROFILE_DOCUMENT));
+  const nonCanonicalHash = createHash('sha256').update(nonCanonical).digest('hex');
+  const nonCanonicalSetup = fixture({
+    profileArtifact: nonCanonical,
+    mutateDescriptor: (descriptor) => {
+      descriptor.profileSha256 = nonCanonicalHash;
+      (descriptor.configurationClaim as Item).profileSha256 = nonCanonicalHash;
+    },
+  });
+  const nonCanonicalResponse = await createDeviceConfigurationHandler(nonCanonicalSetup.dependencies)(event(), context);
+  assert.equal(nonCanonicalResponse.statusCode, 409);
+  assert.deepEqual(nonCanonicalSetup.transactions, []);
+
+  const oversizedSetup = fixture({ profileArtifact: Buffer.alloc(1024 * 1024 + 1, 0x20) });
+  const oversizedResponse = await createDeviceConfigurationHandler(oversizedSetup.dependencies)(event(), context);
+  assert.equal(oversizedResponse.statusCode, 409);
+  assert.deepEqual(oversizedSetup.transactions, []);
 });

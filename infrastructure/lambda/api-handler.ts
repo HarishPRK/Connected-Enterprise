@@ -30,7 +30,12 @@ import {
 } from './shared/ddb.js';
 import { errorResponse, idempotencyKey, json, parseJsonBody } from './shared/http.js';
 import { newId, sha256 } from './shared/crypto.js';
-import { canonicalJson, signManifest, validateProfile } from './shared/profile.js';
+import {
+  canonicalJson,
+  signGatewayConfigurationClaim,
+  signManifest,
+  validateProfile,
+} from './shared/profile.js';
 import { INITIAL_OPERATION_STEPS, publicOperation } from './shared/models.js';
 import { validateUiProfileParameters } from './shared/ui-profile.js';
 import { assertProfileCompatibility, assertProfileLineageModel } from './shared/compatibility.js';
@@ -265,6 +270,14 @@ async function createOperation(
     tenantId: context.tenantId,
     gatewayId,
     thingName,
+    gatewayMetadata: configurationGatewayMetadata({
+      gatewayId,
+      thingName,
+      serialNumber,
+      modelId: authoritativeModelId,
+      hardwareRevision: record.hardwareRevision ?? 'UNKNOWN',
+      siteId,
+    }),
     generation: 1,
     profileVersion,
     issuedAt: now,
@@ -727,7 +740,20 @@ async function assignProfile(
   const operationId = newId('op');
   const outboxId = newId('out');
   const descriptor = await signAssignmentDescriptor({
-    tenantId: context.tenantId, gatewayId, thingName: gateway.thingName, generation, profileVersion, issuedAt: now,
+    tenantId: context.tenantId,
+    gatewayId,
+    thingName: gateway.thingName,
+    gatewayMetadata: configurationGatewayMetadata({
+      gatewayId,
+      thingName: gateway.thingName,
+      serialNumber: gateway.serialNumber,
+      modelId: gateway.modelId ?? gateway.model,
+      hardwareRevision: gateway.hardwareRevision,
+      siteId: gateway.siteId,
+    }),
+    generation,
+    profileVersion,
+    issuedAt: now,
   });
   const deployment = {
     PK: tenantPk(context.tenantId), SK: deploymentSk(gatewayId, generation),
@@ -898,11 +924,25 @@ async function signAssignmentDescriptor(input: {
   tenantId: string;
   gatewayId: string;
   thingName: string;
+  gatewayMetadata: Record<string, unknown>;
   generation: number;
   profileVersion: Record<string, unknown>;
   issuedAt: string;
 }) {
   const expiresAt = new Date(Date.parse(input.issuedAt) + 30 * 24 * 60 * 60 * 1000).toISOString();
+  if (input.gatewayMetadata.gatewayId !== input.gatewayId || input.gatewayMetadata.thingName !== input.thingName) {
+    throw new Error('Gateway configuration metadata does not match the assignment identity');
+  }
+  const configurationClaim = await signGatewayConfigurationClaim({
+    gatewayId: input.gatewayId,
+    thingName: input.thingName,
+    gatewayMetadataSha256: sha256(canonicalJson(input.gatewayMetadata)),
+    generation: input.generation,
+    profileVersionId: String(input.profileVersion.profileVersionId),
+    profileSha256: String(input.profileVersion.documentHash),
+    issuedAt: input.issuedAt,
+    expiresAt,
+  });
   const signed = await signManifest({
     kind: 'gateway-profile-assignment', tenantId: input.tenantId, gatewayId: input.gatewayId,
     thingName: input.thingName, generation: input.generation,
@@ -910,8 +950,34 @@ async function signAssignmentDescriptor(input: {
     profileVersion: input.profileVersion.version, schemaVersion: input.profileVersion.schemaVersion,
     profileSha256: input.profileVersion.documentHash, objectKey: input.profileVersion.objectKey,
     manifestKey: input.profileVersion.manifestKey, issuedAt: input.issuedAt, expiresAt,
+    configurationClaim,
   });
   return { ...signed.manifest, signature: signed.signature, signingAlgorithm: signed.signingAlgorithm };
+}
+
+function configurationGatewayMetadata(input: {
+  gatewayId: unknown;
+  thingName: unknown;
+  serialNumber: unknown;
+  modelId: unknown;
+  hardwareRevision?: unknown;
+  siteId: unknown;
+}): Record<string, unknown> {
+  const required = (value: unknown, label: string): string => {
+    if (typeof value !== 'string' || !value) throw new ConflictError(`Gateway ${label} is missing`);
+    return value;
+  };
+  const hardwareRevision = typeof input.hardwareRevision === 'string' && input.hardwareRevision
+    ? input.hardwareRevision
+    : undefined;
+  return {
+    gatewayId: required(input.gatewayId, 'ID'),
+    thingName: required(input.thingName, 'Thing name'),
+    serialNumber: required(input.serialNumber, 'serial number'),
+    modelId: required(input.modelId, 'model ID'),
+    ...(hardwareRevision ? { hardwareRevision } : {}),
+    siteId: required(input.siteId, 'site ID'),
+  };
 }
 
 function requiredText(value: unknown, label: string, maxLength: number): string {

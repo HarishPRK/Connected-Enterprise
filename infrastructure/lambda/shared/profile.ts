@@ -22,6 +22,17 @@ export interface SignedManifest<T extends Record<string, unknown>> {
   signingAlgorithm: 'ECDSA_SHA_256';
 }
 
+export interface GatewayConfigurationClaimInput {
+  gatewayId: string;
+  thingName: string;
+  gatewayMetadataSha256: string;
+  generation: number;
+  profileVersionId: string;
+  profileSha256: string;
+  issuedAt: string;
+  expiresAt: string;
+}
+
 export function validateProfile(document: unknown): asserts document is Record<string, unknown> {
   validateProfileSecretReferences(document);
   if (!validate(document)) {
@@ -92,5 +103,27 @@ export async function signManifest<T extends Record<string, unknown>>(manifest: 
     canonicalManifest,
     signature: Buffer.from(result.Signature).toString('base64'),
     signingAlgorithm: 'ECDSA_SHA_256',
+  };
+}
+
+export async function signGatewayConfigurationClaim(
+  input: GatewayConfigurationClaimInput,
+): Promise<Record<string, unknown>> {
+  const signed = await signManifest({
+    kind: 'gateway-configuration-claim',
+    claimVersion: 1,
+    gatewayId: input.gatewayId,
+    thingName: input.thingName,
+    gatewayMetadataSha256: input.gatewayMetadataSha256,
+    generation: input.generation,
+    profileVersionId: input.profileVersionId,
+    profileSha256: input.profileSha256,
+    issuedAt: input.issuedAt,
+    expiresAt: input.expiresAt,
+  });
+  return {
+    ...signed.manifest,
+    signature: signed.signature,
+    signingAlgorithm: signed.signingAlgorithm,
   };
 }

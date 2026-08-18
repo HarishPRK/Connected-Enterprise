@@ -351,7 +351,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       resources: [table.tableArn, `${table.tableArn}/index/GSI1`],
     }));
     deviceConfigHttpFunction.addToRolePolicy(new iam.PolicyStatement({
-      sid: 'PresignOnlyImmutableProfileArtifacts',
+      sid: 'ReadOnlyImmutableProfileArtifacts',
       actions: ['s3:GetObject'],
       resources: [artifactBucket.arnForObjects('*')],
     }));
@@ -1081,7 +1081,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     });
     new CfnOutput(this, 'DeviceConfigurationUrlTemplate', {
       value: `${httpApi.apiEndpoint}${deviceConfigRoutePath}`,
-      description: 'AWS_IAM-protected signed configuration endpoint; Thing and certificate path values are bound by IoT-issued credentials',
+      description: 'AWS_IAM-protected inline configuration endpoint; Thing and certificate path values are bound by IoT-issued credentials',
     });
     new CfnOutput(this, 'DeviceStatusUrlTemplate', {
       value: `${httpApi.apiEndpoint}${deviceStatusRoutePath}`,

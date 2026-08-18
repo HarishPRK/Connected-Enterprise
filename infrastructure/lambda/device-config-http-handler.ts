@@ -1,5 +1,4 @@
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { GetCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import type {
   APIGatewayProxyEventV2WithIAMAuthorizer,
@@ -21,7 +20,11 @@ import {
   operationSk,
   tenantPk,
 } from './shared/ddb.js';
-import { canonicalJson } from './shared/profile.js';
+import { sha256 } from './shared/crypto.js';
+import {
+  canonicalJson,
+  type GatewayConfigurationClaimInput,
+} from './shared/profile.js';
 import {
   finalizePermanentIdentity,
   PermanentIdentityFinalizationError,
@@ -30,7 +33,7 @@ import {
 
 const ROUTE_KEY = 'GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration';
 const GATEWAY_CONFIG_ROLE_NAME = process.env.GATEWAY_CONFIG_ROLE_NAME?.trim() ?? '';
-const URL_TTL_SECONDS = 5 * 60;
+const MAX_PROFILE_BYTES = 1024 * 1024;
 const THING_NAME_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
 const CERTIFICATE_ID_PATTERN = /^[a-f0-9]{64}$/i;
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
@@ -85,7 +88,7 @@ type TransactItems = NonNullable<ConstructorParameters<typeof TransactWriteComma
 
 export interface DeviceConfigurationDependencies extends PermanentIdentityFinalizationDependencies {
   queryGatewayByThing(thingName: string): Promise<Item[]>;
-  presignArtifact(key: string, expiresIn: number): Promise<string>;
+  loadProfileArtifact(key: string): Promise<Uint8Array>;
 }
 
 interface AuthorizedRequest {
@@ -107,7 +110,6 @@ interface ConfigurationAuthority {
   profileVersionId: string;
   descriptor: Item;
   objectKey: string;
-  manifestKey: string;
 }
 
 class DeviceConfigurationError extends Error {
@@ -143,13 +145,17 @@ const productionDependencies: DeviceConfigurationDependencies = {
   async transactWrite(items) {
     await ddb.send(new TransactWriteCommand({ TransactItems: items }));
   },
-  async presignArtifact(key, expiresIn) {
+  async loadProfileArtifact(key) {
     if (!ARTIFACT_BUCKET) throw new Error('Artifact bucket is not configured');
-    return getSignedUrl(s3, new GetObjectCommand({
+    const result = await s3.send(new GetObjectCommand({
       Bucket: ARTIFACT_BUCKET,
       Key: key,
-      ResponseContentType: 'application/json',
-    }), { expiresIn });
+    }));
+    if (!result.Body) throw new Error('Profile artifact has no body');
+    if (typeof result.ContentLength === 'number' && result.ContentLength > MAX_PROFILE_BYTES) {
+      throw unavailable();
+    }
+    return result.Body.transformToByteArray();
   },
   now: () => new Date(),
 };
@@ -165,32 +171,21 @@ export function createDeviceConfigurationHandler(
     try {
       const request = authorizedRequest(event, requestId);
       const authority = await configurationAuthority(request, dependencies);
-      const issuedAt = dependencies.now();
-      const expiresAt = new Date(issuedAt.getTime() + URL_TTL_SECONDS * 1000).toISOString();
-      const [profileUrl, manifestUrl] = await Promise.all([
-        dependencies.presignArtifact(authority.objectKey, URL_TTL_SECONDS),
-        dependencies.presignArtifact(authority.manifestKey, URL_TTL_SECONDS),
-      ]);
+      const profileBytes = await dependencies.loadProfileArtifact(authority.objectKey);
+      const configuration = verifiedProfileDocument(profileBytes, authority);
+      const gateway = publicGatewayConfiguration(authority.gateway, authority);
+      const integrity = compactConfigurationClaim(authority, gateway);
 
       await recordHttpDelivery(authority, request, context, dependencies);
 
       return json(200, {
-        type: 'SIGNED_PROFILE_ASSIGNMENT',
+        type: 'GATEWAY_CONFIGURATION',
+        responseVersion: 1,
         requestId,
-        gatewayId: authority.gatewayId,
-        thingName: request.thingName,
-        generation: request.generation,
-        profileVersionId: authority.profileVersionId,
-        descriptor: authority.descriptor,
-        artifacts: {
-          profile: {
-            url: profileUrl,
-            sha256: authority.descriptor.profileSha256,
-            expiresAt,
-          },
-          manifest: { url: manifestUrl, expiresAt },
-        },
-        issuedAt: issuedAt.toISOString(),
+        gateway,
+        assignment: publicAssignment(authority),
+        configuration,
+        integrity,
       }, requestId);
     } catch (error) {
       if (error instanceof DeviceConfigurationError) {
@@ -330,7 +325,9 @@ async function configurationAuthority(
     profileVersionId: desiredProfileVersionId,
   });
   const objectKey = artifactKey(descriptor.objectKey, tenantId);
-  const manifestKey = artifactKey(descriptor.manifestKey, tenantId);
+  // The manifest stays control-plane-only, but an assigned descriptor must
+  // still reference a well-scoped immutable manifest.
+  artifactKey(descriptor.manifestKey, tenantId);
 
   const deployment = await dependencies.getItem({
     PK: expectedPk,
@@ -377,8 +374,142 @@ async function configurationAuthority(
     profileVersionId: desiredProfileVersionId,
     descriptor,
     objectKey,
-    manifestKey,
   };
+}
+
+function verifiedProfileDocument(
+  profileBytes: Uint8Array,
+  authority: ConfigurationAuthority,
+): Item {
+  if (!(profileBytes instanceof Uint8Array)
+    || profileBytes.byteLength === 0
+    || profileBytes.byteLength > MAX_PROFILE_BYTES
+    || sha256(profileBytes) !== authority.descriptor.profileSha256) {
+    throw unavailable();
+  }
+
+  const raw = Buffer.from(profileBytes);
+  const text = raw.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(raw)) throw unavailable();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw unavailable();
+  }
+  if (!isRecord(parsed)) throw unavailable();
+
+  try {
+    // Published profile objects are content-addressed canonical JSON. Requiring
+    // the exact encoding keeps the signed checksum meaningful end to end.
+    if (canonicalJson(parsed) !== text) throw unavailable();
+  } catch {
+    throw unavailable();
+  }
+
+  const expectedSchemaVersion = profileSchemaVersion(authority.descriptor.schemaVersion);
+  if (parsed.schemaVersion !== expectedSchemaVersion) throw unavailable();
+
+  const gatewayModelId = requiredStoredString(authority.gateway.modelId ?? authority.gateway.model, unavailable);
+  if (parsed.modelId !== undefined && parsed.modelId !== gatewayModelId) throw unavailable();
+
+  return parsed;
+}
+
+function compactConfigurationClaim(
+  authority: ConfigurationAuthority,
+  gateway: Item,
+): Item {
+  const input: GatewayConfigurationClaimInput = {
+    gatewayId: authority.gatewayId,
+    thingName: requiredStoredString(authority.gateway.thingName, unavailable),
+    gatewayMetadataSha256: sha256(canonicalJson(gateway)),
+    generation: authority.generation,
+    profileVersionId: authority.profileVersionId,
+    profileSha256: requiredStoredString(authority.descriptor.profileSha256, unavailable),
+    issuedAt: requiredStoredString(authority.descriptor.issuedAt, unavailable),
+    expiresAt: requiredStoredString(authority.descriptor.expiresAt, unavailable),
+  };
+
+  // The control plane signs this compact claim once when the immutable
+  // assignment is created. The read path must never mint replacement claims.
+  if (!isRecord(authority.descriptor.configurationClaim)) throw unavailable();
+  const claim = authority.descriptor.configurationClaim;
+  return verifiedConfigurationClaim(claim, input);
+}
+
+function verifiedConfigurationClaim(
+  claim: Item,
+  expected: GatewayConfigurationClaimInput,
+): Item {
+  if (claim.kind !== 'gateway-configuration-claim'
+    || claim.claimVersion !== 1
+    || claim.gatewayId !== expected.gatewayId
+    || claim.thingName !== expected.thingName
+    || claim.gatewayMetadataSha256 !== expected.gatewayMetadataSha256
+    || claim.generation !== expected.generation
+    || claim.profileVersionId !== expected.profileVersionId
+    || claim.profileSha256 !== expected.profileSha256
+    || claim.issuedAt !== expected.issuedAt
+    || claim.expiresAt !== expected.expiresAt
+    || !SIGNING_KEY_ID
+    || claim.signingKeyId !== SIGNING_KEY_ID
+    || claim.signingAlgorithm !== 'ECDSA_SHA_256'
+    || typeof claim.signature !== 'string'
+    || claim.signature.length > 1024
+    || !SIGNATURE_PATTERN.test(claim.signature)) {
+    throw unavailable();
+  }
+
+  // Strictly allowlist the public claim. Unknown descriptor fields, S3
+  // locators, tenant IDs, and database metadata never cross the device API.
+  return {
+    kind: claim.kind,
+    claimVersion: claim.claimVersion,
+    gatewayId: claim.gatewayId,
+    thingName: claim.thingName,
+    gatewayMetadataSha256: claim.gatewayMetadataSha256,
+    generation: claim.generation,
+    profileVersionId: claim.profileVersionId,
+    profileSha256: claim.profileSha256,
+    issuedAt: claim.issuedAt,
+    expiresAt: claim.expiresAt,
+    signingKeyId: claim.signingKeyId,
+    signingAlgorithm: claim.signingAlgorithm,
+    signature: claim.signature,
+  };
+}
+
+function publicGatewayConfiguration(gateway: Item, authority: ConfigurationAuthority): Item {
+  const hardwareRevision = typeof gateway.hardwareRevision === 'string' && gateway.hardwareRevision
+    ? gateway.hardwareRevision
+    : undefined;
+  return {
+    gatewayId: authority.gatewayId,
+    thingName: requiredStoredString(gateway.thingName, unavailable),
+    serialNumber: requiredStoredString(gateway.serialNumber, unavailable),
+    modelId: requiredStoredString(gateway.modelId ?? gateway.model, unavailable),
+    ...(hardwareRevision ? { hardwareRevision } : {}),
+    siteId: requiredStoredString(gateway.siteId, unavailable),
+  };
+}
+
+function publicAssignment(authority: ConfigurationAuthority): Item {
+  return {
+    generation: authority.generation,
+    profileId: requiredStoredString(authority.descriptor.profileId, unavailable),
+    profileVersionId: authority.profileVersionId,
+    profileVersion: positiveStoredInteger(authority.descriptor.profileVersion, unavailable),
+    schemaVersion: profileSchemaVersion(authority.descriptor.schemaVersion),
+    profileChecksum: requiredStoredString(authority.descriptor.profileSha256, unavailable),
+  };
+}
+
+function profileSchemaVersion(value: unknown): string | number {
+  if (typeof value === 'string' && value.length > 0 && value.length <= 32) return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value;
+  throw unavailable();
 }
 
 async function recordHttpDelivery(
