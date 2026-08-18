@@ -50,7 +50,20 @@ The script validates the tenant, model, site, profile, AWS certificate, and poli
 
 The restricted binding role needs only `iot:DescribeCertificate`, `iot:ListAttachedPolicies`, `iot:ListPrincipalThings`, the documented DynamoDB reads/scan, and the conditional DynamoDB transaction on this stack's table. It does not need certificate creation or private-key access.
 
-## 3. Runtime enrollment state machine
+## 3. Provide bootstrap network connectivity
+
+Before the gateway can contact AWS IoT Core, the IoT Credentials Provider, or API Gateway, its protected local bootstrap configuration must provide:
+
+- a working WAN link with DHCP, or a site-specific static WAN address, prefix, and gateway;
+- a default route and working DNS resolver;
+- correct time (or a reachable bootstrap NTP source) for certificate validation; and
+- the Amazon Trust Services root CA plus correct TLS hostname validation.
+
+These values are factory/installer prerequisites, not the managed profile. They must exist before AWS can deliver anything. After onboarding, the gateway retrieves and verifies the complete signed profile and can transactionally replace the bootstrap WAN/DNS state with managed schema-v2 values.
+
+Do not put DHCP pools, WAN addresses, DNS/NTP servers, LAN settings, forwarding, or NAT state into Fleet Provisioning parameters or IoT Thing attributes. Those AWS fields bind identity only. Network configuration belongs to the immutable signed profile returned inline by the HTTPS device configuration API.
+
+## 4. Runtime enrollment state machine
 
 1. The authenticated UI submits the serial. The JWT-authorized API verifies that the inventory record belongs to the user's tenant, that its unique bootstrap certificate is active, and atomically changes `CLAIMABLE → RESERVED`. An unexpired reservation cannot be overwritten; idempotency replay is the only repeat path.
 2. Within the 15-minute wizard reservation, the UI selects an allowed site and model-compatible immutable profile. Clicking **Start secure activation** consumes the verification, stamps `enrollmentAuthorizedAt`, removes the reservation expiry, and changes `RESERVED → ENROLLMENT_PENDING`. There is no post-Start enrollment deadline: the uniquely credentialed gateway may begin later and the authorized operation remains pending until it progresses or an operator explicitly recovers it.
@@ -86,7 +99,7 @@ The simulator directory and bootstrap private key must be accessible only to the
 
 The bundled simulator still retains the legacy MQTT adapter for compatibility tests. The gateway integration described above uses the AWS_IAM HTTPS GET/POST routes. In both adapters, payload identity fields are never authorization inputs. Failed outbox dispatches remain `PENDING`, record sanitized attempts, retry through the stream mapping, and reach the encrypted DLQ after bounded retries.
 
-## 4. Quarantine stuck provisioning
+## 5. Quarantine stuck provisioning
 
 Never reset `PROVISIONING` directly to claimable. First confirm the gateway is
 offline, then dry-run with the exact serial, certificate, operator identity,
@@ -105,7 +118,7 @@ deactivates the certificate (or records `NOT_FOUND`), force-cleans the exact
 MQTT session, transitions both records to `QUARANTINED`, and appends a tenant
 audit record. It never makes the serial claimable.
 
-## 5. Async IoT handler failure replay
+## 6. Async IoT handler failure replay
 
 The IoT Rule error queue covers rule/action failures. Handler failures after an
 accepted asynchronous invocation go to separate encrypted config/status Lambda

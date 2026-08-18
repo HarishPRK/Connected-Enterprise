@@ -25,8 +25,10 @@ export interface ProfileParameterDefinition {
 
 export const PROFILE_CATEGORIES: ProfileCategory[] = [
   { id: 'identity', title: 'Service & identity', description: 'Non-secret service metadata and operating state', tone: 'cyan' },
-  { id: 'network', title: 'Network & addressing', description: 'LAN, WAN, VLAN and interface behavior', tone: 'green' },
-  { id: 'dns', title: 'DNS & packet handling', description: 'Resolver, caching and packet validation', tone: 'violet' },
+  { id: 'network', title: 'LAN & interfaces', description: 'Local addressing, MTU and interface behavior', tone: 'green' },
+  { id: 'dhcp', title: 'DHCP server', description: 'Local address pools and lease behavior', tone: 'blue' },
+  { id: 'wan', title: 'WAN uplink', description: 'Uplink addressing, VLAN, forwarding and route policy', tone: 'cyan' },
+  { id: 'dns', title: 'DNS & time', description: 'Resolver, caching and clock synchronization', tone: 'violet' },
   { id: 'firewall', title: 'Firewall & crypto', description: 'Runtime limits and hardware acceleration', tone: 'amber' },
   { id: 'vpn', title: 'VPN & tunnels', description: 'Tunnel behavior with secret references kept separate', tone: 'pink' },
   { id: 'cellular', title: 'Cellular backup', description: 'Managed backup and failover telemetry', tone: 'blue' },
@@ -55,20 +57,51 @@ export const PROFILE_PARAMETERS: ProfileParameterDefinition[] = [
 
   { key: 'lanIpAddress', categoryId: 'network', label: 'LAN IP address', description: 'Gateway address on the primary LAN.', control: { kind: 'text', placeholder: '10.10.10.1' }, defaultValue: '10.10.10.1' },
   { key: 'lanPrefixLength', categoryId: 'network', label: 'LAN prefix length', description: 'CIDR prefix for the primary LAN.', control: { kind: 'number', min: 8, max: 30 }, defaultValue: 24 },
-  { key: 'wanMtu', categoryId: 'network', label: 'WAN MTU', description: 'Maximum transmission unit for the primary WAN.', control: { kind: 'number', min: 576, max: 9216, unit: 'bytes' }, defaultValue: 1500 },
+  { key: 'lanMtu', categoryId: 'network', label: 'LAN MTU', description: 'Maximum transmission unit for the primary LAN.', control: { kind: 'number', min: 576, max: 9216, unit: 'bytes' }, defaultValue: 1500 },
   { key: 'lanEthernetSpeed', categoryId: 'network', label: 'LAN Ethernet speed', description: 'Negotiation behavior for LAN interfaces.', control: { kind: 'select', options: ethernetOptions }, defaultValue: 'AUTO' },
-  { key: 'wanEthernetSpeed', categoryId: 'network', label: 'WAN Ethernet speed', description: 'Negotiation behavior for WAN interfaces.', control: { kind: 'select', options: ethernetOptions }, defaultValue: 'AUTO' },
   { key: 'defaultVlanPortsEnabled', categoryId: 'network', label: 'Default VLAN ports enabled', description: 'Keep default VLAN membership on physical LAN ports.', control: { kind: 'boolean' }, defaultValue: true },
   { key: 'vrrpEnabled', categoryId: 'network', label: 'VRRP enabled', description: 'Advertise a redundant first-hop gateway.', control: { kind: 'boolean' }, defaultValue: false },
 
-  { key: 'dnsTcpEnabled', categoryId: 'dns', label: 'DNS over TCP', description: 'Allow TCP fallback for DNS responses.', control: { kind: 'boolean' }, defaultValue: true },
-  { key: 'dnsCacheEntries', categoryId: 'dns', label: 'DNS cache size', description: 'Maximum cached DNS records.', control: { kind: 'number', min: 0, max: 100000, step: 100, unit: 'entries' }, defaultValue: 1000 },
-  { key: 'reversePathFilter', categoryId: 'dns', label: 'Reverse path filter', description: 'Source validation mode for inbound packets.', control: { kind: 'select', options: [
+  { key: 'dhcpServerEnabled', categoryId: 'dhcp', label: 'DHCP server', description: 'Issue IPv4 leases to clients on the primary LAN.', control: { kind: 'boolean' }, defaultValue: true },
+  { key: 'dhcpPoolStart', categoryId: 'dhcp', label: 'Pool start address', description: 'First IPv4 address available for dynamic leases.', control: { kind: 'text', placeholder: '10.10.10.100' }, defaultValue: '10.10.10.100' },
+  { key: 'dhcpPoolEnd', categoryId: 'dhcp', label: 'Pool end address', description: 'Last IPv4 address available for dynamic leases.', control: { kind: 'text', placeholder: '10.10.10.199' }, defaultValue: '10.10.10.199' },
+  { key: 'dhcpLeaseSeconds', categoryId: 'dhcp', label: 'Lease duration', description: 'Lifetime assigned to each dynamic IPv4 lease.', control: { kind: 'number', min: 60, max: 2592000, step: 60, unit: 'seconds' }, defaultValue: 86400 },
+
+  { key: 'wanMode', categoryId: 'wan', label: 'WAN addressing', description: 'Obtain uplink addressing automatically or use a static IPv4 configuration.', control: { kind: 'select', options: [
+    { value: 'DHCP', label: 'DHCP · automatic' },
+    { value: 'STATIC', label: 'Static IPv4' },
+  ] }, defaultValue: 'DHCP' },
+  { key: 'wanStaticIpAddress', categoryId: 'wan', label: 'Static WAN IP address', description: 'IPv4 address sent only when WAN addressing is Static IPv4.', control: { kind: 'text', placeholder: '198.51.100.10' }, defaultValue: '' },
+  { key: 'wanStaticPrefixLength', categoryId: 'wan', label: 'Static WAN prefix length', description: 'CIDR prefix sent only when WAN addressing is Static IPv4.', control: { kind: 'number', min: 1, max: 30 }, defaultValue: 24 },
+  { key: 'wanStaticGateway', categoryId: 'wan', label: 'Static WAN gateway', description: 'Default-router IPv4 address sent only for a static WAN.', control: { kind: 'text', placeholder: '198.51.100.1' }, defaultValue: '' },
+  { key: 'wanMtu', categoryId: 'wan', label: 'WAN MTU', description: 'Maximum transmission unit for the primary WAN.', control: { kind: 'number', min: 576, max: 9216, unit: 'bytes' }, defaultValue: 1500 },
+  { key: 'wanEthernetSpeed', categoryId: 'wan', label: 'WAN Ethernet speed', description: 'Negotiation behavior for WAN interfaces.', control: { kind: 'select', options: ethernetOptions }, defaultValue: 'AUTO' },
+  { key: 'wanVlanId', categoryId: 'wan', label: 'WAN VLAN ID', description: '802.1Q VLAN for the uplink; use 0 for an untagged WAN.', control: { kind: 'number', min: 0, max: 4094 }, defaultValue: 0 },
+  { key: 'ipv4ForwardingEnabled', categoryId: 'wan', label: 'IPv4 forwarding', description: 'Forward IPv4 traffic between LAN and WAN interfaces.', control: { kind: 'boolean' }, defaultValue: true },
+  { key: 'natMode', categoryId: 'wan', label: 'NAT mode', description: 'Translate LAN source addresses at the WAN boundary.', control: { kind: 'select', options: [
+    { value: 'MASQUERADE', label: 'Masquerade' },
+    { value: 'DISABLED', label: 'Disabled' },
+  ] }, defaultValue: 'MASQUERADE' },
+  { key: 'defaultRouteMetric', categoryId: 'wan', label: 'Default-route metric', description: 'Priority of the primary WAN default route; lower values win.', control: { kind: 'number', min: 0, max: 65535 }, defaultValue: 100 },
+  { key: 'reversePathFilter', categoryId: 'wan', label: 'Reverse path filter', description: 'Source validation mode for inbound packets.', control: { kind: 'select', options: [
     { value: 'STRICT', label: 'Strict' },
     { value: 'LOOSE', label: 'Loose' },
     { value: 'DISABLED', label: 'Disabled' },
   ] }, defaultValue: 'STRICT' },
-  { key: 'tcpTimestampsEnabled', categoryId: 'dns', label: 'TCP timestamps', description: 'Expose TCP timestamp negotiation.', control: { kind: 'boolean' }, defaultValue: true },
+  { key: 'tcpTimestampsEnabled', categoryId: 'wan', label: 'TCP timestamps', description: 'Expose TCP timestamp negotiation.', control: { kind: 'boolean' }, defaultValue: true },
+
+  { key: 'dnsMode', categoryId: 'dns', label: 'DNS resolver source', description: 'Use resolvers learned from WAN DHCP or provide static servers.', control: { kind: 'select', options: [
+    { value: 'WAN_DHCP', label: 'WAN DHCP' },
+    { value: 'STATIC', label: 'Static resolvers' },
+  ] }, defaultValue: 'WAN_DHCP' },
+  { key: 'dnsPrimaryServer', categoryId: 'dns', label: 'Primary DNS server', description: 'Required IPv4 resolver sent only when resolver source is Static.', control: { kind: 'text', placeholder: '1.1.1.1' }, defaultValue: '' },
+  { key: 'dnsSecondaryServer', categoryId: 'dns', label: 'Secondary DNS server', description: 'Optional fallback IPv4 resolver for static DNS.', control: { kind: 'text', placeholder: '8.8.8.8' }, defaultValue: '' },
+  { key: 'dnsSearchDomain', categoryId: 'dns', label: 'DNS search domain', description: 'Optional suffix used to resolve unqualified host names.', control: { kind: 'text', placeholder: 'branch.example.com' }, defaultValue: '' },
+  { key: 'dnsCacheEnabled', categoryId: 'dns', label: 'DNS cache', description: 'Cache resolver answers on the gateway.', control: { kind: 'boolean' }, defaultValue: true },
+  { key: 'dnsTcpEnabled', categoryId: 'dns', label: 'DNS over TCP', description: 'Allow TCP fallback for DNS responses.', control: { kind: 'boolean' }, defaultValue: true },
+  { key: 'dnsCacheEntries', categoryId: 'dns', label: 'DNS cache size', description: 'Maximum cached DNS records.', control: { kind: 'number', min: 0, max: 100000, step: 100, unit: 'entries' }, defaultValue: 1000 },
+  { key: 'ntpPrimaryServer', categoryId: 'dns', label: 'Primary NTP server', description: 'Preferred hostname or IPv4 source for clock synchronization.', control: { kind: 'text', placeholder: 'time.cloudflare.com' }, defaultValue: 'time.cloudflare.com' },
+  { key: 'ntpSecondaryServer', categoryId: 'dns', label: 'Secondary NTP server', description: 'Distinct fallback hostname or IPv4 source for clock synchronization.', control: { kind: 'text', placeholder: 'time.google.com' }, defaultValue: 'time.google.com' },
 
   { key: 'firewallMemoryMb', categoryId: 'firewall', label: 'Firewall memory', description: 'Memory budget reserved for firewall state.', control: { kind: 'number', min: 256, max: 32768, step: 256, unit: 'MB' }, defaultValue: 8192 },
   { key: 'cryptoBufferCount', categoryId: 'firewall', label: 'Hardware crypto buffers', description: 'Buffers allocated to hardware-assisted encryption.', control: { kind: 'number', min: 64, max: 8192, step: 64 }, defaultValue: 512 },

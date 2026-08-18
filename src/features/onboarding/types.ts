@@ -135,6 +135,7 @@ export interface VerificationResult {
 }
 
 export interface CreateProfileVersionInput {
+  schemaVersion: 2;
   name: string;
   description: string;
   modelId: string;

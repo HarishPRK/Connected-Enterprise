@@ -27,6 +27,30 @@ function profileSearchText(profile: ProfileVersion): string {
   return `${profile.name} ${profile.description} ${profile.modelId} ${profile.version} ${profile.changeNote}`.toLowerCase();
 }
 
+function profileSubmissionParameters(
+  parameters: Record<string, ProfileParameterValue>,
+): Record<string, ProfileParameterValue> {
+  const submitted = { ...parameters };
+  if (submitted.wanMode !== 'STATIC') {
+    delete submitted.wanStaticIpAddress;
+    delete submitted.wanStaticPrefixLength;
+    delete submitted.wanStaticGateway;
+  }
+  if (submitted.dhcpServerEnabled !== true) {
+    delete submitted.dhcpPoolStart;
+    delete submitted.dhcpPoolEnd;
+    delete submitted.dhcpLeaseSeconds;
+  }
+  if (submitted.dnsMode !== 'STATIC') {
+    delete submitted.dnsPrimaryServer;
+    delete submitted.dnsSecondaryServer;
+  } else if (String(submitted.dnsSecondaryServer ?? '').trim() === '') {
+    delete submitted.dnsSecondaryServer;
+  }
+  if (String(submitted.dnsSearchDomain ?? '').trim() === '') delete submitted.dnsSearchDomain;
+  return submitted;
+}
+
 export function ProfileManager({ profiles, models, canPublish, onProfileCreated }: ProfileManagerProps) {
   const { push } = useToast();
   const [mode, setMode] = useState<'catalog' | 'create'>('catalog');
@@ -69,6 +93,24 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
     if (description.trim().length < 10) return 'Describe when operators should use this profile.';
     if (!models.some((model) => model.id === modelId)) return 'Select a supported gateway model.';
     if (changeNote.trim().length < 3) return 'Summarize what this immutable version changes.';
+    if (parameters.wanMode === 'STATIC'
+      && (!String(parameters.wanStaticIpAddress ?? '').trim() || !String(parameters.wanStaticGateway ?? '').trim())) {
+      return 'Enter the static WAN IP address and gateway before publishing.';
+    }
+    if (parameters.dhcpServerEnabled === true
+      && (!String(parameters.dhcpPoolStart ?? '').trim() || !String(parameters.dhcpPoolEnd ?? '').trim())) {
+      return 'Enter the DHCP pool start and end addresses before publishing.';
+    }
+    if (parameters.dnsMode === 'WAN_DHCP' && parameters.wanMode !== 'DHCP') {
+      return 'Choose static DNS resolvers when the WAN does not use DHCP.';
+    }
+    if (parameters.dnsMode === 'STATIC' && !String(parameters.dnsPrimaryServer ?? '').trim()) {
+      return 'Enter a primary DNS server for static resolver mode.';
+    }
+    const primaryNtp = String(parameters.ntpPrimaryServer ?? '').trim().toLowerCase();
+    const secondaryNtp = String(parameters.ntpSecondaryServer ?? '').trim().toLowerCase();
+    if (!primaryNtp || !secondaryNtp) return 'Enter both primary and secondary NTP servers.';
+    if (primaryNtp === secondaryNtp) return 'Primary and secondary NTP servers must be different.';
 
     const invalidReference = PROFILE_PARAMETERS.find((parameter) => {
       if (parameter.control.kind !== 'secret-reference') return false;
@@ -93,11 +135,12 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
     setError(undefined);
     try {
       const profile = await createProfileVersion({
+        schemaVersion: 2,
         name: name.trim(),
         description: description.trim(),
         modelId,
         baseProfileVersionId: baseId || undefined,
-        parameters,
+        parameters: profileSubmissionParameters(parameters),
         changeNote: changeNote.trim(),
       }, idempotencyKey);
       onProfileCreated(profile);

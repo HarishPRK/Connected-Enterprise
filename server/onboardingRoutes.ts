@@ -128,6 +128,7 @@ export async function createOnboardingRouter(options: RouterOptions = {}): Promi
       description: req.body?.description,
       modelId: req.body?.modelId,
       baseProfileVersionId: req.body?.baseProfileVersionId,
+      schemaVersion: req.body?.schemaVersion,
       parameters: req.body?.parameters,
       changeNote: req.body?.changeNote,
     }, idempotencyKey(req));

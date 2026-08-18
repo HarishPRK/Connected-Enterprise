@@ -130,6 +130,39 @@ allowedSiteIds = [<site-id>, ...]
 
 The binding tool validates that the public certificate matches AWS, is active, has only the expected bootstrap policy, is not attached to a Thing, and is not already bound to another serial. The authenticated UI then reserves this tenant-bound serial and creates the `ENROLLMENT_PENDING` operation. Only after that UI state exists is the gateway started. The serial remains an identifier; possession of the exact pre-bound private key supplies the bootstrap authentication.
 
+## Bootstrap connectivity versus the managed profile
+
+The gateway must already have enough local bootstrap networking to reach AWS before it can retrieve a managed profile. At minimum, manufacturing or the installer must provide a working WAN link and address method, a default route, DNS resolution, correct time for TLS, and the Amazon Trust Services root chain. This can be a simple WAN DHCP configuration; a site that cannot use DHCP must provide its static WAN address, prefix, gateway, and DNS through the protected bootstrap channel.
+
+That bootstrap configuration is not the post-onboarding managed configuration. After Fleet Provisioning succeeds, the gateway uses its operational certificate to obtain short-lived credentials and retrieves the complete immutable, signed profile over the AWS_IAM HTTPS API. The profile can then replace the temporary bootstrap WAN/DNS settings transactionally. This ordering avoids the circular dependency of needing the AWS-delivered configuration in order to reach AWS.
+
+AWS IoT Thing attributes and Fleet Provisioning parameters carry onboarding identity and routing metadata only (for example, Thing name, gateway ID, serial, and tenant binding). DHCP, WAN, DNS, NTP, LAN, forwarding, and NAT settings belong in the signed profile document stored by the control plane; they are not copied into Thing attributes. The gateway receives the whole signed configuration for the assigned generation, rather than selecting fields from Thing metadata.
+
+## Profile schema v2 network settings
+
+New UI profile requests explicitly send numeric `schemaVersion: 2`. Requests that omit `schemaVersion` retain the legacy v1 contract, and already persisted v1 profiles remain readable. Schema v2 keeps all v1 parameters and adds these flat scalar settings:
+
+| Parameter | Default | Validation / meaning |
+| --- | --- | --- |
+| `lanMtu` | `1500` | Integer `576–9216` |
+| `dhcpServerEnabled` | `true` | Enables the LAN DHCP server |
+| `dhcpPoolStart` / `dhcpPoolEnd` | `10.10.10.100` / `10.10.10.199` | Valid ordered IPv4 range in the LAN subnet; must exclude the LAN gateway, network, and broadcast addresses when DHCP is enabled |
+| `dhcpLeaseSeconds` | `86400` | Integer `60–2592000` |
+| `wanMode` | `DHCP` | `DHCP` or `STATIC` |
+| `wanStaticIpAddress` / `wanStaticGateway` | empty | Valid IPv4 values required only when `wanMode=STATIC` |
+| `wanStaticPrefixLength` | `24` | Integer `1–30`; dormant under DHCP |
+| `wanVlanId` | `0` | Integer `0–4094`; `0` means untagged |
+| `dnsMode` | `WAN_DHCP` | `WAN_DHCP` or `STATIC`; `WAN_DHCP` is valid only with DHCP WAN |
+| `dnsPrimaryServer` / `dnsSecondaryServer` | empty | Primary is required for static DNS; secondary is optional |
+| `dnsSearchDomain` | empty | Optional DNS domain, at most 253 characters |
+| `dnsCacheEnabled` | `true` | Enables the local DNS cache |
+| `ntpPrimaryServer` / `ntpSecondaryServer` | `time.cloudflare.com` / `time.google.com` | Valid NTP host names |
+| `ipv4ForwardingEnabled` | `true` | Enables IPv4 forwarding |
+| `natMode` | `MASQUERADE` | `MASQUERADE` or `DISABLED` |
+| `defaultRouteMetric` | `100` | Integer `0–65535` |
+
+Dormant static WAN/DNS values may be omitted or empty. Likewise, DHCP pool values may be omitted while the LAN DHCP server is disabled. The v2 core LAN/WAN/DNS/NTP/forwarding/NAT catalog fields are required, and as soon as a mode activates its conditional values, the API validates the complete active combination before publishing an immutable version. Validation also rejects unsafe/reserved IPv4 addresses, overlapping LAN and static-WAN subnets, duplicate DNS/NTP endpoints, and masquerading without IPv4 forwarding.
+
 ## Gateway contract
 
 1. Validate WAN, DNS, NTP, TLS hostname, and the ATS trust chain.

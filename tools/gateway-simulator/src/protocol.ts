@@ -3,6 +3,7 @@ import { createHash, createPublicKey, verify } from 'node:crypto';
 export const DEVICE_STATUS_SEQUENCE = ['APPLYING', 'HEALTH_CHECK', 'APPLIED_HEALTHY'] as const;
 
 export type DeviceStatus = (typeof DEVICE_STATUS_SEQUENCE)[number];
+export type ProfileSchemaVersion = 1 | 2;
 
 export interface AssignmentExpectation {
   thingName: string;
@@ -20,6 +21,7 @@ export interface SignedAssignmentDescriptor extends Record<string, unknown> {
   generation: number;
   profileId: string;
   profileVersionId: string;
+  schemaVersion: ProfileSchemaVersion;
   profileSha256: string;
   objectKey: string;
   manifestKey: string;
@@ -184,6 +186,7 @@ export function verifyDownloadedArtifacts(
 
   const manifest = parseJsonObject(manifestText, 'Profile manifest');
   verifyKmsSignedObject(manifest, publicKeyPem, expectedSigningKeyId, 'profile manifest');
+  const manifestSchemaVersion = requiredProfileSchemaVersion(manifest.schemaVersion, 'profile manifest schemaVersion');
   if (manifest.kind !== 'gateway-profile'
     || manifest.tenantId !== assignment.descriptor.tenantId
     || manifest.profileId !== assignment.descriptor.profileId
@@ -194,11 +197,15 @@ export function verifyDownloadedArtifacts(
   }
 
   const profile = parseJsonObject(profileText, 'Profile document');
-  if (profile.schemaVersion !== 1
-    || typeof profile.modelId !== 'string'
+  const profileSchemaVersion = requiredProfileSchemaVersion(profile.schemaVersion, 'profile document schemaVersion');
+  if (typeof profile.modelId !== 'string'
     || profile.modelId.length === 0
     || !isRecord(profile.parameters)) {
     throw new Error('Profile document does not implement the Connected Enterprise UI profile schema');
+  }
+  if (profileSchemaVersion !== manifestSchemaVersion
+    || profileSchemaVersion !== assignment.descriptor.schemaVersion) {
+    throw new Error('Profile, manifest, and assignment schema versions do not match');
   }
   if (manifest.modelId !== profile.modelId) throw new Error('Profile model does not match its signed manifest');
 
@@ -282,6 +289,7 @@ function validateDescriptor(
   const generation = requiredPositiveInteger(value.generation, 'descriptor generation');
   const profileId = requiredString(value.profileId, 'descriptor profileId', 128);
   const profileVersionId = requiredString(value.profileVersionId, 'descriptor profileVersionId', 128);
+  const schemaVersion = requiredProfileSchemaVersion(value.schemaVersion, 'descriptor schemaVersion');
   if (gatewayId !== expected.gatewayId || thingName !== expected.thingName
     || generation !== expected.generation || profileVersionId !== expected.profileVersionId) {
     throw new Error('Assignment descriptor binding does not match the configuration response');
@@ -304,6 +312,7 @@ function validateDescriptor(
     generation,
     profileId,
     profileVersionId,
+    schemaVersion,
     profileSha256,
     objectKey,
     manifestKey,
@@ -330,6 +339,11 @@ function requiredThingName(value: unknown, label: string): string {
 
 function requiredPositiveInteger(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw new Error(`${label} must be a positive integer`);
+  return value;
+}
+
+function requiredProfileSchemaVersion(value: unknown, label: string): ProfileSchemaVersion {
+  if (value !== 1 && value !== 2) throw new Error(`${label} must be 1 or 2`);
   return value;
 }
 

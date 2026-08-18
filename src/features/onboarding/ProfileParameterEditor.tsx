@@ -6,7 +6,9 @@ import {
   Globe2,
   KeyRound,
   Network,
+  Router,
   Search,
+  Server,
   ShieldCheck,
   Signal,
   Tags,
@@ -29,6 +31,8 @@ interface ProfileParameterEditorProps {
 const CATEGORY_ICONS = {
   identity: Tags,
   network: Network,
+  dhcp: Server,
+  wan: Router,
   dns: Globe2,
   firewall: ShieldCheck,
   vpn: KeyRound,
@@ -44,6 +48,11 @@ const SEARCH_SYNONYMS: Record<string, string[]> = {
   credential: ['password', 'secret', 'vpn'],
   mtu: ['packet', 'wan'],
   subnet: ['prefix', 'cidr', 'lan'],
+  dhcp: ['lease', 'pool', 'automatic', 'address'],
+  resolver: ['dns', 'nameserver'],
+  nameserver: ['dns', 'resolver'],
+  route: ['gateway', 'metric', 'wan'],
+  clock: ['ntp', 'time'],
   restart: ['reboot', 'recovery'],
   reboot: ['restart', 'recovery'],
   timezone: ['clock', 'time', 'locale'],
@@ -259,6 +268,7 @@ export function ProfileParameterEditor({
                     {parameters.map((parameter) => {
                       const inputId = `${instanceId}-${parameter.key}`;
                       const labelId = `${inputId}-label`;
+                      const included = Object.prototype.hasOwnProperty.call(values, parameter.key);
                       const value = values[parameter.key] ?? parameter.defaultValue;
                       const labelable = !readOnly && parameter.control.kind !== 'boolean';
                       return (
@@ -268,14 +278,18 @@ export function ProfileParameterEditor({
                             <span>{parameter.description}</span>
                           </div>
                           <div className="ce-onb-parameter-control">
-                            <ParameterControl
-                              parameter={parameter}
-                              value={value}
-                              inputId={inputId}
-                              labelId={labelId}
-                              readOnly={readOnly}
-                              onChange={(next) => onChange?.(parameter.key, next)}
-                            />
+                            {readOnly && !included ? (
+                              <span className="ce-onb-param-value" aria-labelledby={labelId}>Not included in this version</span>
+                            ) : (
+                              <ParameterControl
+                                parameter={parameter}
+                                value={value}
+                                inputId={inputId}
+                                labelId={labelId}
+                                readOnly={readOnly}
+                                onChange={(next) => onChange?.(parameter.key, next)}
+                              />
+                            )}
                           </div>
                         </div>
                       );

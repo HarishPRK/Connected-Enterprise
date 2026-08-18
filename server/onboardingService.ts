@@ -86,6 +86,7 @@ interface ProfileInput {
   description?: string;
   modelId: string;
   baseProfileVersionId?: string;
+  schemaVersion?: number;
   parameters: Record<string, unknown>;
   changeNote: string;
 }
@@ -109,9 +110,15 @@ type ProfileRule =
   | { type: 'string'; maxLength: number; pattern?: RegExp }
   | { type: 'enum'; values: readonly string[] }
   | { type: 'ipv4' }
+  | { type: 'ipv4-or-empty' }
+  | { type: 'host-or-ipv4' }
+  | { type: 'optional-hostname' }
+  | { type: 'timezone' }
   | { type: 'secret-reference' };
 
-const PROFILE_PARAMETER_RULES: Record<string, ProfileRule> = {
+type ProfileSchemaVersion = 1 | 2;
+
+const PROFILE_PARAMETER_RULES_V1: Record<string, ProfileRule> = {
   serviceOffering: { type: 'enum', values: ['ANIRA', 'AVTS', 'NETBOND', 'VPN_MANAGED'] },
   internetAccess: { type: 'boolean' },
   usbPortsEnabled: { type: 'boolean' },
@@ -147,12 +154,65 @@ const PROFILE_PARAMETER_RULES: Record<string, ProfileRule> = {
   autoRebootAfterApply: { type: 'boolean' },
 };
 
+const PROFILE_PARAMETER_RULES_V2: Record<string, ProfileRule> = {
+  ...PROFILE_PARAMETER_RULES_V1,
+  lanMtu: { type: 'number', min: 576, max: 9216, integer: true },
+  dhcpServerEnabled: { type: 'boolean' },
+  dhcpPoolStart: { type: 'ipv4-or-empty' },
+  dhcpPoolEnd: { type: 'ipv4-or-empty' },
+  dhcpLeaseSeconds: { type: 'number', min: 60, max: 2_592_000, integer: true },
+  wanMode: { type: 'enum', values: ['DHCP', 'STATIC'] },
+  wanStaticIpAddress: { type: 'ipv4-or-empty' },
+  wanStaticPrefixLength: { type: 'number', min: 1, max: 30, integer: true },
+  wanStaticGateway: { type: 'ipv4-or-empty' },
+  wanVlanId: { type: 'number', min: 0, max: 4094, integer: true },
+  dnsMode: { type: 'enum', values: ['WAN_DHCP', 'STATIC'] },
+  dnsPrimaryServer: { type: 'ipv4-or-empty' },
+  dnsSecondaryServer: { type: 'ipv4-or-empty' },
+  dnsSearchDomain: { type: 'optional-hostname' },
+  dnsCacheEnabled: { type: 'boolean' },
+  ntpPrimaryServer: { type: 'host-or-ipv4' },
+  ntpSecondaryServer: { type: 'host-or-ipv4' },
+  ipv4ForwardingEnabled: { type: 'boolean' },
+  natMode: { type: 'enum', values: ['MASQUERADE', 'DISABLED'] },
+  defaultRouteMetric: { type: 'number', min: 0, max: 65_535, integer: true },
+  timezone: { type: 'timezone' },
+};
+
+const PROFILE_V2_REQUIRED_KEYS = [
+  'lanIpAddress',
+  'lanPrefixLength',
+  'lanMtu',
+  'wanMtu',
+  'dhcpServerEnabled',
+  'wanMode',
+  'wanVlanId',
+  'dnsMode',
+  'dnsCacheEnabled',
+  'timezone',
+  'ntpPrimaryServer',
+  'ntpSecondaryServer',
+  'ipv4ForwardingEnabled',
+  'natMode',
+  'defaultRouteMetric',
+] as const;
+
 const DEFAULT_PROFILE_PARAMETERS: Record<string, string | number | boolean> = {
   serviceOffering: 'ANIRA',
   internetAccess: true,
   usbPortsEnabled: false,
   lanIpAddress: '10.10.10.1',
   lanPrefixLength: 24,
+  lanMtu: 1500,
+  dhcpServerEnabled: true,
+  dhcpPoolStart: '10.10.10.100',
+  dhcpPoolEnd: '10.10.10.199',
+  dhcpLeaseSeconds: 86_400,
+  wanMode: 'DHCP',
+  wanStaticIpAddress: '',
+  wanStaticPrefixLength: 24,
+  wanStaticGateway: '',
+  wanVlanId: 0,
   wanMtu: 1500,
   lanEthernetSpeed: 'AUTO',
   wanEthernetSpeed: 'AUTO',
@@ -160,6 +220,13 @@ const DEFAULT_PROFILE_PARAMETERS: Record<string, string | number | boolean> = {
   vrrpEnabled: false,
   dnsTcpEnabled: true,
   dnsCacheEntries: 1000,
+  dnsMode: 'WAN_DHCP',
+  dnsPrimaryServer: '',
+  dnsSecondaryServer: '',
+  dnsSearchDomain: '',
+  dnsCacheEnabled: true,
+  ntpPrimaryServer: 'time.cloudflare.com',
+  ntpSecondaryServer: 'time.google.com',
   reversePathFilter: 'STRICT',
   tcpTimestampsEnabled: true,
   firewallMemoryMb: 8192,
@@ -168,6 +235,9 @@ const DEFAULT_PROFILE_PARAMETERS: Record<string, string | number | boolean> = {
   vpnCredentialRef: '',
   wireGuardKeyRef: '',
   natTraversalEnabled: true,
+  ipv4ForwardingEnabled: true,
+  natMode: 'MASQUERADE',
+  defaultRouteMetric: 100,
   natKeepaliveSeconds: 20,
   tunnelReconnectSeconds: 30,
   maxInboundTunnels: 10,
@@ -283,7 +353,190 @@ function assertIdempotencyKey(value: string): void {
   }
 }
 
-function assertProfileParameters(parameters: unknown): asserts parameters is Record<string, unknown> {
+function assertProfileSchemaVersion(value: unknown): ProfileSchemaVersion {
+  if (value === undefined) return 1;
+  if (value !== 1 && value !== 2) {
+    throw new OnboardingError(400, 'INVALID_PROFILE_SCHEMA', 'schemaVersion must be 1 or 2.');
+  }
+  return value;
+}
+
+function assertProfileV2Relationships(parameters: Record<string, unknown>): void {
+  const invalid = (key: string, message: string): never => {
+    throw new OnboardingError(400, 'INVALID_PROFILE_PARAMETER', `parameters.${key} ${message}`);
+  };
+
+  for (const key of PROFILE_V2_REQUIRED_KEYS) {
+    if (!Object.hasOwn(parameters, key)) invalid(key, 'is required by profile schema v2.');
+  }
+
+  const lanAddress = parameters.lanIpAddress as string;
+  const lanPrefix = parameters.lanPrefixLength as number;
+  assertSafeHostAddress(lanAddress, lanPrefix, 'lanIpAddress', invalid);
+
+  if (parameters.dhcpServerEnabled === true) {
+    for (const key of ['dhcpPoolStart', 'dhcpPoolEnd', 'dhcpLeaseSeconds'] as const) {
+      if (!Object.hasOwn(parameters, key)) invalid(key, 'is required when DHCP is enabled.');
+    }
+    const poolStart = parameters.dhcpPoolStart as string;
+    const poolEnd = parameters.dhcpPoolEnd as string;
+    assertSafeHostAddress(poolStart, lanPrefix, 'dhcpPoolStart', invalid);
+    assertSafeHostAddress(poolEnd, lanPrefix, 'dhcpPoolEnd', invalid);
+    const lanRange = ipv4Range(lanAddress, lanPrefix);
+    const start = ipv4ToInteger(poolStart);
+    const end = ipv4ToInteger(poolEnd);
+    const gateway = ipv4ToInteger(lanAddress);
+    if (start > end) invalid('dhcpPoolStart', 'must not be greater than parameters.dhcpPoolEnd.');
+    if (start <= lanRange.network || end >= lanRange.broadcast) {
+      invalid('dhcpPoolStart', 'and parameters.dhcpPoolEnd must be entirely inside the usable LAN subnet.');
+    }
+    if (gateway >= start && gateway <= end) {
+      invalid('dhcpPoolStart', 'and parameters.dhcpPoolEnd must not include the LAN gateway address.');
+    }
+  }
+
+  const wanMode = parameters.wanMode as string;
+  if (wanMode === 'STATIC') {
+    for (const key of ['wanStaticIpAddress', 'wanStaticPrefixLength', 'wanStaticGateway'] as const) {
+      if (!Object.hasOwn(parameters, key)) invalid(key, 'is required when parameters.wanMode is STATIC.');
+    }
+    const wanAddress = parameters.wanStaticIpAddress as string;
+    const wanPrefix = parameters.wanStaticPrefixLength as number;
+    const wanGateway = parameters.wanStaticGateway as string;
+    assertSafeHostAddress(wanAddress, wanPrefix, 'wanStaticIpAddress', invalid);
+    assertSafeHostAddress(wanGateway, wanPrefix, 'wanStaticGateway', invalid);
+    const wanRange = ipv4Range(wanAddress, wanPrefix);
+    const gateway = ipv4ToInteger(wanGateway);
+    if (gateway <= wanRange.network || gateway >= wanRange.broadcast) {
+      invalid('wanStaticGateway', 'must be inside the usable static WAN subnet.');
+    }
+    if (wanGateway === wanAddress) invalid('wanStaticGateway', 'must differ from parameters.wanStaticIpAddress.');
+    if (rangesOverlap(ipv4Range(lanAddress, lanPrefix), wanRange)) {
+      invalid('wanStaticIpAddress', 'must not use a subnet that overlaps the LAN subnet.');
+    }
+  } else if (hasNonEmptyString(parameters, 'wanStaticIpAddress') || hasNonEmptyString(parameters, 'wanStaticGateway')) {
+    invalid('wanStaticIpAddress', 'and parameters.wanStaticGateway must be empty or omitted when parameters.wanMode is DHCP.');
+  }
+
+  const dnsMode = parameters.dnsMode as string;
+  if (dnsMode === 'WAN_DHCP') {
+    if (wanMode !== 'DHCP') invalid('dnsMode', 'WAN_DHCP requires parameters.wanMode DHCP.');
+    if (hasNonEmptyString(parameters, 'dnsPrimaryServer') || hasNonEmptyString(parameters, 'dnsSecondaryServer')) {
+      invalid('dnsPrimaryServer', 'and parameters.dnsSecondaryServer must be empty or omitted when parameters.dnsMode is WAN_DHCP.');
+    }
+  } else {
+    if (!Object.hasOwn(parameters, 'dnsPrimaryServer')) invalid('dnsPrimaryServer', 'is required when parameters.dnsMode is STATIC.');
+    const primary = parameters.dnsPrimaryServer as string;
+    assertSafeUnicastAddress(primary, 'dnsPrimaryServer', invalid);
+    if (hasNonEmptyString(parameters, 'dnsSecondaryServer')) {
+      const secondary = parameters.dnsSecondaryServer as string;
+      assertSafeUnicastAddress(secondary, 'dnsSecondaryServer', invalid);
+      if (secondary === primary) invalid('dnsSecondaryServer', 'must differ from parameters.dnsPrimaryServer.');
+    }
+  }
+
+  const ntpPrimary = parameters.ntpPrimaryServer as string;
+  const ntpSecondary = parameters.ntpSecondaryServer as string;
+  assertSafeHostOrIpv4(ntpPrimary, 'ntpPrimaryServer', invalid);
+  assertSafeHostOrIpv4(ntpSecondary, 'ntpSecondaryServer', invalid);
+  if (ntpPrimary.toLowerCase() === ntpSecondary.toLowerCase()) {
+    invalid('ntpSecondaryServer', 'must differ from parameters.ntpPrimaryServer.');
+  }
+
+  if (parameters.natMode === 'MASQUERADE' && parameters.ipv4ForwardingEnabled !== true) {
+    invalid('ipv4ForwardingEnabled', 'must be true when parameters.natMode is MASQUERADE.');
+  }
+}
+
+function hasNonEmptyString(parameters: Record<string, unknown>, key: string): boolean {
+  return typeof parameters[key] === 'string' && parameters[key] !== '';
+}
+
+function assertSafeHostOrIpv4(
+  value: string,
+  key: string,
+  invalid: (key: string, message: string) => never,
+): void {
+  if (isIP(value) === 4) {
+    assertSafeUnicastAddress(value, key, invalid);
+    return;
+  }
+  if (!isStrictHostname(value)) invalid(key, 'must be a safe IPv4 address or ASCII hostname.');
+}
+
+function assertSafeHostAddress(
+  value: string,
+  prefixLength: number,
+  key: string,
+  invalid: (key: string, message: string) => never,
+): void {
+  assertSafeUnicastAddress(value, key, invalid);
+  const range = ipv4Range(value, prefixLength);
+  const address = ipv4ToInteger(value);
+  if (address === range.network || address === range.broadcast) {
+    invalid(key, 'must be a usable host address for its subnet.');
+  }
+}
+
+function assertSafeUnicastAddress(
+  value: string,
+  key: string,
+  invalid: (key: string, message: string) => never,
+): void {
+  if (isIP(value) !== 4) invalid(key, 'must be a valid IPv4 address.');
+  const [first = -1, second = -1] = value.split('.').map(Number);
+  if (first === 0
+    || first === 127
+    || first >= 224
+    || (first === 169 && second === 254)
+    || value === '255.255.255.255') {
+    invalid(key, 'must be a safe unicast IPv4 address.');
+  }
+}
+
+function isStrictHostname(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 253 || value.endsWith('.')) return false;
+  const labels = value.split('.');
+  if (labels.some((label) => label.length < 1
+    || label.length > 63
+    || !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label))) return false;
+  return !/^\d+$/.test(value.replaceAll('.', ''));
+}
+
+function isIanaTimezone(value: unknown): value is string {
+  if (typeof value !== 'string'
+    || value.length < 1
+    || value.length > 64
+    || (value !== 'UTC' && !/^[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)+$/.test(value))) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ipv4ToInteger(value: string): number {
+  return value.split('.').reduce((result, octet) => ((result << 8) | Number(octet)) >>> 0, 0);
+}
+
+function ipv4Range(value: string, prefixLength: number): { network: number; broadcast: number } {
+  const mask = (0xffff_ffff << (32 - prefixLength)) >>> 0;
+  const network = (ipv4ToInteger(value) & mask) >>> 0;
+  return { network, broadcast: (network | (~mask >>> 0)) >>> 0 };
+}
+
+function rangesOverlap(
+  left: { network: number; broadcast: number },
+  right: { network: number; broadcast: number },
+): boolean {
+  return left.network <= right.broadcast && right.network <= left.broadcast;
+}
+
+function assertProfileParameters(
+  parameters: unknown,
+  schemaVersion: ProfileSchemaVersion,
+): asserts parameters is Record<string, unknown> {
   if (!parameters || Array.isArray(parameters) || typeof parameters !== 'object') {
     throw new OnboardingError(400, 'INVALID_PROFILE', 'Profile parameters must be a JSON object.');
   }
@@ -333,13 +586,14 @@ function assertProfileParameters(parameters: unknown): asserts parameters is Rec
 
   visit(parameters, 'parameters');
 
+  const rules = schemaVersion === 2 ? PROFILE_PARAMETER_RULES_V2 : PROFILE_PARAMETER_RULES_V1;
   for (const [key, value] of Object.entries(parameters)) {
-    const rule = PROFILE_PARAMETER_RULES[key];
+    const rule = Object.hasOwn(rules, key) ? rules[key] : undefined;
     if (!rule) {
       throw new OnboardingError(
         400,
         'UNKNOWN_PROFILE_PARAMETER',
-        `parameters.${key} is not part of profile schema v1.`,
+        `parameters.${key} is not part of profile schema v${schemaVersion}.`,
       );
     }
     const invalid = (message: string): never => {
@@ -364,6 +618,22 @@ function assertProfileParameters(parameters: unknown): asserts parameters is Rec
       case 'ipv4':
         if (typeof value !== 'string' || isIP(value) !== 4) invalid('must be a valid IPv4 address.');
         break;
+      case 'ipv4-or-empty':
+        if (typeof value !== 'string' || (value !== '' && isIP(value) !== 4)) invalid('must be empty or a valid IPv4 address.');
+        break;
+      case 'host-or-ipv4':
+        if (typeof value !== 'string' || (isIP(value) !== 4 && !isStrictHostname(value))) {
+          invalid('must be a valid IPv4 address or ASCII hostname.');
+        }
+        break;
+      case 'optional-hostname':
+        if (typeof value !== 'string' || (value !== '' && !isStrictHostname(value))) {
+          invalid('must be empty or a valid ASCII hostname.');
+        }
+        break;
+      case 'timezone':
+        if (typeof value !== 'string' || !isIanaTimezone(value)) invalid('must be a valid IANA time zone.');
+        break;
       case 'secret-reference':
         if (typeof value !== 'string' || (value !== '' && !/^(secretsmanager:\/\/|arn:aws:secretsmanager:)/.test(value))) {
           invalid('must be empty or an AWS Secrets Manager reference.');
@@ -371,6 +641,8 @@ function assertProfileParameters(parameters: unknown): asserts parameters is Rec
         break;
     }
   }
+
+  if (schemaVersion === 2) assertProfileV2Relationships(parameters as Record<string, unknown>);
 }
 
 export class OnboardingService {
@@ -533,19 +805,21 @@ export class OnboardingService {
     const modelId = String(input.modelId ?? '').trim();
     const baseProfileVersionId = String(input.baseProfileVersionId ?? '').trim() || undefined;
     const changeNote = String(input.changeNote ?? '').trim();
+    const schemaVersion = assertProfileSchemaVersion(input.schemaVersion);
     if (name.length < 3 || name.length > 80 || description.length > 500 || changeNote.length < 3 || changeNote.length > 300) {
       throw new OnboardingError(400, 'INVALID_PROFILE', 'Provide a profile name and a short, meaningful change note.');
     }
     if (!GATEWAY_MODELS.some((model) => model.id === modelId)) {
       throw new OnboardingError(400, 'UNSUPPORTED_MODEL', 'Choose a supported gateway model.');
     }
-    assertProfileParameters(input.parameters);
+    assertProfileParameters(input.parameters, schemaVersion);
 
     const normalizedInput = {
       name,
       description,
       modelId,
       baseProfileVersionId,
+      schemaVersion,
       parameters: stableValue(input.parameters) as Record<string, unknown>,
       changeNote,
     };
@@ -570,7 +844,7 @@ export class OnboardingService {
         const contentHash = sha256(stableJson({
           profileId,
           version,
-          schemaVersion: 1,
+          schemaVersion,
           modelId,
           parameters: normalizedInput.parameters,
         }));
@@ -581,7 +855,7 @@ export class OnboardingService {
           description,
           modelId,
           version,
-          schemaVersion: 1,
+          schemaVersion,
           parameters: normalizedInput.parameters,
           contentHash,
           immutable: true,
@@ -596,7 +870,7 @@ export class OnboardingService {
           'ProfileVersionCreated',
           value.id,
           createdAt,
-          { profileId, version, modelId, contentHash },
+          { profileId, version, schemaVersion, modelId, contentHash },
         ));
         return value;
       });
@@ -1003,7 +1277,7 @@ export class OnboardingService {
     createdAt: string,
     parameters: Record<string, unknown>,
   ): ProfileVersion {
-    const contentHash = sha256(stableJson({ profileId, version: 1, schemaVersion: 1, modelId, parameters }));
+    const contentHash = sha256(stableJson({ profileId, version: 1, schemaVersion: 2, modelId, parameters }));
     return {
       id: `${profileId}@1`,
       profileId,
@@ -1011,7 +1285,7 @@ export class OnboardingService {
       description: 'Validated baseline with transactional apply and automatic rollback.',
       modelId,
       version: 1,
-      schemaVersion: 1,
+      schemaVersion: 2,
       parameters,
       contentHash,
       immutable: true,

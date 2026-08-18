@@ -43,6 +43,50 @@ test('assignment and downloaded artifacts require both valid KMS signatures and 
   assert.equal(verified.profile.modelId, 'ce-gateway-v1');
 });
 
+test('downloaded artifacts accept aligned signed profile schema v2', () => {
+  const fixture = signedFixture({ profile: 2 });
+  const assignment = validateAssignmentResponse(fixture.response, fixture.expectation, fixture.publicKeyPem);
+  const verified = verifyDownloadedArtifacts(
+    assignment,
+    fixture.profileText,
+    fixture.manifestText,
+    fixture.publicKeyPem,
+    fixture.signingKeyId,
+  );
+  assert.equal(assignment.descriptor.schemaVersion, 2);
+  assert.equal(verified.manifest.schemaVersion, 2);
+  assert.equal(verified.profile.schemaVersion, 2);
+});
+
+test('downloaded artifacts reject mismatched profile, manifest, and assignment schema versions', () => {
+  const mismatches = [
+    signedFixture({ profile: 2, manifest: 1, descriptor: 1 }),
+    signedFixture({ profile: 2, manifest: 2, descriptor: 1 }),
+    signedFixture({ profile: 2, manifest: 1, descriptor: 2 }),
+  ];
+  for (const fixture of mismatches) {
+    const assignment = validateAssignmentResponse(fixture.response, fixture.expectation, fixture.publicKeyPem);
+    assert.throws(
+      () => verifyDownloadedArtifacts(
+        assignment,
+        fixture.profileText,
+        fixture.manifestText,
+        fixture.publicKeyPem,
+        fixture.signingKeyId,
+      ),
+      /schema versions do not match/,
+    );
+  }
+});
+
+test('signed assignment descriptors reject unsupported profile schema versions', () => {
+  const fixture = signedFixture({ descriptor: 3 });
+  assert.throws(
+    () => validateAssignmentResponse(fixture.response, fixture.expectation, fixture.publicKeyPem),
+    /descriptor schemaVersion must be 1 or 2/,
+  );
+});
+
 test('tampered artifact content is rejected', () => {
   const fixture = signedFixture();
   const assignment = validateAssignmentResponse(fixture.response, fixture.expectation, fixture.publicKeyPem);
@@ -107,11 +151,14 @@ test('modeled Fleet Provisioning errors expose only bounded redacted fields', ()
   );
 });
 
-function signedFixture() {
+function signedFixture(schemaVersions: { profile?: number; manifest?: number; descriptor?: number } = {}) {
   const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
   const signingKeyId = 'arn:aws:kms:us-east-1:111122223333:key/test-signing-key';
-  const profile = { schemaVersion: 1, modelId: 'ce-gateway-v1', parameters: { serviceOffering: 'ANIRA' } };
+  const profileSchemaVersion = schemaVersions.profile ?? 1;
+  const manifestSchemaVersion = schemaVersions.manifest ?? profileSchemaVersion;
+  const descriptorSchemaVersion = schemaVersions.descriptor ?? profileSchemaVersion;
+  const profile = { schemaVersion: profileSchemaVersion, modelId: 'ce-gateway-v1', parameters: { serviceOffering: 'ANIRA' } };
   const profileText = canonicalJson(profile);
   const profileChecksum = sha256Hex(profileText);
   const descriptorPayload = {
@@ -123,7 +170,7 @@ function signedFixture() {
     profileId: 'profile_test',
     profileVersionId: 'pv_test',
     profileVersion: 1,
-    schemaVersion: 1,
+    schemaVersion: descriptorSchemaVersion,
     profileSha256: profileChecksum,
     objectKey: 'tenants/ce-test/profiles/profile_test/versions/0000000001/profile.json',
     manifestKey: 'tenants/ce-test/profiles/profile_test/versions/0000000001/manifest.json',
@@ -134,7 +181,7 @@ function signedFixture() {
   const descriptor = signedObject(descriptorPayload, privateKey);
   const manifestPayload = {
     kind: 'gateway-profile',
-    schemaVersion: 1,
+    schemaVersion: manifestSchemaVersion,
     tenantId: 'ce-test',
     profileId: 'profile_test',
     profileVersionId: 'pv_test',

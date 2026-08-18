@@ -6,6 +6,26 @@ import express from 'express';
 import { createOnboardingRouter } from './onboardingRoutes.js';
 import { MemoryOnboardingRepository } from './onboardingStore.js';
 
+const schemaV2CoreParameters = {
+  lanIpAddress: '10.30.40.1',
+  lanPrefixLength: 24,
+  lanMtu: 1500,
+  wanMtu: 1500,
+  dhcpServerEnabled: false,
+  dhcpPoolStart: '',
+  dhcpPoolEnd: '',
+  wanMode: 'DHCP',
+  wanVlanId: 0,
+  dnsMode: 'WAN_DHCP',
+  dnsCacheEnabled: true,
+  timezone: 'America/Chicago',
+  ntpPrimaryServer: 'time.cloudflare.com',
+  ntpSecondaryServer: 'time.google.com',
+  ipv4ForwardingEnabled: true,
+  natMode: 'MASQUERADE',
+  defaultRouteMetric: 100,
+};
+
 describe('onboarding HTTP API', () => {
   let server: Server;
   let baseUrl: string;
@@ -75,5 +95,45 @@ describe('onboarding HTTP API', () => {
     assert.equal(body.identity.serialNumber, 'CE-GW-840021');
     assert.equal(body.identity.modelId, 'edge-pro');
     assert.ok(body.allowedSites.length > 0);
+  });
+
+  it('passes explicit profile schema v2 through and defaults legacy requests to v1', async () => {
+    const schemaTwoResponse = await fetch(`${baseUrl}/profiles`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'route-profile-v2-01',
+      },
+      body: JSON.stringify({
+        name: 'Route Schema Two',
+        modelId: 'edge-pro',
+        schemaVersion: 2,
+        parameters: {
+          ...schemaV2CoreParameters,
+        },
+        changeNote: 'Exercise the schema-v2 route contract',
+      }),
+    });
+    assert.equal(schemaTwoResponse.status, 201);
+    const schemaTwo = await schemaTwoResponse.json() as { schemaVersion: number; parameters: Record<string, unknown> };
+    assert.equal(schemaTwo.schemaVersion, 2);
+    assert.equal(schemaTwo.parameters.wanMode, 'DHCP');
+
+    const legacyResponse = await fetch(`${baseUrl}/profiles`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'route-profile-v1-01',
+      },
+      body: JSON.stringify({
+        name: 'Route Legacy Profile',
+        modelId: 'edge-pro',
+        parameters: { wanMtu: 1492 },
+        changeNote: 'Exercise the legacy default schema',
+      }),
+    });
+    assert.equal(legacyResponse.status, 201);
+    const legacy = await legacyResponse.json() as { schemaVersion: number };
+    assert.equal(legacy.schemaVersion, 1);
   });
 });

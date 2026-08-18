@@ -37,7 +37,7 @@ import {
   validateProfile,
 } from './shared/profile.js';
 import { INITIAL_OPERATION_STEPS, publicOperation } from './shared/models.js';
-import { validateUiProfileParameters } from './shared/ui-profile.js';
+import { uiProfileSchemaVersion, validateUiProfileParameters } from './shared/ui-profile.js';
 import { assertProfileCompatibility, assertProfileLineageModel } from './shared/compatibility.js';
 import { normalizePresentedSerial } from './shared/manufacturing-credentials.js';
 
@@ -398,10 +398,11 @@ async function createUiProfileVersion(
   const baseProfileVersionId = body.baseProfileVersionId == null || body.baseProfileVersionId === ''
     ? undefined
     : normalizeIdentifier(body.baseProfileVersionId, 'baseProfileVersionId');
-  const parameters = validateUiProfileParameters(body.parameters);
+  const schemaVersion = uiProfileSchemaVersion(body.schemaVersion);
+  const parameters = validateUiProfileParameters(body.parameters, schemaVersion);
   const key = idempotencyKey(event);
   const requestHash = sha256(canonicalJson({
-    route: event.routeKey, name, description, modelId, changeNote, baseProfileVersionId, parameters,
+    route: event.routeKey, name, description, modelId, changeNote, baseProfileVersionId, schemaVersion, parameters,
   }));
   const existing = await existingIdempotency(context.tenantId, event.routeKey, key, requestHash);
   if (existing) return json(existing.statusCode ?? 201, existing.response);
@@ -435,14 +436,14 @@ async function createUiProfileVersion(
   const version = currentVersion + 1;
   const profileVersionId = newId('pv');
   const now = new Date().toISOString();
-  const document = { schemaVersion: 1, modelId, parameters };
+  const document = { schemaVersion, modelId, parameters };
   const documentCanonical = canonicalJson(document);
   const documentHash = sha256(documentCanonical);
   const objectPrefix = `tenants/${context.tenantId}/profiles/${profileId}/versions/${String(version).padStart(10, '0')}/${documentHash}`;
   const objectKey = `${objectPrefix}/profile.json`;
   const manifestKey = `${objectPrefix}/manifest.json`;
   const signed = await signManifest({
-    kind: 'gateway-profile', schemaVersion: 1, tenantId: context.tenantId, profileId,
+    kind: 'gateway-profile', schemaVersion, tenantId: context.tenantId, profileId,
     profileVersionId, version, modelId, sha256: documentHash, objectKey, issuedAt: now,
   });
   const storedManifest = { ...signed.manifest, signature: signed.signature, signingAlgorithm: signed.signingAlgorithm };
@@ -460,7 +461,7 @@ async function createUiProfileVersion(
 
   const versionItem = {
     PK: tenantPk(context.tenantId), SK: profileVersionSk(profileId, version), entityType: 'PROFILE_VERSION', tenantId: context.tenantId,
-    profileId, profileVersionId, name, description, modelId, version, schemaVersion: 1, parameters,
+    profileId, profileVersionId, name, description, modelId, version, schemaVersion, parameters,
     documentHash, contentHash: documentHash, objectKey, manifestKey, signature: signed.signature,
     signingAlgorithm: signed.signingAlgorithm, signingKeyId: signed.manifest.signingKeyId,
     immutable: true, changeNote, createdBy: context.subject,

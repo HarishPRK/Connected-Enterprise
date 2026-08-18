@@ -146,6 +146,7 @@ describe('OnboardingService', () => {
     }, 'profile-safe-001');
     assert.equal(profile.immutable, true);
     assert.equal(profile.version, 1);
+    assert.equal(profile.schemaVersion, 1);
     assert.match(profile.contentHash, /^[a-f0-9]{64}$/);
 
     const successor = await service.createProfile(tenantA, {
@@ -157,6 +158,7 @@ describe('OnboardingService', () => {
     }, 'profile-successor1');
     assert.equal(successor.profileId, profile.profileId);
     assert.equal(successor.version, 2);
+    assert.equal(successor.schemaVersion, 1);
 
     await assert.rejects(
       service.createProfile(tenantA, {
@@ -177,6 +179,167 @@ describe('OnboardingService', () => {
         changeNote: 'Exercise server schema validation',
       }, 'profile-invalid01'),
       (error: unknown) => error instanceof OnboardingError && error.code === 'INVALID_PROFILE_PARAMETER',
+    );
+  });
+
+  it('creates schema-v2 network profiles while keeping legacy schema-v1 callers readable', async () => {
+    const { service } = await setup();
+    const snapshot = await service.getSnapshot(tenantA);
+    const seeded = snapshot.profiles.find((candidate) => candidate.modelId === 'edge-pro');
+    assert.ok(seeded);
+    assert.equal(seeded.schemaVersion, 2);
+    assert.equal(seeded.parameters.lanMtu, 1500);
+    assert.equal(seeded.parameters.dhcpPoolStart, '10.10.10.100');
+    assert.equal(seeded.parameters.wanMode, 'DHCP');
+    assert.equal(seeded.parameters.dnsMode, 'WAN_DHCP');
+    assert.equal(seeded.parameters.ntpPrimaryServer, 'time.cloudflare.com');
+    assert.equal(seeded.parameters.natMode, 'MASQUERADE');
+    assert.equal(seeded.parameters.defaultRouteMetric, 100);
+
+    await assert.rejects(
+      service.createProfile(tenantA, {
+        name: 'Null Schema Version',
+        modelId: 'edge-pro',
+        schemaVersion: null as unknown as number,
+        parameters: { wanMtu: 1500 },
+        changeNote: 'Reject explicit null schema versions',
+      }, 'profile-null-schema'),
+      (error: unknown) => error instanceof OnboardingError && error.code === 'INVALID_PROFILE_SCHEMA',
+    );
+
+    const profile = await service.createProfile(tenantA, {
+      name: 'Schema Two Branch',
+      modelId: 'edge-pro',
+      schemaVersion: 2,
+      parameters: {
+        ...seeded.parameters,
+        lanIpAddress: '10.20.30.1',
+        lanPrefixLength: 24,
+        lanMtu: 1500,
+        dhcpServerEnabled: true,
+        dhcpPoolStart: '10.20.30.100',
+        dhcpPoolEnd: '10.20.30.199',
+        dhcpLeaseSeconds: 86_400,
+        wanMode: 'DHCP',
+        wanStaticIpAddress: '',
+        wanStaticPrefixLength: 24,
+        wanStaticGateway: '',
+        wanVlanId: 0,
+        dnsMode: 'WAN_DHCP',
+        dnsPrimaryServer: '',
+        dnsSecondaryServer: '',
+        dnsSearchDomain: '',
+        dnsCacheEnabled: true,
+        ntpPrimaryServer: 'time.cloudflare.com',
+        ntpSecondaryServer: 'time.google.com',
+        ipv4ForwardingEnabled: true,
+        natMode: 'MASQUERADE',
+        defaultRouteMetric: 100,
+      },
+      changeNote: 'Add managed network settings',
+    }, 'profile-schema-v2');
+    assert.equal(profile.schemaVersion, 2);
+    assert.equal(profile.parameters.dhcpPoolEnd, '10.20.30.199');
+
+    const disabledDhcpParameters = { ...seeded.parameters };
+    delete disabledDhcpParameters.dhcpPoolStart;
+    delete disabledDhcpParameters.dhcpPoolEnd;
+    delete disabledDhcpParameters.dhcpLeaseSeconds;
+    const disabledDhcp = await service.createProfile(tenantA, {
+      name: 'Static Addressing Branch',
+      modelId: 'edge-pro',
+      schemaVersion: 2,
+      parameters: {
+        ...disabledDhcpParameters,
+        dhcpServerEnabled: false,
+        wanMode: 'STATIC',
+        wanStaticIpAddress: '198.51.100.10',
+        wanStaticPrefixLength: 24,
+        wanStaticGateway: '198.51.100.1',
+        dnsMode: 'STATIC',
+        dnsPrimaryServer: '1.1.1.1',
+        dnsSecondaryServer: '',
+        dnsSearchDomain: '',
+      },
+      changeNote: 'Use explicit underlay addressing',
+    }, 'profile-static-v2');
+    assert.equal(disabledDhcp.schemaVersion, 2);
+    assert.equal(disabledDhcp.parameters.dhcpPoolStart, undefined);
+
+    const missingWanMtuParameters = { ...seeded.parameters };
+    delete missingWanMtuParameters.wanMtu;
+    await assert.rejects(
+      service.createProfile(tenantA, {
+        name: 'Missing WAN MTU',
+        modelId: 'edge-pro',
+        schemaVersion: 2,
+        parameters: missingWanMtuParameters,
+        changeNote: 'Reject an incomplete v2 catalog',
+      }, 'profile-no-wan-mtu'),
+      (error: unknown) => error instanceof OnboardingError && error.code === 'INVALID_PROFILE_PARAMETER',
+    );
+
+    await assert.rejects(
+      service.createProfile(tenantA, {
+        name: 'Invalid Static WAN',
+        modelId: 'edge-pro',
+        schemaVersion: 2,
+        parameters: {
+          ...seeded.parameters,
+          wanMode: 'STATIC',
+          wanStaticIpAddress: '',
+          wanStaticGateway: '',
+          dnsMode: 'STATIC',
+          dnsPrimaryServer: '1.1.1.1',
+        },
+        changeNote: 'Reject missing static addresses',
+      }, 'profile-bad-static'),
+      (error: unknown) => error instanceof OnboardingError && error.code === 'INVALID_PROFILE_PARAMETER',
+    );
+
+    await assert.rejects(
+      service.createProfile(tenantA, {
+        name: 'Invalid DNS Coupling',
+        modelId: 'edge-pro',
+        schemaVersion: 2,
+        parameters: {
+          ...seeded.parameters,
+          wanMode: 'STATIC',
+          wanStaticIpAddress: '198.51.100.10',
+          wanStaticGateway: '198.51.100.1',
+          dnsMode: 'WAN_DHCP',
+        },
+        changeNote: 'Reject DHCP DNS with static WAN',
+      }, 'profile-bad-dns-01'),
+      (error: unknown) => error instanceof OnboardingError && error.code === 'INVALID_PROFILE_PARAMETER',
+    );
+
+    await assert.rejects(
+      service.createProfile(tenantA, {
+        name: 'Invalid DHCP Pool',
+        modelId: 'edge-pro',
+        schemaVersion: 2,
+        parameters: {
+          ...seeded.parameters,
+          lanIpAddress: '10.20.30.1',
+          lanPrefixLength: 24,
+          dhcpServerEnabled: true,
+          dhcpPoolStart: '10.20.31.100',
+          dhcpPoolEnd: '10.20.31.199',
+        },
+        changeNote: 'Reject a pool outside the LAN subnet',
+      }, 'profile-bad-pool-1'),
+      (error: unknown) => error instanceof OnboardingError && error.code === 'INVALID_PROFILE_PARAMETER',
+    );
+
+    await assert.rejects(
+      service.createProfile(tenantA, {
+        name: 'Legacy With V2 Field',
+        modelId: 'edge-pro',
+        parameters: { lanMtu: 1500 },
+        changeNote: 'Keep schema one validation stable',
+      }, 'profile-v1-new-key'),
+      (error: unknown) => error instanceof OnboardingError && error.code === 'UNKNOWN_PROFILE_PARAMETER',
     );
   });
 
@@ -233,6 +396,7 @@ describe('OnboardingService', () => {
       description: initial.description,
       modelId: initial.modelId,
       baseProfileVersionId: initial.id,
+      schemaVersion: 2,
       parameters: { ...initial.parameters, wanMtu: 1492 },
       changeNote: 'Reduce WAN MTU for the managed underlay',
     }, 'profile-deploy-v2');
