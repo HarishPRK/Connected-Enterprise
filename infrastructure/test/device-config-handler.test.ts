@@ -334,6 +334,18 @@ test('secured device configuration GET returns only device-ready gateway and pro
   const transaction = setup.transactions[0];
   assert.ok(transaction);
   assert.equal(transaction.length, 4, 'gateway, deployment, operation, and audit are committed together');
+  const deploymentUpdate = (transaction[1] as {
+    Update?: {
+      ConditionExpression?: string;
+      ExpressionAttributeNames?: Record<string, string>;
+    };
+  }).Update;
+  assert.ok(deploymentUpdate);
+  assert.match(
+    deploymentUpdate.ConditionExpression ?? '',
+    /(?:^| AND )#descriptor = :descriptor(?: AND|$)/,
+  );
+  assert.equal(deploymentUpdate.ExpressionAttributeNames?.['#descriptor'], 'descriptor');
   const serialized = JSON.stringify(transaction);
   assert.match(serialized, /certificateStatus = :active/);
   assert.match(serialized, /signedDescriptor = :descriptor/);

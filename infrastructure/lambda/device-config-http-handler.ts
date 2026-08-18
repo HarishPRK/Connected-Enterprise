@@ -582,9 +582,12 @@ async function recordHttpDelivery(
           'generation = :generation',
           'profileVersionId = :profileVersionId',
           'operationId = :operationId',
-          'descriptor = :descriptor',
+          '#descriptor = :descriptor',
         ].join(' AND '),
-        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeNames: {
+          '#descriptor': 'descriptor',
+          '#status': 'status',
+        },
         ExpressionAttributeValues: {
           ':deployment': 'DEPLOYMENT',
           ':observedStatus': deploymentState,
