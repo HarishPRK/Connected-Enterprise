@@ -1179,6 +1179,8 @@ test('legacy delivered assignments are migrated only from an exact lease-free de
 
   const api = fs.readFileSync(path.join(process.cwd(), 'lambda', 'api-handler.ts'), 'utf8');
   assert.match(api, /#status = :superseded[\s\S]*':superseded': 'SUPERSEDED'/);
+  assert.match(api, /#descriptor = :descriptor[\s\S]*'#descriptor': 'descriptor'/);
+  assert.doesNotMatch(api, / AND descriptor = :descriptor/);
   assert.match(api, /code: 'LEGACY_ASSIGNMENT_SUPERSEDED'/);
   assert.match(api, /supersededByGeneration/);
   assert.match(api, /#state IN \(:healthy, :rolledBack\)/);

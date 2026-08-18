@@ -837,8 +837,8 @@ async function assignProfile(
           TableName: TABLE_NAME,
           Key: { PK: tenantPk(context.tenantId), SK: deploymentSk(gatewayId, currentGeneration) },
           UpdateExpression: 'SET #status = :superseded, supersededAt = :now, supersededByGeneration = :nextGeneration, supersededByOperationId = :nextOperationId, updatedAt = :now',
-          ConditionExpression: 'entityType = :deployment AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND descriptor = :descriptor AND #status = :delivered',
-          ExpressionAttributeNames: { '#status': 'status' },
+          ConditionExpression: 'entityType = :deployment AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND #descriptor = :descriptor AND #status = :delivered',
+          ExpressionAttributeNames: { '#descriptor': 'descriptor', '#status': 'status' },
           ExpressionAttributeValues: {
             ':deployment': 'DEPLOYMENT', ':gatewayId': gatewayId, ':generation': currentGeneration,
             ':profileVersionId': legacyMigration.profileVersionId, ':operationId': legacyMigration.operationId,
