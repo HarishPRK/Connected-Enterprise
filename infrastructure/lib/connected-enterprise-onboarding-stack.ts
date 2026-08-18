@@ -357,6 +357,27 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     }));
     dataKey.grantDecrypt(deviceConfigHttpFunction);
 
+    const deviceStatusHttpFunction = new lambdaNodejs.NodejsFunction(this, 'DeviceStatusHttpFunction', {
+      ...functionDefaults,
+      functionName: `connected-enterprise-onboarding-${stage}-device-status-http`,
+      entry: entry('device-status-http-handler.ts'),
+      handler: 'handler',
+      timeout: Duration.seconds(10),
+      reservedConcurrentExecutions: 50,
+      logGroup: logGroup('device-status-http', logs.RetentionDays.THREE_MONTHS),
+      environment: {
+        TABLE_NAME: table.tableName,
+        AWS_ACCOUNT_ID: Aws.ACCOUNT_ID,
+        GATEWAY_CONFIG_ROLE_NAME: gatewayConfigPullRoleName,
+        STAGE: stage,
+      },
+    });
+    deviceStatusHttpFunction.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'ValidateAndRecordAuthorizedConfigurationStatus',
+      actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:TransactWriteItems'],
+      resources: [table.tableArn, `${table.tableArn}/index/GSI1`],
+    }));
+
     const jwtAuthorizer = new apigwv2Authorizers.HttpJwtAuthorizer(
       'CognitoJwtAuthorizer',
       userPool.userPoolProviderUrl,
@@ -396,6 +417,11 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       deviceConfigHttpFunction,
       { payloadFormatVersion: apigwv2.PayloadFormatVersion.VERSION_2_0 },
     );
+    const deviceStatusHttpIntegration = new apigwv2Integrations.HttpLambdaIntegration(
+      'DeviceStatusHttpIntegration',
+      deviceStatusHttpFunction,
+      { payloadFormatVersion: apigwv2.PayloadFormatVersion.VERSION_2_0 },
+    );
     const addJwtRoute = (path: string, method: apigwv2.HttpMethod) => httpApi.addRoutes({
       path, methods: [method], authorizer: jwtAuthorizer, integration: apiIntegration,
     });
@@ -424,12 +450,21 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       integration: deviceConfigHttpIntegration,
     });
     if (!deviceConfigRoute) throw new Error('Secured device configuration route was not created');
+    const deviceStatusRoutePath = '/device/v1/things/{thingName}/certificates/{certificateId}/status';
+    const [deviceStatusRoute] = httpApi.addRoutes({
+      path: deviceStatusRoutePath,
+      methods: [apigwv2.HttpMethod.POST],
+      authorizer: new apigwv2Authorizers.HttpIamAuthorizer(),
+      integration: deviceStatusHttpIntegration,
+    });
+    if (!deviceStatusRoute) throw new Error('Secured device configuration status route was not created');
     const cfnDefaultStage = httpApi.defaultStage?.node.defaultChild as apigwv2.CfnStage;
     // API Gateway rejects RouteSettings for a route that has not been created
     // yet. CloudFormation otherwise considers the stage and route independent,
     // so make their deployment order explicit.
     cfnDefaultStage.addResourceDependency(publicDeviceTestRoute.node.defaultChild as apigwv2.CfnRoute);
     cfnDefaultStage.addResourceDependency(deviceConfigRoute.node.defaultChild as apigwv2.CfnRoute);
+    cfnDefaultStage.addResourceDependency(deviceStatusRoute.node.defaultChild as apigwv2.CfnRoute);
     cfnDefaultStage.accessLogSettings = {
       // `LogGroup.logGroupArn` includes a trailing `:*`, while API Gateway
       // persists the destination as the base log-group ARN. Render that base
@@ -445,6 +480,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     cfnDefaultStage.addPropertyOverride('RouteSettings', {
       'GET /device/v1/test/ping': { ThrottlingBurstLimit: 5, ThrottlingRateLimit: 2 },
       [`GET ${deviceConfigRoutePath}`]: { ThrottlingBurstLimit: 100, ThrottlingRateLimit: 50 },
+      [`POST ${deviceStatusRoutePath}`]: { ThrottlingBurstLimit: 100, ThrottlingRateLimit: 50 },
     });
 
     const operationalPolicyName = `ConnectedEnterpriseGatewayOperational-${stage}-v1`;
@@ -494,7 +530,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     const credentialsCertificateId = '${credentials-iot:AwsCertificateId}';
     const gatewayConfigPullRole = new iam.Role(this, 'GatewayConfigPullRole', {
       roleName: gatewayConfigPullRoleName,
-      description: 'IoT credential-provider role for a gateway to retrieve only its own signed configuration assignment',
+      description: 'IoT credential-provider role for a gateway to retrieve its own signed configuration and report its own status',
       assumedBy: new iam.ServicePrincipal('credentials.iot.amazonaws.com', {
         conditions: {
           StringEquals: { 'aws:SourceAccount': Aws.ACCOUNT_ID },
@@ -504,13 +540,20 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       maxSessionDuration: Duration.hours(1),
     });
     gatewayConfigPullRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'InvokeOnlyOwnConfigurationRoute',
+      sid: 'InvokeOnlyOwnConfigurationRoutes',
       actions: ['execute-api:Invoke'],
-      resources: [httpApi.arnForExecuteApi(
-        'GET',
-        `/device/v1/things/${credentialsThingName}/certificates/${credentialsCertificateId}/configuration`,
-        '$default',
-      )],
+      resources: [
+        httpApi.arnForExecuteApi(
+          'GET',
+          `/device/v1/things/${credentialsThingName}/certificates/${credentialsCertificateId}/configuration`,
+          '$default',
+        ),
+        httpApi.arnForExecuteApi(
+          'POST',
+          `/device/v1/things/${credentialsThingName}/certificates/${credentialsCertificateId}/status`,
+          '$default',
+        ),
+      ],
     }));
     const gatewayConfigRoleAlias = new iot.CfnRoleAlias(this, 'GatewayConfigPullRoleAlias', {
       roleAlias: gatewayConfigRoleAliasName,
@@ -1028,7 +1071,10 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     configAsyncDlqAlarm.node.addDependency(iotConfigFunction);
     statusAsyncDlqAlarm.node.addDependency(iotStatusFunction);
 
-    new CfnOutput(this, 'ApiUrl', { value: httpApi.apiEndpoint, description: 'Onboarding HTTP API base URL; business routes require JWT authorization' });
+    new CfnOutput(this, 'ApiUrl', {
+      value: httpApi.apiEndpoint,
+      description: 'Onboarding HTTP API base URL; browser routes require JWT and device configuration/status routes require AWS_IAM',
+    });
     new CfnOutput(this, 'PublicDeviceTestUrl', {
       value: `${httpApi.apiEndpoint}/device/v1/test/ping`,
       description: 'Unauthenticated dev-only static gateway HTTP connectivity probe; never returns configuration data',
@@ -1036,6 +1082,10 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     new CfnOutput(this, 'DeviceConfigurationUrlTemplate', {
       value: `${httpApi.apiEndpoint}${deviceConfigRoutePath}`,
       description: 'AWS_IAM-protected signed configuration endpoint; Thing and certificate path values are bound by IoT-issued credentials',
+    });
+    new CfnOutput(this, 'DeviceStatusUrlTemplate', {
+      value: `${httpApi.apiEndpoint}${deviceStatusRoutePath}`,
+      description: 'AWS_IAM-protected device status endpoint; Thing and certificate path values are bound by IoT-issued credentials',
     });
     new CfnOutput(this, 'CognitoIssuer', { value: userPool.userPoolProviderUrl, description: 'JWT issuer used by API Gateway' });
     new CfnOutput(this, 'CognitoUserPoolId', { value: userPool.userPoolId });

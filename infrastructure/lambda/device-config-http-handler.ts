@@ -22,6 +22,11 @@ import {
   tenantPk,
 } from './shared/ddb.js';
 import { canonicalJson } from './shared/profile.js';
+import {
+  finalizePermanentIdentity,
+  PermanentIdentityFinalizationError,
+  type PermanentIdentityFinalizationDependencies,
+} from './shared/permanent-identity.js';
 
 const ROUTE_KEY = 'GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration';
 const GATEWAY_CONFIG_ROLE_NAME = process.env.GATEWAY_CONFIG_ROLE_NAME?.trim() ?? '';
@@ -78,12 +83,9 @@ const DELIVERY_OPERATION_STATES = new Set([
 type Item = Record<string, unknown>;
 type TransactItems = NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']>;
 
-export interface DeviceConfigurationDependencies {
+export interface DeviceConfigurationDependencies extends PermanentIdentityFinalizationDependencies {
   queryGatewayByThing(thingName: string): Promise<Item[]>;
-  getItem(key: { PK: string; SK: string }): Promise<Item | undefined>;
-  transactWrite(items: TransactItems): Promise<void>;
   presignArtifact(key: string, expiresIn: number): Promise<string>;
-  now(): Date;
 }
 
 interface AuthorizedRequest {
@@ -219,7 +221,11 @@ function authorizedRequest(
   event: APIGatewayProxyEventV2WithIAMAuthorizer,
   requestId: string,
 ): AuthorizedRequest {
-  if (event.routeKey !== ROUTE_KEY) throw invalidRequest('Route not found');
+  if (event.routeKey !== ROUTE_KEY
+    || event.requestContext?.routeKey !== ROUTE_KEY
+    || event.requestContext?.http?.method !== 'GET') {
+    throw invalidRequest('Route not found');
+  }
   const iam = event.requestContext?.authorizer?.iam;
   if (!iam || typeof iam.userArn !== 'string' || !iam.userArn || typeof iam.accessKey !== 'string' || !iam.accessKey) {
     throw unauthorized();
@@ -239,6 +245,10 @@ function authorizedRequest(
     throw invalidRequest('Invalid device configuration request');
   }
   if (typeof certificateId !== 'string' || !CERTIFICATE_ID_PATTERN.test(certificateId)) {
+    throw invalidRequest('Invalid device configuration request');
+  }
+  const expectedPath = `/device/v1/things/${thingName}/certificates/${certificateId}/configuration`;
+  if (event.rawPath !== expectedPath || event.requestContext.http.path !== expectedPath) {
     throw invalidRequest('Invalid device configuration request');
   }
 
@@ -276,8 +286,22 @@ async function configurationAuthority(
 
   // GSI reads are eventually consistent. Always authorize against a fresh,
   // strongly consistent base-table read so decommissioning takes effect here.
-  const gateway = await dependencies.getItem({ PK: located.PK, SK: located.SK });
+  let gateway = await dependencies.getItem({ PK: located.PK, SK: located.SK });
   if (!gateway || gateway.entityType !== 'GATEWAY') throw unauthorized();
+
+  if (gateway.state === 'IDENTITY_PROVISIONING' || gateway.certificateStatus === 'PENDING_ACTIVATION') {
+    try {
+      gateway = await finalizePermanentIdentity(gateway, {
+        thingName: request.thingName,
+        certificateId: request.certificateId,
+        requestId: request.requestId,
+        channel: 'IOT_CREDENTIAL_PROVIDER',
+      }, dependencies);
+    } catch (error) {
+      if (error instanceof PermanentIdentityFinalizationError) throw unauthorized();
+      throw error;
+    }
+  }
 
   const tenantId = requiredStoredString(gateway.tenantId, unauthorized);
   const gatewayId = requiredStoredString(gateway.gatewayId, unauthorized);

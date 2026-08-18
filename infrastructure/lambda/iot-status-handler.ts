@@ -7,9 +7,48 @@ import { INITIAL_OPERATION_STEPS } from './shared/models.js';
 const TOPIC_PREFIX = 'ce/v1/gateways/';
 const STATUS_SUFFIX = '/status';
 
-type DeviceStatus = 'APPLYING' | 'HEALTH_CHECK' | 'APPLIED_HEALTHY' | 'FAILED' | 'ROLLING_BACK' | 'ROLLED_BACK';
+export type DeviceStatus = 'APPLYING' | 'HEALTH_CHECK' | 'APPLIED_HEALTHY' | 'FAILED' | 'ROLLING_BACK' | 'ROLLED_BACK';
 type UiOperationStatus = 'IN_PROGRESS' | 'SUCCEEDED' | 'FAILED';
 export type TransitionDisposition = 'APPLY' | 'STALE_NOOP';
+export type DeviceStatusRecordDisposition = 'APPLIED' | 'STALE_NOOP' | 'QUARANTINED';
+
+type Item = Record<string, unknown>;
+type TransactItems = NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']>;
+
+export interface AuthoritativeDeviceIdentity {
+  thingName: string;
+  certificateId: string;
+}
+
+export interface DeviceStatusReport extends Record<string, unknown> {
+  generation: unknown;
+  status: unknown;
+  profileVersionId?: unknown;
+  profileChecksum?: unknown;
+  detail?: unknown;
+  error?: unknown;
+}
+
+export interface DeviceStatusDependencies {
+  queryGatewayByThing(thingName: string): Promise<Item[]>;
+  getItem(key: { PK: string; SK: string }): Promise<Item | undefined>;
+  transactWrite(items: TransactItems): Promise<void>;
+  now(): Date;
+  /** MQTT broker identity predates the consistent-base-read HTTP boundary. */
+  consistentGatewayRead?: boolean;
+}
+
+export class DeviceStatusAuthorizationError extends Error {
+  constructor() {
+    super('Device identity is not authorized');
+  }
+}
+
+export class DeviceStatusConflictError extends Error {
+  constructor(message = 'Device status is not consistent with the authoritative deployment') {
+    super(message);
+  }
+}
 
 interface StatusEvent extends Record<string, unknown> {
   generation?: unknown;
@@ -24,6 +63,35 @@ interface StatusEvent extends Record<string, unknown> {
   brokerTraceId?: unknown;
   brokerReceivedAt?: unknown;
 }
+
+const productionDependencies: DeviceStatusDependencies = {
+  async queryGatewayByThing(thingName) {
+    const result = await ddb.send(new QueryCommand({
+      TableName: TABLE_NAME,
+      IndexName: 'GSI1',
+      KeyConditionExpression: 'GSI1PK = :thing',
+      ExpressionAttributeValues: { ':thing': `THING#${thingName}` },
+      Limit: 2,
+    }));
+    return result.Items ?? [];
+  },
+  async getItem(key) {
+    return (await ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: key,
+      ConsistentRead: true,
+    }))).Item;
+  },
+  async transactWrite(items) {
+    await ddb.send(new TransactWriteCommand({ TransactItems: items }));
+  },
+  now: () => new Date(),
+};
+
+const mqttProductionDependencies: DeviceStatusDependencies = {
+  ...productionDependencies,
+  consistentGatewayRead: false,
+};
 
 export function statusBrokerIdentity(event: Record<string, unknown>): {
   brokerClientId: string;
@@ -43,38 +111,63 @@ export function statusBrokerIdentity(event: Record<string, unknown>): {
 export async function handler(event: StatusEvent, context: Context): Promise<void> {
   const { brokerPrincipal, thingName } = statusBrokerIdentity(event);
 
+  await recordAuthoritativeDeviceStatus({
+    thingName,
+    certificateId: brokerPrincipal,
+  }, event as DeviceStatusReport, context, mqttProductionDependencies);
+}
+
+/**
+ * Applies a status report after the transport has authoritatively bound a
+ * Thing name to an operational certificate. The core still reauthorizes that
+ * pair against the active gateway record before changing deployment state.
+ */
+export async function recordAuthoritativeDeviceStatus(
+  identity: AuthoritativeDeviceIdentity,
+  event: DeviceStatusReport,
+  context: Context,
+  dependencies: DeviceStatusDependencies = productionDependencies,
+): Promise<DeviceStatusRecordDisposition> {
+  const thingName = identity.thingName;
+  // Keep the broker-oriented local name for source-level compatibility with
+  // the existing MQTT identity guard while allowing an HTTPS adapter to call
+  // the same transition engine with an already-authoritative certificate ID.
+  const brokerPrincipal = identity.certificateId;
+
   const generation = positiveInteger(event.generation, 'generation');
   const status = deviceStatus(event.status);
   const detail = safeDetail(event.detail ?? event.error);
-  const gateway = await gatewayForThing(thingName);
+  const gateway = await gatewayForThing(thingName, dependencies);
   const tenantId = requiredStoredString(gateway.tenantId, 'gateway tenantId');
   const gatewayId = requiredStoredString(gateway.gatewayId, 'gateway gatewayId');
+  if (dependencies.consistentGatewayRead !== false
+    && (gateway.PK !== tenantPk(tenantId) || gateway.SK !== gatewaySk(gatewayId))) {
+    throw new DeviceStatusAuthorizationError();
+  }
   const certificateId = requiredStoredString(gateway.certificateId, 'gateway certificateId');
   const certificatePrincipal = requiredStoredString(gateway.certificatePrincipal, 'gateway certificatePrincipal');
   const expectedCertificatePrincipal = `arn:aws:iot:${AWS_REGION_NAME}:${AWS_ACCOUNT_ID}:cert/${certificateId}`;
-  if (certificatePrincipal !== expectedCertificatePrincipal) throw new Error('Stored gateway certificate principal is inconsistent');
-  if (certificateId !== brokerPrincipal) throw new Error('Broker certificate principal is not authorized for this gateway');
-  if (gateway.thingName !== thingName) throw new Error('Gateway thing identity is inconsistent');
-  if (gateway.certificateStatus !== 'ACTIVE') throw new Error('Gateway certificate is not active');
+  if (certificatePrincipal !== expectedCertificatePrincipal) throw new DeviceStatusAuthorizationError();
+  if (certificateId !== brokerPrincipal) throw new DeviceStatusAuthorizationError();
+  if (gateway.thingName !== thingName) throw new DeviceStatusAuthorizationError();
+  if (gateway.certificateStatus !== 'ACTIVE') throw new DeviceStatusAuthorizationError();
   if (positiveInteger(gateway.desiredGeneration ?? gateway.generation, 'gateway desiredGeneration') !== generation) {
-    throw new Error('Device status generation is not the authoritative desired generation');
+    throw new DeviceStatusConflictError('Device status generation is not the authoritative desired generation');
   }
 
-  const deploymentResult = await ddb.send(new GetCommand({
-    TableName: TABLE_NAME,
-    Key: { PK: tenantPk(tenantId), SK: deploymentSk(gatewayId, generation) },
-    ConsistentRead: true,
-  }));
-  const deployment = deploymentResult.Item;
+  const deployment = await dependencies.getItem({
+    PK: tenantPk(tenantId),
+    SK: deploymentSk(gatewayId, generation),
+  });
   if (!deployment
     || deployment.entityType !== 'DEPLOYMENT'
     || deployment.gatewayId !== gatewayId
     || positiveInteger(deployment.generation, 'deployment generation') !== generation) {
-    throw new Error('Authoritative deployment record is missing or inconsistent');
+    throw new DeviceStatusConflictError('Authoritative deployment record is missing or inconsistent');
   }
   const profileVersionId = requiredStoredString(deployment.profileVersionId, 'deployment profileVersionId');
   if (gateway.desiredProfileVersionId != null && gateway.desiredProfileVersionId !== profileVersionId) {
-    throw new Error('Gateway desired profile does not match the authoritative deployment');
+    throw new DeviceStatusConflictError('Gateway desired profile does not match the authoritative deployment');
   }
 
   const gatewayState = requiredStoredString(gateway.state, 'gateway state');
@@ -89,7 +182,7 @@ export async function handler(event: StatusEvent, context: Context): Promise<voi
     const reportedProfileVersionId = requiredStoredString(event.profileVersionId, 'reported profileVersionId');
     reportedChecksum = requiredChecksum(event.profileChecksum, 'reported profileChecksum');
     if (reportedProfileVersionId !== profileVersionId || reportedChecksum !== authoritativeChecksum) {
-      throw new Error('Healthy acknowledgement does not match the authoritative profile version and checksum');
+      throw new DeviceStatusConflictError('Healthy acknowledgement does not match the authoritative profile version and checksum');
     }
   }
   if (status === 'ROLLED_BACK') {
@@ -104,29 +197,38 @@ export async function handler(event: StatusEvent, context: Context): Promise<voi
       rollbackProfileChecksum,
     );
   }
-  const dispositions: TransitionDisposition[] = [
-    transitionDisposition(gatewayState, status, 'gateway'),
-    transitionDisposition(deploymentStatus, status, 'deployment'),
-  ];
+  const dispositions: TransitionDisposition[] = [];
+  try {
+    dispositions.push(
+      transitionDisposition(gatewayState, status, 'gateway'),
+      transitionDisposition(deploymentStatus, status, 'deployment'),
+    );
+  } catch (error) {
+    throw new DeviceStatusConflictError(error instanceof Error ? error.message : undefined);
+  }
 
   const operationId = requiredStoredString(deployment.operationId, 'deployment operationId');
-  const operation = (await ddb.send(new GetCommand({
-    TableName: TABLE_NAME,
-    Key: { PK: tenantPk(tenantId), SK: operationSk(operationId) },
-    ConsistentRead: true,
-  }))).Item;
+  const operation = await dependencies.getItem({
+    PK: tenantPk(tenantId),
+    SK: operationSk(operationId),
+  });
   if (!operation || operation.entityType !== 'OPERATION' || operation.gatewayId !== gatewayId) {
-    throw new Error('Deployment operation record is missing or inconsistent');
+    throw new DeviceStatusConflictError('Deployment operation record is missing or inconsistent');
   }
-  dispositions.push(transitionDisposition(requiredStoredString(operation.state, 'operation state'), status, 'operation'));
+  try {
+    dispositions.push(transitionDisposition(requiredStoredString(operation.state, 'operation state'), status, 'operation'));
+  } catch (error) {
+    throw new DeviceStatusConflictError(error instanceof Error ? error.message : undefined);
+  }
 
   // IoT Rules invoke Lambdas asynchronously and messages can be delivered out
   // of order. A same-generation report that is already reflected, or that is
   // behind any authoritative entity, is a successful stale no-op. This avoids
   // DLQ noise and, more importantly, prevents terminal-state regression.
-  if (dispositions.includes('STALE_NOOP')) return;
+  if (dispositions.includes('STALE_NOOP')) return 'STALE_NOOP';
 
-  const now = new Date().toISOString();
+  const observedAt = dependencies.now();
+  const now = observedAt.toISOString();
   const tenantKey = tenantPk(tenantId);
   const errorDetail = detail ?? defaultStatusDetail(status);
   if (status === 'ROLLED_BACK' && !rollbackAttestationValid) {
@@ -134,27 +236,28 @@ export async function handler(event: StatusEvent, context: Context): Promise<voi
       tenantId, tenantKey, gatewayId, thingName, certificateId, certificatePrincipal, generation,
       profileVersionId, gatewayState, deploymentStatus, operationId,
       operationState: requiredStoredString(operation.state, 'operation state'),
-      detail: errorDetail, now, context,
+      detail: errorDetail, now, context, dependencies,
     });
-    return;
+    return 'QUARANTINED';
   }
   const rollbackClearOutboxId = status === 'ROLLED_BACK' ? `rollback_clear_${context.awsRequestId}` : undefined;
-  const rollbackLeaseExpiry = status === 'ROLLED_BACK' ? Math.floor(Date.now() / 1000) + 60 : undefined;
+  const rollbackLeaseExpiry = status === 'ROLLED_BACK' ? Math.floor(observedAt.getTime() / 1000) + 60 : undefined;
   const gatewayUpdate = gatewayUpdateExpression(status);
   const deploymentUpdate = deploymentUpdateExpression(status);
-  const transaction: NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']> = [
+  const transaction: TransactItems = [
     {
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: gatewaySk(gatewayId) },
         UpdateExpression: gatewayUpdate.expression,
-        ConditionExpression: 'entityType = :gateway AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :certificatePrincipal AND desiredGeneration = :generation AND #state = :current',
+        ConditionExpression: 'entityType = :gateway AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :certificatePrincipal AND certificateStatus = :active AND desiredGeneration = :generation AND #state = :current',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':gateway': 'GATEWAY',
           ':thingName': thingName,
           ':certificateId': certificateId,
           ':certificatePrincipal': certificatePrincipal,
+          ':active': 'ACTIVE',
           ':generation': generation,
           ':current': gatewayState,
           ':next': status,
@@ -290,7 +393,8 @@ export async function handler(event: StatusEvent, context: Context): Promise<voi
     },
   });
 
-  await ddb.send(new TransactWriteCommand({ TransactItems: transaction }));
+  await dependencies.transactWrite(transaction);
+  return 'APPLIED';
 }
 
 async function quarantineInvalidRollback(input: {
@@ -309,23 +413,24 @@ async function quarantineInvalidRollback(input: {
   detail: string;
   now: string;
   context: Context;
+  dependencies: DeviceStatusDependencies;
 }): Promise<void> {
   const outboxId = `rollback_quarantine_${input.context.awsRequestId}`;
-  const leaseExpiry = Math.floor(Date.now() / 1000) + 60;
+  const leaseExpiry = Math.floor(input.dependencies.now().getTime() / 1000) + 60;
   const auditId = `iot_${input.context.awsRequestId}`;
-  await ddb.send(new TransactWriteCommand({ TransactItems: [
+  await input.dependencies.transactWrite([
     {
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: input.tenantKey, SK: gatewaySk(input.gatewayId) },
         UpdateExpression: 'SET #state = :quarantined, health = :degraded, lastError = :error, rollbackRecoveryRequiredAt = :now, dispatchLeaseId = :leaseId, dispatchLeaseGeneration = :generation, dispatchLeaseExpiresAtEpoch = :leaseExpiry, updatedAt = :now REMOVE desiredProfileVersionId, signedDescriptor',
-        ConditionExpression: 'entityType = :gateway AND #state = :current AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :principal AND desiredGeneration = :generation',
+        ConditionExpression: 'entityType = :gateway AND #state = :current AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :principal AND certificateStatus = :active AND desiredGeneration = :generation',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':gateway': 'GATEWAY', ':current': input.gatewayState, ':quarantined': 'QUARANTINED',
           ':degraded': 'DEGRADED', ':error': 'Rollback target did not match the last known applied profile.',
           ':thingName': input.thingName, ':certificateId': input.certificateId,
-          ':principal': input.certificatePrincipal, ':generation': input.generation,
+          ':principal': input.certificatePrincipal, ':active': 'ACTIVE', ':generation': input.generation,
           ':leaseId': outboxId, ':leaseExpiry': leaseExpiry, ':now': input.now,
         },
       },
@@ -386,20 +491,32 @@ async function quarantineInvalidRollback(input: {
         ConditionExpression: 'attribute_not_exists(PK)',
       },
     },
-  ] }));
+  ]);
 }
 
-async function gatewayForThing(thingName: string): Promise<Record<string, unknown>> {
-  const result = await ddb.send(new QueryCommand({
-    TableName: TABLE_NAME,
-    IndexName: 'GSI1',
-    KeyConditionExpression: 'GSI1PK = :thing',
-    ExpressionAttributeValues: { ':thing': `THING#${thingName}` },
-    Limit: 2,
-  }));
-  if (result.Items?.length !== 1) throw new Error('A unique gateway identity was not found for the broker thing');
-  const gateway = result.Items[0];
-  if (!gateway || gateway.entityType !== 'GATEWAY') throw new Error('Thing lookup did not resolve to a gateway');
+async function gatewayForThing(thingName: string, dependencies: DeviceStatusDependencies): Promise<Item> {
+  const matches = await dependencies.queryGatewayByThing(thingName);
+  if (matches.length !== 1) throw new DeviceStatusAuthorizationError();
+  const located = matches[0];
+  if (!located || located.entityType !== 'GATEWAY') {
+    throw new DeviceStatusAuthorizationError();
+  }
+  // The MQTT adapter keeps its broker-authoritative legacy lookup behavior.
+  // HTTP callers must dereference the GSI locator with a strongly consistent
+  // base-table read before any certificate or deployment-state decision.
+  if (dependencies.consistentGatewayRead === false) return located;
+  if (typeof located.PK !== 'string'
+    || typeof located.SK !== 'string'
+    || located.GSI1PK !== `THING#${thingName}`) {
+    throw new DeviceStatusAuthorizationError();
+  }
+  const gateway = await dependencies.getItem({ PK: located.PK, SK: located.SK });
+  if (!gateway
+    || gateway.entityType !== 'GATEWAY'
+    || gateway.PK !== located.PK
+    || gateway.SK !== located.SK) {
+    throw new DeviceStatusAuthorizationError();
+  }
   return gateway;
 }
 
@@ -455,7 +572,7 @@ function operationSteps(value: unknown, status: DeviceStatus, now: string, detai
     };
   };
 
-  set('identity', 'complete', 'Permanent certificate authenticated by the IoT broker.');
+  set('identity', 'complete', 'Permanent device certificate authenticated.');
   set('profile', 'complete', 'Signed profile generation delivered to the gateway.');
   if (status === 'APPLYING') {
     set('apply', 'in_progress', detail ?? 'Gateway is applying the profile transactionally.');

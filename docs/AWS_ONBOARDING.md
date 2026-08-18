@@ -17,12 +17,14 @@ flowchart LR
   IoT --> Hook["Pre-provisioning hook"]
   Hook --> DDB
   DDB --> Outbox["DynamoDB transactional outbox"]
-  Outbox --> Shadow["Named configuration Shadow"]
-  Outbox --> Jobs["IoT Jobs for controlled rollout"]
-  Gateway -->|"broker-derived identity"| Rules["IoT Rules"]
-  Rules --> Config["Short-lived artifact retrieval"]
-  Rules --> Status["Apply / health acknowledgement"]
+  Outbox -->|"optional generation notification"| Shadow["Named configuration Shadow"]
+  Outbox -->|"optional rollout notification"| Jobs["IoT Jobs"]
+  Gateway -->|"permanent certificate"| Provider["IoT Credentials Provider"]
+  Provider -->|"short-lived AWS credentials"| DeviceAPI["AWS_IAM device API"]
+  DeviceAPI --> Config["Signed configuration retrieval"]
+  DeviceAPI --> Status["Apply / health acknowledgement"]
   Config --> S3
+  Config --> DDB
   Status --> DDB
 ```
 
@@ -36,7 +38,8 @@ DynamoDB and S3 are authoritative. The named Shadow contains only a small conver
 - Every operational certificate uses a device-specific key. The production gateway generates that key locally and submits a CSR; the current gateway integration test may exercise AWS certificate/key creation while its persistence and recovery behavior is validated.
 - The Fleet Provisioning hook accepts only an unexpired server-side enrollment reservation, the expected template, and the exact active unique bootstrap certificate already bound to that serial.
 - The provisioning template attaches one named least-privilege policy with `EXCLUSIVE_THING`. MQTT client ID must equal the attached Thing name.
-- MQTT identity is taken from IoT Rule `principal()`, `clientid()`, and `topic()` fields, not from device-supplied identity fields.
+- For remaining MQTT ingestion paths, identity is taken from IoT Rule `principal()`, `clientid()`, and `topic()` fields, not from device-supplied identity fields.
+- Device HTTP requests use short-lived credentials issued through the one configured IoT role alias. Its IAM policy permits only the requesting certificate's Thing-bound GET configuration and POST status paths; each Lambda independently revalidates the assumed role, Thing, certificate, and DynamoDB identity binding.
 - Reusable profiles contain only validated values and secret references. Inline passwords, tokens, PSKs, or private keys are rejected.
 - Profile bodies and signed manifests are immutable S3 objects. Per-device assignment descriptors bind tenant, Thing, gateway, profile hash, generation, issue time, and expiry.
 - Decommissioning disables the certificate before clearing the MQTT session; audit records are retained.
@@ -133,14 +136,16 @@ The binding tool validates that the public certificate matches AWS, is active, h
 2. Load the unique pre-flashed bootstrap certificate/key from protected device storage and connect with a `claim-*` client ID.
 3. Request one operational certificate. The production path should generate its operational key locally and use `CreateCertificateFromCsr`; the current gateway integration test may use `CreateKeysAndCertificate`.
 4. Persist the new operational certificate/key before calling `RegisterThing`, then call `RegisterThing` with only `SerialNumber`. Subscribe to accepted/rejected topics before publishing.
-5. Disconnect the bootstrap session and reconnect with the assigned Thing name as MQTT client ID.
-6. After the permanent-certificate reconnect, request the initial immutable artifacts on `ce/v1/gateways/{thingName}/config/request`. For later assignments, converge on the newer generation announced through named Shadow `configuration` or an IoT Job, then request that generation.
-7. Receive the short-lived response on `ce/v1/gateways/{thingName}/config/response`, verify the KMS signature, tenant/Thing binding, generation, expiry, and SHA-256 hash.
+5. Disconnect the bootstrap session and use only the assigned Thing name plus permanent operational certificate/key. If the gateway also connects to MQTT for optional Shadow or Job notifications, its MQTT client ID must equal that Thing name.
+6. Call the IoT Credentials Provider with the configured role alias and Thing-name header. Use the returned short-lived AWS credentials to SigV4-sign `GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration?generation={generation}`. Poll the next monotonic generation with backoff; named Shadow `configuration` or an IoT Job may optionally accelerate discovery of a later generation, but neither is required for the pull.
+7. Consume the JSON returned by the signed GET, verify the descriptor's KMS signature, tenant/Thing binding, generation, expiry, and SHA-256 hash, then download the profile and manifest through their short-lived presigned HTTPS URLs.
 8. Stage and translate the vendor-neutral profile through the gateway data model, apply transactionally, health-check, and roll back on failure.
-9. Report progress on `ce/v1/gateways/{thingName}/status`. `APPLIED_HEALTHY` must include `generation`, `profileVersionId`, and `profileChecksum`, where the checksum is the lowercase SHA-256 digest from the authoritative descriptor.
+9. SigV4-sign status acknowledgements with the same short-lived role credentials and send them to `POST /device/v1/things/{thingName}/certificates/{certificateId}/status`. `APPLIED_HEALTHY` must include `generation`, `profileVersionId`, and `profileChecksum`, where the checksum is the lowercase SHA-256 digest from the authoritative descriptor.
 10. If the candidate fails and the gateway restores its last-known-good configuration, `ROLLED_BACK` must attest that restored configuration with the same `generation` plus the **previously applied** `profileVersionId` and `profileChecksum`. A missing, mismatched, or unverifiable rollback target—including an initial onboarding attempt with no healthy baseline—causes quarantine instead of returning the gateway to an assignable state.
 
 After the first authenticated configuration request completes, AWS schedules the bootstrap certificate for deactivation. The gateway continues only with its operational identity and must not fall back to the bootstrap credential.
+
+The stack outputs `IotCredentialProviderEndpoint`, `GatewayConfigRoleAliasName`, `DeviceConfigurationUrlTemplate`, and `DeviceStatusUrlTemplate` for the gateway integration. The gateway never calls DynamoDB or Lambda directly; API Gateway authenticates the SigV4 requests and invokes the dedicated least-privilege HTTP Lambdas.
 
 The device must reject stale generations, expired descriptors, incompatible models/firmware, invalid signatures, hash mismatches, and rollback attempts without explicit signed authorization.
 

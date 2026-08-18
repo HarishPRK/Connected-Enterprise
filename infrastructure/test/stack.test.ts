@@ -126,7 +126,7 @@ test('encrypted LogGroups wait for a namespace-scoped CloudWatch Logs KMS grant'
   );
 
   const logGroups = Object.entries(rendered.Resources).filter(([, resource]) => resource.Type === 'AWS::Logs::LogGroup');
-  assert.equal(logGroups.length, 9, 'every application/API LogGroup is explicitly declared');
+  assert.equal(logGroups.length, 10, 'every application/API LogGroup is explicitly declared');
   for (const [logicalId, resource] of logGroups) {
     assert.deepEqual(resource.Properties?.KmsKeyId, { 'Fn::GetAtt': [dataKeyLogicalId, 'Arn'] },
       `${logicalId} uses the DataKey`);
@@ -686,10 +686,14 @@ test('public gateway HTTP probe is isolated, throttled, and is the only unauthen
     'public probe cannot read control-plane data, secrets, artifacts, or signing keys');
 });
 
-test('fleet configuration pull uses one exact IoT credential role and an AWS_IAM route', () => {
+test('fleet configuration pull and status acknowledgement use one exact IoT credential role and AWS_IAM routes', () => {
   const template = synthesized();
   template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
     RouteKey: 'GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration',
+    AuthorizationType: 'AWS_IAM',
+  });
+  template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
+    RouteKey: 'POST /device/v1/things/{thingName}/certificates/{certificateId}/status',
     AuthorizationType: 'AWS_IAM',
   });
   template.hasResourceProperties('AWS::Lambda::Function', {
@@ -702,11 +706,30 @@ test('fleet configuration pull uses one exact IoT credential role and an AWS_IAM
       }),
     },
   });
+  template.hasResourceProperties('AWS::Lambda::Function', {
+    FunctionName: 'connected-enterprise-onboarding-dev-device-status-http',
+    ReservedConcurrentExecutions: 50,
+    Timeout: 10,
+    Environment: {
+      Variables: Match.objectLike({
+        TABLE_NAME: Match.anyValue(),
+        AWS_ACCOUNT_ID: Match.anyValue(),
+        GATEWAY_CONFIG_ROLE_NAME: 'connected-enterprise-onboarding-dev-gateway-config-pull',
+        STAGE: 'dev',
+      }),
+    },
+  });
+  template.hasResourceProperties('AWS::Logs::LogGroup', {
+    LogGroupName: '/aws/lambda/connected-enterprise-onboarding-dev-device-status-http',
+    RetentionInDays: 90,
+    KmsKeyId: Match.anyValue(),
+  });
   template.hasResourceProperties('AWS::IoT::RoleAlias', {
     RoleAlias: 'GatewayConfigPull-dev',
     CredentialDurationSeconds: 900,
   });
   template.hasOutput('DeviceConfigurationUrlTemplate', {});
+  template.hasOutput('DeviceStatusUrlTemplate', {});
   template.hasOutput('IotCredentialProviderEndpoint', {});
   template.hasOutput('GatewayConfigRoleAliasName', {});
   template.hasOutput('GatewayConfigCredentialsPolicyName', {});
@@ -718,16 +741,41 @@ test('fleet configuration pull uses one exact IoT credential role and an AWS_IAM
     resource.Type === 'AWS::ApiGatewayV2::Route'
     && resource.Properties?.RouteKey === 'GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration');
   assert.ok(configRouteEntry, 'secured configuration route is synthesized');
+  const statusRouteEntry = Object.entries(rendered.Resources).find(([, resource]) =>
+    resource.Type === 'AWS::ApiGatewayV2::Route'
+    && resource.Properties?.RouteKey === 'POST /device/v1/things/{thingName}/certificates/{certificateId}/status');
+  assert.ok(statusRouteEntry, 'secured configuration status route is synthesized');
   const stage = Object.values(rendered.Resources).find((resource) => resource.Type === 'AWS::ApiGatewayV2::Stage');
   assert.ok(stage?.Properties, 'default stage is synthesized');
   const stageDependencies = Array.isArray(stage.DependsOn)
     ? stage.DependsOn
     : [stage.DependsOn].filter((value): value is string => typeof value === 'string');
   assert.ok(stageDependencies.includes(configRouteEntry[0]), 'stage waits for secured route before applying throttling');
+  assert.ok(stageDependencies.includes(statusRouteEntry[0]), 'stage waits for secured status route before applying throttling');
   assert.deepEqual((stage.Properties.RouteSettings as Record<string, unknown>)[configRouteEntry[1].Properties?.RouteKey as string], {
     ThrottlingBurstLimit: 100,
     ThrottlingRateLimit: 50,
   });
+  assert.deepEqual((stage.Properties.RouteSettings as Record<string, unknown>)[statusRouteEntry[1].Properties?.RouteKey as string], {
+    ThrottlingBurstLimit: 100,
+    ThrottlingRateLimit: 50,
+  });
+
+  const statusFunctionEntry = Object.entries(rendered.Resources).find(([, resource]) =>
+    resource.Type === 'AWS::Lambda::Function'
+    && resource.Properties?.FunctionName === 'connected-enterprise-onboarding-dev-device-status-http');
+  assert.ok(statusFunctionEntry, 'dedicated configuration status Lambda is synthesized');
+  const statusRoleLogicalId = (statusFunctionEntry[1].Properties?.Role as { 'Fn::GetAtt': [string, string] })['Fn::GetAtt'][0];
+  const statusRolePolicies = Object.values(rendered.Resources).filter((resource) =>
+    resource.Type === 'AWS::IAM::Policy'
+    && JSON.stringify(resource.Properties?.Roles ?? []).includes(`\"Ref\":\"${statusRoleLogicalId}\"`));
+  const statusPermissions = JSON.stringify(statusRolePolicies);
+  assert.match(statusPermissions, /dynamodb:GetItem/);
+  assert.match(statusPermissions, /dynamodb:Query/);
+  assert.match(statusPermissions, /dynamodb:TransactWriteItems/);
+  assert.match(statusPermissions, /index\/GSI1/);
+  assert.doesNotMatch(statusPermissions, /s3:|secretsmanager:|kms:(?:Decrypt|Sign)|iot:/i,
+    'status acknowledgement Lambda cannot read profile artifacts, secrets, signing keys, or IoT resources');
 
   const roleEntry = Object.entries(rendered.Resources).find(([, resource]) =>
     resource.Type === 'AWS::IAM::Role'
@@ -747,6 +795,8 @@ test('fleet configuration pull uses one exact IoT credential role and an AWS_IAM
   const invokePolicy = JSON.stringify(rolePolicies[0]);
   assert.match(invokePolicy, /execute-api:Invoke/);
   assert.match(invokePolicy, /\$default\/GET\/device\/v1\/things/);
+  assert.match(invokePolicy, /\$default\/POST\/device\/v1\/things/);
+  assert.match(invokePolicy, /certificates.*\/status/);
   assert.match(invokePolicy, /\$\{credentials-iot:ThingName\}/);
   assert.match(invokePolicy, /\$\{credentials-iot:AwsCertificateId\}/);
   assert.doesNotMatch(invokePolicy, /dynamodb:|s3:|iot:Publish|secretsmanager:/i);

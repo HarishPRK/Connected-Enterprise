@@ -10,7 +10,7 @@ This isolated AWS CDK application defines `ConnectedEnterpriseOnboarding-dev` in
 - A private, versioned, CMK-encrypted S3 bucket for immutable profile/manifest artifacts and an asymmetric KMS P-256 signing key. KMS creates no exportable private key.
 - Authenticated serial-inventory reservation and a pre-provisioning hook that binds one exact pre-flashed bootstrap certificate to the server-side tenant, gateway, operation, site, and profile reservation.
 - Fleet Provisioning with `EXCLUSIVE_THING`, an existing named operational policy, constrained service roles, and support for both locally generated CSR identities and the gateway team's current certificate-creation test flow.
-- Broker-identity-enriched IoT Rules, named Shadow/Jobs delivery, monotonic generation fencing, apply/checksum acknowledgements, transactional manufacturing revocation, separate async-handler failure destinations, retry/DLQ handling, logs, and alarms.
+- Fleet-wide IoT Credentials Provider role alias plus Thing/certificate-scoped AWS_IAM API routes for signed configuration retrieval and apply/health acknowledgements. Legacy broker-identity IoT Rule adapters remain available during migration; named Shadow/Jobs notifications are optional.
 
 ## Local validation
 
@@ -65,8 +65,10 @@ Before a user can receive tenant claims, create the Cognito user, obtain its `su
 - `GET /api/onboarding/operations/{operationId}`
 - `POST /api/onboarding/gateways/{gatewayId}/decommission`
 - `POST /api/onboarding/gateways/{gatewayId}/assignments`
+- `GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration?generation={N}` (`AWS_IAM`)
+- `POST /device/v1/things/{thingName}/certificates/{certificateId}/status` (`AWS_IAM`)
 
-All mutations require `Idempotency-Key`. The authenticated serial-reservation body contains only `serialNumber`; no activation code, hardware ID, or hardware proof is accepted or verified by the current runtime. Assignment bodies contain `profileVersionId` and `deliveryMode` (`SHADOW` or `JOB`). Profile versions are immutable, strictly schema/range validated, contain only Secrets Manager references for secret-bearing fields, and are model-compatible on both onboarding and reassignment. `APPLIED_HEALTHY` is accepted only when the authenticated device reports the authoritative generation, profile version ID, and SHA-256 profile checksum. `ROLLED_BACK` must attest the exact previously applied profile version and checksum; a missing or invalid rollback target is quarantined.
+Operator mutations require `Idempotency-Key`. The authenticated serial-reservation body contains only `serialNumber`; no activation code, hardware ID, or hardware proof is accepted or verified by the current runtime. Assignment bodies contain `profileVersionId` and `deliveryMode` (`SHADOW` or `JOB`). Profile versions are immutable, strictly schema/range validated, contain only Secrets Manager references for secret-bearing fields, and are model-compatible on both onboarding and reassignment. Device GET/POST calls use short-lived credentials issued from the permanent IoT certificate and are SigV4-authenticated; they do not use MQTT topics. `APPLIED_HEALTHY` is accepted only when the authenticated device reports the authoritative generation, profile version ID, and SHA-256 profile checksum. `ROLLED_BACK` must attest the exact previously applied profile version and checksum; a missing or invalid rollback target is quarantined.
 
 ## Required operator workflows
 

@@ -20,10 +20,14 @@ const GATEWAY_ID = 'gateway-a';
 const OPERATION_ID = 'operation-a';
 const PROFILE_VERSION_ID = 'pv-1';
 const GENERATION = 2;
+const SERIAL_NUMBER = 'SNA8C2463D4248';
+const BOOTSTRAP_CERTIFICATE_ID = 'c'.repeat(64);
 const TENANT_KEY = `TENANT#${TENANT_ID}`;
 const GATEWAY_KEY = `GATEWAY#${GATEWAY_ID}`;
 const DEPLOYMENT_KEY = `DEPLOYMENT#${GATEWAY_ID}#${String(GENERATION).padStart(12, '0')}`;
 const OPERATION_KEY = `OPERATION#${OPERATION_ID}`;
+const MANUFACTURING_KEY = `SERIAL#${SERIAL_NUMBER}`;
+const BOOTSTRAP_BINDING_KEY = `BOOTSTRAPCERT#${BOOTSTRAP_CERTIFICATE_ID}`;
 const SIGNING_KEY_ID = process.env.SIGNING_KEY_ID;
 
 type Item = Record<string, unknown>;
@@ -60,6 +64,7 @@ function records() {
     entityType: 'GATEWAY',
     tenantId: TENANT_ID,
     gatewayId: GATEWAY_ID,
+    serialNumber: SERIAL_NUMBER,
     thingName: THING_NAME,
     certificateId: CERTIFICATE_ID,
     certificatePrincipal: `arn:aws:iot:us-east-1:111122223333:cert/${CERTIFICATE_ID}`,
@@ -143,21 +148,63 @@ function event(overrides: Partial<APIGatewayProxyEventV2WithIAMAuthorizer> = {})
 const context = { awsRequestId: 'lambda-request-1' } as Context;
 
 function fixture(options: {
+  firstUse?: boolean;
   mutateGateway?: (gateway: Item) => void;
   mutateDeployment?: (deployment: Item) => void;
   mutateOperation?: (operation: Item) => void;
+  mutateManufacturing?: (manufacturing: Item) => void;
+  mutateBootstrapBinding?: (bootstrapBinding: Item) => void;
 } = {}) {
   const state = records();
+  const manufacturing: Item = {
+    PK: MANUFACTURING_KEY,
+    SK: 'MANUFACTURING',
+    entityType: 'MANUFACTURING',
+    state: 'PROVISIONING',
+    tenantId: TENANT_ID,
+    gatewayId: GATEWAY_ID,
+    operationId: OPERATION_ID,
+    serialNumber: SERIAL_NUMBER,
+    thingName: THING_NAME,
+    certificateId: CERTIFICATE_ID,
+    certificatePrincipal: `arn:aws:iot:us-east-1:111122223333:cert/${CERTIFICATE_ID}`,
+    certificateStatus: 'PENDING_ACTIVATION',
+    claimMechanism: 'PRELOADED_UNIQUE_BOOTSTRAP',
+    bootstrapCertificateId: BOOTSTRAP_CERTIFICATE_ID,
+    bootstrapCertificateStatus: 'ACTIVE',
+  };
+  const bootstrapBinding: Item = {
+    PK: BOOTSTRAP_BINDING_KEY,
+    SK: 'BINDING',
+    entityType: 'BOOTSTRAP_CERTIFICATE_BINDING',
+    bootstrapCertificateId: BOOTSTRAP_CERTIFICATE_ID,
+    serialNumber: SERIAL_NUMBER,
+    tenantId: TENANT_ID,
+    status: 'ACTIVE',
+  };
+  if (options.firstUse) {
+    state.gateway.state = 'IDENTITY_PROVISIONING';
+    state.gateway.certificateStatus = 'PENDING_ACTIVATION';
+    state.deployment.status = 'WAITING_FOR_DEVICE';
+    state.operation.state = 'CSR_VERIFIED';
+  }
   options.mutateGateway?.(state.gateway);
   options.mutateDeployment?.(state.deployment);
   options.mutateOperation?.(state.operation);
+  options.mutateManufacturing?.(manufacturing);
+  options.mutateBootstrapBinding?.(bootstrapBinding);
   const items = new Map<string, Item>([
     [`${TENANT_KEY}|${GATEWAY_KEY}`, state.gateway],
     [`${TENANT_KEY}|${DEPLOYMENT_KEY}`, state.deployment],
     [`${TENANT_KEY}|${OPERATION_KEY}`, state.operation],
   ]);
+  if (options.firstUse) {
+    items.set(`${MANUFACTURING_KEY}|MANUFACTURING`, manufacturing);
+    items.set(`${BOOTSTRAP_BINDING_KEY}|BINDING`, bootstrapBinding);
+  }
   const transactions: unknown[][] = [];
   const presignedKeys: string[] = [];
+  const callOrder: string[] = [];
   const dependencies: DeviceConfigurationDependencies = {
     async queryGatewayByThing() {
       return [{
@@ -172,14 +219,36 @@ function fixture(options: {
     },
     async transactWrite(transaction) {
       transactions.push(transaction);
+      const serialized = JSON.stringify(transaction);
+      if (serialized.includes('DEACTIVATE_BOOTSTRAP_CERTIFICATE')) {
+        callOrder.push('finalize-identity');
+        state.gateway.state = 'PERMANENT_IDENTITY_ACTIVE';
+        state.gateway.certificateStatus = 'ACTIVE';
+        state.operation.state = 'OPERATIONAL_IDENTITY_ISSUED';
+        manufacturing.state = 'PROVISIONED';
+        manufacturing.certificateStatus = 'ACTIVE';
+        manufacturing.bootstrapCertificateStatus = 'DEACTIVATING';
+        bootstrapBinding.status = 'DEACTIVATING';
+      } else {
+        callOrder.push('record-delivery');
+      }
     },
     async presignArtifact(key) {
       presignedKeys.push(key);
+      callOrder.push(`presign:${key}`);
       return `https://artifacts.example.test/${encodeURIComponent(key)}?signature=redacted`;
     },
     now: () => new Date('2026-08-17T12:00:00.000Z'),
   };
-  return { dependencies, transactions, presignedKeys, ...state };
+  return {
+    dependencies,
+    transactions,
+    presignedKeys,
+    callOrder,
+    manufacturing,
+    bootstrapBinding,
+    ...state,
+  };
 }
 
 test('secured device configuration GET returns the existing signed assignment contract', async () => {
@@ -210,6 +279,50 @@ test('secured device configuration GET returns the existing signed assignment co
   assert.match(serialized, /certificateStatus = :active/);
   assert.match(serialized, /signedDescriptor = :descriptor/);
   assert.match(serialized, /SIGNED_PROFILE_DELIVERED_HTTP/);
+});
+
+test('first IAM-authenticated configuration GET finalizes the permanent identity before signing artifacts', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const setup = fixture({ firstUse: true });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(setup.transactions.length, 2, 'identity activation and profile delivery use separate atomic transitions');
+
+  const finalization = setup.transactions[0];
+  assert.ok(finalization);
+  assert.equal(finalization.length, 5, 'bootstrap binding, manufacturing, gateway, operation, and outbox move together');
+  const serializedFinalization = JSON.stringify(finalization);
+  assert.match(serializedFinalization, /DEACTIVATE_BOOTSTRAP_CERTIFICATE/);
+  assert.match(serializedFinalization, /PRELOADED_UNIQUE_BOOTSTRAP/);
+  assert.match(serializedFinalization, /PENDING_ACTIVATION/);
+  assert.match(serializedFinalization, /OPERATIONAL_IDENTITY_ISSUED/);
+  assert.match(serializedFinalization, /AWS IoT credentials provider/);
+  assert.match(serializedFinalization, new RegExp(BOOTSTRAP_CERTIFICATE_ID));
+  assert.match(serializedFinalization, new RegExp(CERTIFICATE_ID));
+
+  assert.equal(setup.callOrder[0], 'finalize-identity', 'no signed artifact URL exists before identity activation');
+  assert.deepEqual(setup.callOrder.slice(1), [
+    `presign:${setup.descriptor.objectKey}`,
+    `presign:${setup.descriptor.manifestKey}`,
+    'record-delivery',
+  ]);
+});
+
+test('first configuration GET fails closed when the bootstrap binding is not owned by the gateway tenant', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const setup = fixture({
+    firstUse: true,
+    mutateBootstrapBinding: (binding) => {
+      binding.tenantId = 'tenant-attacker';
+    },
+  });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 403);
+  assert.equal((JSON.parse(String(response.body)) as { code: string }).code, 'DEVICE_NOT_AUTHORIZED');
+  assert.deepEqual(setup.transactions, []);
+  assert.deepEqual(setup.presignedKeys, []);
 });
 
 test('secured device configuration GET requires exact IAM context, path identity, and generation', async () => {
