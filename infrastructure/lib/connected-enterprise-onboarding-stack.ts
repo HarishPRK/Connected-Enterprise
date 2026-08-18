@@ -558,7 +558,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     const gatewayConfigRoleAlias = new iot.CfnRoleAlias(this, 'GatewayConfigPullRoleAlias', {
       roleAlias: gatewayConfigRoleAliasName,
       roleArn: gatewayConfigPullRole.roleArn,
-      credentialDurationSeconds: 900,
+      credentialDurationSeconds: 3600,
       tags: [
         { key: 'Stage', value: stage },
         { key: 'Service', value: 'ConnectedEnterpriseGatewayConfigPull' },

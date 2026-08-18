@@ -726,7 +726,7 @@ test('fleet configuration pull and status acknowledgement use one exact IoT cred
   });
   template.hasResourceProperties('AWS::IoT::RoleAlias', {
     RoleAlias: 'GatewayConfigPull-dev',
-    CredentialDurationSeconds: 900,
+    CredentialDurationSeconds: 3600,
   });
   template.hasOutput('DeviceConfigurationUrlTemplate', {});
   template.hasOutput('DeviceStatusUrlTemplate', {});
