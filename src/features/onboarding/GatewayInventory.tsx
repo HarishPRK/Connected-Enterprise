@@ -73,6 +73,22 @@ function operationFor(gateway: Gateway, operations: OnboardingOperation[]): Onbo
     ?? gatewayOperations.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
 }
 
+function canMigrateLegacyAssignment(
+  gateway: Gateway,
+  activeOperation?: OnboardingOperation,
+): boolean {
+  return gateway.certificateState === 'ACTIVE'
+    && gateway.state === 'ACTIVE'
+    && gateway.health === 'APPLYING'
+    && !gateway.profileVersionId
+    && Boolean(gateway.desiredProfileVersionId)
+    && gateway.deploymentGeneration >= 1
+    && activeOperation?.type === 'ONBOARD'
+    && activeOperation.state === 'PROFILE_STAGED'
+    && activeOperation.deploymentGeneration === gateway.deploymentGeneration
+    && activeOperation.profileVersionId === gateway.desiredProfileVersionId;
+}
+
 export function GatewayInventory({
   gateways,
   sites,
@@ -241,10 +257,12 @@ export function GatewayInventory({
             const desiredProfile = gateway.desiredProfileVersionId ? profileById.get(gateway.desiredProfileVersionId) : undefined;
             const gatewayOperation = operationFor(gateway, operations);
             const activeOperation = gatewayOperation?.status === 'IN_PROGRESS' ? gatewayOperation : undefined;
+            const legacyAssignmentCanMigrate = canMigrateLegacyAssignment(gateway, activeOperation);
             const gatewayCanDecommission = gateway.certificateState === 'ACTIVE'
               && (gateway.state === 'ACTIVE' || gateway.state === 'ROLLED_BACK' || gateway.state === 'FAILED');
-            const gatewayCanDeploy = gateway.certificateState === 'ACTIVE'
-              && ((gateway.state === 'ACTIVE' && gateway.health === 'HEALTHY') || gateway.state === 'ROLLED_BACK');
+            const gatewayCanDeploy = legacyAssignmentCanMigrate
+              || (gateway.certificateState === 'ACTIVE'
+                && ((gateway.state === 'ACTIVE' && gateway.health === 'HEALTHY') || gateway.state === 'ROLLED_BACK'));
             return (
               <li key={gateway.id} className="ce-onb-gateway-row">
                 <span className="ce-onb-gateway-icon"><Cpu size={19} aria-hidden="true" /></span>
@@ -277,8 +295,14 @@ export function GatewayInventory({
                       {activeOperation ? 'View progress' : 'View operation'}
                     </button>
                   )}
-                  {canDeployProfile && gatewayCanDeploy && !activeOperation && (
-                    <button type="button" onClick={() => openDeploy(gateway)}>
+                  {canDeployProfile && gatewayCanDeploy && (!activeOperation || legacyAssignmentCanMigrate) && (
+                    <button
+                      type="button"
+                      onClick={() => openDeploy(gateway)}
+                      title={legacyAssignmentCanMigrate
+                        ? `Create signed generation ${gateway.deploymentGeneration + 1} without reprovisioning this gateway`
+                        : undefined}
+                    >
                       <CloudUpload size={14} aria-hidden="true" />Deploy profile
                     </button>
                   )}
