@@ -1114,6 +1114,76 @@ test('assignment, retry leases, and decommission are generation and manufacturin
   });
 });
 
+test('legacy delivered assignments are migrated only from an exact lease-free delivery authority', async () => {
+  const { legacyAssignmentMigrationAuthority } = await import('../lambda/api-handler.js');
+  const nowEpoch = 1_800_000_000;
+  const descriptor = {
+    kind: 'gateway-profile-assignment',
+    gatewayId: 'gateway-a',
+    thingName: 'gw-device-a',
+    generation: 1,
+    profileVersionId: 'pv-1',
+    signature: 'legacy-signature',
+  };
+  const gateway = {
+    entityType: 'GATEWAY',
+    gatewayId: 'gateway-a',
+    thingName: 'gw-device-a',
+    certificateStatus: 'ACTIVE',
+    state: 'PROFILE_DELIVERED',
+    generation: 1,
+    desiredGeneration: 1,
+    desiredProfileVersionId: 'pv-1',
+    operationId: 'op-1',
+    dispatchLeaseExpiresAtEpoch: nowEpoch - 1,
+    signedDescriptor: descriptor,
+  };
+  const deployment = {
+    entityType: 'DEPLOYMENT',
+    gatewayId: 'gateway-a',
+    generation: 1,
+    profileVersionId: 'pv-1',
+    operationId: 'op-1',
+    status: 'PROFILE_DELIVERED',
+    descriptor,
+  };
+  const operation = {
+    entityType: 'OPERATION',
+    operationId: 'op-1',
+    gatewayId: 'gateway-a',
+    deploymentGeneration: 1,
+    profileVersionId: 'pv-1',
+    operationStatus: 'IN_PROGRESS',
+    state: 'PROFILE_STAGED',
+  };
+
+  assert.deepEqual(
+    legacyAssignmentMigrationAuthority(gateway, deployment, operation, nowEpoch),
+    { descriptor, operationId: 'op-1', profileVersionId: 'pv-1' },
+  );
+  const rejectedAuthorities: Array<[Record<string, unknown>, Record<string, unknown>, Record<string, unknown>]> = [
+    [{ ...gateway, certificateStatus: 'INACTIVE' }, deployment, operation],
+    [{ ...gateway, dispatchLeaseExpiresAtEpoch: nowEpoch }, deployment, operation],
+    [{ ...gateway, signedDescriptor: { ...descriptor, configurationClaim: {} } }, deployment, operation],
+    [{ ...gateway, signedDescriptor: undefined }, deployment, operation],
+    [gateway, { ...deployment, status: 'APPLIED_HEALTHY' }, operation],
+    [gateway, deployment, { ...operation, operationStatus: 'SUCCEEDED' }],
+    [gateway, deployment, { ...operation, operationId: 'op-racing' }],
+  ];
+  for (const authority of rejectedAuthorities) {
+    assert.throws(
+      () => legacyAssignmentMigrationAuthority(...authority, nowEpoch),
+      /cannot be migrated safely/,
+    );
+  }
+
+  const api = fs.readFileSync(path.join(process.cwd(), 'lambda', 'api-handler.ts'), 'utf8');
+  assert.match(api, /#status = :superseded[\s\S]*':superseded': 'SUPERSEDED'/);
+  assert.match(api, /code: 'LEGACY_ASSIGNMENT_SUPERSEDED'/);
+  assert.match(api, /supersededByGeneration/);
+  assert.match(api, /#state IN \(:healthy, :rolledBack\)/);
+});
+
 test('signing key identity is inside signed manifests and retrieval validation', () => {
   const profile = fs.readFileSync(path.join(process.cwd(), 'lambda', 'shared', 'profile.ts'), 'utf8');
   const config = fs.readFileSync(path.join(process.cwd(), 'lambda', 'iot-config-handler.ts'), 'utf8');

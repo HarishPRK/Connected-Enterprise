@@ -46,6 +46,12 @@ const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
 const VERIFICATION_TTL_SECONDS = 15 * 60;
 const ASSIGNABLE_GATEWAY_STATES = new Set(['APPLIED_HEALTHY', 'ROLLED_BACK']);
 
+interface LegacyAssignmentMigration {
+  descriptor: Record<string, unknown>;
+  operationId: string;
+  profileVersionId: string;
+}
+
 interface IdempotencyRecord extends Record<string, unknown> {
   requestHash?: string;
   response?: unknown;
@@ -727,12 +733,36 @@ async function assignProfile(
   }
   const currentGeneration = Number(gateway.generation ?? 0);
   const currentGatewayState = String(gateway.state ?? '');
-  if (!ASSIGNABLE_GATEWAY_STATES.has(currentGatewayState)) {
-    throw new ConflictError('Gateway is not in a stable state that permits profile assignment');
-  }
   const assignmentNowEpoch = Math.floor(Date.now() / 1000);
   if (Number(gateway.dispatchLeaseExpiresAtEpoch ?? 0) >= assignmentNowEpoch) {
     throw new ConflictError('Gateway has an active profile-delivery lease');
+  }
+  let legacyMigration: LegacyAssignmentMigration | undefined;
+  if (currentGatewayState === 'PROFILE_DELIVERED') {
+    if (!Number.isSafeInteger(currentGeneration) || currentGeneration < 1
+      || typeof gateway.operationId !== 'string' || !gateway.operationId) {
+      throw new ConflictError('Legacy profile assignment cannot be migrated safely');
+    }
+    const [deploymentResult, operationResult] = await Promise.all([
+      ddb.send(new GetCommand({
+        TableName: TABLE_NAME,
+        Key: { PK: tenantPk(context.tenantId), SK: deploymentSk(gatewayId, currentGeneration) },
+        ConsistentRead: true,
+      })),
+      ddb.send(new GetCommand({
+        TableName: TABLE_NAME,
+        Key: { PK: tenantPk(context.tenantId), SK: operationSk(gateway.operationId) },
+        ConsistentRead: true,
+      })),
+    ]);
+    legacyMigration = legacyAssignmentMigrationAuthority(
+      gateway,
+      deploymentResult.Item ?? {},
+      operationResult.Item ?? {},
+      assignmentNowEpoch,
+    );
+  } else if (!ASSIGNABLE_GATEWAY_STATES.has(currentGatewayState)) {
+    throw new ConflictError('Gateway is not in a stable state that permits profile assignment');
   }
   const generation = currentGeneration + 1;
   const now = new Date().toISOString();
@@ -781,16 +811,68 @@ async function assignProfile(
         TableName: TABLE_NAME,
         Key: { PK: tenantPk(context.tenantId), SK: gatewaySk(gatewayId) },
         UpdateExpression: 'SET generation = :generation, desiredGeneration = :generation, desiredProfileVersionId = :versionId, signedDescriptor = :descriptor, operationId = :operationId, #state = :available, health = :applying, updatedAt = :now',
-        ConditionExpression: 'entityType = :gateway AND generation = :current AND #state = :currentState AND #state IN (:healthy, :rolledBack) AND certificateStatus = :active AND (attribute_not_exists(dispatchLeaseExpiresAtEpoch) OR dispatchLeaseExpiresAtEpoch < :nowEpoch)',
+        ConditionExpression: legacyMigration
+          ? 'entityType = :gateway AND generation = :current AND desiredGeneration = :current AND desiredProfileVersionId = :legacyProfileVersionId AND operationId = :legacyOperationId AND signedDescriptor = :legacyDescriptor AND #state = :currentState AND certificateStatus = :active AND (attribute_not_exists(dispatchLeaseExpiresAtEpoch) OR dispatchLeaseExpiresAtEpoch < :nowEpoch)'
+          : 'entityType = :gateway AND generation = :current AND #state = :currentState AND #state IN (:healthy, :rolledBack) AND certificateStatus = :active AND (attribute_not_exists(dispatchLeaseExpiresAtEpoch) OR dispatchLeaseExpiresAtEpoch < :nowEpoch)',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':gateway': 'GATEWAY', ':current': currentGeneration, ':currentState': currentGatewayState,
           ':generation': generation, ':versionId': profileVersionId, ':descriptor': descriptor,
           ':operationId': operationId, ':available': 'PROFILE_AVAILABLE', ':applying': 'APPLYING', ':now': now,
-          ':healthy': 'APPLIED_HEALTHY', ':rolledBack': 'ROLLED_BACK', ':active': 'ACTIVE', ':nowEpoch': assignmentNowEpoch,
+          ':active': 'ACTIVE', ':nowEpoch': assignmentNowEpoch,
+          ...(legacyMigration ? {
+            ':legacyProfileVersionId': legacyMigration.profileVersionId,
+            ':legacyOperationId': legacyMigration.operationId,
+            ':legacyDescriptor': legacyMigration.descriptor,
+          } : {
+            ':healthy': 'APPLIED_HEALTHY',
+            ':rolledBack': 'ROLLED_BACK',
+          }),
         },
       },
     },
+    ...(legacyMigration ? [
+      {
+        Update: {
+          TableName: TABLE_NAME,
+          Key: { PK: tenantPk(context.tenantId), SK: deploymentSk(gatewayId, currentGeneration) },
+          UpdateExpression: 'SET #status = :superseded, supersededAt = :now, supersededByGeneration = :nextGeneration, supersededByOperationId = :nextOperationId, updatedAt = :now',
+          ConditionExpression: 'entityType = :deployment AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND descriptor = :descriptor AND #status = :delivered',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: {
+            ':deployment': 'DEPLOYMENT', ':gatewayId': gatewayId, ':generation': currentGeneration,
+            ':profileVersionId': legacyMigration.profileVersionId, ':operationId': legacyMigration.operationId,
+            ':descriptor': legacyMigration.descriptor, ':delivered': 'PROFILE_DELIVERED',
+            ':superseded': 'SUPERSEDED', ':nextGeneration': generation, ':nextOperationId': operationId, ':now': now,
+          },
+        },
+      },
+      {
+        Update: {
+          TableName: TABLE_NAME,
+          Key: { PK: tenantPk(context.tenantId), SK: operationSk(legacyMigration.operationId) },
+          UpdateExpression: 'SET operationStatus = :failed, #state = :failed, supersededAt = :now, supersededByGeneration = :nextGeneration, supersededByOperationId = :nextOperationId, failure = :failure, updatedAt = :now, timeline = list_append(if_not_exists(timeline, :empty), :events)',
+          ConditionExpression: 'entityType = :operation AND operationId = :operationId AND gatewayId = :gatewayId AND deploymentGeneration = :generation AND profileVersionId = :profileVersionId AND operationStatus = :inProgress AND #state = :profileStaged',
+          ExpressionAttributeNames: { '#state': 'state' },
+          ExpressionAttributeValues: {
+            ':operation': 'OPERATION', ':operationId': legacyMigration.operationId, ':gatewayId': gatewayId,
+            ':generation': currentGeneration, ':profileVersionId': legacyMigration.profileVersionId,
+            ':inProgress': 'IN_PROGRESS', ':profileStaged': 'PROFILE_STAGED', ':failed': 'FAILED',
+            ':nextGeneration': generation, ':nextOperationId': operationId, ':now': now, ':empty': [],
+            ':failure': {
+              code: 'LEGACY_ASSIGNMENT_SUPERSEDED',
+              message: 'Legacy assignment was superseded by a signed inline-configuration assignment.',
+              rolledBack: false,
+            },
+            ':events': [{
+              state: 'FAILED',
+              at: now,
+              detail: `Legacy generation ${currentGeneration} was superseded by generation ${generation}.`,
+            }],
+          },
+        },
+      },
+    ] : []),
     { Put: { TableName: TABLE_NAME, Item: deployment, ConditionExpression: 'attribute_not_exists(PK)' } },
     { Put: { TableName: TABLE_NAME, Item: operation, ConditionExpression: 'attribute_not_exists(PK)' } },
     {
@@ -806,9 +888,71 @@ async function assignProfile(
       },
     },
     { Put: { TableName: TABLE_NAME, Item: idempotencyItem(context.tenantId, event.routeKey, key, requestHash, response, 202), ConditionExpression: 'attribute_not_exists(PK)' } },
-    { Put: { TableName: TABLE_NAME, Item: auditItem(context, 'PROFILE_ASSIGNED', deploymentId, now, { gatewayId, generation, profileVersionId, deliveryMode }), ConditionExpression: 'attribute_not_exists(PK)' } },
+    { Put: { TableName: TABLE_NAME, Item: auditItem(context, 'PROFILE_ASSIGNED', deploymentId, now, {
+      gatewayId, generation, profileVersionId, deliveryMode,
+      ...(legacyMigration ? { supersededLegacyGeneration: currentGeneration } : {}),
+    }), ConditionExpression: 'attribute_not_exists(PK)' } },
   ] }));
   return json(202, response);
+}
+
+export function legacyAssignmentMigrationAuthority(
+  gateway: Record<string, unknown>,
+  deployment: Record<string, unknown>,
+  operation: Record<string, unknown>,
+  nowEpoch: number,
+): LegacyAssignmentMigration {
+  const conflict = (): never => {
+    throw new ConflictError('Legacy profile assignment cannot be migrated safely');
+  };
+  const gatewayId = typeof gateway.gatewayId === 'string' && gateway.gatewayId ? gateway.gatewayId : conflict();
+  const thingName = typeof gateway.thingName === 'string' && gateway.thingName ? gateway.thingName : conflict();
+  const operationId = typeof gateway.operationId === 'string' && gateway.operationId ? gateway.operationId : conflict();
+  const profileVersionId = typeof gateway.desiredProfileVersionId === 'string' && gateway.desiredProfileVersionId
+    ? gateway.desiredProfileVersionId
+    : conflict();
+  const generation = Number(gateway.generation);
+  const desiredGeneration = Number(gateway.desiredGeneration);
+  const leaseValue = gateway.dispatchLeaseExpiresAtEpoch;
+  const leaseExpiresAtEpoch = Number(leaseValue ?? 0);
+  const descriptor = gateway.signedDescriptor;
+  if (gateway.state !== 'PROFILE_DELIVERED'
+    || gateway.certificateStatus !== 'ACTIVE'
+    || !Number.isSafeInteger(generation) || generation < 1
+    || desiredGeneration !== generation
+    || (leaseValue != null && !Number.isSafeInteger(leaseExpiresAtEpoch))
+    || leaseExpiresAtEpoch >= nowEpoch
+    || descriptor == null || typeof descriptor !== 'object' || Array.isArray(descriptor)
+    || Object.hasOwn(descriptor, 'configurationClaim')) {
+    return conflict();
+  }
+  const signedDescriptor = descriptor as Record<string, unknown>;
+  if (signedDescriptor.gatewayId !== gatewayId
+    || signedDescriptor.thingName !== thingName
+    || Number(signedDescriptor.generation) !== generation
+    || signedDescriptor.profileVersionId !== profileVersionId) {
+    return conflict();
+  }
+  if (deployment.entityType !== 'DEPLOYMENT'
+    || deployment.gatewayId !== gatewayId
+    || Number(deployment.generation) !== generation
+    || deployment.profileVersionId !== profileVersionId
+    || deployment.operationId !== operationId
+    || deployment.status !== 'PROFILE_DELIVERED'
+    || deployment.descriptor == null || typeof deployment.descriptor !== 'object' || Array.isArray(deployment.descriptor)
+    || canonicalJson(deployment.descriptor) !== canonicalJson(signedDescriptor)) {
+    return conflict();
+  }
+  if (operation.entityType !== 'OPERATION'
+    || operation.operationId !== operationId
+    || operation.gatewayId !== gatewayId
+    || Number(operation.deploymentGeneration) !== generation
+    || operation.profileVersionId !== profileVersionId
+    || operation.operationStatus !== 'IN_PROGRESS'
+    || operation.state !== 'PROFILE_STAGED') {
+    return conflict();
+  }
+  return { descriptor: signedDescriptor, operationId, profileVersionId };
 }
 
 async function queryTenantEntityPrefix(
