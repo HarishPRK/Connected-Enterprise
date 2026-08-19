@@ -50,6 +50,12 @@ The script validates the tenant, model, site, profile, AWS certificate, and poli
 
 The restricted binding role needs only `iot:DescribeCertificate`, `iot:ListAttachedPolicies`, `iot:ListPrincipalThings`, the documented DynamoDB reads/scan, and the conditional DynamoDB transaction on this stack's table. It does not need certificate creation or private-key access.
 
+### Lab-only administrator package issuance
+
+For controlled development gateways, a `platform_admin` or `tenant_admin` can open **Onboarding → Bootstrap** and issue a new package. The authenticated API creates one active AWS IoT certificate/key pair, attaches only `BootstrapClaimPolicyName`, and conditionally creates the serial inventory record plus the global certificate-binding sentinel. The response is a one-time ZIP containing the certificate, private key, Amazon Root CA 1, and endpoint/serial metadata.
+
+The private key exists transiently in the Lambda response and browser download memory. It is never written to DynamoDB, S3, application logs, or an idempotency record. AWS cannot return it again. If the download is lost after issuance, retire that binding through a controlled recovery instead of attempting to recreate the same package. This browser flow is for lab handling only; production manufacturing should generate the private key inside gateway protected storage and submit a CSR.
+
 ## 3. Provide bootstrap network connectivity
 
 Before the gateway can contact AWS IoT Core, the IoT Credentials Provider, or API Gateway, its protected local bootstrap configuration must provide:

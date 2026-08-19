@@ -144,6 +144,14 @@ export interface CreateProfileVersionInput {
   changeNote: string;
 }
 
+export interface BootstrapPackageInput {
+  serialNumber: string;
+  modelId: string;
+  siteId: string;
+  profileVersionId: string;
+  acknowledgeOneTimePrivateKey: true;
+}
+
 export interface OnboardingEventEnvelope {
   type?: 'snapshot' | 'operation' | 'gateway' | 'profile';
   snapshot?: OnboardingSnapshot;

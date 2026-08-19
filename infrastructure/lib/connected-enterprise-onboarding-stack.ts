@@ -407,7 +407,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
         // API Gateway canonicalizes CORS header names to lowercase. Keep the
         // template canonical too so CloudFormation drift detection stays clean.
         allowHeaders: ['authorization', 'content-type', 'idempotency-key'],
-        exposeHeaders: ['x-request-id'],
+        exposeHeaders: ['content-disposition', 'x-certificate-id', 'x-request-id'],
         maxAge: Duration.hours(1),
         allowCredentials: false,
       },
@@ -436,6 +436,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     });
     addJwtRoute('/api/onboarding/snapshot', apigwv2.HttpMethod.GET);
     addJwtRoute('/api/onboarding/claims/verify', apigwv2.HttpMethod.POST);
+    addJwtRoute('/api/onboarding/bootstrap-packages', apigwv2.HttpMethod.POST);
     addJwtRoute('/api/onboarding/profiles', apigwv2.HttpMethod.POST);
     addJwtRoute('/api/onboarding/operations', apigwv2.HttpMethod.POST);
     addJwtRoute('/api/onboarding/operations/{operationId}', apigwv2.HttpMethod.GET);
@@ -842,6 +843,36 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       })]),
     });
     const iotCredentialProviderEndpoint = credentialProviderEndpointLookup.getResponseField('endpointAddress');
+
+    apiFunction.addEnvironment('BOOTSTRAP_POLICY_NAME', bootstrapClaimPolicyName);
+    apiFunction.addEnvironment('IOT_DATA_ENDPOINT', iotDataEndpoint);
+    apiFunction.addEnvironment('IOT_CREDENTIAL_PROVIDER_ENDPOINT', iotCredentialProviderEndpoint);
+    apiFunction.addEnvironment('FLEET_PROVISIONING_TEMPLATE_NAME', fleetTemplateName);
+    apiFunction.addEnvironment('GATEWAY_CONFIG_ROLE_ALIAS_NAME', gatewayConfigRoleAliasName);
+    apiFunction.addEnvironment(
+      'DEVICE_CONFIGURATION_URL_TEMPLATE',
+      `${httpApi.apiEndpoint}${deviceConfigRoutePath}`,
+    );
+    apiFunction.addEnvironment(
+      'DEVICE_STATUS_URL_TEMPLATE',
+      `${httpApi.apiEndpoint}${deviceStatusRoutePath}`,
+    );
+    apiFunction.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'CreateOneTimeBootstrapKeyPair',
+      actions: ['iot:CreateKeysAndCertificate'],
+      resources: ['*'],
+    }));
+    apiFunction.addToRolePolicy(new iam.PolicyStatement({
+      sid: 'BindOrRetireIssuedBootstrapCertificate',
+      actions: [
+        'iot:AttachPolicy',
+        'iot:DetachPolicy',
+        'iot:UpdateCertificate',
+        'iot:DeleteCertificate',
+      ],
+      resources: [iotArn('cert/*')],
+    }));
+    apiFunction.node.addDependency(bootstrapClaimPolicy);
 
     const jobTemplate = new iot.CfnJobTemplate(this, 'ProfileApplyJobTemplate', {
       jobTemplateId: `connected-enterprise-profile-apply-${stage}-v1`,

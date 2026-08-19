@@ -26,6 +26,7 @@ interface OnboardingWizardProps {
   profiles: ProfileVersion[];
   models: GatewayModel[];
   preferredSiteId?: string;
+  initialSerialNumber?: string;
   onCancel: () => void;
   onStarted: (operation: OnboardingOperation) => void;
 }
@@ -56,11 +57,12 @@ export function OnboardingWizard({
   profiles,
   models,
   preferredSiteId,
+  initialSerialNumber = '',
   onCancel,
   onStarted,
 }: OnboardingWizardProps) {
   const [step, setStep] = useState(0);
-  const [serialNumber, setSerialNumber] = useState('');
+  const [serialNumber, setSerialNumber] = useState(initialSerialNumber);
   const [verification, setVerification] = useState<VerificationResult>();
   const [siteId, setSiteId] = useState('');
   const [profileVersionId, setProfileVersionId] = useState('');

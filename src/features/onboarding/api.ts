@@ -1,4 +1,5 @@
 import type {
+  BootstrapPackageInput,
   CreateProfileVersionInput,
   OnboardingOperation,
   OnboardingSnapshot,
@@ -185,4 +186,34 @@ export async function createProfileVersion(
     signal,
   );
   return 'profile' in result ? result.profile : result;
+}
+
+export async function generateBootstrapPackage(
+  input: BootstrapPackageInput,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<{ archive: Blob; certificateId: string }> {
+  const response = await fetch(onboardingApiUrl('/api/onboarding/bootstrap-packages'), {
+    method: 'POST',
+    headers: {
+      ...JSON_HEADERS,
+      Accept: 'application/zip, application/json',
+      'Idempotency-Key': idempotencyKey,
+      ...await onboardingAuthorizationHeaders(),
+    },
+    credentials: 'same-origin',
+    cache: 'no-store',
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!response.ok) await readResponse<never>(response);
+  const certificateId = response.headers.get('x-certificate-id')?.trim() ?? '';
+  if (!/^[a-f0-9]{64}$/i.test(certificateId)) {
+    throw new OnboardingApiError('The server issued a package without a valid certificate identifier.', 502);
+  }
+  const archive = await response.blob();
+  if (archive.size === 0 || archive.size > 1024 * 1024 || archive.type !== 'application/zip') {
+    throw new OnboardingApiError('The downloaded bootstrap package is invalid.', 502);
+  }
+  return { archive, certificateId };
 }

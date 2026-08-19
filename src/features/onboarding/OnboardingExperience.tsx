@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { CloudCog, FileLock2, LogOut, MapPin, PackagePlus, Radio, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CloudCog, FileKey2, FileLock2, LogOut, MapPin, PackagePlus, Radio, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { PageHeader } from '../../components/PageHeader';
+import { BootstrapPackageManager } from './BootstrapPackageManager';
 import { GatewayInventory } from './GatewayInventory';
 import { OnboardingWizard } from './OnboardingWizard';
 import { OperationProgress } from './OperationProgress';
@@ -9,7 +10,7 @@ import type { OnboardingOperation } from './types';
 import { useOnboardingData } from './useOnboardingData';
 import { useOnboardingAuth } from './onboardingAuthContext';
 
-type Surface = 'gateways' | 'profiles' | 'wizard' | 'operation';
+type Surface = 'gateways' | 'profiles' | 'bootstrap' | 'wizard' | 'operation';
 
 export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: string }) {
   const { user, signOut } = useOnboardingAuth();
@@ -27,8 +28,11 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
   const tenantRole = user?.tenantRole;
   const canOperate = localSimulator || tenantRole === 'platform_admin' || tenantRole === 'tenant_admin' || tenantRole === 'operator';
   const canAdminister = localSimulator || tenantRole === 'platform_admin' || tenantRole === 'tenant_admin';
+  const canIssueBootstrapPackage = snapshot?.mode === 'aws'
+    && (tenantRole === 'platform_admin' || tenantRole === 'tenant_admin');
   const [surface, setSurface] = useState<Surface>('gateways');
   const [operationId, setOperationId] = useState<string>();
+  const [wizardSerial, setWizardSerial] = useState('');
 
   const openOperation = (operation: OnboardingOperation) => {
     upsertOperation(operation);
@@ -88,7 +92,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
             </div>
           )}
 
-          {(surface === 'gateways' || surface === 'profiles') && (
+          {(surface === 'gateways' || surface === 'profiles' || surface === 'bootstrap') && (
             <div className="ce-onb-command-bar">
               <div className="ce-onb-tabs" role="tablist" aria-label="Onboarding workspace">
                 <button
@@ -111,6 +115,18 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                 >
                   <FileLock2 size={15} aria-hidden="true" />Profiles <span>{snapshot.profiles.length}</span>
                 </button>
+                {canIssueBootstrapPackage && (
+                  <button
+                    id="ce-onb-bootstrap-tab"
+                    type="button"
+                    role="tab"
+                    aria-selected={surface === 'bootstrap'}
+                    aria-controls="ce-onb-bootstrap-panel"
+                    onClick={() => setSurface('bootstrap')}
+                  >
+                    <FileKey2 size={15} aria-hidden="true" />Bootstrap
+                  </button>
+                )}
               </div>
               <div className="ce-onb-command-assurance">
                 <Radio size={14} aria-hidden="true" />
@@ -155,11 +171,26 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
             </div>
           )}
 
+          {surface === 'bootstrap' && canIssueBootstrapPackage && (
+            <div id="ce-onb-bootstrap-panel" role="tabpanel" aria-labelledby="ce-onb-bootstrap-tab">
+              <BootstrapPackageManager
+                models={snapshot.gatewayModels}
+                profiles={snapshot.profiles}
+                sites={snapshot.sites}
+                onVerifySerial={(serialNumber) => {
+                  setWizardSerial(serialNumber);
+                  setSurface('wizard');
+                }}
+              />
+            </div>
+          )}
+
           {surface === 'wizard' && (
             <OnboardingWizard
               profiles={snapshot.profiles}
               models={snapshot.gatewayModels}
               preferredSiteId={preferredSiteId}
+              initialSerialNumber={wizardSerial}
               onCancel={() => setSurface('gateways')}
               onStarted={openOperation}
             />

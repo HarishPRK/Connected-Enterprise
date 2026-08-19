@@ -2,6 +2,14 @@ import type {
   APIGatewayProxyEventV2WithJWTAuthorizer,
   APIGatewayProxyHandlerV2WithJWTAuthorizer,
 } from 'aws-lambda';
+import {
+  AttachPolicyCommand,
+  CreateKeysAndCertificateCommand,
+  DeleteCertificateCommand,
+  DetachPolicyCommand,
+  IoTClient,
+  UpdateCertificateCommand,
+} from '@aws-sdk/client-iot';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import {
   BatchGetCommand,
@@ -40,8 +48,13 @@ import { INITIAL_OPERATION_STEPS, publicOperation } from './shared/models.js';
 import { uiProfileSchemaVersion, validateUiProfileParameters } from './shared/ui-profile.js';
 import { assertProfileCompatibility, assertProfileLineageModel } from './shared/compatibility.js';
 import { normalizePresentedSerial } from './shared/manufacturing-credentials.js';
+import {
+  createBootstrapPackageArchive,
+  type BootstrapPackageMetadata,
+} from './shared/bootstrap-package.js';
 
 const s3 = new S3Client({});
+const iot = new IoTClient({});
 const IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
 const VERIFICATION_TTL_SECONDS = 15 * 60;
 const ASSIGNABLE_GATEWAY_STATES = new Set(['APPLIED_HEALTHY', 'ROLLED_BACK']);
@@ -76,6 +89,9 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) 
       case 'POST /api/onboarding/claims/verify':
         requireRole(context, 'platform_admin', 'tenant_admin', 'operator');
         return await verifyDevice(event, context);
+      case 'POST /api/onboarding/bootstrap-packages':
+        requireRole(context, 'platform_admin', 'tenant_admin');
+        return await createBootstrapPackage(event, context);
       case 'POST /api/onboarding/profiles':
         requireRole(context, 'platform_admin', 'tenant_admin');
         return await createUiProfileVersion(event, context);
@@ -136,6 +152,370 @@ async function snapshot(tenantId: string): Promise<Record<string, unknown>> {
     sites: sites.map(publicSite),
     operations: [...operationMap.values()].map(publicOperation),
   };
+}
+
+async function createBootstrapPackage(
+  event: APIGatewayProxyEventV2WithJWTAuthorizer,
+  context: ReturnType<typeof tenantContext>,
+) {
+  const body = parseJsonBody<Record<string, unknown>>(event, 16 * 1024);
+  const allowedKeys = new Set([
+    'serialNumber',
+    'modelId',
+    'siteId',
+    'profileVersionId',
+    'acknowledgeOneTimePrivateKey',
+  ]);
+  const unknownKeys = Object.keys(body).filter((key) => !allowedKeys.has(key));
+  if (unknownKeys.length > 0) throw new InputError(`Unsupported bootstrap package field: ${unknownKeys[0]}`);
+  if (body.acknowledgeOneTimePrivateKey !== true) {
+    throw new InputError('Confirm that the bootstrap private key can be downloaded only once');
+  }
+
+  let serialNumber: string;
+  try {
+    serialNumber = normalizePresentedSerial(body.serialNumber);
+  } catch {
+    throw new InputError('Enter a valid factory serial number');
+  }
+  const modelId = normalizeIdentifier(body.modelId, 'modelId');
+  const siteId = normalizeIdentifier(body.siteId, 'siteId');
+  const profileVersionId = normalizeIdentifier(body.profileVersionId, 'profileVersionId');
+  const requestKey = idempotencyKey(event);
+  const tenantKey = tenantPk(context.tenantId);
+  const [existingSerial, tenant, site, model, profileVersion] = await Promise.all([
+    ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
+      ConsistentRead: true,
+    })),
+    ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: tenantKey, SK: 'METADATA' },
+      ConsistentRead: true,
+    })),
+    ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: tenantKey, SK: `SITE#${siteId}` },
+      ConsistentRead: true,
+    })),
+    ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: tenantKey, SK: `MODEL#${modelId}` },
+      ConsistentRead: true,
+    })),
+    profileVersionById(context.tenantId, profileVersionId),
+  ]);
+
+  if (existingSerial.Item) {
+    throw new ConflictError('This serial is already registered. Its bootstrap private key cannot be downloaded again');
+  }
+  if (!tenant.Item || tenant.Item.entityType !== 'TENANT' || tenant.Item.tenantId !== context.tenantId) {
+    throw new NotFoundError('Tenant manufacturing inventory is unavailable');
+  }
+  if (!site.Item || site.Item.entityType !== 'SITE' || site.Item.tenantId !== context.tenantId) {
+    throw new NotFoundError('Authorized site not found');
+  }
+  if (!model.Item || model.Item.entityType !== 'GATEWAY_MODEL' || model.Item.tenantId !== context.tenantId) {
+    throw new NotFoundError('Gateway model not found');
+  }
+  if (!profileVersion
+    || profileVersion.entityType !== 'PROFILE_VERSION'
+    || profileVersion.tenantId !== context.tenantId
+    || profileVersion.profileVersionId !== profileVersionId) {
+    throw new NotFoundError('Profile version not found');
+  }
+  assertProfileCompatibility(modelId, profileVersion.modelId);
+  if (typeof profileVersion.PK !== 'string' || typeof profileVersion.SK !== 'string') {
+    throw new Error('Profile version has no authoritative DynamoDB key');
+  }
+
+  const environment = bootstrapPackageEnvironment();
+  const issuedAt = new Date().toISOString();
+  const created = await iot.send(new CreateKeysAndCertificateCommand({ setAsActive: true }));
+  const certificateId = created.certificateId;
+  const certificateArn = created.certificateArn;
+  const certificatePem = created.certificatePem;
+  const privateKey = created.keyPair?.PrivateKey;
+  if (!certificateId
+    || !/^[a-f0-9]{64}$/i.test(certificateId)
+    || !certificateArn
+    || !certificatePem
+    || !privateKey) {
+    if (certificateId && /^[a-f0-9]{64}$/i.test(certificateId)) {
+      await retireUnboundBootstrapCertificate(certificateId, certificateArn, environment.bootstrapPolicyName, false);
+    }
+    throw new Error('AWS IoT returned an incomplete bootstrap certificate package');
+  }
+
+  let policyAttached = false;
+  try {
+    await iot.send(new AttachPolicyCommand({
+      policyName: environment.bootstrapPolicyName,
+      target: certificateArn,
+    }));
+    policyAttached = true;
+  } catch (error) {
+    await retireUnboundBootstrapCertificate(
+      certificateId,
+      certificateArn,
+      environment.bootstrapPolicyName,
+      policyAttached,
+    );
+    throw error;
+  }
+
+  const metadata: BootstrapPackageMetadata = {
+    formatVersion: 1,
+    issuedAt,
+    serialNumber,
+    certificateId,
+    certificateArn,
+    tenantId: context.tenantId,
+    modelId,
+    siteId,
+    profileVersionId,
+    region: environment.region,
+    bootstrapPolicyName: environment.bootstrapPolicyName,
+    iotDataEndpoint: environment.iotDataEndpoint,
+    iotCredentialProviderEndpoint: environment.iotCredentialProviderEndpoint,
+    fleetProvisioningTemplateName: environment.fleetProvisioningTemplateName,
+    gatewayConfigRoleAliasName: environment.gatewayConfigRoleAliasName,
+    claimClientIdPrefix: 'claim-',
+    configurationUrlTemplate: environment.configurationUrlTemplate,
+    statusUrlTemplate: environment.statusUrlTemplate,
+  };
+  const archive = createBootstrapPackageArchive({ certificatePem, privateKey, metadata });
+  if (archive.length > 1024 * 1024) {
+    await retireUnboundBootstrapCertificate(
+      certificateId,
+      certificateArn,
+      environment.bootstrapPolicyName,
+      policyAttached,
+    );
+    throw new Error('Bootstrap package exceeds the one-megabyte response limit');
+  }
+
+  const bindingKey = `BOOTSTRAPCERT#${certificateId}`;
+  const audit = auditItem(context, 'BOOTSTRAP_PACKAGE_ISSUED', serialNumber, issuedAt, {
+    certificateId,
+    bootstrapPolicyName: environment.bootstrapPolicyName,
+    modelId,
+    siteId,
+    profileVersionId,
+  });
+  try {
+    await ddb.send(new TransactWriteCommand({
+      ClientRequestToken: sha256(`${event.routeKey}:${requestKey}`).slice(0, 36),
+      TransactItems: [
+        {
+          ConditionCheck: {
+            TableName: TABLE_NAME,
+            Key: { PK: tenantKey, SK: 'METADATA' },
+            ConditionExpression: 'entityType = :entity AND tenantId = :tenantId',
+            ExpressionAttributeValues: { ':entity': 'TENANT', ':tenantId': context.tenantId },
+          },
+        },
+        {
+          ConditionCheck: {
+            TableName: TABLE_NAME,
+            Key: { PK: tenantKey, SK: `SITE#${siteId}` },
+            ConditionExpression: 'entityType = :entity AND tenantId = :tenantId AND siteId = :siteId',
+            ExpressionAttributeValues: {
+              ':entity': 'SITE', ':tenantId': context.tenantId, ':siteId': siteId,
+            },
+          },
+        },
+        {
+          ConditionCheck: {
+            TableName: TABLE_NAME,
+            Key: { PK: tenantKey, SK: `MODEL#${modelId}` },
+            ConditionExpression: 'entityType = :entity AND tenantId = :tenantId AND modelId = :modelId',
+            ExpressionAttributeValues: {
+              ':entity': 'GATEWAY_MODEL', ':tenantId': context.tenantId, ':modelId': modelId,
+            },
+          },
+        },
+        {
+          ConditionCheck: {
+            TableName: TABLE_NAME,
+            Key: { PK: profileVersion.PK, SK: profileVersion.SK },
+            ConditionExpression: 'entityType = :entity AND tenantId = :tenantId AND profileVersionId = :profileVersionId AND modelId = :modelId',
+            ExpressionAttributeValues: {
+              ':entity': 'PROFILE_VERSION',
+              ':tenantId': context.tenantId,
+              ':profileVersionId': profileVersionId,
+              ':modelId': modelId,
+            },
+          },
+        },
+        {
+          Put: {
+            TableName: TABLE_NAME,
+            Item: {
+              PK: serialPk(serialNumber),
+              SK: 'MANUFACTURING',
+              entityType: 'MANUFACTURING',
+              serialNumber,
+              tenantId: context.tenantId,
+              modelId,
+              allowedSiteIds: [siteId],
+              demoExpectedProfileVersionId: profileVersionId,
+              demoExpectedDeliveryMode: 'SHADOW',
+              claimMechanism: 'PRELOADED_UNIQUE_BOOTSTRAP',
+              bootstrapCertificateId: certificateId,
+              bootstrapCertificateArn: certificateArn,
+              bootstrapCertificateStatus: 'ACTIVE',
+              bootstrapPolicyName: environment.bootstrapPolicyName,
+              state: 'CLAIMABLE',
+              createdAt: issuedAt,
+              updatedAt: issuedAt,
+            },
+            ConditionExpression: 'attribute_not_exists(PK)',
+          },
+        },
+        {
+          Put: {
+            TableName: TABLE_NAME,
+            Item: {
+              PK: bindingKey,
+              SK: 'BINDING',
+              entityType: 'BOOTSTRAP_CERTIFICATE_BINDING',
+              bootstrapCertificateId: certificateId,
+              certificateArn,
+              serialNumber,
+              tenantId: context.tenantId,
+              status: 'ACTIVE',
+              createdAt: issuedAt,
+              updatedAt: issuedAt,
+            },
+            ConditionExpression: 'attribute_not_exists(PK)',
+          },
+        },
+        {
+          Put: {
+            TableName: TABLE_NAME,
+            Item: audit,
+            ConditionExpression: 'attribute_not_exists(PK)',
+          },
+        },
+      ],
+    }));
+  } catch (error) {
+    const committed = await bootstrapBindingCommitted(serialNumber, certificateId, context.tenantId);
+    if (!committed) {
+      await retireUnboundBootstrapCertificate(
+        certificateId,
+        certificateArn,
+        environment.bootstrapPolicyName,
+        policyAttached,
+      );
+      if ((await ddb.send(new GetCommand({
+        TableName: TABLE_NAME,
+        Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
+        ConsistentRead: true,
+      }))).Item) {
+        throw new ConflictError('This serial was registered by another request. The unused certificate was retired');
+      }
+      throw error;
+    }
+  }
+
+  return {
+    statusCode: 201,
+    isBase64Encoded: true,
+    headers: {
+      'cache-control': 'no-store, no-cache, must-revalidate, private',
+      'content-disposition': `attachment; filename="connected-enterprise-bootstrap-${serialNumber}.zip"`,
+      'content-type': 'application/zip',
+      'x-certificate-id': certificateId,
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'no-referrer',
+    },
+    body: archive.toString('base64'),
+  };
+}
+
+function bootstrapPackageEnvironment() {
+  return {
+    region: requiredRuntimeValue('AWS_REGION'),
+    bootstrapPolicyName: requiredRuntimeValue('BOOTSTRAP_POLICY_NAME'),
+    iotDataEndpoint: requiredRuntimeValue('IOT_DATA_ENDPOINT'),
+    iotCredentialProviderEndpoint: requiredRuntimeValue('IOT_CREDENTIAL_PROVIDER_ENDPOINT'),
+    fleetProvisioningTemplateName: requiredRuntimeValue('FLEET_PROVISIONING_TEMPLATE_NAME'),
+    gatewayConfigRoleAliasName: requiredRuntimeValue('GATEWAY_CONFIG_ROLE_ALIAS_NAME'),
+    configurationUrlTemplate: requiredRuntimeValue('DEVICE_CONFIGURATION_URL_TEMPLATE'),
+    statusUrlTemplate: requiredRuntimeValue('DEVICE_STATUS_URL_TEMPLATE'),
+  };
+}
+
+function requiredRuntimeValue(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`Missing required bootstrap package setting: ${name}`);
+  return value;
+}
+
+async function bootstrapBindingCommitted(
+  serialNumber: string,
+  certificateId: string,
+  tenantId: string,
+): Promise<boolean> {
+  const [manufacturing, binding] = await Promise.all([
+    ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
+      ConsistentRead: true,
+    })),
+    ddb.send(new GetCommand({
+      TableName: TABLE_NAME,
+      Key: { PK: `BOOTSTRAPCERT#${certificateId}`, SK: 'BINDING' },
+      ConsistentRead: true,
+    })),
+  ]);
+  return manufacturing.Item?.entityType === 'MANUFACTURING'
+    && manufacturing.Item.serialNumber === serialNumber
+    && manufacturing.Item.tenantId === tenantId
+    && manufacturing.Item.bootstrapCertificateId === certificateId
+    && manufacturing.Item.bootstrapCertificateStatus === 'ACTIVE'
+    && binding.Item?.entityType === 'BOOTSTRAP_CERTIFICATE_BINDING'
+    && binding.Item.bootstrapCertificateId === certificateId
+    && binding.Item.serialNumber === serialNumber
+    && binding.Item.tenantId === tenantId
+    && binding.Item.status === 'ACTIVE';
+}
+
+async function retireUnboundBootstrapCertificate(
+  certificateId: string,
+  certificateArn: string | undefined,
+  policyName: string,
+  policyAttached: boolean,
+): Promise<void> {
+  const failures: string[] = [];
+  if (policyAttached && certificateArn) {
+    try {
+      await iot.send(new DetachPolicyCommand({ policyName, target: certificateArn }));
+    } catch (error) {
+      failures.push(error instanceof Error ? error.name : 'DetachPolicyError');
+    }
+  }
+  try {
+    await iot.send(new UpdateCertificateCommand({ certificateId, newStatus: 'INACTIVE' }));
+  } catch (error) {
+    failures.push(error instanceof Error ? error.name : 'UpdateCertificateError');
+  }
+  try {
+    await iot.send(new DeleteCertificateCommand({ certificateId, forceDelete: true }));
+  } catch (error) {
+    failures.push(error instanceof Error ? error.name : 'DeleteCertificateError');
+  }
+  if (failures.length > 0) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'bootstrap-package-cleanup-failed',
+      certificateId,
+      errors: failures,
+    }));
+  }
 }
 
 async function verifyDevice(

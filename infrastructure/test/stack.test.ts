@@ -594,6 +594,7 @@ test('HTTP handler exposes the exact Connected Enterprise onboarding contract', 
   for (const route of [
     'GET /api/onboarding/snapshot',
     'POST /api/onboarding/claims/verify',
+    'POST /api/onboarding/bootstrap-packages',
     'POST /api/onboarding/profiles',
     'POST /api/onboarding/operations',
     'GET /api/onboarding/operations/{operationId}',
@@ -610,6 +611,7 @@ test('HTTP API declares exact JWT routes so Lambda receives exact routeKey value
   for (const routeKey of [
     'GET /api/onboarding/snapshot',
     'POST /api/onboarding/claims/verify',
+    'POST /api/onboarding/bootstrap-packages',
     'POST /api/onboarding/profiles',
     'POST /api/onboarding/operations',
     'GET /api/onboarding/operations/{operationId}',
@@ -624,6 +626,51 @@ test('HTTP API declares exact JWT routes so Lambda receives exact routeKey value
   }
   const rendered = JSON.stringify(template.toJSON());
   assert.doesNotMatch(rendered, /ANY \/\{proxy\+\}/);
+});
+
+test('administrator bootstrap package route has exact IoT issuance and cleanup authority', () => {
+  const template = synthesized();
+  template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
+    RouteKey: 'POST /api/onboarding/bootstrap-packages',
+    AuthorizationType: 'JWT',
+  });
+  const rendered = template.toJSON() as {
+    Resources: Record<string, { Type: string; Properties?: Record<string, unknown> }>;
+  };
+  const apiFunction = Object.values(rendered.Resources).find((resource) =>
+    resource.Type === 'AWS::Lambda::Function'
+    && resource.Properties?.FunctionName === 'connected-enterprise-onboarding-dev-api');
+  assert.ok(apiFunction?.Properties, 'onboarding API Lambda is synthesized');
+  const variables = (apiFunction.Properties.Environment as { Variables: Record<string, unknown> }).Variables;
+  for (const name of [
+    'BOOTSTRAP_POLICY_NAME',
+    'IOT_DATA_ENDPOINT',
+    'IOT_CREDENTIAL_PROVIDER_ENDPOINT',
+    'FLEET_PROVISIONING_TEMPLATE_NAME',
+    'GATEWAY_CONFIG_ROLE_ALIAS_NAME',
+    'DEVICE_CONFIGURATION_URL_TEMPLATE',
+    'DEVICE_STATUS_URL_TEMPLATE',
+  ]) assert.ok(name in variables, `${name} is provided to the one-time package handler`);
+
+  const roleLogicalId = (apiFunction.Properties.Role as { 'Fn::GetAtt': [string, string] })['Fn::GetAtt'][0];
+  const rolePolicies = Object.values(rendered.Resources).filter((resource) =>
+    resource.Type === 'AWS::IAM::Policy'
+    && JSON.stringify(resource.Properties?.Roles ?? []).includes(`\"Ref\":\"${roleLogicalId}\"`));
+  const rolePolicyJson = JSON.stringify(resolvePolicyIntrinsics(
+    rolePolicies.map((resource) => resource.Properties?.PolicyDocument),
+  ));
+  assert.match(rolePolicyJson, /iot:CreateKeysAndCertificate/);
+  for (const action of ['iot:AttachPolicy', 'iot:DetachPolicy', 'iot:UpdateCertificate', 'iot:DeleteCertificate']) {
+    assert.match(rolePolicyJson, new RegExp(action));
+  }
+  assert.match(rolePolicyJson, /arn:[^\"]+:iot:[^\"]+:cert\/\*/);
+
+  const source = fs.readFileSync(path.join(process.cwd(), 'lambda', 'api-handler.ts'), 'utf8');
+  assert.match(source, /case 'POST \/api\/onboarding\/bootstrap-packages':[\s\S]*requireRole\(context, 'platform_admin', 'tenant_admin'\)/);
+  assert.match(source, /new CreateKeysAndCertificateCommand\(\{ setAsActive: true \}\)/);
+  assert.match(source, /BOOTSTRAP_PACKAGE_ISSUED/);
+  assert.match(source, /acknowledgeOneTimePrivateKey !== true/);
+  assert.doesNotMatch(source, /privateKey[^\n]*(?:Put|Item|auditItem)/i);
 });
 
 test('public gateway HTTP probe is isolated, throttled, and is the only unauthenticated route', () => {
@@ -856,6 +903,7 @@ test('HTTP API renders drift-stable CORS and access-log properties', () => {
   template.hasResourceProperties('AWS::ApiGatewayV2::Api', {
     CorsConfiguration: {
       AllowHeaders: ['authorization', 'content-type', 'idempotency-key'],
+      ExposeHeaders: ['content-disposition', 'x-certificate-id', 'x-request-id'],
     },
   });
 
