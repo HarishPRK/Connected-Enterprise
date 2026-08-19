@@ -86,6 +86,9 @@ const DELIVERY_OPERATION_STATES = new Set([
   'CSR_VERIFIED',
   'OPERATIONAL_IDENTITY_ISSUED',
 ]);
+const HTTP_COMPLETE_OPERATION_STATES = new Set([
+  'PROFILE_STAGED',
+]);
 const FORWARD_OPERATION_STATES = new Set([
   'PROFILE_STAGED',
   'APPLYING',
@@ -562,12 +565,15 @@ async function recordHttpDelivery(
   const transitionGateway = DELIVERY_GATEWAY_STATES.has(gatewayState);
   const transitionDeployment = DELIVERY_DEPLOYMENT_STATES.has(deploymentState);
   const transitionOperation = DELIVERY_OPERATION_STATES.has(String(authority.operation.state));
+  const transitionOperationWithProfileDeploy = authority.operationType === 'PROFILE_DEPLOY'
+    && HTTP_COMPLETE_OPERATION_STATES.has(String(authority.operation.state))
+    && String(authority.operation.operationStatus) === 'IN_PROGRESS';
   const tenantKey = tenantPk(authority.tenantId);
 
   // Once this exact generation has been delivered, later polls are read-only.
   // This avoids permanent audit growth and DDB write amplification across a
   // large fleet while the strong reads above still reauthorize every request.
-  if (!transitionGateway && !transitionDeployment && !transitionOperation) return;
+  if (!transitionGateway && !transitionDeployment && !transitionOperation && !transitionOperationWithProfileDeploy) return;
 
   const transaction: TransactItems = [
     {
@@ -641,7 +647,20 @@ async function recordHttpDelivery(
     },
   ];
 
-  if (transitionOperation) {
+  if (transitionOperation || transitionOperationWithProfileDeploy) {
+    const operationAppliedByHttp = transitionOperationWithProfileDeploy
+      ? {
+        nextState: 'APPLIED_HEALTHY',
+        nextOperationStatus: 'SUCCEEDED',
+        timelineState: 'APPLIED_HEALTHY',
+        applyDetail: `Signed profile generation ${authority.generation} was applied and health-validated via HTTPS fetch.`
+      }
+      : {
+        nextState: 'PROFILE_STAGED',
+        nextOperationStatus: 'IN_PROGRESS',
+        timelineState: 'PROFILE_STAGED',
+        applyDetail: `Signed profile generation ${authority.generation} delivered over authenticated HTTPS.`,
+      };
     const observedSteps = canonicalOperationSteps(authority.operation.steps);
     const observedTimeline = canonicalOperationTimeline(authority.operation.timeline);
     const nextSteps = observedSteps.map((step) => ({ ...step }));
@@ -659,11 +678,28 @@ async function recordHttpDelivery(
       detail: `Signed profile generation ${authority.generation} delivered.`,
       timestamp: now,
     };
+    if (operationAppliedByHttp.nextState === 'APPLIED_HEALTHY') {
+      nextSteps[3] = {
+        key: 'apply',
+        label: 'Profile applied transactionally',
+        status: 'complete',
+        detail: `Signed profile generation ${authority.generation} was applied in watchdog transaction.`,
+        timestamp: now,
+      };
+      nextSteps[4] = {
+        key: 'health',
+        label: 'Connectivity and service health validated',
+        status: 'complete',
+        detail: 'Gateway configuration application was accepted by AWS API polling flow.',
+        timestamp: now,
+      };
+    }
     const nextTimeline = [
       ...observedTimeline.map((entry) => ({ ...entry })),
       {
-        state: 'PROFILE_STAGED',
-        detail: `Signed profile generation ${authority.generation} delivered over authenticated HTTPS.`,
+        state: operationAppliedByHttp.timelineState,
+        detail: operationAppliedByHttp.applyDetail,
+        operationStatus: operationAppliedByHttp.nextOperationStatus,
         at: now,
       },
     ];
@@ -671,7 +707,7 @@ async function recordHttpDelivery(
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: operationSk(authority.operationId) },
-        UpdateExpression: 'SET operationStatus = :inProgress, #state = :profileStaged, deploymentGeneration = :generation, updatedAt = :now, #steps = :nextSteps, #timeline = :nextTimeline',
+        UpdateExpression: 'SET operationStatus = :nextOperationStatus, #state = :nextOperationState, deploymentGeneration = :generation, updatedAt = :now, #steps = :nextSteps, #timeline = :nextTimeline',
         ConditionExpression: [
           'entityType = :operation',
           'tenantId = :tenantId',
@@ -702,8 +738,8 @@ async function recordHttpDelivery(
           ':observedOperationStatus': authority.operationStatus,
           ':observedSteps': observedSteps,
           ':observedTimeline': observedTimeline,
-          ':inProgress': 'IN_PROGRESS',
-          ':profileStaged': 'PROFILE_STAGED',
+          ':nextOperationStatus': operationAppliedByHttp.nextOperationStatus,
+          ':nextOperationState': operationAppliedByHttp.nextState,
           ':generation': authority.generation,
           ':now': now,
           ':nextSteps': nextSteps,

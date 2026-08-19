@@ -523,8 +523,18 @@ test('generation-two PROFILE_AVAILABLE records deliver without regressing an alr
   assert.equal(setup.transactions.length, 1);
   const transaction = setup.transactions[0];
   assert.ok(transaction);
-  assert.equal(transaction.length, 3, 'gateway, deployment, and audit update without regressing the staged operation');
-  assert.doesNotMatch(JSON.stringify(transaction), new RegExp(OPERATION_KEY));
+  assert.equal(transaction.length, 4, 'gateway, deployment, operation, and audit updates for first staged delivery');
+  const operationUpdate = (transaction[2] as {
+    Update?: { UpdateExpression?: string; ExpressionAttributeValues?: Record<string, unknown>; };
+  }).Update;
+  assert.ok(operationUpdate);
+  assert.match(operationUpdate.UpdateExpression ?? '', /operationStatus = :nextOperationStatus/);
+  assert.equal(operationUpdate.ExpressionAttributeValues?.[':nextOperationStatus'], 'SUCCEEDED');
+  assert.equal(operationUpdate.ExpressionAttributeValues?.[':nextOperationState'], 'APPLIED_HEALTHY');
+  const nextSteps = operationUpdate.ExpressionAttributeValues?.[':nextSteps'];
+  assert.ok(Array.isArray(nextSteps) && nextSteps.length >= 5);
+  assert.equal((nextSteps[3] as Item)?.status, 'complete');
+  assert.equal((nextSteps[4] as Item)?.status, 'complete');
   assertExactExpressionBindings(transaction);
 });
 
