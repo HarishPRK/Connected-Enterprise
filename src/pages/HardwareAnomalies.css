@@ -1,6 +1,23 @@
 .anomaly-page {
   min-width: 0;
+  --anomaly-ok: #047857;
+  --anomaly-warn: #92400e;
+  --anomaly-err: #b91c1c;
+  --anomaly-mse: #047857;
+  --anomaly-threshold: #be185d;
 }
+
+[data-theme="dark"] .anomaly-page {
+  --anomaly-ok: var(--ok);
+  --anomaly-warn: var(--warn);
+  --anomaly-err: var(--err);
+  --anomaly-mse: var(--accent);
+  --anomaly-threshold: var(--accent-2);
+}
+
+.anomaly-page .badge.ok { color: var(--anomaly-ok); }
+.anomaly-page .badge.warn { color: var(--anomaly-warn); }
+.anomaly-page .badge.err { color: var(--anomaly-err); }
 
 .anomaly-page .page-header {
   align-items: center;
@@ -51,7 +68,7 @@
 }
 
 .anomaly-source[data-tone="live"] {
-  color: var(--ok);
+  color: var(--anomaly-ok);
   border-color: rgba(var(--ok-rgb) / 0.32);
   background: rgba(var(--ok-rgb) / 0.07);
 }
@@ -62,13 +79,13 @@
 
 .anomaly-source[data-tone="pending"],
 .anomaly-source[data-tone="stale"] {
-  color: var(--warn);
+  color: var(--anomaly-warn);
   border-color: rgba(var(--warn-rgb) / 0.34);
   background: rgba(var(--warn-rgb) / 0.07);
 }
 
 .anomaly-source[data-tone="error"] {
-  color: var(--err);
+  color: var(--anomaly-err);
   border-color: rgba(var(--err-rgb) / 0.34);
   background: rgba(var(--err-rgb) / 0.07);
 }
@@ -120,7 +137,8 @@
   min-height: 38px;
 }
 
-.anomaly-refresh .is-spinning {
+.anomaly-refresh .is-spinning,
+.anomaly-state-card .is-spinning {
   animation: anomaly-spin 0.9s linear infinite;
 }
 
@@ -132,7 +150,7 @@
 .anomaly-refresh:focus-visible,
 .anomaly-stale-banner button:focus-visible,
 .anomaly-state-card button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--anomaly-mse);
   outline-offset: 2px;
 }
 
@@ -187,17 +205,17 @@
 
 .anomaly-summary-item[data-tone="ok"] .anomaly-summary-icon,
 .anomaly-summary-item[data-tone="ok"] .anomaly-summary-value {
-  color: var(--ok);
+  color: var(--anomaly-ok);
 }
 
 .anomaly-summary-item[data-tone="warn"] .anomaly-summary-icon,
 .anomaly-summary-item[data-tone="warn"] .anomaly-summary-value {
-  color: var(--warn);
+  color: var(--anomaly-warn);
 }
 
 .anomaly-summary-item[data-tone="err"] .anomaly-summary-icon,
 .anomaly-summary-item[data-tone="err"] .anomaly-summary-value {
-  color: var(--err);
+  color: var(--anomaly-err);
 }
 
 .anomaly-summary-copy {
@@ -225,6 +243,12 @@
   white-space: nowrap;
 }
 
+.anomaly-summary-item:first-child .anomaly-summary-value {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .anomaly-summary-detail {
   overflow: hidden;
   color: var(--text-dim);
@@ -248,7 +272,7 @@
 
 .anomaly-stale-banner > svg {
   flex: 0 0 auto;
-  color: var(--warn);
+  color: var(--anomaly-warn);
 }
 
 .anomaly-stale-banner > span {
@@ -286,7 +310,7 @@
 }
 
 .anomaly-card-title svg {
-  color: var(--accent);
+  color: var(--anomaly-mse);
 }
 
 .anomaly-chart-legend {
@@ -311,12 +335,12 @@
   height: 2px;
   display: inline-block;
   border-radius: 1px;
-  background: var(--accent);
+  background: var(--anomaly-mse);
 }
 
 .anomaly-chart-legend i.threshold {
   height: 0;
-  border-top: 2px dashed var(--accent-2);
+  border-top: 2px dashed var(--anomaly-threshold);
   background: transparent;
 }
 
@@ -324,7 +348,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--err);
+  background: var(--anomaly-err);
   box-shadow: 0 0 0 3px rgba(var(--err-rgb) / 0.12);
 }
 
@@ -344,7 +368,7 @@
 }
 
 .anomaly-chart .recharts-surface:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--anomaly-mse);
   outline-offset: -3px;
 }
 
@@ -432,7 +456,7 @@
 }
 
 .anomaly-table .anomaly-positive {
-  color: var(--warn);
+  color: var(--anomaly-warn);
 }
 
 .anomaly-no-breaches {
@@ -441,7 +465,7 @@
   justify-content: center;
   gap: 11px;
   min-height: 112px;
-  color: var(--ok);
+  color: var(--anomaly-ok);
   text-align: left;
 }
 
@@ -539,13 +563,13 @@
   place-items: center;
   border: 1px solid rgba(var(--accent-rgb) / 0.30);
   border-radius: 14px;
-  color: var(--accent);
+  color: var(--anomaly-mse);
   background: rgba(var(--accent-rgb) / 0.08);
 }
 
 .anomaly-state-icon.is-error {
   border-color: rgba(var(--err-rgb) / 0.30);
-  color: var(--err);
+  color: var(--anomaly-err);
   background: rgba(var(--err-rgb) / 0.08);
 }
 
@@ -653,7 +677,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .anomaly-source[data-tone="live"] .anomaly-source-dot,
-  .anomaly-refresh .is-spinning {
+  .anomaly-refresh .is-spinning,
+  .anomaly-state-card .is-spinning {
     animation: none;
   }
 }

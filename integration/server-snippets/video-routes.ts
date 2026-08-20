@@ -44,11 +44,39 @@ const VIDEO_STREAM_PATHS: Record<string, { base: keyof typeof VIDEO_DEFAULT_BASE
   'ha-drive':    { base: 'hailo',  path: '/drive_thru_monitor_stream' },
 };
 
+/** Upstream POST endpoints that explicitly stop an inference pipeline.
+ *  The Hailo theft, pet-monitor, and fall endpoints are registered even
+ *  though those feeds do not currently have tiles in VideoAnalytics.tsx. */
+const VIDEO_STOP_PATHS: Record<string, { base: keyof typeof VIDEO_DEFAULT_BASES; path: string }> = {
+  'nv-nanoowl':  { base: 'nvidia', path: '/stop_nanoowl' },
+  'nv-violence': { base: 'nvidia', path: '/stop_violence' },
+  'nv-fall':     { base: 'nvidia', path: '/stop_fall' },
+  'nv-ppe':      { base: 'nvidia', path: '/stop_ppe_feed' },
+  'ha-intruder': { base: 'hailo',  path: '/stop_intruder' },
+  'ha-theft':    { base: 'hailo',  path: '/stop_theft_detection' },
+  'ha-pet':      { base: 'hailo',  path: '/stop_petmonitor' },
+  'ha-hairnet':  { base: 'hailo',  path: '/stop_hairnetmonitor' },
+  'ha-fire':     { base: 'hailo',  path: '/stop_firedetection' },
+  'ha-fall':     { base: 'hailo',  path: '/stop_falldetection' },
+  'ha-crowd':    { base: 'hailo',  path: '/stop_crowddetection' },
+};
+
 function getVideoUpstream(id: string): string | null {
   const envKey = `VIDEO_UPSTREAM_${id.replace(/-/g, '_').toUpperCase()}`;
   const direct = process.env[envKey];
   if (direct) return direct;
   const def = VIDEO_STREAM_PATHS[id];
+  if (!def) return null;
+  const baseKey = `VIDEO_BASE_${def.base.toUpperCase()}`;
+  const base = process.env[baseKey] ?? VIDEO_DEFAULT_BASES[def.base];
+  return `${base.replace(/\/+$/, '')}${def.path}`;
+}
+
+function getVideoStopUpstream(id: string): string | null {
+  const envKey = `VIDEO_STOP_UPSTREAM_${id.replace(/-/g, '_').toUpperCase()}`;
+  const direct = process.env[envKey];
+  if (direct) return direct;
+  const def = VIDEO_STOP_PATHS[id];
   if (!def) return null;
   const baseKey = `VIDEO_BASE_${def.base.toUpperCase()}`;
   const base = process.env[baseKey] ?? VIDEO_DEFAULT_BASES[def.base];
@@ -62,8 +90,46 @@ export function registerVideoRoutes(app: Express): void {
       Object.keys(VIDEO_STREAM_PATHS).map((id) => ({
         id,
         upstream: getVideoUpstream(id),
+        stopUpstream: getVideoStopUpstream(id),
       })),
     );
+  });
+
+  /** Stop an upstream inference pipeline. Only explicitly configured IDs are
+   *  accepted so this route cannot be used as an open POST proxy. */
+  app.post('/api/video/:id/stop', async (req, res) => {
+    const upstream = getVideoStopUpstream(req.params.id);
+    if (!upstream) {
+      res.status(404).json({ error: `No stop API configured for stream id: ${req.params.id}` });
+      return;
+    }
+
+    try {
+      const r = await fetch(upstream, {
+        method: 'POST',
+        headers: { Accept: 'application/json, text/plain, */*' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      const body = await r.text();
+
+      if (!r.ok) {
+        res.status(502).json({
+          error: `stop API returned ${r.status}`,
+          upstreamStatus: r.status,
+          detail: body || undefined,
+        });
+        return;
+      }
+
+      const contentType = r.headers.get('content-type');
+      if (contentType) res.setHeader('Content-Type', contentType);
+      res.status(r.status);
+      if (body) res.send(body);
+      else res.end();
+    } catch (err) {
+      console.error(`[video-stop:${req.params.id}] upstream error:`, err);
+      res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   /** MJPEG passthrough. */

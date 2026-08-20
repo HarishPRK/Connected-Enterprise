@@ -107,6 +107,10 @@ test('allows only separate, allowlisted selector/aggregate functions', () => {
   assert.equal(query.flagAggregation, 'last');
   assert.equal(query.valueAggregation, 'last');
   assert.equal((flux.match(/fn: last/g) ?? []).length, 2);
+  assert.equal((flux.match(/\|> sort\(columns: \["_time"\]\)/g) ?? []).length, 2);
+  assert.equal((flux.match(
+    /\|> group\(columns: \["metric"\]\)\s+\|> sort\(columns: \["_time"\]\)\s+\|> aggregateWindow\([^\n]+fn: last/g,
+  ) ?? []).length, 2);
   assert.match(flux, /bucket-with-\\"quote/);
   assert.match(flux, /keep\(columns: \["_time", "_value", "metric"\]\)/);
 });
@@ -187,6 +191,29 @@ test('aborts a query that exceeds its timeout', async () => {
   assert.equal(observedAbort, true);
 });
 
+test('propagates a caller abort to the upstream fetch', async () => {
+  let upstreamSignal: AbortSignal | undefined;
+  const source = new InfluxSource({
+    token: 'test-token',
+    fetchImpl: (_input, init) => new Promise<Response>((_resolve, reject) => {
+      upstreamSignal = init?.signal ?? undefined;
+      if (upstreamSignal?.aborted) {
+        reject(new Error('aborted'));
+        return;
+      }
+      upstreamSignal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }),
+  });
+  const caller = new AbortController();
+
+  const pending = source.queryAnomalies({}, { signal: caller.signal });
+  caller.abort();
+
+  const error = await errorOf(pending);
+  assert.equal(error.kind, 'cancelled');
+  assert.equal(upstreamSignal?.aborted, true);
+});
+
 test('stops reading a response beyond the configured byte cap', async () => {
   const source = new InfluxSource({
     token: 'test-token',
@@ -254,4 +281,22 @@ test('rejects a successful non-CSV response instead of silently returning no dat
   const error = await errorOf(source.queryAnomalies());
   assert.equal(error.kind, 'response');
   assert.match(error.message, /malformed CSV/);
+});
+
+test('rejects an appended Influx error table instead of returning partial results', () => {
+  const partialThenError = `${ANNOTATED_CSV}
+#datatype,string,long
+#group,true,true
+#default,,
+,error,reference
+,"execution failed after partial output, internal detail",42
+`;
+
+  assert.throws(
+    () => parseAnomalyAnnotatedCsv(partialThenError),
+    (error: unknown) => error instanceof InfluxSourceError
+      && error.kind === 'response'
+      && /error while executing/.test(error.message)
+      && !/internal detail|partial output/.test(error.message),
+  );
 });

@@ -60,6 +60,7 @@ export interface AnomalyQueryResult {
 export type InfluxSourceErrorKind =
   | 'validation'
   | 'configuration'
+  | 'cancelled'
   | 'timeout'
   | 'upstream'
   | 'response';
@@ -86,6 +87,11 @@ export interface InfluxSourceConfig {
   maxResponseBytes?: number;
   fetchImpl?: FetchLike;
   now?: () => number;
+}
+
+export interface InfluxQueryOptions {
+  /** Cancels the upstream fetch when the browser abandons its HTTP request. */
+  signal?: AbortSignal;
 }
 
 interface NormalizedInfluxSourceConfig {
@@ -304,11 +310,13 @@ export function buildAnomalyFluxQuery(
   return `flag = ${common}
   |> filter(fn: (r) => r["metric"] == "anomaly_flag")
   |> group(columns: ["metric"])
+  |> sort(columns: ["_time"])
   |> aggregateWindow(every: ${query.window}, fn: ${query.flagAggregation}, createEmpty: false)
 
 values = ${common}
   |> filter(fn: (r) => r["metric"] == "anomaly_mse" or r["metric"] == "anomaly_threshold")
   |> group(columns: ["metric"])
+  |> sort(columns: ["_time"])
   |> aggregateWindow(every: ${query.window}, fn: ${query.valueAggregation}, createEmpty: false)
 
 union(tables: [flag, values])
@@ -408,6 +416,13 @@ export function parseAnomalyAnnotatedCsv(csv: string): AnomalyPoint[] {
 
   for (const row of parseCsvRecords(csv.replace(/^\uFEFF/, ''))) {
     if (row.length === 0 || row[0]?.startsWith('#')) continue;
+
+    // Influx can append a CSV error table after valid result tables. Reject the
+    // entire response so callers never mistake a partial prefix for success.
+    const normalizedColumns = row.map((column) => column.trim().toLowerCase());
+    if (normalizedColumns.includes('error') && normalizedColumns.includes('reference')) {
+      throw new InfluxSourceError('response', 'InfluxDB returned an error while executing the query.');
+    }
 
     const nextTimeIndex = row.indexOf('_time');
     const nextValueIndex = row.indexOf('_value');
@@ -509,7 +524,10 @@ export class InfluxSource {
     });
   }
 
-  async queryAnomalies(input: AnomalyQueryInput = {}): Promise<AnomalyQueryResult> {
+  async queryAnomalies(
+    input: AnomalyQueryInput = {},
+    options: InfluxQueryOptions = {},
+  ): Promise<AnomalyQueryResult> {
     if (!this.config.token) {
       throw new InfluxSourceError(
         'configuration',
@@ -523,11 +541,30 @@ export class InfluxSource {
     endpoint.searchParams.set('org', this.config.org);
 
     const controller = new AbortController();
-    let timedOut = false;
+    let abortCause: 'caller' | 'timeout' | undefined;
+    const abortFromCaller = () => {
+      if (!abortCause) abortCause = 'caller';
+      controller.abort();
+    };
+    if (options.signal?.aborted) {
+      abortFromCaller();
+    } else {
+      options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    }
     const timeout = setTimeout(() => {
-      timedOut = true;
+      if (!abortCause) abortCause = 'timeout';
       controller.abort();
     }, this.config.timeoutMs);
+
+    const abortError = (): InfluxSourceError | undefined => {
+      if (abortCause === 'caller') {
+        return new InfluxSourceError('cancelled', 'InfluxDB query was cancelled.');
+      }
+      if (abortCause === 'timeout') {
+        return new InfluxSourceError('timeout', 'InfluxDB did not respond before the query timed out.');
+      }
+      return undefined;
+    };
 
     try {
       let response: Response;
@@ -543,9 +580,8 @@ export class InfluxSource {
           signal: controller.signal,
         });
       } catch {
-        if (timedOut) {
-          throw new InfluxSourceError('timeout', 'InfluxDB did not respond before the query timed out.');
-        }
+        const aborted = abortError();
+        if (aborted) throw aborted;
         throw new InfluxSourceError('upstream', 'The server could not reach InfluxDB.');
       }
 
@@ -553,6 +589,8 @@ export class InfluxSource {
         // Do not relay the upstream body. It can contain database internals and
         // is unnecessary for the browser to handle the failure safely.
         await response.body?.cancel().catch(() => undefined);
+        const aborted = abortError();
+        if (aborted) throw aborted;
         throw new InfluxSourceError('upstream', 'InfluxDB rejected the anomaly query.');
       }
 
@@ -560,12 +598,14 @@ export class InfluxSource {
       try {
         csv = await readLimitedResponse(response, this.config.maxResponseBytes, controller);
       } catch (error) {
-        if (timedOut) {
-          throw new InfluxSourceError('timeout', 'InfluxDB did not respond before the query timed out.');
-        }
+        const aborted = abortError();
+        if (aborted) throw aborted;
         if (error instanceof InfluxSourceError) throw error;
         throw new InfluxSourceError('upstream', 'The server could not read the InfluxDB response.');
       }
+
+      const aborted = abortError();
+      if (aborted) throw aborted;
 
       return {
         source: {
@@ -584,6 +624,7 @@ export class InfluxSource {
       };
     } finally {
       clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abortFromCaller);
     }
   }
 }

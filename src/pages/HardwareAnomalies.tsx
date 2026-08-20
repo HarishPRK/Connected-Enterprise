@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
-import { useThemeColors } from '../ui/Theme';
+import { useTheme, useThemeColors } from '../ui/Theme';
 import {
   useHardwareAnomalies,
   type HardwareAnomalyPoint,
@@ -48,6 +48,8 @@ const RANGE_OPTIONS = [
 
 type RangeKey = (typeof RANGE_OPTIONS)[number]['key'];
 const EMPTY_ANOMALY_POINTS: HardwareAnomalyPoint[] = [];
+type SummaryTone = 'ok' | 'warn' | 'err' | 'neutral';
+type SummaryIcon = React.ComponentType<{ size?: number; 'aria-hidden'?: boolean }>;
 
 interface ChartPoint extends HardwareAnomalyPoint {
   timestamp: number;
@@ -85,6 +87,33 @@ function crossedThreshold(point: HardwareAnomalyPoint): boolean {
   return point.anomalyMse !== null
     && point.anomalyThreshold !== null
     && point.anomalyMse > point.anomalyThreshold;
+}
+
+function currentAnomalyStatus(point: HardwareAnomalyPoint | null): {
+  tone: SummaryTone;
+  label: string;
+  icon: SummaryIcon;
+} {
+  if (!point) return { tone: 'neutral', label: 'No sample available', icon: AlertTriangle };
+  if (point.anomalyFlag === true) {
+    return { tone: 'err', label: 'Anomaly flagged', icon: ShieldAlert };
+  }
+  if (crossedThreshold(point)) {
+    return {
+      tone: 'warn',
+      label: point.anomalyFlag === false
+        ? 'Threshold crossed · no flag'
+        : 'Threshold crossed · flag unknown',
+      icon: TriangleAlert,
+    };
+  }
+  if (point.anomalyMse === null || point.anomalyThreshold === null) {
+    return { tone: 'neutral', label: 'Metric incomplete', icon: AlertTriangle };
+  }
+  if (point.anomalyFlag === null) {
+    return { tone: 'neutral', label: 'Flag unavailable', icon: AlertTriangle };
+  }
+  return { tone: 'ok', label: 'Within threshold', icon: CheckCircle2 };
 }
 
 function formatAxisTime(timestamp: number, range: RangeKey): string {
@@ -133,7 +162,10 @@ function flaggedWindows(points: ChartPoint[]): FlaggedWindow[] {
 }
 
 function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
+  const [reduced, setReduced] = useState(() => (
+    typeof window !== 'undefined'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ));
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -175,27 +207,7 @@ export function HardwareAnomaliesPage() {
     [points],
   );
 
-  const latestHasComparison = Boolean(
-    latest && latest.anomalyMse !== null && latest.anomalyThreshold !== null,
-  );
-  const currentTone = !latest || latest.anomalyFlag === null || !latestHasComparison
-    ? 'neutral'
-    : latest.anomalyFlag
-      ? 'err'
-      : crossedThreshold(latest)
-        ? 'warn'
-        : 'ok';
-  const currentLabel = !latest
-    ? 'No current sample'
-    : latest.anomalyFlag === null
-      ? 'Flag unavailable'
-      : !latestHasComparison
-        ? 'Metric incomplete'
-        : latest.anomalyFlag
-          ? 'Anomaly flagged'
-          : crossedThreshold(latest)
-            ? 'Threshold crossed'
-            : 'Within threshold';
+  const currentStatus = currentAnomalyStatus(latest);
 
   return (
     <div className="anomaly-page">
@@ -246,25 +258,33 @@ export function HardwareAnomaliesPage() {
             : `${points.length} anomaly samples loaded for the last ${range.label}.`}
       </p>
 
+      {error && data && (
+        <div className="anomaly-stale-banner" role="status">
+          <AlertTriangle size={15} aria-hidden="true" />
+          <span>
+            <strong>Refresh failed.</strong> Showing the last successful response
+            {fetchedAt ? ` from ${new Date(fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}.
+            {' '}{error}
+          </span>
+          <button type="button" onClick={refresh} disabled={loading}>Retry</button>
+        </div>
+      )}
+
       {loading && !data ? (
         <AnomalyLoadingState />
       ) : error && !data ? (
         <AnomalyErrorState message={error} onRetry={refresh} />
       ) : points.length === 0 ? (
-        <AnomalyEmptyState rangeLabel={range.label} onRefresh={refresh} />
+        <AnomalyEmptyState rangeLabel={range.label} loading={loading} onRefresh={refresh} />
       ) : (
         <>
           <section className="anomaly-summary" aria-label="Current anomaly summary">
             <SummaryMetric
-              icon={latest?.anomalyFlag === true
-                ? ShieldAlert
-                : latest?.anomalyFlag === false && latestHasComparison
-                  ? CheckCircle2
-                  : AlertTriangle}
-              label="Current state"
-              value={currentLabel}
+              icon={currentStatus.icon}
+              label="Latest sample"
+              value={currentStatus.label}
               detail={latest ? formatTableTime(latest.time) : 'No sample timestamp'}
-              tone={currentTone}
+              tone={currentStatus.tone}
             />
             <SummaryMetric
               icon={Gauge}
@@ -290,18 +310,6 @@ export function HardwareAnomaliesPage() {
               tone={flagged.length > 0 ? 'err' : 'ok'}
             />
           </section>
-
-          {error && data && (
-            <div className="anomaly-stale-banner" role="status">
-              <AlertTriangle size={15} aria-hidden="true" />
-              <span>
-                <strong>Refresh failed.</strong> Showing the last successful response
-                {fetchedAt ? ` from ${new Date(fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}.
-                {' '}{error}
-              </span>
-              <button type="button" onClick={refresh} disabled={loading}>Retry</button>
-            </div>
-          )}
 
           <div className="grid anomaly-content-grid">
             <div className="col-12">
@@ -354,8 +362,12 @@ function SourceStatus({
   error: boolean;
   hasData: boolean;
 }) {
-  const tone = error ? (hasData ? 'stale' : 'error') : loading ? 'pending' : 'live';
-  const label = error ? (hasData ? 'Cached response' : 'Source unavailable') : loading ? 'Querying source' : 'Source online';
+  const tone = error ? (hasData ? 'stale' : 'error') : loading ? 'pending' : 'snapshot';
+  const label = error
+    ? (hasData ? 'Cached snapshot' : 'Source unavailable')
+    : loading
+      ? 'Querying source'
+      : 'Snapshot loaded';
   const sourceLabel = source ? `${source.org} · ${source.bucket}` : 'Capgemini · BGW620';
   return (
     <div className="anomaly-source" data-tone={tone} title={source?.measurement || 'hardware_metrics'}>
@@ -376,11 +388,11 @@ function SummaryMetric({
   detail,
   tone,
 }: {
-  icon: React.ComponentType<{ size?: number; 'aria-hidden'?: boolean }>;
+  icon: SummaryIcon;
   label: string;
   value: string;
   detail: string;
-  tone: 'ok' | 'warn' | 'err' | 'neutral';
+  tone: SummaryTone;
 }) {
   return (
     <div className="anomaly-summary-item" data-tone={tone}>
@@ -396,6 +408,7 @@ function SummaryMetric({
 
 function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range: RangeKey }) {
   const colors = useThemeColors();
+  const { theme } = useTheme();
   const reducedMotion = usePrefersReducedMotion();
   const chartPoints = useMemo<ChartPoint[]>(() => points.map((point) => ({
     ...point,
@@ -406,6 +419,9 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
   const windows = useMemo(() => flaggedWindows(chartPoints), [chartPoints]);
   const flaggedCount = points.filter((point) => point.anomalyFlag === true).length;
   const crossingCount = points.filter(crossedThreshold).length;
+  const signalColors = theme === 'light'
+    ? { mse: '#047857', threshold: '#be185d', flag: '#b91c1c', axis: '#475569' }
+    : { mse: colors.accent, threshold: colors.accent2, flag: colors.err, axis: colors.textDim };
 
   return (
     <figure className="anomaly-trace" aria-labelledby="anomaly-trace-caption">
@@ -413,7 +429,7 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
         Reconstruction error over the selected range. The shaded corridor is bounded by the learned threshold.
         {` ${crossingCount} threshold crossings and ${flaggedCount} flagged windows are present.`}
       </figcaption>
-      <div className="anomaly-chart" role="img" aria-describedby="anomaly-trace-caption">
+      <div className="anomaly-chart">
         <ResponsiveContainer
           width="100%"
           height="100%"
@@ -425,11 +441,13 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
             data={chartPoints}
             margin={{ top: 12, right: 14, left: 2, bottom: 2 }}
             accessibilityLayer
+            aria-label="Hardware anomaly threshold chart"
+            aria-describedby="anomaly-trace-caption"
           >
             <defs>
               <linearGradient id="anomaly-corridor-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={colors.accent3} stopOpacity={0.24} />
-                <stop offset="100%" stopColor={colors.accent3} stopOpacity={0.025} />
+                <stop offset="0%" stopColor={signalColors.threshold} stopOpacity={0.18} />
+                <stop offset="100%" stopColor={signalColors.threshold} stopOpacity={0.02} />
               </linearGradient>
             </defs>
             <CartesianGrid stroke={colors.chartGrid} strokeDasharray="3 5" vertical={false} />
@@ -438,7 +456,7 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
                 key={`${window.start}-${window.end}`}
                 x1={window.start}
                 x2={window.end}
-                fill={colors.err}
+                fill={signalColors.flag}
                 fillOpacity={0.095}
                 strokeOpacity={0}
                 ifOverflow="hidden"
@@ -450,7 +468,7 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
               scale="time"
               domain={['dataMin', 'dataMax']}
               tickFormatter={(value: number) => formatAxisTime(value, range)}
-              stroke={colors.textMuted}
+              stroke={signalColors.axis}
               tickLine={false}
               axisLine={false}
               minTickGap={52}
@@ -460,7 +478,7 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
             <YAxis
               domain={[0, 'auto']}
               tickFormatter={(value: number) => formatMetric(value, true)}
-              stroke={colors.textMuted}
+              stroke={signalColors.axis}
               tickLine={false}
               axisLine={false}
               width={58}
@@ -482,11 +500,10 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
               type="monotone"
               dataKey="anomalyMse"
               name="Reconstruction error"
-              stroke={colors.accent}
+              stroke={signalColors.mse}
               strokeWidth={2.25}
               dot={false}
               activeDot={{ r: 4, strokeWidth: 2, fill: colors.panelSolid }}
-              connectNulls
               isAnimationActive={!reducedMotion}
               animationDuration={500}
             />
@@ -494,17 +511,16 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
               type="stepAfter"
               dataKey="anomalyThreshold"
               name="Learned threshold"
-              stroke={colors.accent2}
+              stroke={signalColors.threshold}
               strokeWidth={1.7}
               strokeDasharray="7 5"
               dot={false}
-              connectNulls
               isAnimationActive={false}
             />
             <Scatter
               name="Flagged window"
               dataKey="flaggedMse"
-              fill={colors.err}
+              fill={signalColors.flag}
               line={false}
               isAnimationActive={!reducedMotion}
             />
@@ -659,7 +675,15 @@ function AnomalyErrorState({ message, onRetry }: { message: string; onRetry: () 
   );
 }
 
-function AnomalyEmptyState({ rangeLabel, onRefresh }: { rangeLabel: string; onRefresh: () => void }) {
+function AnomalyEmptyState({
+  rangeLabel,
+  loading,
+  onRefresh,
+}: {
+  rangeLabel: string;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
   return (
     <Card className="anomaly-state-card">
       <span className="anomaly-state-icon"><Activity size={24} aria-hidden="true" /></span>
@@ -667,7 +691,10 @@ function AnomalyEmptyState({ rangeLabel, onRefresh }: { rangeLabel: string; onRe
         <h2>No anomaly samples in the last {rangeLabel}</h2>
         <p>The query succeeded, but BGW620 returned no hardware anomaly measurements. Choose a longer range or refresh.</p>
       </div>
-      <button type="button" onClick={onRefresh}><RefreshCw size={14} aria-hidden="true" />Refresh query</button>
+      <button type="button" onClick={onRefresh} disabled={loading}>
+        <RefreshCw size={14} className={loading ? 'is-spinning' : undefined} aria-hidden="true" />
+        {loading ? 'Refreshing' : 'Refresh query'}
+      </button>
     </Card>
   );
 }

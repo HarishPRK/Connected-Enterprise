@@ -57,6 +57,8 @@ const llm = makeLLM();
 // must still boot while INFLUX_TOKEN is intentionally blank during setup.
 let influxSource: InfluxSource | undefined;
 let influxConfigurationError: InfluxSourceError | undefined;
+const INFLUX_QUERY_CONCURRENCY_LIMIT = 4;
+let influxQueriesInFlight = 0;
 try {
   influxSource = InfluxSource.fromEnv();
 } catch {
@@ -130,6 +132,22 @@ app.get('/api/hardware-metrics/anomalies', async (req, res) => {
   res.removeHeader('Access-Control-Allow-Origin');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   res.setHeader('Cache-Control', 'no-store');
+  if (influxQueriesInFlight >= INFLUX_QUERY_CONCURRENCY_LIMIT) {
+    res.setHeader('Retry-After', '2');
+    res.status(429).json({
+      error: 'The anomaly service is busy. Try again shortly.',
+      code: 'INFLUX_BUSY',
+    });
+    return;
+  }
+
+  influxQueriesInFlight += 1;
+  const clientController = new AbortController();
+  const abortForDisconnect = () => clientController.abort();
+  req.once('aborted', abortForDisconnect);
+  res.once('close', abortForDisconnect);
+  if (req.aborted || res.destroyed) clientController.abort();
+
   try {
     if (influxConfigurationError) throw influxConfigurationError;
     if (!influxSource) {
@@ -141,17 +159,20 @@ app.get('/api/hardware-metrics/anomalies', async (req, res) => {
       window: req.query.window,
       flagAggregation: req.query.flagAggregation,
       valueAggregation: req.query.valueAggregation,
-    });
-    res.json(result);
+    }, { signal: clientController.signal });
+    if (!res.destroyed && !res.writableEnded) res.json(result);
   } catch (error) {
+    if (res.destroyed || res.writableEnded) return;
     if (error instanceof InfluxSourceError) {
       const status = error.kind === 'validation'
         ? 400
         : error.kind === 'configuration'
           ? 503
-          : error.kind === 'timeout'
-            ? 504
-            : 502;
+          : error.kind === 'cancelled'
+            ? 499
+            : error.kind === 'timeout'
+              ? 504
+              : 502;
       res.status(status).json({
         error: error.message,
         code: `INFLUX_${error.kind.toUpperCase()}`,
@@ -165,6 +186,10 @@ app.get('/api/hardware-metrics/anomalies', async (req, res) => {
       error: 'The server could not complete the InfluxDB anomaly query.',
       code: 'INFLUX_UPSTREAM',
     });
+  } finally {
+    req.off('aborted', abortForDisconnect);
+    res.off('close', abortForDisconnect);
+    influxQueriesInFlight -= 1;
   }
 });
 
@@ -1335,6 +1360,23 @@ const VIDEO_STREAM_PATHS: Record<string, { base: keyof typeof VIDEO_DEFAULT_BASE
   'ha-drive':    { base: 'hailo',  path: '/drive_thru_monitor_stream' },
 };
 
+/** Upstream POST endpoints that explicitly stop an inference pipeline.
+ *  Extra Hailo endpoints are registered for compatibility with the inference
+ *  node even though they do not currently have CE dashboard tiles. */
+const VIDEO_STOP_PATHS: Record<string, { base: keyof typeof VIDEO_DEFAULT_BASES; path: string }> = {
+  'nv-nanoowl':  { base: 'nvidia', path: '/stop_nanoowl' },
+  'nv-violence': { base: 'nvidia', path: '/stop_violence' },
+  'nv-fall':     { base: 'nvidia', path: '/stop_fall' },
+  'nv-ppe':      { base: 'nvidia', path: '/stop_ppe_feed' },
+  'ha-intruder': { base: 'hailo',  path: '/stop_intruder' },
+  'ha-theft':    { base: 'hailo',  path: '/stop_theft_detection' },
+  'ha-pet':      { base: 'hailo',  path: '/stop_petmonitor' },
+  'ha-hairnet':  { base: 'hailo',  path: '/stop_hairnetmonitor' },
+  'ha-fire':     { base: 'hailo',  path: '/stop_firedetection' },
+  'ha-fall':     { base: 'hailo',  path: '/stop_falldetection' },
+  'ha-crowd':    { base: 'hailo',  path: '/stop_crowddetection' },
+};
+
 function getVideoUpstream(id: string): string | null {
   const envKey = `VIDEO_UPSTREAM_${id.replace(/-/g, '_').toUpperCase()}`;
   const direct = process.env[envKey];
@@ -1346,14 +1388,63 @@ function getVideoUpstream(id: string): string | null {
   return `${base.replace(/\/+$/, '')}${def.path}`;
 }
 
+function getVideoStopUpstream(id: string): string | null {
+  const envKey = `VIDEO_STOP_UPSTREAM_${id.replace(/-/g, '_').toUpperCase()}`;
+  const direct = process.env[envKey];
+  if (direct) return direct;
+  const def = VIDEO_STOP_PATHS[id];
+  if (!def) return null;
+  const baseKey = `VIDEO_BASE_${def.base.toUpperCase()}`;
+  const base = process.env[baseKey] ?? VIDEO_DEFAULT_BASES[def.base];
+  return `${base.replace(/\/+$/, '')}${def.path}`;
+}
+
 /** List of configured streams + their resolved upstreams. Handy for debugging. */
 app.get('/api/video', (_req, res) => {
   res.json(
-    Object.keys(VIDEO_STREAM_PATHS).map((id) => ({
-      id,
-      upstream: getVideoUpstream(id),
-    })),
-  );
+      Object.keys(VIDEO_STREAM_PATHS).map((id) => ({
+        id,
+        upstream: getVideoUpstream(id),
+        stopUpstream: getVideoStopUpstream(id),
+      })),
+    );
+});
+
+/** Stop an upstream inference pipeline. Only explicitly configured IDs are
+ *  accepted so this route cannot be used as an open POST proxy. */
+app.post('/api/video/:id/stop', async (req, res) => {
+  const upstream = getVideoStopUpstream(req.params.id);
+  if (!upstream) {
+    res.status(404).json({ error: `No stop API configured for stream id: ${req.params.id}` });
+    return;
+  }
+
+  try {
+    const r = await fetch(upstream, {
+      method: 'POST',
+      headers: { Accept: 'application/json, text/plain, */*' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = await r.text();
+
+    if (!r.ok) {
+      res.status(502).json({
+        error: `stop API returned ${r.status}`,
+        upstreamStatus: r.status,
+        detail: body || undefined,
+      });
+      return;
+    }
+
+    const contentType = r.headers.get('content-type');
+    if (contentType) res.setHeader('Content-Type', contentType);
+    res.status(r.status);
+    if (body) res.send(body);
+    else res.end();
+  } catch (err) {
+    console.error(`[video-stop:${req.params.id}] upstream error:`, err);
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 app.get('/api/video/:id', async (req, res) => {
