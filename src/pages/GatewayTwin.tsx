@@ -134,8 +134,10 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
 
   useEffect(() => {
     if (!ready) return;
+    // Keep live roster ownership separate from overlay visibility. The `hosts`
+    // prop below establishes the initial default; the iframe HUD owns the
+    // operator's choice after that, even as inventory snapshots keep arriving.
     twin.current?.setHostRoster(liveEnabled ? hostRoster : null);
-    twin.current?.setOverlays({ hosts: liveEnabled });
   }, [hostRoster, liveEnabled, ready]);
 
   useEffect(() => {
