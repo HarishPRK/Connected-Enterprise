@@ -42,6 +42,7 @@ import './HardwareAnomalies.css';
 const RANGE_OPTIONS = [
   { key: '1h', label: '1 hour', shortLabel: '1h', start: '-1h', window: '1m' },
   { key: '6h', label: '6 hours', shortLabel: '6h', start: '-6h', window: '5m' },
+  { key: '12h', label: '12 hours', shortLabel: '12h', start: '-12h', window: '5m' },
   { key: '24h', label: '24 hours', shortLabel: '24h', start: '-24h', window: '5m' },
   { key: '7d', label: '7 days', shortLabel: '7d', start: '-7d', window: '30m' },
 ] as const;
@@ -184,7 +185,7 @@ function usePrefersReducedMotion(): boolean {
 
 export function HardwareAnomaliesPage() {
   const [rangeKey, setRangeKey] = useState<RangeKey>('24h');
-  const range = RANGE_OPTIONS.find((option) => option.key === rangeKey) ?? RANGE_OPTIONS[2];
+  const range = RANGE_OPTIONS.find((option) => option.key === rangeKey) ?? RANGE_OPTIONS[3];
   const query = useMemo(() => ({
     start: range.start,
     stop: 'now',

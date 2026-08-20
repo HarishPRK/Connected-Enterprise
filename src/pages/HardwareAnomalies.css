@@ -97,7 +97,7 @@
 
 .anomaly-range-control {
   display: inline-grid;
-  grid-template-columns: repeat(4, minmax(36px, 1fr));
+  grid-template-columns: repeat(5, minmax(36px, 1fr));
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--border);
