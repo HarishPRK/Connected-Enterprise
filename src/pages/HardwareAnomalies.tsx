@@ -73,6 +73,10 @@ function formatMetric(value: number | null, compact = false): string {
   return value.toFixed(compact ? 3 : 5);
 }
 
+function formatFixedAxisMetric(value: number): string {
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
+}
+
 function formatRatio(point: HardwareAnomalyPoint | null): string {
   if (
     !point
@@ -213,7 +217,7 @@ export function HardwareAnomaliesPage() {
     <div className="anomaly-page">
       <PageHeader
         title="Hardware Anomalies"
-        subtitle="BGW620 · Reconstruction error compared with the learned anomaly threshold"
+        subtitle="BGW620 · R95VA4GP000041 · Reconstruction error compared with the learned anomaly threshold"
         right={
           <div className="anomaly-header-tools">
             <SourceStatus
@@ -321,7 +325,7 @@ export function HardwareAnomaliesPage() {
                     Threshold corridor
                   </span>
                 }
-                sub={`MSE and learned threshold · ${data?.window || range.window} aggregation window`}
+                sub={`MSE and learned threshold · ${data?.window || range.window} aggregation window · fixed Y scale 0–2`}
                 right={
                   <div className="anomaly-chart-legend" aria-label="Chart legend">
                     <span><i className="mse" />Reconstruction error</span>
@@ -334,6 +338,7 @@ export function HardwareAnomaliesPage() {
                 <div className="anomaly-trace-meta">
                   <span><strong>{points.length.toLocaleString()}</strong> samples</span>
                   <span><strong>{data?.window || range.window}</strong> returned window</span>
+                  <span><strong>0–2</strong> fixed Y-axis scale</span>
                   <span><strong>{data?.aggregations.anomalyFlag ?? 'max'}</strong> flag aggregation</span>
                   <span><strong>{data?.aggregations.anomalyMse ?? 'mean'}</strong> MSE aggregation</span>
                   {fetchedAt && <span>Updated <strong>{new Date(fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong></span>}
@@ -476,8 +481,10 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
               tickMargin={10}
             />
             <YAxis
-              domain={[0, 'auto']}
-              tickFormatter={(value: number) => formatMetric(value, true)}
+              domain={[0, 2]}
+              ticks={[0, 0.5, 1, 1.5, 2]}
+              allowDataOverflow
+              tickFormatter={formatFixedAxisMetric}
               stroke={signalColors.axis}
               tickLine={false}
               axisLine={false}

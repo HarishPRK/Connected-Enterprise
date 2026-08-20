@@ -1,6 +1,7 @@
 const DEFAULT_INFLUX_URL = 'http://76.187.201.239:8086';
 const DEFAULT_INFLUX_ORG = 'Capgemini';
 const DEFAULT_INFLUX_BUCKET = 'BGW620';
+const ANOMALY_DEVICE_SERIAL = 'R95VA4GP000041';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1_000;
@@ -303,10 +304,11 @@ export function buildAnomalyFluxQuery(
   const common = `from(bucket: ${fluxString(bucket)})
   |> range(start: time(v: ${fluxString(query.start)}), stop: time(v: ${fluxString(query.stop)}))
   |> filter(fn: (r) => r["_measurement"] == "hardware_metrics")
-  |> filter(fn: (r) => r["_field"] == "value")`;
+  |> filter(fn: (r) => r["_field"] == "value")
+  |> filter(fn: (r) => r["device_serial"] == ${fluxString(ANOMALY_DEVICE_SERIAL)})`;
 
-  // The first page is a bucket-wide view. Grouping only by metric deliberately
-  // collapses host/device tag dimensions before each window is aggregated.
+  // The first page is intentionally scoped to the fixed gateway above. Keeping
+  // the serial server-owned prevents callers from injecting arbitrary filters.
   return `flag = ${common}
   |> filter(fn: (r) => r["metric"] == "anomaly_flag")
   |> group(columns: ["metric"])

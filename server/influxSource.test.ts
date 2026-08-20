@@ -59,6 +59,9 @@ test('queries the fixed Influx endpoint and normalizes annotated CSV', async () 
   assert.equal(new Headers(call.init?.headers).get('content-type'), 'application/vnd.flux');
   assert.doesNotMatch(String(call.init?.body), /test-read-only-token/);
   assert.match(String(call.init?.body), /from\(bucket: "BGW620"\)/);
+  assert.equal((String(call.init?.body).match(
+    /device_serial"\] == "R95VA4GP000041"/g,
+  ) ?? []).length, 2);
   assert.match(String(call.init?.body), /metric"\] == "anomaly_flag"/);
   assert.match(String(call.init?.body), /group\(columns: \["metric"\]\)/);
   assert.match(String(call.init?.body), /fn: max/);
@@ -112,7 +115,28 @@ test('allows only separate, allowlisted selector/aggregate functions', () => {
     /\|> group\(columns: \["metric"\]\)\s+\|> sort\(columns: \["_time"\]\)\s+\|> aggregateWindow\([^\n]+fn: last/g,
   ) ?? []).length, 2);
   assert.match(flux, /bucket-with-\\"quote/);
+  assert.match(flux, /device_serial"\] == "R95VA4GP000041"/);
   assert.match(flux, /keep\(columns: \["_time", "_value", "metric"\]\)/);
+});
+
+test('keeps the anomaly device selector fixed and ignores arbitrary device input', async () => {
+  let requestBody = '';
+  const source = new InfluxSource({
+    token: 'test-token',
+    fetchImpl: async (_input, init) => {
+      requestBody = String(init?.body);
+      return new Response(ANNOTATED_CSV);
+    },
+    now: () => NOW,
+  });
+
+  await source.queryAnomalies({
+    start: '-1h',
+    deviceSerial: 'attacker-controlled-device',
+  } as Parameters<InfluxSource['queryAnomalies']>[0] & { deviceSerial: string });
+
+  assert.equal((requestBody.match(/device_serial"\] == "R95VA4GP000041"/g) ?? []).length, 2);
+  assert.doesNotMatch(requestBody, /attacker-controlled-device/);
 });
 
 test('rejects arbitrary Flux and excessive query ranges before fetching', async () => {
