@@ -7,7 +7,13 @@ import GatewayTwinEmbed, {
   type TwinScenario,
   type TwinState,
 } from '../components/GatewayTwinEmbed';
-import { BRANCH_TO_IPSEC_SOURCE, branches } from '../data/mock';
+import {
+  BRANCH_TO_DEVICE_TOPIC,
+  BRANCH_TO_IPSEC_SOURCE,
+  branches,
+} from '../data/mock';
+import { gatewayTwinHostRoster } from '../ui/gatewayTwinHosts';
+import { useDevices } from '../ui/useDevices';
 import { useToast } from '../ui/Toast';
 
 /* ─────────── Gateway Digital Twin
@@ -71,11 +77,26 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const { push } = useToast();
+  const deviceInventory = useDevices();
   const branch = branches.find((item) => item.id === branchId) ?? branches[0];
   // The current OSPv2 DeviceInfo topics belong to the prpl gateway family.
   // Other branches intentionally render the same complete simulator without
   // mislabelling that gateway's measurements as their own.
   const liveEnabled = BRANCH_TO_IPSEC_SOURCE[branchId] === 'prpl';
+  const deviceTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
+  const hostRoster = useMemo(
+    () => gatewayTwinHostRoster(deviceInventory.devices, {
+      locationSource: BRANCH_TO_IPSEC_SOURCE[branchId],
+      inventoryTopic: deviceTopic,
+      inventoryTopicsSeen: deviceInventory.inventoryTopicsSeen,
+    }),
+    [
+      branchId,
+      deviceInventory.devices,
+      deviceInventory.inventoryTopicsSeen,
+      deviceTopic,
+    ],
+  );
   const status = useMemo(
     () => sourceStatus(liveEnabled, twinState?.live),
     [liveEnabled, twinState?.live],
@@ -109,6 +130,12 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
       document.removeEventListener('fullscreenerror', onFullscreenError);
     };
   }, [reportFullscreenError]);
+
+  useEffect(() => {
+    if (!ready) return;
+    twin.current?.setHostRoster(liveEnabled ? hostRoster : null);
+    twin.current?.setOverlays({ hosts: liveEnabled });
+  }, [hostRoster, liveEnabled, ready]);
 
   const toggleFullscreen = async () => {
     const page = pageRef.current;
@@ -202,11 +229,20 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
           ref={twin}
           scenario={scenario}
           live={liveEnabled}
+          hosts={liveEnabled}
+          hostBridgeSrc={liveEnabled
+            ? '/widgets/gw-twin/ce-host-inventory-bridge.js'
+            : undefined}
           onReady={() => setReady(true)}
           onState={(state) => {
             setTwinState(state);
             setScenario(state.scenario);
           }}
+          onHostBridgeError={(error) => push({
+            kind: 'error',
+            title: 'IT/OT roster unavailable',
+            detail: error.message,
+          })}
         />
       </div>
     </div>

@@ -13,7 +13,7 @@ type TestableIpsecSource = {
 test('prplhome metrics drive IT/OT inventory', () => {
   assert.ok(DEFAULT_IPSEC_TOPICS.includes('prplhome/ipsec/metrics'));
   assert.ok(DEFAULT_IPSEC_DEVICE_TOPICS.includes('prplhome/ipsec/metrics'));
-  assert.ok(!DEFAULT_IPSEC_DEVICE_TOPICS.includes('prpl/ipsec/metrics'));
+  assert.ok(!(DEFAULT_IPSEC_DEVICE_TOPICS as readonly string[]).includes('prpl/ipsec/metrics'));
 
   const source = new IpsecSource();
   let failoverUpdate: {
@@ -135,6 +135,39 @@ test('prpl failover metrics never enter IT/OT inventory', () => {
 
   assert.equal(failoverUpdate, true);
   assert.equal(inventoryUpdate, false);
+});
+
+test('an empty prplhome roster clears stale IT/OT clients', () => {
+  const source = new IpsecSource();
+  const rosterSizes: number[] = [];
+  source.onInventory(({ payload }) => {
+    rosterSizes.push((payload as { devices: unknown[] }).devices.length);
+  });
+
+  const send = (clients: object[]) => {
+    const payload = new TextEncoder().encode(JSON.stringify({
+      gateway: { name: 'qdr-mckinney' },
+      wifi: { clients },
+    }));
+    (source as unknown as TestableIpsecSource).handleMessage(
+      'prplhome/ipsec/metrics',
+      payload.buffer as ArrayBuffer,
+    );
+  };
+
+  send([{
+    mac: 'AA:BB:CC:DD:EE:01',
+    hostname: 'temporary-client',
+    active: true,
+    authenticated: true,
+    rssi: -55,
+    snr: 32,
+    rx_bytes: 1,
+    tx_bytes: 1,
+  }]);
+  send([]);
+
+  assert.deepEqual(rosterSizes, [1, 0]);
 });
 
 test('same gateway identity on two MQTT topics remains isolated', () => {

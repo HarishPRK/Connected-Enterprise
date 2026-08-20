@@ -48,6 +48,9 @@ export interface DeviceView extends Device {
   /** Which gateway location this device was discovered from ('rdk' for Plano,
    *  'prpl' for McKinney). Undefined for seed devices (pre-live-discovery). */
   locationSource?: 'rdk' | 'prpl';
+  /** Exact authoritative MQTT inventory topic(s), when the source has one.
+   *  Auxiliary Matter/Shelly enrichments intentionally have no primary topic. */
+  inventoryTopics?: string[];
 }
 
 export interface DeviceSnapshot {
@@ -59,6 +62,9 @@ export interface DeviceSnapshot {
   connected: boolean;
   /** When the last live inventory was ingested (undefined while on seed). */
   lastInventoryAt?: number;
+  /** Exact primary inventory topics that have reported at least once. This
+   *  remains populated after an authoritative empty roster. */
+  inventoryTopicsSeen: string[];
   /** Current operator overrides, keyed by normalized MAC. */
   overrides: Record<string, Domain>;
 }
@@ -335,6 +341,19 @@ function seedToRaw(d: Device): RawDevice {
   };
 }
 
+/** Recover the exact authoritative inventory topic from the internal source
+ *  key used by ipsecSource. Auxiliary `:matter` / `:shelly` feeds enrich the
+ *  branch inventory but are not primary IT/OT discovery topics. */
+export function inventoryTopicFromSource(source: string): string | undefined {
+  for (const suffix of [':wifi', ':inventory']) {
+    if (source.endsWith(suffix)) {
+      const topic = source.slice(0, -suffix.length);
+      return topic.includes('/') ? topic : undefined;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Merge two raw records for the same MAC seen across sources — e.g. the Shelly
  * reported both via its MQTT power telemetry and the gateway's Wi-Fi block.
@@ -474,7 +493,12 @@ class DeviceSource extends EventEmitter {
   /** The active base inventory (live once received, else seed), each paired with
    *  its auto domain and the location source it was discovered from. Live
    *  devices are de-duped by MAC across sources. */
-  private activeBase(): { device: Device; autoDomain: Domain; locationSource?: 'rdk' | 'prpl' }[] {
+  private activeBase(): {
+    device: Device;
+    autoDomain: Domain;
+    locationSource?: 'rdk' | 'prpl';
+    inventoryTopics?: string[];
+  }[] {
     if (!this.receivedInventory) {
       return SEED.map((d) => ({ device: d, autoDomain: d.domain, locationSource: undefined }));
     }
@@ -482,9 +506,13 @@ class DeviceSource extends EventEmitter {
     // more than one source (e.g. the Shelly via MQTT power + the gateway's
     // Wi-Fi block) becomes one row carrying both sets of telemetry.
     const rawByMac = new Map<string, RawDevice>();
-    // Track which location (rdk/prpl) each MAC belongs to. A device source like
-    // "rdk:wifi" or "rdk:matter" or "rdk:shelly" → location 'rdk'; "prpl:wifi" → 'prpl'.
+    // Track which location (rdk/prpl) each MAC belongs to. Source keys beginning
+    // with `rdk` map to Plano; both `prpl` and `prplhome` map to McKinney.
     const macLocation = new Map<string, 'rdk' | 'prpl'>();
+    // Preserve exact primary discovery provenance. This lets the frontend keep
+    // McKinney's prpl failover feed separate from its prplhome device feed even
+    // though both intentionally collapse to locationSource='prpl'.
+    const macInventoryTopics = new Map<string, Set<string>>();
     // While the only live data is partial (Matter lists are OT-only), keep the
     // seed's IT side so the IT page stays populated until real LAN discovery.
     const onlyPartial = [...this.liveBySource.keys()].every((k) => this.partialSources.has(k));
@@ -496,31 +524,61 @@ class DeviceSource extends EventEmitter {
     for (const [source, list] of this.liveBySource.entries()) {
       const loc: 'rdk' | 'prpl' | undefined = source.startsWith('rdk') ? 'rdk'
         : source.startsWith('prpl') ? 'prpl' : undefined;
+      const inventoryTopic = inventoryTopicFromSource(source);
       for (const raw of list) {
         const key = normalizeMac(raw.mac);
         const existing = rawByMac.get(key);
         rawByMac.set(key, existing ? mergeRaw(existing, raw) : raw);
         if (loc) macLocation.set(key, loc);
+        if (inventoryTopic) {
+          const topics = macInventoryTopics.get(key) ?? new Set<string>();
+          topics.add(inventoryTopic);
+          macInventoryTopics.set(key, topics);
+        }
       }
     }
     return [...rawByMac.entries()].map(([mac, raw]) => {
       const { device, autoDomain } = toDevice(raw);
-      return { device, autoDomain, locationSource: macLocation.get(mac) };
+      const topics = macInventoryTopics.get(mac);
+      return {
+        device,
+        autoDomain,
+        locationSource: macLocation.get(mac),
+        inventoryTopics: topics ? [...topics].sort() : undefined,
+      };
     });
   }
 
   getSnapshot(): DeviceSnapshot {
-    const devices: DeviceView[] = this.activeBase().map(({ device, autoDomain, locationSource }) => {
+    const devices: DeviceView[] = this.activeBase().map(({
+      device,
+      autoDomain,
+      locationSource,
+      inventoryTopics,
+    }) => {
       const override = this.overrides.get(device.mac);
       const domain = override ?? autoDomain;
-      return { ...device, domain, autoDomain, overridden: override != null && override !== autoDomain, locationSource };
+      return {
+        ...device,
+        domain,
+        autoDomain,
+        overridden: override != null && override !== autoDomain,
+        locationSource,
+        inventoryTopics,
+      };
     });
+    const inventoryTopicsSeen = [...new Set(
+      [...this.liveBySource.keys()]
+        .map(inventoryTopicFromSource)
+        .filter((topic): topic is string => topic !== undefined),
+    )].sort();
     return {
       devices,
       receivedAt: Date.now(),
       source: this.receivedInventory ? 'gateway' : 'seed',
       connected: this.receivedInventory ? ipsecSource.isConnected() : true,
       lastInventoryAt: this.lastInventoryAt,
+      inventoryTopicsSeen,
       overrides: Object.fromEntries(this.overrides.entries()),
     };
   }

@@ -243,6 +243,7 @@ function wifiClientToRawDevice(c: IpsecWifiClient): Record<string, unknown> {
       linkUpMbps: c.uplink_rate ? c.uplink_rate / 1000 : undefined,
       wifiStandard: c.standard || undefined,
       wifiHealth: c.health || undefined,
+      wifiApIndex: Number.isFinite(c.ap_index) ? c.ap_index : undefined,
       rxBytes: c.rx_bytes || undefined,
       txBytes: c.tx_bytes || undefined,
     },
@@ -818,11 +819,12 @@ export class IpsecSource extends EventEmitter {
       // the Shelly, …) populate the Devices pages with measured RSSI/health.
       if (IPSEC_DEVICE_TOPICS.has(topic)
         && metrics.wifi
-        && Array.isArray(metrics.wifi.clients)
-        && metrics.wifi.clients.length > 0) {
+        && Array.isArray(metrics.wifi.clients)) {
         // eslint-disable-next-line no-console
-        console.log('[wifi] ' + metrics.wifi.clients.map((c) =>
-          `${c.hostname || c.mac}: rssi=${c.rssi}dBm snr=${c.snr}dB health=${c.health || 'ok'}`).join(' | '));
+        console.log(metrics.wifi.clients.length > 0
+          ? '[wifi] ' + metrics.wifi.clients.map((c) =>
+              `${c.hostname || c.mac}: rssi=${c.rssi}dBm snr=${c.snr}dB health=${c.health || 'ok'}`).join(' | ')
+          : `[wifi] no clients reported on ${topic}`);
         const now = Date.now();
         this.emit('inventory', {
           // Keep inventories from legacy `prpl` and QDR `prplhome` publishers

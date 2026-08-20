@@ -83,6 +83,7 @@ Full schema in `twin-manifest.json`. Summary:
 | `set-explode` `{ value: 0..1 }` | exploded view |
 | `set-mode` `{ mode }` | `solid` \| `xray` |
 | `set-overlays` `{ rings?, hosts?, flow?, atmos? }` | RF rings, host constellation, port flow, atmosphere |
+| `set-hosts` `{ hosts: Host[] \| null }` | CE extension: authoritative IT/OT roster; `null` restores the simulator and `[]` clears it |
 | `set-auto-rotate` `{ value }` / `set-hud` `{ hidden }` | stage behavior |
 | `focus-part` `{ id }` | fly camera to a part (`mainboard`, `rfboard`, …) |
 | `select-port` `{ port }` | open a rear-bay port (`lan1` … `fiveg`) |
@@ -101,6 +102,9 @@ Full schema in `twin-manifest.json`. Summary:
   the simulator baseline without opening the stream.
 - Live fields override only the values actually received. Unreported domains
   continue to use the simulator, so the twin remains complete during outages.
+- Connected Enterprise injects `ce-host-inventory-bridge.js` through its React
+  wrapper. The bridge maps the canonical `/api/devices` inventory into the
+  existing host constellation without modifying the vendored hashed assets.
 - Needs WebGL2. On weak/software GL hosts add `lite: true` (`?lite=1`).
 - postMessage pins to the parent referrer's origin when available; hosts should
   still serve the widget same-origin and restrict framing to trusted pages.

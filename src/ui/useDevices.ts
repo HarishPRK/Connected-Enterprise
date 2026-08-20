@@ -24,6 +24,9 @@ export interface DeviceView extends Device {
   /** Which gateway location this device was discovered from ('rdk' for Plano,
    *  'prpl' for McKinney). Undefined for seed devices (pre-live-discovery). */
   locationSource?: 'rdk' | 'prpl';
+  /** Exact primary MQTT inventory topic(s). Auxiliary Matter/Shelly-only
+   *  records may omit this while still carrying a branch location. */
+  inventoryTopics?: string[];
 }
 
 interface DeviceSnapshot {
@@ -32,6 +35,7 @@ interface DeviceSnapshot {
   source: 'seed' | 'gateway';
   connected: boolean;
   lastInventoryAt?: number;
+  inventoryTopicsSeen?: string[];
   overrides: Record<string, Domain>;
 }
 
@@ -47,6 +51,8 @@ export interface UseDevicesResult {
   lastReceivedAt?: number;
   /** When the last live inventory was ingested (undefined while on seed). */
   lastInventoryAt?: number;
+  /** Primary inventory topics that have reported, including an empty roster. */
+  inventoryTopicsSeen: string[];
 }
 
 /** Move a device between IT and OT. Resolves on the server's ack; the updated
@@ -134,6 +140,7 @@ export function useDevices(): UseDevicesResult {
   const [source, setSource] = useState<'seed' | 'gateway'>('seed');
   const [lastReceivedAt, setLastReceivedAt] = useState<number | undefined>();
   const [lastInventoryAt, setLastInventoryAt] = useState<number | undefined>();
+  const [inventoryTopicsSeen, setInventoryTopicsSeen] = useState<string[]>([]);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -145,6 +152,7 @@ export function useDevices(): UseDevicesResult {
       if (snap.source) setSource(snap.source);
       setLastReceivedAt(snap.receivedAt);
       setLastInventoryAt(snap.lastInventoryAt);
+      setInventoryTopicsSeen(snap.inventoryTopicsSeen ?? []);
       setLoaded(true);
     };
 
@@ -182,7 +190,23 @@ export function useDevices(): UseDevicesResult {
   }, []);
 
   return useMemo(
-    () => ({ devices, loaded, connected, source, lastReceivedAt, lastInventoryAt }),
-    [devices, loaded, connected, source, lastReceivedAt, lastInventoryAt],
+    () => ({
+      devices,
+      loaded,
+      connected,
+      source,
+      lastReceivedAt,
+      lastInventoryAt,
+      inventoryTopicsSeen,
+    }),
+    [
+      devices,
+      loaded,
+      connected,
+      source,
+      lastReceivedAt,
+      lastInventoryAt,
+      inventoryTopicsSeen,
+    ],
   );
 }

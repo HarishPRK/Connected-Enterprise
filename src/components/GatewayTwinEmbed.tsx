@@ -14,9 +14,10 @@
  *   twin.current?.setScenario('outage')
  */
 import {
-  forwardRef, useEffect, useImperativeHandle, useMemo, useRef,
+  forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef,
   type CSSProperties,
 } from 'react'
+import type { GatewayTwinHost } from '../ui/gatewayTwinHosts'
 
 export type TwinScenario =
   | 'normal' | 'boot' | 'fwupdate' | 'overheat' | 'outage' | 'cellular' | 'voip'
@@ -50,6 +51,8 @@ export interface GatewayTwinHandle {
   setExplode: (value: number) => void
   setMode: (mode: 'solid' | 'xray') => void
   setOverlays: (o: { rings?: boolean; hosts?: boolean; flow?: boolean; atmos?: boolean }) => void
+  /** null restores the twin simulator; [] is an authoritative empty roster. */
+  setHostRoster: (hosts: GatewayTwinHost[] | null) => void
   focusPart: (id: string | null) => void
   requestState: () => void
 }
@@ -67,6 +70,8 @@ export interface GatewayTwinEmbedProps {
   still?: boolean
   /** Enable the live AWS IoT field overlay; false keeps the simulator baseline. */
   live?: boolean
+  /** Optional same-origin module that adds the CE host-roster bridge. */
+  hostBridgeSrc?: string
   /** hide the twin's own HUD — recommended when embedding as a tile */
   nohud?: boolean
   /** skip GPU-heavy floor reflection (software GL / low-power hosts) */
@@ -77,6 +82,7 @@ export interface GatewayTwinEmbedProps {
   onReady?: (info: { scenarios: Array<{ id: TwinScenario; label: string; hint: string }>; parts: Array<{ id: string; label: string }> }) => void
   onState?: (state: TwinState) => void
   onTwinEvent?: (event: TwinEvent) => void
+  onHostBridgeError?: (error: { message: string }) => void
 }
 
 const DEFAULT_SRC = '/widgets/gw-twin/app/index.html'
@@ -85,12 +91,15 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
   function GatewayTwinEmbed(props, ref) {
     const {
       src = DEFAULT_SRC, scenario, explode, xray, rings, hosts, flow, still, live,
+      hostBridgeSrc,
       nohud, lite, title = 'GW Operational Twin', className, style,
-      onReady, onState, onTwinEvent,
+      onReady, onState, onTwinEvent, onHostBridgeError,
     } = props
     const iframeRef = useRef<HTMLIFrameElement>(null)
-    const callbacks = useRef({ onReady, onState, onTwinEvent })
-    callbacks.current = { onReady, onState, onTwinEvent }
+    const callbacks = useRef({ onReady, onState, onTwinEvent, onHostBridgeError })
+    const hostBridgeReady = useRef(false)
+    const pendingHostRoster = useRef<GatewayTwinHost[] | null | undefined>(undefined)
+    callbacks.current = { onReady, onState, onTwinEvent, onHostBridgeError }
 
     // initial state travels in the URL; runtime changes go over postMessage
     const url = useMemo(() => {
@@ -114,6 +123,12 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
       [src],
     )
 
+    const send = useCallback((type: string, payload?: unknown) =>
+      iframeRef.current?.contentWindow?.postMessage(
+        { target: 'gw-twin', type, payload },
+        widgetOrigin,
+      ), [widgetOrigin])
+
     useEffect(() => {
       const onMessage = (e: MessageEvent) => {
         if (e.source !== iframeRef.current?.contentWindow) return
@@ -123,32 +138,60 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
         if (m.type === 'ready') callbacks.current.onReady?.(m.payload)
         else if (m.type === 'state') callbacks.current.onState?.(m.payload)
         else if (m.type === 'event') callbacks.current.onTwinEvent?.(m.payload)
+        else if (m.type === 'host-bridge-ready') {
+          hostBridgeReady.current = true
+          if (pendingHostRoster.current !== undefined) {
+            send('set-hosts', { hosts: pendingHostRoster.current })
+          }
+        } else if (m.type === 'host-bridge-error') {
+          callbacks.current.onHostBridgeError?.(m.payload)
+        }
       }
       window.addEventListener('message', onMessage)
       return () => window.removeEventListener('message', onMessage)
-    }, [widgetOrigin])
+    }, [send, widgetOrigin])
 
     useImperativeHandle(ref, () => {
-      const send = (type: string, payload?: unknown) =>
-        iframeRef.current?.contentWindow?.postMessage(
-          { target: 'gw-twin', type, payload },
-          widgetOrigin,
-        )
       return {
         send,
         setScenario: (s) => send('set-scenario', { scenario: s }),
         setExplode: (value) => send('set-explode', { value }),
         setMode: (mode) => send('set-mode', { mode }),
         setOverlays: (o) => send('set-overlays', o),
+        setHostRoster: (hostRoster) => {
+          pendingHostRoster.current = hostRoster
+          if (hostBridgeReady.current) send('set-hosts', { hosts: hostRoster })
+        },
         focusPart: (id) => send('focus-part', { id }),
         requestState: () => send('get-state'),
       }
-    }, [widgetOrigin])
+    }, [send])
+
+    const installHostBridge = () => {
+      hostBridgeReady.current = false
+      if (!hostBridgeSrc) return
+      try {
+        const bridgeUrl = new URL(hostBridgeSrc, window.location.href)
+        if (bridgeUrl.origin !== widgetOrigin) return
+        const doc = iframeRef.current?.contentDocument
+        if (!doc || doc.querySelector('script[data-ce-host-bridge]')) return
+        const script = doc.createElement('script')
+        script.type = 'module'
+        script.src = bridgeUrl.href
+        script.dataset.ceHostBridge = 'true'
+        doc.head.append(script)
+      } catch {
+        callbacks.current.onHostBridgeError?.({
+          message: 'The device-roster bridge could not be loaded for this twin.',
+        })
+      }
+    }
 
     return (
       <iframe
         ref={iframeRef}
         src={url}
+        onLoad={installHostBridge}
         title={title}
         className={className}
         style={{ border: 0, width: '100%', height: '100%', display: 'block', background: '#060709', ...style }}

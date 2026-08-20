@@ -91,6 +91,8 @@ export interface DeviceTelemetry {
   linkUpMbps?: number;
   wifiStandard?: string;   // e.g. "802.11ax"
   wifiHealth?: string;     // gateway verdict, e.g. "high_retrans" | "tx_errors"
+  /** prplOS access-point index used to place clients on the twin's RF band. */
+  wifiApIndex?: number;
   rxBytes?: number;
   txBytes?: number;
   // Live measured throughput, derived server-side from byte-counter deltas.

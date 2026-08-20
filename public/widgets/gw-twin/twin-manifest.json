@@ -1,7 +1,7 @@
 {
   "id": "gw-operational-twin",
   "name": "GW Operational Twin — Gemtek OSPv2 Edge Gateway",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "embeddable-3d-operational-twin",
   "entry": "app/index.html",
   "device": {
@@ -52,6 +52,10 @@
         "set-explode": { "value": "0..1" },
         "set-mode": { "mode": "solid | xray" },
         "set-overlays": { "rings": "bool?", "hosts": "bool?", "flow": "bool?", "atmos": "bool?" },
+        "set-hosts": {
+          "hosts": "Host[] | null",
+          "semantics": "Connected Enterprise extension: null restores simulator ownership; [] is an authoritative empty IT/OT roster"
+        },
         "set-auto-rotate": { "value": "bool" },
         "set-hud": { "hidden": "bool" },
         "focus-part": { "id": "PartId | null" },
