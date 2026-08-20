@@ -42,10 +42,21 @@ export const GATEWAY_TWIN_WIFI_TOPICS = [
   'prplos/wifi/wlan4',
 ] as const;
 
+// Match the standalone twin bridge: subscribe to the full Wi-Fi namespace so
+// broker-side topic routing cannot miss the supported radio reports. Ingest
+// remains restricted to GATEWAY_TWIN_WIFI_TOPICS below.
+export const GATEWAY_TWIN_WIFI_FILTER = 'prplos/wifi/#' as const;
+
 export const GATEWAY_TWIN_TELEMETRY_TOPICS = [
   ...GATEWAY_TWIN_DEVICE_INFO_TOPICS,
   ...GATEWAY_TWIN_ETHERNET_TOPICS,
   ...GATEWAY_TWIN_WIFI_TOPICS,
+] as const;
+
+export const GATEWAY_TWIN_TELEMETRY_SUBSCRIPTIONS = [
+  ...GATEWAY_TWIN_DEVICE_INFO_TOPICS,
+  ...GATEWAY_TWIN_ETHERNET_TOPICS,
+  GATEWAY_TWIN_WIFI_FILTER,
 ] as const;
 
 export type GatewayTwinLogTopic =
@@ -165,7 +176,7 @@ function inputTopic(raw: string | undefined, fallback: string, name: string): st
   return value;
 }
 
-function prplosInputTopic(canonical: GatewayTwinTelemetryTopic, prefix: string): string {
+function prplosInputTopic(canonical: string, prefix: string): string {
   return `${prefix}/${canonical.slice('prplos/'.length)}`;
 }
 
@@ -204,9 +215,19 @@ function readSourceConfig(): SourceConfig {
     add(prplosInputTopic(canonical, prplosPrefix), canonical);
   }
 
+  // Subscription filters are intentionally separate from the exact input map:
+  // the wildcard receives the namespace, while ingest() accepts only the three
+  // canonical radio topics that the embedded twin can map to 2.4/5/6 GHz.
+  const subscriptionTopics = [
+    eventsInput,
+    statusInput,
+    ...GATEWAY_TWIN_TELEMETRY_SUBSCRIPTIONS.map((canonical) =>
+      prplosInputTopic(canonical, prplosPrefix)),
+  ];
+
   return {
     canonicalByInput,
-    subscriptionTopics: [...canonicalByInput.keys()],
+    subscriptionTopics,
     historySize: positiveInteger(
       process.env.IOT_GATEWAY_TWIN_HISTORY_SIZE,
       DEFAULT_HISTORY_SIZE,
