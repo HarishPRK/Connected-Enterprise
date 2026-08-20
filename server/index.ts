@@ -25,6 +25,7 @@ import {
 } from './gatewayTwinSource.js';
 import { createOnboardingRouter } from './onboardingRoutes.js';
 import { createCorsOptionsDelegate } from './corsPolicy.js';
+import { runGatewayTwinCopilotTurn } from './gatewayTwinCopilot.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -55,6 +56,55 @@ app.use(express.json({ limit: '256kb' }));
 app.use('/api/onboarding', await createOnboardingRouter());
 
 const llm = makeLLM();
+
+// The main CE assistant may intentionally use Anthropic while the Gateway
+// Twin's own console is specifically a Bedrock feature. Give it a scoped
+// Bedrock client so one provider choice does not silently disable the other.
+const gatewayTwinCopilotLlm = llm.provider === 'bedrock'
+  ? llm
+  : makeLLM({
+    provider: 'bedrock',
+    model: process.env.BEDROCK_COPILOT_MODEL_ID?.trim() || undefined,
+    bedrockAuth: 'iam-first',
+  });
+
+const GATEWAY_TWIN_COPILOT_WINDOW_MS = 60_000;
+const GATEWAY_TWIN_COPILOT_TIMEOUT_MS = 45_000;
+const GATEWAY_TWIN_COPILOT_RATE_LIMIT = 30;
+const recentGatewayTwinCopilotRequests: number[] = [];
+
+function claimGatewayTwinCopilotRequest(now = Date.now()): boolean {
+  while (
+    recentGatewayTwinCopilotRequests.length > 0
+    && now - recentGatewayTwinCopilotRequests[0] >= GATEWAY_TWIN_COPILOT_WINDOW_MS
+  ) {
+    recentGatewayTwinCopilotRequests.shift();
+  }
+  if (recentGatewayTwinCopilotRequests.length >= GATEWAY_TWIN_COPILOT_RATE_LIMIT) return false;
+  recentGatewayTwinCopilotRequests.push(now);
+  return true;
+}
+
+function publicGatewayTwinCopilotError(error: unknown): { status: number; message: string } {
+  if (error instanceof TypeError) return { status: 400, message: error.message };
+  const named = error as { name?: string };
+  if (named.name === 'AccessDeniedException' || named.name === 'AuthenticationError') {
+    return { status: 503, message: 'This server is not authorized to invoke the configured Bedrock model.' };
+  }
+  if (named.name === 'ResourceNotFoundException' || named.name === 'NotFoundError') {
+    return { status: 503, message: 'The configured Bedrock model is not available in this AWS Region.' };
+  }
+  if (named.name === 'ValidationException' || named.name === 'BadRequestError') {
+    return { status: 502, message: 'Amazon Bedrock rejected the conversation request. Try again.' };
+  }
+  if (named.name === 'AbortError') {
+    return { status: 504, message: 'Amazon Bedrock took too long to respond. Try again.' };
+  }
+  return {
+    status: 502,
+    message: 'Twin Agent could not reach Amazon Bedrock. Try again or use a local command.',
+  };
+}
 
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -801,6 +851,63 @@ app.get('/api/gateway-logs/readyz', (_req, res) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   res.setHeader('Cache-Control', 'no-store');
   res.status(ready ? 200 : 503).json({ ready, state: state.state, endpoint: state.endpoint });
+});
+
+/* ─────────── Gateway Twin agent ───────────
+ * The embedded Twin Agent uses this compact JSON contract. Its visual actions
+ * remain allowlisted and execute only inside the browser after Bedrock returns
+ * an approved action id. */
+app.get('/api/copilot/readyz', (_req, res) => {
+  const ready = Boolean(gatewayTwinCopilotLlm.client);
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(ready ? 200 : 503).json({
+    ready,
+    provider: 'aws-bedrock',
+    modelId: gatewayTwinCopilotLlm.model,
+    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
+    ...(ready ? null : { error: 'Amazon Bedrock is not configured for the Twin Agent.' }),
+  });
+});
+
+app.post('/api/copilot/chat', async (req, res) => {
+  if (!req.is('application/json')) {
+    res.status(415).json({ error: 'Content-Type must be application/json.' });
+    return;
+  }
+  if (!gatewayTwinCopilotLlm.client) {
+    res.status(503).json({ error: 'Amazon Bedrock is not configured for the Twin Agent.' });
+    return;
+  }
+  if (!claimGatewayTwinCopilotRequest()) {
+    res.setHeader('Retry-After', '60');
+    res.status(429).json({ error: 'Twin Agent is receiving too many requests. Try again in a minute.' });
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GATEWAY_TWIN_COPILOT_TIMEOUT_MS);
+  const onAborted = () => controller.abort();
+  req.once('aborted', onAborted);
+  try {
+    const reply = await runGatewayTwinCopilotTurn(
+      gatewayTwinCopilotLlm.client,
+      gatewayTwinCopilotLlm.model,
+      req.body,
+      {
+        signal: controller.signal,
+      },
+    );
+    if (!res.destroyed) res.json(reply);
+  } catch (error) {
+    const problem = publicGatewayTwinCopilotError(error);
+    if (problem.status >= 500) {
+      console.error('[gateway-twin-copilot] request failed:', error);
+    }
+    if (!res.destroyed) res.status(problem.status).json({ error: problem.message });
+  } finally {
+    clearTimeout(timeout);
+    req.off('aborted', onAborted);
+  }
 });
 
 app.get('/api/gateway-logs/stream', (req, res) => {

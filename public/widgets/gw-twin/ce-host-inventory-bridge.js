@@ -1,10 +1,12 @@
 /**
- * Connected Enterprise host-roster adapter for the vendored Gateway Twin.
+ * Connected Enterprise integration adapter for the vendored Gateway Twin.
  *
  * The upstream widget remains a portable static export. CE injects this small
  * same-origin module at runtime so its canonical /api/devices inventory can
  * temporarily own the twin's HostState roster without editing hashed assets.
  * `null` restores the simulator; `[]` is an authoritative empty live roster.
+ * It also gives the parent a stable `open-agent` command; browser keyboard
+ * events do not cross the iframe boundary on their own.
  */
 
 const MAX_HOSTS = 16
@@ -106,6 +108,16 @@ async function install() {
     if (PARENT_ORIGIN !== '*' && event.origin !== PARENT_ORIGIN) return
     const message = event.data
     if (!message || typeof message !== 'object' || message.target !== 'gw-twin') return
+    if (message.type === 'open-agent') {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'k',
+        code: 'KeyK',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }))
+      return
+    }
     if (message.type !== 'set-hosts') return
 
     const requested = message.payload?.hosts
@@ -122,7 +134,11 @@ async function install() {
   }
 
   window.addEventListener('message', onMessage)
-  post('host-bridge-ready', { version: 1, maxHosts: MAX_HOSTS })
+  post('host-bridge-ready', {
+    version: 2,
+    maxHosts: MAX_HOSTS,
+    capabilities: ['set-hosts', 'open-agent'],
+  })
 }
 
 install().catch(() => {

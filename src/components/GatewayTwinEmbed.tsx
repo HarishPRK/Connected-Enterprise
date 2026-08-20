@@ -53,6 +53,8 @@ export interface GatewayTwinHandle {
   setOverlays: (o: { rings?: boolean; hosts?: boolean; flow?: boolean; atmos?: boolean }) => void
   /** null restores the twin simulator; [] is an authoritative empty roster. */
   setHostRoster: (hosts: GatewayTwinHost[] | null) => void
+  /** Open the Twin Agent inside the embedded application. */
+  openAgent: () => void
   focusPart: (id: string | null) => void
   requestState: () => void
 }
@@ -70,7 +72,7 @@ export interface GatewayTwinEmbedProps {
   still?: boolean
   /** Enable the live AWS IoT field overlay; false keeps the simulator baseline. */
   live?: boolean
-  /** Optional same-origin module that adds the CE host-roster bridge. */
+  /** Optional same-origin module that adds CE host-roster and agent controls. */
   hostBridgeSrc?: string
   /** hide the twin's own HUD — recommended when embedding as a tile */
   nohud?: boolean
@@ -99,6 +101,7 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
     const callbacks = useRef({ onReady, onState, onTwinEvent, onHostBridgeError })
     const hostBridgeReady = useRef(false)
     const pendingHostRoster = useRef<GatewayTwinHost[] | null | undefined>(undefined)
+    const pendingAgentOpen = useRef(false)
     callbacks.current = { onReady, onState, onTwinEvent, onHostBridgeError }
 
     // initial state travels in the URL; runtime changes go over postMessage
@@ -143,6 +146,10 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
           if (pendingHostRoster.current !== undefined) {
             send('set-hosts', { hosts: pendingHostRoster.current })
           }
+          if (pendingAgentOpen.current) {
+            pendingAgentOpen.current = false
+            send('open-agent')
+          }
         } else if (m.type === 'host-bridge-error') {
           callbacks.current.onHostBridgeError?.(m.payload)
         }
@@ -161,6 +168,10 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
         setHostRoster: (hostRoster) => {
           pendingHostRoster.current = hostRoster
           if (hostBridgeReady.current) send('set-hosts', { hosts: hostRoster })
+        },
+        openAgent: () => {
+          if (hostBridgeReady.current) send('open-agent')
+          else pendingAgentOpen.current = true
         },
         focusPart: (id) => send('focus-part', { id }),
         requestState: () => send('get-state'),

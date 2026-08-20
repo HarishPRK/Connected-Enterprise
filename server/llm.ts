@@ -34,6 +34,15 @@ export interface LLMSetup {
   reason?: string;
 }
 
+export interface MakeLLMOptions {
+  /** Force a provider for a scoped feature without changing the app-wide LLM. */
+  provider?: Provider;
+  /** Explicit model for that provider. Forced providers otherwise use their default. */
+  model?: string;
+  /** Prefer explicit SigV4 credentials before a Bedrock bearer token. */
+  bedrockAuth?: 'auto' | 'iam-first';
+}
+
 const DEFAULT_MODELS: Record<Provider, string> = {
   anthropic: 'claude-haiku-4-5-20251001',
   bedrock:   'us.anthropic.claude-haiku-4-5-20251001-v1:0',
@@ -42,7 +51,7 @@ const DEFAULT_MODELS: Record<Provider, string> = {
 const isBedrockApiKey = (s: string | undefined): s is string =>
   !!s && s.startsWith('bedrock-api-key-');
 
-export function makeLLM(): LLMSetup {
+export function makeLLM(options: MakeLLMOptions = {}): LLMSetup {
   // ── Find a Bedrock bearer token in any of the conventional env vars ──
   const bedrockBearer =
     process.env.AWS_BEARER_TOKEN_BEDROCK ||
@@ -52,7 +61,7 @@ export function makeLLM(): LLMSetup {
   // ── Pick a provider ──
   // Explicit LLM_PROVIDER wins. Otherwise, presence of a Bedrock bearer auto-routes
   // to Bedrock; everything else defaults to Anthropic.
-  const explicit = (process.env.LLM_PROVIDER ?? '').toLowerCase();
+  const explicit = options.provider ?? (process.env.LLM_PROVIDER ?? '').toLowerCase();
   let provider: Provider =
     explicit === 'bedrock' ? 'bedrock' :
     explicit === 'anthropic' ? 'anthropic' :
@@ -63,7 +72,9 @@ export function makeLLM(): LLMSetup {
     provider = 'bedrock';
   }
 
-  const model = process.env.AGENT_MODEL ?? DEFAULT_MODELS[provider];
+  const model = options.model
+    ?? (options.provider ? undefined : process.env.AGENT_MODEL)
+    ?? DEFAULT_MODELS[provider];
 
   if (provider === 'bedrock') {
     const region = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-east-1';
@@ -72,7 +83,7 @@ export function makeLLM(): LLMSetup {
     // @anthropic-ai/bedrock-sdk v0.29 does not reliably honour AWS_BEARER_TOKEN_BEDROCK
     // end-to-end (it still signs with SigV4 against the default credential chain),
     // so we go direct to the Bedrock REST API with a thin fetch wrapper.
-    if (bedrockBearer) {
+    if (bedrockBearer && options.bedrockAuth !== 'iam-first') {
       const client = makeBedrockBearerClient({ region, apiKey: bedrockBearer }) as AgentClient;
       return { provider, client, model, authMode: 'bedrock-api-key' };
     }
@@ -82,12 +93,22 @@ export function makeLLM(): LLMSetup {
     const secretKey = process.env.AWS_SECRET_ACCESS_KEY;
     if (accessKey && secretKey) {
       const client = new AnthropicBedrock({
+        // Suppress the SDK's implicit AWS_BEARER_TOKEN_BEDROCK lookup when
+        // explicit SigV4 credentials were selected for this client.
+        apiKey: null as unknown as string,
         awsRegion: region,
         awsAccessKey: accessKey,
         awsSecretKey: secretKey,
         awsSessionToken: process.env.AWS_SESSION_TOKEN,
       }) as unknown as AgentClient;
       return { provider, client, model, authMode: 'aws-iam' };
+    }
+
+    // A scoped feature may prefer IAM when both auth forms are present, but
+    // still fall back to the bearer token on hosts without explicit keys.
+    if (bedrockBearer) {
+      const client = makeBedrockBearerClient({ region, apiKey: bedrockBearer }) as AgentClient;
+      return { provider, client, model, authMode: 'bedrock-api-key' };
     }
 
     // ── AWS default credential chain (IAM role on EC2/ECS/Lambda, ~/.aws/credentials, SSO) ──

@@ -8,6 +8,7 @@ import { LiveDataProvider } from './ui/LiveData';
 import { OpsIncidentsProvider } from './ui/OpsIncidents';
 import { CommandPalette } from './ui/CommandPalette';
 import { NotificationsDrawer } from './ui/NotificationsDrawer';
+import { requestGatewayTwinAgent } from './ui/gatewayTwinAgent';
 
 /* Route pages are code-split so the initial download is just the app shell +
  * router, not all 17 pages (recharts, the SVG topology, and the 6k-line
@@ -52,12 +53,16 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setCmdOpen((o) => !o);
+        if (isGatewayTwin) {
+          requestGatewayTwinAgent();
+        } else {
+          setCmdOpen((o) => !o);
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [isGatewayTwin]);
 
   // Close transient overlays whenever the route changes so a drawer opened on
   // one page doesn't hang around obscuring the next page's content.

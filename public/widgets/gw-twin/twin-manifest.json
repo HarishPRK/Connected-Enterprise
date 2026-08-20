@@ -56,6 +56,7 @@
           "hosts": "Host[] | null",
           "semantics": "Connected Enterprise extension: null restores simulator ownership; [] is an authoritative empty IT/OT roster"
         },
+        "open-agent": "Connected Enterprise extension: open the embedded Twin Agent",
         "set-auto-rotate": { "value": "bool" },
         "set-hud": { "hidden": "bool" },
         "focus-part": { "id": "PartId | null" },

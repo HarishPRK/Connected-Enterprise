@@ -13,6 +13,7 @@ import {
   branches,
 } from '../data/mock';
 import { gatewayTwinHostRoster } from '../ui/gatewayTwinHosts';
+import { GATEWAY_TWIN_OPEN_AGENT_EVENT } from '../ui/gatewayTwinAgent';
 import { useDevices } from '../ui/useDevices';
 import { useToast } from '../ui/Toast';
 
@@ -137,6 +138,12 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
     twin.current?.setOverlays({ hosts: liveEnabled });
   }, [hostRoster, liveEnabled, ready]);
 
+  useEffect(() => {
+    const openAgent = () => twin.current?.openAgent();
+    window.addEventListener(GATEWAY_TWIN_OPEN_AGENT_EVENT, openAgent);
+    return () => window.removeEventListener(GATEWAY_TWIN_OPEN_AGENT_EVENT, openAgent);
+  }, []);
+
   const toggleFullscreen = async () => {
     const page = pageRef.current;
     if (!page || !fullscreenSupported) {
@@ -230,9 +237,7 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
           scenario={scenario}
           live={liveEnabled}
           hosts={liveEnabled}
-          hostBridgeSrc={liveEnabled
-            ? '/widgets/gw-twin/ce-host-inventory-bridge.js'
-            : undefined}
+          hostBridgeSrc="/widgets/gw-twin/ce-host-inventory-bridge.js"
           onReady={() => setReady(true)}
           onState={(state) => {
             setTwinState(state);
