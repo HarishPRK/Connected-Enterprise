@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Laptop, Siren, Shuffle,
   PackagePlus, Sparkles, Settings, GitBranch, Layers, AlertOctagon, FileSearch,
   TrendingUp, CloudCog, ShieldCheck, Video, Bot, Box,
-  PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen, Activity,
 } from 'lucide-react';
 
 const nav = [
@@ -12,6 +12,7 @@ const nav = [
   { to: '/it-devices',       label: 'IT Devices',                icon: Laptop,          section: 'Monitor' },
   { to: '/ot-devices',       label: 'OT Devices',                icon: Siren,           section: 'Monitor' },
   { to: '/gateway-twin',     label: 'Gateway Twin',              icon: Box,             section: 'Monitor' },
+  { to: '/hardware-anomalies', label: 'Hardware Anomalies',      icon: Activity,        section: 'Monitor' },
   { to: '/video-analytics',  label: 'Video Analytics',           icon: Video,           section: 'Monitor' },
   { to: '/path-selection',   label: 'Dynamic Failover',    icon: GitBranch,       section: 'Routing' },
   { to: '/app-routing',      label: 'Application Traffic Routing', icon: Layers,          section: 'Routing' },

@@ -45,11 +45,23 @@ export const DEFAULT_IPSEC_TOPICS = [
   'prplhome/ipsec/metrics',
 ] as const;
 
+/** Parse a comma-separated topic setting. Empty values are treated as unset so
+ *  a copied `.env.example` cannot silently disable an entire live feed. */
+export function resolveTopicList(
+  configured: string | undefined,
+  defaults: readonly string[],
+): string[] {
+  const topics = (configured ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return topics.length > 0 ? topics : [...defaults];
+}
+
 const SUBSCRIBE_TOPICS: string[] = (() => {
-  const single = process.env.IOT_IPSEC_TOPIC;
-  const list   = process.env.IOT_IPSEC_TOPICS;
-  const raw = list ?? single ?? DEFAULT_IPSEC_TOPICS.join(',');
-  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const list = process.env.IOT_IPSEC_TOPICS?.trim();
+  const single = process.env.IOT_IPSEC_TOPIC?.trim();
+  return resolveTopicList(list || single, DEFAULT_IPSEC_TOPICS);
 })();
 
 // Only these IPsec topics are authoritative device/Wi-Fi inventory sources.
@@ -60,8 +72,7 @@ export const DEFAULT_IPSEC_DEVICE_TOPICS = [
   'prplhome/ipsec/metrics',
 ] as const;
 const IPSEC_DEVICE_TOPICS = new Set(
-  (process.env.IOT_IPSEC_DEVICE_TOPICS ?? DEFAULT_IPSEC_DEVICE_TOPICS.join(','))
-    .split(',').map((value) => value.trim()).filter(Boolean),
+  resolveTopicList(process.env.IOT_IPSEC_DEVICE_TOPICS, DEFAULT_IPSEC_DEVICE_TOPICS),
 );
 
 // Application-Aware Routing telemetry topics (proto/aar.proto). The AAR plugin
@@ -469,7 +480,7 @@ export class IpsecSource extends EventEmitter {
         'inventory',
         topic,
         mqtt.QoS.AtLeastOnce,
-        (t, payload) => this.handleInventory(t, payload),
+        (t, payload) => this.handleInventory(t, payload, `${t}:inventory`),
       );
     }
 

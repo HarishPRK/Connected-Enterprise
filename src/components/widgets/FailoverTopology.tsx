@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { LiveIpsecCard, SAMPLE_IPSEC_GATEWAY } from '../../pages/DynamicPathSelection';
-import { BRANCH_TO_FAILOVER_TOPIC } from '../../data/mock';
+import { BRANCH_TO_DEVICE_TOPIC, BRANCH_TO_FAILOVER_TOPIC } from '../../data/mock';
 import type { UseIpsecMetricsResult } from '../../ui/useIpsecMetrics';
 
 /** Branch-scoped Dynamic Failover diagram for the Overview page.
@@ -39,6 +39,7 @@ export function FailoverTopology({
       onToggleSample={() => setShowSample((s) => !s)}
       effectiveList={effectiveList}
       branchTopic={branchTopic ?? null}
+      deviceTopic={BRANCH_TO_DEVICE_TOPIC[branchId] ?? null}
     />
   );
 }

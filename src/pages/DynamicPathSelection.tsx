@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import {
   pathThresholds,
+  BRANCH_TO_DEVICE_TOPIC,
   BRANCH_TO_FAILOVER_TOPIC,
 } from "../data/mock";
 import type {
@@ -56,6 +57,7 @@ import { useThemeColors } from "../ui/Theme";
 import type { ThemeColors } from "../ui/Theme";
 import { useIpsecMetrics } from "../ui/useIpsecMetrics";
 import { useDevices, type DeviceView } from "../ui/useDevices";
+import { matchesDeviceInventory } from "../ui/deviceInventory";
 import { runIpsecInsightSSE } from "../ui/agentClient";
 import { RichText } from "../ui/markdown";
 import { useToast } from "../ui/Toast";
@@ -710,6 +712,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   // `rdk/...` gateways, McKinney sees `prpl/...` gateways. Branches without
   // a mapped source see the unfiltered list (handy during development).
   const branchTopic = branchId ? BRANCH_TO_FAILOVER_TOPIC[branchId] : undefined;
+  const branchDeviceTopic = branchId ? BRANCH_TO_DEVICE_TOPIC[branchId] : undefined;
   const branchList = branchTopic
     ? ipsec.list.filter((gateway) => gateway.topic === branchTopic)
     : ipsec.list;
@@ -883,6 +886,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
             onToggleSample={() => setShowSample((s) => !s)}
             effectiveList={effectiveList}
             branchTopic={branchTopic ?? null}
+            deviceTopic={branchDeviceTopic ?? null}
           />
         </div>
 
@@ -2246,6 +2250,7 @@ export function LiveIpsecCard({
   onToggleSample,
   effectiveList,
   branchTopic,
+  deviceTopic,
 }: {
   ipsec: ReturnType<typeof useIpsecMetrics>;
   showSample: boolean;
@@ -2255,6 +2260,9 @@ export function LiveIpsecCard({
    *  Plano, `prpl/ipsec/metrics` for McKinney/QDR). Falls back to the
    *  server's full subscription list when the branch has no live mapping. */
   branchTopic: string | null;
+  /** Exact inventory topic for endpoint cards inside the topology. This stays
+   *  separate from branchTopic so prpl failover and prplhome clients cannot mix. */
+  deviceTopic: string | null;
 }) {
   const c = useThemeColors();
   const empty = effectiveList.length === 0;
@@ -2362,6 +2370,7 @@ export function LiveIpsecCard({
               g={g}
               c={c}
               sample={showSample}
+              deviceTopic={deviceTopic}
             />
           ))}
         </div>
@@ -2468,10 +2477,12 @@ async function postGatewayPathMode(
 function GatewayBlock({
   g,
   c,
+  deviceTopic,
 }: {
   g: IpsecGatewayState;
   c: ThemeColors;
   sample?: boolean;
+  deviceTopic?: string | null;
 }) {
   const m = g.metrics;
   const [forceMode, setForceMode] = useState<ForceMode>("auto");
@@ -2920,6 +2931,7 @@ function GatewayBlock({
         tunnelRates={tunnelRates}
         tunnelHist={tunnelHist}
         locationSource={source}
+        deviceTopic={deviceTopic}
       />
 
       {/* Failover / SLA event ribbon — flips + breaches over the live session */}
@@ -3013,6 +3025,7 @@ function IpsecFlowSvg({
   tunnelRates,
   tunnelHist,
   locationSource,
+  deviceTopic,
 }: {
   m: IpsecGatewayState["metrics"];
   c: ThemeColors;
@@ -3032,6 +3045,8 @@ function IpsecFlowSvg({
   viewMode: ViewMode;
   /** Filter devices to this location ('rdk' for Plano, 'prpl' for McKinney). */
   locationSource?: "rdk" | "prpl";
+  /** Exact primary inventory feed for the endpoint column. */
+  deviceTopic?: string | null;
 }) {
   // Keep the canvas tight: less dead space = a larger render scale when the
   // SVG is fit to the card width, i.e. bigger, readable labels.
@@ -3043,19 +3058,13 @@ function IpsecFlowSvg({
   // Strictly filter by location so Plano (rdk) and McKinney (prpl) devices never
   // mix — only devices whose locationSource matches this gateway are drawn.
   const { devices: allDevicesRaw } = useDevices();
-  const allDevices = locationSource
-    ? allDevicesRaw.filter((d) => d.locationSource === locationSource)
-    : allDevicesRaw;
+  const allDevices = allDevicesRaw.filter((device) =>
+    matchesDeviceInventory(device, locationSource, deviceTopic ?? undefined),
+  );
   const itAll = allDevices.filter((d) => d.domain === "IT");
   const otAll = allDevices.filter((d) => d.domain === "OT");
   const itDevices = itAll.slice(0, 3);
   const otDevices = otAll.slice(0, 3);
-  // Device presence only controls the endpoint links into the gateway. The
-  // gateway → tunnel → cloud path represents infrastructure availability and
-  // remains active even when the client inventory is empty.
-  const hasIT = itAll.length > 0;
-  const hasOT = otAll.length > 0;
-  const hasClients = hasIT || hasOT;
 
   // Hover tooltip — which tunnel is hovered + pointer position within the wrap.
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -3204,12 +3213,9 @@ function IpsecFlowSvg({
     // Target policy is infrastructure configuration, so its routes stay visible
     // regardless of whether client discovery has populated yet.
     if (isTarget) return routeClassFor(forceMode, underlay, idx);
-    // Live: the selected tunnel remains the active infrastructure path even at
-    // zero clients; endpoint inventory only affects the links left of gateway.
+    // Live failover is infrastructure state from the selected prpl topic. The
+    // separate prplhome endpoint roster must not recolor or reclassify it.
     if (!ifname || ifname !== activeIfname) return null;
-    if (hasIT && hasOT) return "both";
-    if (hasIT) return "it";
-    if (hasOT) return "ot";
     return "infra";
   };
   // "both" (live single active tunnel) leads with IT emerald; its trailing
@@ -3302,8 +3308,8 @@ function IpsecFlowSvg({
       .join(" ");
   };
 
-  // Section title + legend reflect the current view. At zero clients, call out
-  // that the infrastructure path remains active instead of implying user traffic.
+  // Section title + legend reflect only the selected failover state in live
+  // mode. Endpoint inventory is intentionally confined to DeviceColumn.
   const sectionTitle = isTarget
     ? "Application-aware routing"
     : "Live path · single active tunnel";
@@ -3326,13 +3332,7 @@ function IpsecFlowSvg({
         { color: IT_COLOR, label: itLabel },
         { color: OT_COLOR, label: otLabel },
       ]
-    : [
-        ...(hasIT ? [{ color: IT_COLOR, label: itLabel }] : []),
-        ...(hasOT ? [{ color: OT_COLOR, label: otLabel }] : []),
-      ];
-  if (!hasClients) {
-    legend.push({ color: c.ok, label: "Infrastructure path active · no clients" });
-  }
+    : [{ color: c.ok, label: `Infrastructure path → ${activeIfname || "active tunnel"}` }];
 
   return (
     <div
@@ -3529,9 +3529,9 @@ function IpsecFlowSvg({
         />
 
         {/* ─── Gateway → underlays ───
-            Live: connected client classes merge into the single active tunnel;
-            with no clients, a generic infrastructure leg remains active. The
-            other underlay shows as a dim standby in its own colour.
+            Live: the prpl failover feed drives one infrastructure leg. The
+            prplhome device roster is confined to the endpoint column at left.
+            The other underlay shows as a dim standby in its own colour.
             Target: class-steered split — IT and OT each into their underlay
             (parallel, non-crossing, when they share one). */}
         {(() => {
@@ -3560,14 +3560,11 @@ function IpsecFlowSvg({
           );
 
           if (!isTarget) {
-            // Live — connected classes converge on the device's active tunnel.
-            // With no clients, keep one centred infrastructure connector flowing.
+            // Live — render only the active infrastructure path from prpl.
             const end = activeUnderlayOf === "fiber" ? fiberLeft : cellLeft;
-            const both = hasIT && hasOT;
-            const noDevices = !hasIT && !hasOT;
             return (
               <>
-                {activeUnderlayOf && noDevices && (
+                {activeUnderlayOf && (
                   <NodeConnector
                     a={gwRight}
                     b={end}
@@ -3575,28 +3572,6 @@ function IpsecFlowSvg({
                     c={c}
                     beziD={beziD}
                     accent={c.ok}
-                    flowing
-                  />
-                )}
-                {activeUnderlayOf && hasIT && (
-                  <NodeConnector
-                    a={{ x: gwRight.x, y: gwRight.y + (both ? -6 : 0) }}
-                    b={{ x: end.x, y: end.y + (both ? -8 : 0) }}
-                    state="ok"
-                    c={c}
-                    beziD={beziD}
-                    accent={IT_COLOR}
-                    flowing
-                  />
-                )}
-                {activeUnderlayOf && hasOT && (
-                  <NodeConnector
-                    a={{ x: gwRight.x, y: gwRight.y + (both ? 6 : 0) }}
-                    b={{ x: end.x, y: end.y + (both ? 8 : 0) }}
-                    state="ok"
-                    c={c}
-                    beziD={beziD}
-                    accent={OT_COLOR}
                     flowing
                   />
                 )}

@@ -10,6 +10,7 @@ import {
 } from '../data/mock';
 import type { Device } from '../types';
 import { useDevices, classifyDevice, controlMatterDevice, controlShellyDevice, refreshMatterDevices, type DeviceView } from '../ui/useDevices';
+import { matchesDeviceInventory } from '../ui/deviceInventory';
 import {
   Laptop, Monitor, Printer, CreditCard, Server, PhoneCall,
   Flame, Wind, DoorClosed, Lock, Search, Download, Plus, ArrowLeftRight,
@@ -64,10 +65,10 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
   const branchSource = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
   const branchTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
   const liveForBranch = useMemo(
-    () => (branchSource
-      ? liveDevices.filter((d) => d.locationSource === branchSource)
-      : liveDevices),
-    [liveDevices, branchSource],
+    () => liveDevices.filter((device) =>
+      matchesDeviceInventory(device, branchSource, branchTopic),
+    ),
+    [liveDevices, branchSource, branchTopic],
   );
 
   // Live inventory from the gateway feed (Phase 0: server seed + persisted

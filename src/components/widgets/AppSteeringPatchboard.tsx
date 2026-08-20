@@ -40,10 +40,11 @@ import {
 import type { Device, IpsecTunnelMetric, AppCategoryId } from '../../types';
 import { useIpsecMetrics } from '../../ui/useIpsecMetrics';
 import { useDevices } from '../../ui/useDevices';
+import { matchesDeviceInventory } from '../../ui/deviceInventory';
 import { useAarRouting } from '../../ui/useAarRouting';
 import { useTheme, useThemeColors } from '../../ui/Theme';
 import { useToast } from '../../ui/Toast';
-import { BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC, appCategories } from '../../data/mock';
+import { BRANCH_TO_DEVICE_TOPIC, BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC, appCategories } from '../../data/mock';
 import { encodeAppRouteCommand, toHex, ROUTE_ORIGIN, type AppRouteCommand } from '../../proto/appRoute';
 
 /* The AAR plugin publishes on unprefixed routing/* topics; we associate it with
@@ -338,6 +339,7 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
   }, [advisorHostId]);
 
   const source = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
+  const deviceTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
   const topic = BRANCH_TO_FAILOVER_TOPIC[branchId];
   const gw = useMemo(
     () => (topic ? ipsec.list.find((gateway) => gateway.topic === topic) : undefined),
@@ -402,7 +404,9 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
 
   /* ── Clients: AAR decisions → device inventory → sim. ── */
   const { clients, clientSource, extraCount } = useMemo(() => {
-    const mine = source ? allDevices.filter((d) => d.locationSource === source) : [];
+    const mine = allDevices.filter((device) =>
+      matchesDeviceInventory(device, source, deviceTopic),
+    );
     const place = (rows: Omit<PatchClient, 'y'>[]): PatchClient[] => {
       const n = rows.length;
       return rows.map((r, i) => ({ ...r, y: n <= 1 ? BAND_CY : BAND_TOP + i * ((BAND_BOTTOM - BAND_TOP) / (n - 1)) }));
@@ -449,7 +453,7 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
       DevIcon: kindIcon[c.kind] ?? HelpCircle, domain: c.domain, appColor: c.app.color, weight: c.app.weight,
     }));
     return { clients: place(rows), clientSource: 'sim' as const, extraCount: 0 };
-  }, [aarLive, aar.decisions, allDevices, source]);
+  }, [aarLive, aar.decisions, allDevices, source, deviceTopic]);
 
   const slotIdxFor = (c: PatchClient): number => {
     const ov = overrides[c.id];

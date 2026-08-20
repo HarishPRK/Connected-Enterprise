@@ -1,9 +1,4 @@
-import { config as loadDotenv } from 'dotenv';
-// `override: true` — the project's .env is the source of truth. Without this,
-// dotenv won't replace pre-set shell vars (incl. an *empty* AWS_ACCESS_KEY_ID
-// left behind by `aws configure`, or a stale AWS_BEARER_TOKEN_BEDROCK from a
-// previous shell session). Both have bitten us in dev.
-loadDotenv({ override: true });
+import './env.js';
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
@@ -26,6 +21,7 @@ import {
 import { createOnboardingRouter } from './onboardingRoutes.js';
 import { createCorsOptionsDelegate } from './corsPolicy.js';
 import { runGatewayTwinCopilotTurn } from './gatewayTwinCopilot.js';
+import { InfluxSource, InfluxSourceError } from './influxSource.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -57,6 +53,18 @@ app.use('/api/onboarding', await createOnboardingRouter());
 
 const llm = makeLLM();
 
+// Keep a missing/invalid InfluxDB setting local to its page. The rest of CE
+// must still boot while INFLUX_TOKEN is intentionally blank during setup.
+let influxSource: InfluxSource | undefined;
+let influxConfigurationError: InfluxSourceError | undefined;
+try {
+  influxSource = InfluxSource.fromEnv();
+} catch {
+  influxConfigurationError = new InfluxSourceError(
+    'configuration',
+    'InfluxDB query access is not configured correctly on this server.',
+  );
+}
 // The main CE assistant may intentionally use Anthropic while the Gateway
 // Twin's own console is specifically a Bedrock feature. Give it a scoped
 // Bedrock client so one provider choice does not silently disable the other.
@@ -115,6 +123,49 @@ app.get('/api/health', (_req, res) => {
     model: llm.model,
     reason: llm.reason ?? null,
   });
+});
+
+/** Bucket-wide anomaly history for the first hardware-metrics page. */
+app.get('/api/hardware-metrics/anomalies', async (req, res) => {
+  res.removeHeader('Access-Control-Allow-Origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    if (influxConfigurationError) throw influxConfigurationError;
+    if (!influxSource) {
+      throw new InfluxSourceError('configuration', 'InfluxDB query access is not configured.');
+    }
+    const result = await influxSource.queryAnomalies({
+      start: req.query.start,
+      stop: req.query.stop,
+      window: req.query.window,
+      flagAggregation: req.query.flagAggregation,
+      valueAggregation: req.query.valueAggregation,
+    });
+    res.json(result);
+  } catch (error) {
+    if (error instanceof InfluxSourceError) {
+      const status = error.kind === 'validation'
+        ? 400
+        : error.kind === 'configuration'
+          ? 503
+          : error.kind === 'timeout'
+            ? 504
+            : 502;
+      res.status(status).json({
+        error: error.message,
+        code: `INFLUX_${error.kind.toUpperCase()}`,
+      });
+      return;
+    }
+    // Do not log the error object: a third-party fetch implementation could
+    // attach request headers, including the server-only query token.
+    console.error('[influx] anomaly query failed with an unexpected error');
+    res.status(502).json({
+      error: 'The server could not complete the InfluxDB anomaly query.',
+      code: 'INFLUX_UPSTREAM',
+    });
+  }
 });
 
 app.post('/api/agent/run', async (req, res) => {

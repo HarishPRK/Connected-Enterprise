@@ -13,4 +13,3 @@ export const JOB_TEMPLATE_ARN = process.env.JOB_TEMPLATE_ARN?.trim() ?? '';
 export const STAGE = process.env.STAGE?.trim() ?? 'dev';
 export const AWS_ACCOUNT_ID = process.env.AWS_ACCOUNT_ID?.trim() ?? '';
 export const AWS_REGION_NAME = process.env.AWS_REGION?.trim() ?? 'us-east-1';
-

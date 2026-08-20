@@ -10,6 +10,7 @@
     "diff": "cdk diff ConnectedEnterpriseOnboarding-dev",
     "deploy": "cdk deploy ConnectedEnterpriseOnboarding-dev --require-approval broadening",
     "bootstrap:bind-certificate": "tsx scripts/bind-unique-bootstrap-certificate.ts",
+    "demo:recover-quarantined-gateway": "tsx scripts/recover-quarantined-demo-gateway.ts",
     "demo:recycle-decommissioned-gateway": "tsx scripts/recycle-decommissioned-demo-gateway.ts",
     "demo:run-preloaded-bootstrap": "tsx scripts/run-unique-bootstrap-certificate-demo.ts"
   },

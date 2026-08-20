@@ -4,7 +4,7 @@ import { useEscape } from './Toast';
 import {
   LayoutDashboard, Laptop, Siren, Shuffle, PackagePlus,
   Sparkles, Settings, Search, ArrowRight, MapPin,
-  AlertOctagon, FileSearch, GitBranch, Layers, TrendingUp, CloudCog, ShieldCheck, Video, Box,
+  AlertOctagon, FileSearch, GitBranch, Layers, TrendingUp, CloudCog, ShieldCheck, Video, Box, Activity,
 } from 'lucide-react';
 import { branches } from '../data/mock';
 
@@ -35,6 +35,7 @@ export function CommandPalette({ open, onClose, onBranchChange }: CommandPalette
     { id: 'go-it',           group: 'Navigate', label: 'Open IT Devices',                icon: Laptop,          run: () => nav('/it-devices') },
     { id: 'go-ot',           group: 'Navigate', label: 'Open OT Devices',                icon: Siren,           run: () => nav('/ot-devices') },
     { id: 'go-gateway-twin', group: 'Navigate', label: 'Open Gateway Twin',              icon: Box,             run: () => nav('/gateway-twin') },
+    { id: 'go-hardware-anomalies', group: 'Navigate', label: 'Open Hardware Anomalies',  icon: Activity,        run: () => nav('/hardware-anomalies') },
     { id: 'go-video',       group: 'Navigate', label: 'Open Video Analytics',            icon: Video,           run: () => nav('/video-analytics') },
     { id: 'go-dps',          group: 'Routing',  label: 'Open Dynamic Path Selection',    icon: GitBranch,       run: () => nav('/path-selection') },
     { id: 'go-aar',          group: 'Routing',  label: 'Open Application Aware Routing', icon: Layers,          run: () => nav('/app-routing') },

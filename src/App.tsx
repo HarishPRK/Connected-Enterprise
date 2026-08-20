@@ -34,6 +34,7 @@ const SecurityPage               = lazy(() => import('./pages/Security').then((m
 const VideoAnalyticsPage         = lazy(() => import('./pages/VideoAnalytics').then((m) => ({ default: m.VideoAnalyticsPage })));
 const AgenticAIPage              = lazy(() => import('./pages/AgenticAI').then((m) => ({ default: m.AgenticAIPage })));
 const GatewayTwinPage            = lazy(() => import('./pages/GatewayTwin').then((m) => ({ default: m.GatewayTwinPage })));
+const HardwareAnomaliesPage      = lazy(() => import('./pages/HardwareAnomalies').then((m) => ({ default: m.HardwareAnomaliesPage })));
 
 // Default branch — McKinney/QDR. Path telemetry comes from prpl/ipsec/metrics;
 // IT/OT client inventory comes from prplhome/ipsec/metrics.
@@ -95,6 +96,7 @@ export default function App() {
                 <Route path="/fleet"          element={<FleetPage />} />
                 <Route path="/connectivity"   element={<Connectivity />} />
                 <Route path="/gateway-twin"   element={<GatewayTwinPage key={branchId} branchId={branchId} />} />
+                <Route path="/hardware-anomalies" element={<HardwareAnomaliesPage />} />
                 <Route path="/it-devices"     element={<DevicesPage domain="IT" branchId={branchId} />} />
                 <Route path="/ot-devices"     element={<DevicesPage domain="OT" branchId={branchId} />} />
                 <Route path="/service-offerings" element={<ServiceOfferingsPage />} />

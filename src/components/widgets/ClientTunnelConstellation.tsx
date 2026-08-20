@@ -25,8 +25,9 @@ import {
 import type { Device, IpsecTunnelMetric } from '../../types';
 import { useIpsecMetrics } from '../../ui/useIpsecMetrics';
 import { useDevices, type DeviceView } from '../../ui/useDevices';
+import { matchesDeviceInventory } from '../../ui/deviceInventory';
 import { useTheme, useThemeColors } from '../../ui/Theme';
-import { BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC } from '../../data/mock';
+import { BRANCH_TO_DEVICE_TOPIC, BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC } from '../../data/mock';
 
 const kindIcon: Record<Device['kind'], React.ComponentType<{ size?: number }>> = {
   laptop: Laptop, desktop: Monitor, printer: Printer, payment: CreditCard,
@@ -82,6 +83,7 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
   const surface = theme === 'dark' ? 'rgba(14,12,32,0.96)' : '#ffffff';
 
   const source = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
+  const deviceTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
   const failoverTopic = BRANCH_TO_FAILOVER_TOPIC[branchId];
   const gw = useMemo(
     () => (failoverTopic
@@ -92,7 +94,9 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
 
   // STRICT location filter — this branch's fleet only (see memory: Plano/McKinney never mix).
   const clients = useMemo(() => {
-    const mine = source ? allDevices.filter((d) => d.locationSource === source) : allDevices;
+    const mine = allDevices.filter((device) =>
+      matchesDeviceInventory(device, source, deviceTopic),
+    );
     // Cap per domain so the orbits stay legible; overflow is summarized.
     return {
       it: mine.filter((d) => d.domain === 'IT').slice(0, 6),
@@ -100,7 +104,7 @@ export function ClientTunnelConstellation({ branchId }: { branchId: string }) {
       itTotal: mine.filter((d) => d.domain === 'IT').length,
       otTotal: mine.filter((d) => d.domain === 'OT').length,
     };
-  }, [allDevices, source]);
+  }, [allDevices, source, deviceTopic]);
 
   const reduceMotion = useMemo(
     () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,

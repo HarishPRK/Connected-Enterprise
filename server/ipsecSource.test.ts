@@ -4,11 +4,21 @@ import {
   DEFAULT_IPSEC_DEVICE_TOPICS,
   DEFAULT_IPSEC_TOPICS,
   IpsecSource,
+  resolveTopicList,
 } from './ipsecSource.js';
 
 type TestableIpsecSource = {
   handleMessage: (topic: string, payload: ArrayBuffer) => void;
 };
+
+test('blank topic settings fall back to the prpl/prplhome split', () => {
+  assert.deepEqual(resolveTopicList('', DEFAULT_IPSEC_TOPICS), [...DEFAULT_IPSEC_TOPICS]);
+  assert.deepEqual(resolveTopicList('  ', DEFAULT_IPSEC_DEVICE_TOPICS), [...DEFAULT_IPSEC_DEVICE_TOPICS]);
+  assert.deepEqual(
+    resolveTopicList('prpl/ipsec/metrics, prplhome/ipsec/metrics', DEFAULT_IPSEC_TOPICS),
+    ['prpl/ipsec/metrics', 'prplhome/ipsec/metrics'],
+  );
+});
 
 test('prplhome metrics drive IT/OT inventory', () => {
   assert.ok(DEFAULT_IPSEC_TOPICS.includes('prplhome/ipsec/metrics'));

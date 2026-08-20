@@ -19,6 +19,7 @@ import type {
 } from '../types';
 import { useIpsecMetrics } from '../ui/useIpsecMetrics';
 import { useDevices } from '../ui/useDevices';
+import { matchesDeviceInventory } from '../ui/deviceInventory';
 import { useGatewayTelemetry } from '../ui/useGatewayTelemetry';
 import {
   Download, RefreshCcw, X, Search, CheckCircle2, AlertCircle, Cpu,
@@ -159,11 +160,12 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   // exactly matches this branch — devices with no locationSource (pure seed) are
   // excluded here; the branch-specific mock fallback below covers the empty state.
   const branchIpsecSource = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
+  const branchDeviceTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
   const liveDevices = useMemo(
-    () => branchIpsecSource
-      ? liveDevicesAll.filter((d) => d.locationSource === branchIpsecSource)
-      : liveDevicesAll,
-    [liveDevicesAll, branchIpsecSource],
+    () => liveDevicesAll.filter((device) =>
+      matchesDeviceInventory(device, branchIpsecSource, branchDeviceTopic),
+    ),
+    [liveDevicesAll, branchIpsecSource, branchDeviceTopic],
   );
   // Use real devices if loaded, otherwise fall back to mock data
   const branchDevices = devicesLoaded && liveDevices.length > 0 ? liveDevices : mockDevices;
@@ -174,7 +176,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const ipsec = useIpsecMetrics();
   const branchSource = BRANCH_TO_IPSEC_SOURCE[branchId];
   const failoverTopic = BRANCH_TO_FAILOVER_TOPIC[branchId] ?? null;
-  const deviceTopic = BRANCH_TO_DEVICE_TOPIC[branchId] ?? null;
+  const deviceTopic = branchDeviceTopic ?? null;
   const failoverState = failoverTopic
     ? ipsec.list.find((gateway) => gateway.topic === failoverTopic)
     : undefined;
