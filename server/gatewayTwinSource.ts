@@ -7,7 +7,7 @@
  *
  * The public event shapes mirror the GW Operational Twin's standalone bridge:
  *   state            -> upstream connection/decode status
- *   device-telemetry -> latest prplOS DeviceInfo/Ethernet/Wi-Fi JSON sample
+ *   device-telemetry -> latest prplOS DeviceInfo/SoftwareModules/network JSON sample
  *   log-batch        -> decoded gateway LogBatch protobuf with a replay id
  */
 
@@ -26,6 +26,10 @@ export const GATEWAY_TWIN_DEVICE_INFO_TOPICS = [
   'prplos/deviceinfo/cpuutilization',
   'prplos/deviceinfo/temperaturesensor',
   'prplos/deviceinfo/processes',
+] as const;
+
+export const GATEWAY_TWIN_SOFTWARE_MODULE_TOPICS = [
+  'prplos/softwaremodules/executionunits',
 ] as const;
 
 export const GATEWAY_TWIN_ETHERNET_TOPICS = [
@@ -49,12 +53,14 @@ export const GATEWAY_TWIN_WIFI_FILTER = 'prplos/wifi/#' as const;
 
 export const GATEWAY_TWIN_TELEMETRY_TOPICS = [
   ...GATEWAY_TWIN_DEVICE_INFO_TOPICS,
+  ...GATEWAY_TWIN_SOFTWARE_MODULE_TOPICS,
   ...GATEWAY_TWIN_ETHERNET_TOPICS,
   ...GATEWAY_TWIN_WIFI_TOPICS,
 ] as const;
 
 export const GATEWAY_TWIN_TELEMETRY_SUBSCRIPTIONS = [
   ...GATEWAY_TWIN_DEVICE_INFO_TOPICS,
+  ...GATEWAY_TWIN_SOFTWARE_MODULE_TOPICS,
   ...GATEWAY_TWIN_ETHERNET_TOPICS,
   GATEWAY_TWIN_WIFI_FILTER,
 ] as const;

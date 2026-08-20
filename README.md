@@ -59,6 +59,7 @@ topics to `server/gatewayTwinSource.ts`:
 
 - Protobuf `LogBatch`: `gw/mygw/events`, `gw/mygw/status`
 - prplOS DeviceInfo JSON: `prplos/deviceinfo/uptime`, `softwareversion`, `hardwareversion`, `serialnumber`, `memorystatus`, `cpuutilization`, `temperaturesensor`, and `processes` (each after the same `prplos/deviceinfo/` prefix)
+- prplOS SoftwareModules JSON: `prplos/softwaremodules/executionunits` for live LCM container inventory and health
 - prplOS Ethernet JSON: `prplos/ethernet/{eth1,eth0_1,eth0_4,eth0_3,eth0_2}`
 - prplOS Wi-Fi JSON: subscribe to `prplos/wifi/#`, then forward only the
   supported `prplos/wifi/{wlan0,wlan2,wlan4}` radio reports to the twin
@@ -83,7 +84,9 @@ Input aliases are normalized back to the canonical topic names above before SSE
 delivery, preserving the embedded twin's strict event contract. The AWS IoT
 policy attached to the server credentials must allow subscribe access to the
 `<IOT_GATEWAY_TWIN_PRPLOS_PREFIX>/wifi/#` topic filter and receive access to the
-supported concrete Wi-Fi topics, along with the other configured topics.
+supported concrete Wi-Fi topics. It must also allow subscribe and receive access
+to `<IOT_GATEWAY_TWIN_PRPLOS_PREFIX>/softwaremodules/executionunits`, along with
+the other configured topics.
 
 ## Running the live Claude agent (Phase 2)
 
