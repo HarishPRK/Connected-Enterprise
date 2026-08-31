@@ -125,6 +125,7 @@
 .topbar .brand {
   display: flex; align-items: center; gap: 12px;
   font-weight: 600; color: var(--text); font-size: 15px; letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 .topbar .brand .logo {
   width: 32px; height: 32px; border-radius: 10px;
@@ -152,7 +153,7 @@
   display: block; font-size: 10.5px; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.1em; font-weight: 500; margin-top: 1px;
 }
-.topbar .tools { display: flex; align-items: center; gap: 10px; }
+.topbar .tools { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .topbar select { min-width: 220px; }
 
 .icon-btn {
@@ -4251,7 +4252,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 /* ───── Search pill ───── */
 .search-pill {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; min-width: 280px;
+  padding: 8px 12px; min-width: 220px;
   background: rgba(var(--accent-rgb) / 0.04);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -4264,7 +4265,13 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   background: rgba(var(--accent-rgb) / 0.08);
   box-shadow: 0 0 16px rgba(var(--accent-rgb) / 0.18);
 }
-.search-pill .grow { flex: 1; }
+.search-pill .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ───── Incidents · KPI accent tiles ───── */
 .inc-kpi { --kpi-accent: var(--accent); }
