@@ -390,7 +390,7 @@ function WanTrafficKpi({
         >
           <Activity size={16} />
         </div>
-        <div className="kpi-label">WAN traffic</div>
+        <div className="kpi-label">WAN RX / TX rate</div>
         <span
           className="kpi-window-label"
           style={isStale ? { color: c.warn, borderColor: hexAlpha(c.warn, 0.35) } : undefined}

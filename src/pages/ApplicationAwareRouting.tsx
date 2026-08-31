@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { Modal } from '../ui/Modal';
@@ -232,7 +232,7 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
                   />
                   <Bar dataKey="mbps" radius={[6, 6, 0, 0]}>
                     {topApps.map((_, i) => (
-                      <rect key={i} fill={`url(#bar-${i})`} />
+                      <Cell key={i} fill={`url(#bar-${i})`} />
                     ))}
                   </Bar>
                 </BarChart>

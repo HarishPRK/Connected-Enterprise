@@ -12,7 +12,7 @@ import { FailoverTopology } from '../components/widgets/FailoverTopology';
 import { BranchOverviewCard } from '../components/widgets/BranchOverviewCard';
 import {
   branches, BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC,
-  BRANCH_TO_DEVICE_TOPIC, getDevicesForBranch,
+  BRANCH_TO_WAN_TOPIC, BRANCH_TO_DEVICE_TOPIC, getDevicesForBranch,
 } from '../data/mock';
 import type {
   AppTraffic, BandwidthPoint, Device, LanPort, Status, WanLink,
@@ -171,14 +171,18 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const branchDevices = devicesLoaded && liveDevices.length > 0 ? liveDevices : mockDevices;
   const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
-  // Path/WAN telemetry and device inventory have distinct authoritative
-  // topics. McKinney failover uses prpl; IT/OT clients use prplhome.
+  // McKinney keeps failover/path telemetry on prpl while its headline WAN
+  // traffic rate and IT/OT inventory come from prplhome.
   const ipsec = useIpsecMetrics();
   const branchSource = BRANCH_TO_IPSEC_SOURCE[branchId];
   const failoverTopic = BRANCH_TO_FAILOVER_TOPIC[branchId] ?? null;
+  const wanTrafficTopic = BRANCH_TO_WAN_TOPIC[branchId] ?? null;
   const deviceTopic = branchDeviceTopic ?? null;
   const failoverState = failoverTopic
     ? ipsec.list.find((gateway) => gateway.topic === failoverTopic)
+    : undefined;
+  const wanTrafficState = wanTrafficTopic
+    ? ipsec.list.find((gateway) => gateway.topic === wanTrafficTopic)
     : undefined;
   const usingFailover = !!failoverState;
   const gatewayTelemetry = useGatewayTelemetry();
@@ -189,16 +193,16 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     return () => window.clearInterval(timer);
   }, []);
 
-  const liveWanRate = failoverState?.wanRate ?? null;
-  const gatewayIsFresh = !!failoverState
-    && nowMs - failoverState.receivedAt >= -5_000
-    && nowMs - failoverState.receivedAt <= IPSEC_FRESH_MS;
+  const liveWanRate = wanTrafficState?.wanRate ?? null;
+  const gatewayIsFresh = !!wanTrafficState
+    && nowMs - wanTrafficState.receivedAt >= -5_000
+    && nowMs - wanTrafficState.receivedAt <= IPSEC_FRESH_MS;
   const rateIsFresh = !!liveWanRate
     && nowMs - liveWanRate.observedAt >= -5_000
     && nowMs - liveWanRate.observedAt <= IPSEC_FRESH_MS;
-  const liveWanState: WidgetDataState = !failoverTopic
+  const liveWanState: WidgetDataState = !wanTrafficTopic
     ? 'unavailable'
-    : !failoverState
+    : !wanTrafficState
       ? ipsec.lastError ? 'unavailable' : 'loading'
       : liveWanRate
         ? ipsec.connected && rateIsFresh ? 'live' : 'stale'
@@ -395,10 +399,10 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
 
       <KpiStrip
         branchId={branchId}
-        liveWanTraffic={failoverTopic ? {
+        liveWanTraffic={wanTrafficTopic ? {
           rate: liveWanRate,
           state: liveWanState,
-          interfaceName: failoverState?.metrics.wan.ifname || null,
+          interfaceName: wanTrafficState?.metrics.wan.ifname || null,
         } : undefined}
         liveAlertsCount={usingFailover ? liveAlertsCount : null}
         livePlanoMode={usingFailover ? {

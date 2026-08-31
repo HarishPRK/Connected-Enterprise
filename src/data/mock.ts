@@ -22,6 +22,12 @@ export const BRANCH_TO_FAILOVER_TOPIC: Record<string, string> = {
   'b-mck-03': 'prpl/ipsec/metrics',
 };
 
+/** Authoritative headline WAN traffic rate shown on the Overview KPI. */
+export const BRANCH_TO_WAN_TOPIC: Record<string, string> = {
+  'b-pln-01': 'rdk/ipsec/metrics',
+  'b-mck-03': 'prplhome/ipsec/metrics',
+};
+
 /** Authoritative Wi-Fi client inventory consumed by IT/OT device surfaces. */
 export const BRANCH_TO_DEVICE_TOPIC: Record<string, string> = {
   'b-pln-01': 'rdk/ipsec/metrics',
