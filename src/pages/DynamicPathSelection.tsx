@@ -56,6 +56,7 @@ import type {
 import { useThemeColors } from "../ui/Theme";
 import type { ThemeColors } from "../ui/Theme";
 import { useIpsecMetrics } from "../ui/useIpsecMetrics";
+import { ipsecStateForTopic } from "../ui/ipsecTopicState";
 import { useDevices, type DeviceView } from "../ui/useDevices";
 import { matchesDeviceInventory } from "../ui/deviceInventory";
 import { runIpsecInsightSSE } from "../ui/agentClient";
@@ -721,6 +722,11 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   // when the user clicks "Load sample" on the ingest card.
   const effectiveList = showSample ? [SAMPLE_IPSEC_GATEWAY] : branchList;
   const liveState = effectiveList[0];
+  // Wi-Fi inventory has its own authoritative topic. McKinney keeps tunnel
+  // telemetry on prpl while client RSSI comes from prplhome.
+  const wifiState = showSample || !branchDeviceTopic
+    ? liveState
+    : ipsecStateForTopic(ipsec.list, branchDeviceTopic);
 
   // ── Rolling SLA series derived from live IPsec payloads ──────────────
   // We buffer the last ~10 minutes of derived per-underlay metrics so the
@@ -873,7 +879,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           series={slaSeries.map((h) => h.fiber_mos)}
           digits={1}
         />
-        <RssiCard clients={liveState?.metrics.wifi?.clients ?? []} />
+        <RssiCard clients={wifiState?.metrics.wifi?.clients ?? []} />
       </div>
 
       <div className="grid">
@@ -1862,8 +1868,10 @@ function SlaCard({
 function RssiCard({ clients }: { clients: IpsecWifiClient[] }) {
   const c = useThemeColors();
   const [open, setOpen] = useState(false);
-  // A real association has a negative dBm; 0 means "no reading".
-  const valid = clients.filter((cl) => cl.rssi < 0);
+  // Count only currently associated clients with a real signal reading. The
+  // publisher may retain the last RSSI for a disconnected client.
+  const valid = clients.filter((cl) =>
+    cl.active && cl.authenticated && Number.isFinite(cl.rssi) && cl.rssi < 0);
   const count = valid.length;
   const avg = count
     ? Math.round(valid.reduce((s, x) => s + x.rssi, 0) / count)

@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Activity, ArrowUp, Check, ChevronRight, Copy, ListChecks, Lock,
-  Plus, Radio, Sparkles, Square, Wrench, Zap,
+  Activity, ArrowUp, Check, ChevronRight, Copy,
+  Clock3, Gauge, ListChecks, Plus, Radio, Sparkles, Square, Wrench, Zap,
 } from 'lucide-react';
 import { runAskSSE } from '../ui/agentClient';
 import { RichText } from '../ui/markdown';
-import { alerts, branches } from '../data/mock';
+import {
+  branches,
+  BRANCH_TO_DEVICE_TOPIC,
+  BRANCH_TO_FAILOVER_TOPIC,
+  BRANCH_TO_WAN_TOPIC,
+} from '../data/mock';
+import { ipsecStateForTopic } from '../ui/ipsecTopicState';
+import { useIpsecMetrics } from '../ui/useIpsecMetrics';
 
 interface Msg {
   who: 'me' | 'ai';
@@ -20,44 +27,165 @@ interface Msg {
 
 const suggestions = [
   {
-    icon: Zap, tint: 'warn',
-    title: 'Why did Fiber flap at 02:14?',
-    sub: 'Root-cause the overnight link event',
-  },
-  {
-    icon: ListChecks, tint: 'mint',
-    title: 'Summarize the last 24h of alerts',
-    sub: 'One digest of everything that fired',
-  },
-  {
-    icon: Lock, tint: 'rose',
-    title: 'Recommended fix for offline door lock DL-2',
-    sub: 'Guided remediation for the server-room lock',
+    icon: Activity, tint: 'mint',
+    title: 'Is the WAN link up, and which tunnel is active right now?',
+    sub: 'Current link state and active tunnel',
   },
   {
     icon: Radio, tint: 'violet',
-    title: 'Is 5G failover ready right now?',
-    sub: 'Validate the standby path end-to-end',
+    title: 'Are any IPsec tunnels unreachable right now?',
+    sub: 'Live tunnel presence and reachability',
+  },
+  {
+    icon: Activity, tint: 'warn',
+    title: 'What latency and packet loss is each tunnel reporting right now?',
+    sub: 'Current per-tunnel latency and loss',
+  },
+  {
+    icon: Gauge, tint: 'violet',
+    title: 'What are the WAN RX and TX rates right now?',
+    sub: 'Latest counter-derived directional rates',
+  },
+  {
+    icon: Zap, tint: 'mint',
+    title: 'Is the cellular backup registered and connected right now?',
+    sub: 'Modem registration, bearer and radio state',
+  },
+  {
+    icon: ListChecks, tint: 'violet',
+    title: 'How many devices are healthy, degraded, or offline right now?',
+    sub: 'Live inventory health counts',
+  },
+  {
+    icon: Radio, tint: 'warn',
+    title: 'Which IT or OT devices need attention right now?',
+    sub: 'Status and reported device telemetry',
+  },
+  {
+    icon: Clock3, tint: 'mint',
+    title: 'How fresh is the latest telemetry for this branch?',
+    sub: 'Source connection state and sample age',
   },
 ];
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.max(1, Math.round(diff / 60000));
-  if (mins < 60) return `${mins}m ago`;
-  const h = Math.round(mins / 60);
-  if (h < 48) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
+const ASK_AI_FRESH_MS = 90_000;
+
+type TopicAvailability = 'live' | 'stale' | 'disconnected' | 'waiting' | 'not configured';
+
+interface TopicStatus {
+  availability: TopicAvailability;
+  label: 'Live' | 'Stale' | 'Disconnected' | 'Waiting' | 'Not configured';
+  tone: 'ok' | 'warn' | 'err' | 'off';
+  detail: string;
+}
+
+function sampleAge(receivedAt: number, nowMs: number): string {
+  const seconds = Math.max(0, Math.round((nowMs - receivedAt) / 1_000));
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
+}
+
+function topicStatus(
+  topic: string | undefined,
+  state: { receivedAt: number } | undefined,
+  connected: boolean,
+  feedResponded: boolean,
+  nowMs: number,
+): TopicStatus {
+  if (!topic) {
+    return {
+      availability: 'not configured',
+      label: 'Not configured',
+      tone: 'off',
+      detail: 'No live topic mapped',
+    };
+  }
+
+  if (!state) {
+    if (!connected && feedResponded) {
+      return {
+        availability: 'disconnected',
+        label: 'Disconnected',
+        tone: 'err',
+        detail: `${topic} · MQTT disconnected`,
+      };
+    }
+    return {
+      availability: 'waiting',
+      label: 'Waiting',
+      tone: 'off',
+      detail: `${topic} · awaiting first sample`,
+    };
+  }
+
+  const age = sampleAge(state.receivedAt, nowMs);
+  if (!connected) {
+    return {
+      availability: 'disconnected',
+      label: 'Disconnected',
+      tone: 'err',
+      detail: `${topic} · last sample ${age}`,
+    };
+  }
+  if (nowMs - state.receivedAt > ASK_AI_FRESH_MS) {
+    return {
+      availability: 'stale',
+      label: 'Stale',
+      tone: 'warn',
+      detail: `${topic} · last sample ${age}`,
+    };
+  }
+  return {
+    availability: 'live',
+    label: 'Live',
+    tone: 'ok',
+    detail: `${topic} · updated ${age}`,
+  };
+}
+
+const TOOL_ACTIVITY: Record<string, string> = {
+  get_live_branch_wan: 'Reading live WAN and tunnel telemetry…',
+  get_live_branch_devices: 'Reading live device inventory…',
+};
+
+function friendlyToolActivity(tool: string): string {
+  return TOOL_ACTIVITY[tool] ?? 'Checking available telemetry…';
+}
+
+function formatRate(value: number): string {
+  if (!Number.isFinite(value)) return '—';
+  if (value < 0.01) return '<0.01 Mbps';
+  return `${value.toFixed(value < 10 ? 2 : 1)} Mbps`;
 }
 
 export function AskAiPage({ branchId }: { branchId: string }) {
-  const branch = branches.find((b) => b.id === branchId) ?? branches[0];
-  const activeAlerts = alerts.filter((a) => a.level !== 'ok');
+  return <AskAiBranchPage key={branchId} branchId={branchId} />;
+}
+
+function AskAiBranchPage({ branchId }: { branchId: string }) {
+  const configuredBranch = branches.find((branch) => branch.id === branchId);
+  const branchName = configuredBranch?.name ?? (branchId || 'Unknown branch');
+  const branchLocation = configuredBranch?.location ?? 'Location not configured';
+  const ipsec = useIpsecMetrics();
+  const failoverTopic = BRANCH_TO_FAILOVER_TOPIC[branchId];
+  const wanTopic = BRANCH_TO_WAN_TOPIC[branchId];
+  const deviceTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
+  const failoverState = failoverTopic
+    ? ipsecStateForTopic(ipsec.list, failoverTopic)
+    : undefined;
+  const deviceState = deviceTopic
+    ? ipsecStateForTopic(ipsec.list, deviceTopic)
+    : undefined;
+  const wanState = wanTopic
+    ? ipsecStateForTopic(ipsec.list, wanTopic)
+    : undefined;
 
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const stopRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -66,11 +194,66 @@ export function AskAiPage({ branchId }: { branchId: string }) {
   const nearBottomRef = useRef(true);
 
   const hasThread = msgs.length > 0;
+  const feedResponded = ipsec.lastReceivedAt != null || ipsec.lastError != null;
+  const failoverStatus = topicStatus(
+    failoverTopic,
+    failoverState,
+    ipsec.connected,
+    feedResponded,
+    nowMs,
+  );
+  const deviceStatus = topicStatus(
+    deviceTopic,
+    deviceState,
+    ipsec.connected,
+    feedResponded,
+    nowMs,
+  );
+  const wanStatus = topicStatus(
+    wanTopic,
+    wanState,
+    ipsec.connected,
+    feedResponded,
+    nowMs,
+  );
+  const statuses = [failoverStatus, wanStatus, deviceStatus];
+  const footerTone = statuses.some((status) => status.tone === 'err')
+    ? 'err'
+    : statuses.some((status) => status.tone === 'warn')
+      ? 'warn'
+      : statuses.every((status) => status.tone === 'ok')
+        ? 'ok'
+        : 'off';
+  const liveGateway = failoverStatus.availability === 'live'
+    ? failoverState?.metrics.gateway.name || 'Not reported'
+    : failoverStatus.label;
+  const activeTunnel = failoverStatus.availability === 'live' && failoverState
+    ? failoverState.metrics.active_tunnel || 'None reported'
+    : failoverStatus.label;
+  const wifiClients = deviceStatus.availability === 'live'
+    && typeof deviceState?.metrics.wifi?.active_clients === 'number'
+    ? `${deviceState.metrics.wifi.active_clients} connected`
+    : deviceStatus.availability === 'live'
+      ? 'Not reported'
+      : deviceStatus.label;
+  const wanRates = wanStatus.availability === 'live' && wanState?.wanRate
+    ? `${formatRate(wanState.wanRate.rxMbps)} RX · ${formatRate(wanState.wanRate.txMbps)} TX`
+    : wanStatus.availability === 'live'
+      ? 'Warming up'
+      : wanStatus.label;
 
   useEffect(() => {
+    if (!hasThread) return;
     const el = scrollRef.current;
     if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [msgs]);
+  }, [hasThread, msgs]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 5_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => () => stopRef.current?.(), []);
 
   function onThreadScroll() {
     const el = scrollRef.current;
@@ -109,7 +292,7 @@ export function AskAiPage({ branchId }: { branchId: string }) {
     let aiText = '';
 
     stopRef.current = runAskSSE(
-      { messages: historyForApi },
+      { branchId, messages: historyForApi },
       {
         onEvent: ({ event, data }) => {
           if (event === 'chunk') {
@@ -215,7 +398,7 @@ export function AskAiPage({ branchId }: { branchId: string }) {
             <div className="askai-chat-title">
               <span className="askai-avatar sm"><Sparkles size={12} /></span>
               Ask AI
-              <span className="badge">Agentic</span>
+              <span className="badge">Read-only</span>
             </div>
             <button className="askai-newchat" onClick={newChat}>
               <Plus size={14} /> New chat
@@ -253,7 +436,7 @@ export function AskAiPage({ branchId }: { branchId: string }) {
                       )}
                       {m.toolUsing && m.streaming && (
                         <div className="askai-tool">
-                          <Wrench size={12} /> querying <code>{m.toolUsing}</code>
+                          <Wrench size={12} /> {friendlyToolActivity(m.toolUsing)}
                         </div>
                       )}
                       {!m.streaming && !m.error && m.text && (
@@ -277,10 +460,10 @@ export function AskAiPage({ branchId }: { branchId: string }) {
             <div className="askai-hero">
               <div className="askai-orb"><Sparkles size={26} /></div>
               <h1 className="askai-hero-title">
-                How can I help with <span className="askai-hero-branch">{branch.name}</span>?
+                How can I help with <span className="askai-hero-branch">{branchName.replaceAll('-', '\u2011')}</span>?
               </h1>
               <p className="askai-hero-sub">
-                Agentic triage over live gateway telemetry, traffic paths, alerts and connected devices.
+                Read-only analysis using available live WAN, tunnel, cellular and connected-device telemetry.
               </p>
               <div className="askai-suggest-grid">
                 {suggestions.map((s) => (
@@ -304,7 +487,9 @@ export function AskAiPage({ branchId }: { branchId: string }) {
               ref={taRef}
               className="askai-input"
               rows={1}
-              placeholder={running ? 'Ask a follow-up…' : `Ask anything about ${branch.name}…`}
+              placeholder={running
+                ? 'Ask a follow-up…'
+                : 'Ask about WAN, tunnels, cellular backup, or connected devices…'}
               value={input}
               onChange={(e) => { setInput(e.target.value); autoGrow(); }}
               onKeyDown={onComposerKey}
@@ -326,9 +511,9 @@ export function AskAiPage({ branchId }: { branchId: string }) {
           </div>
           <div className="askai-footnote">
             <span className="askai-footnote-ctx">
-              <span className="dot ok" /> {branch.name} · {branch.gatewayModel} · live telemetry
+              <span className={`dot ${footerTone}`} /> {branchName} · WAN {wanStatus.label.toLowerCase()} · devices {deviceStatus.label.toLowerCase()}
             </span>
-            <span>AI-generated — verify before applying changes</span>
+            <span>Read-only AI analysis · confirm against source telemetry</span>
           </div>
         </div>
       </section>
@@ -336,59 +521,54 @@ export function AskAiPage({ branchId }: { branchId: string }) {
       <aside className="askai-rail">
         <div className="askai-rail-card">
           <div className="askai-rail-head">
-            <span className="askai-rail-title"><Activity size={13} /> Branch context</span>
-            <span className="askai-live"><span className="dot ok" /> Live</span>
+            <span className="askai-rail-title"><Activity size={13} /> Selected branch</span>
+            <span className="badge">Read-only</span>
           </div>
 
           <div className="askai-rail-branch">
-            <div className="askai-rail-branch-name">{branch.name}</div>
-            <div className="askai-rail-branch-loc">{branch.location}</div>
+            <div className="askai-rail-branch-name">{branchName}</div>
+            <div className="askai-rail-branch-loc">{branchLocation}</div>
             <div className="askai-facts">
               <div className="askai-fact">
                 <span className="askai-fact-k">Gateway</span>
-                <span className="askai-fact-v">{branch.gatewayModel}</span>
+                <span className="askai-fact-v">{liveGateway}</span>
               </div>
               <div className="askai-fact">
-                <span className="askai-fact-k">Firmware</span>
-                <span className="askai-fact-v">{branch.firmware}</span>
+                <span className="askai-fact-k">Active tunnel</span>
+                <span className="askai-fact-v">{activeTunnel}</span>
               </div>
               <div className="askai-fact">
-                <span className="askai-fact-k">Uptime</span>
-                <span className="askai-fact-v">{Math.floor(branch.uptimeHours / 24)}d {branch.uptimeHours % 24}h</span>
+                <span className="askai-fact-k">Wi-Fi clients</span>
+                <span className="askai-fact-v">{wifiClients}</span>
               </div>
               <div className="askai-fact">
-                <span className="askai-fact-k">Alerts</span>
-                <span className="askai-fact-v">{activeAlerts.length} active</span>
+                <span className="askai-fact-k">WAN RX / TX</span>
+                <span className="askai-fact-v">{wanRates}</span>
               </div>
             </div>
           </div>
 
-          <div className="askai-rail-sec">Active alerts — tap to triage</div>
+          <div className="askai-rail-sec">Live data sources</div>
           <div className="askai-rail-alerts">
-            {activeAlerts.map((a) => (
-              <button
-                key={a.id}
-                className="askai-rail-alert"
-                disabled={running}
-                onClick={() => send(`Diagnose alert "${a.title}" — ${a.detail}. What happened and what's the recommended fix?`)}
-              >
-                <span className={`dot ${a.level}`} />
+            {[
+              { name: 'Tunnels & failover', topic: failoverTopic, status: failoverStatus },
+              { name: 'WAN RX / TX', topic: wanTopic, status: wanStatus },
+              { name: 'Device inventory', topic: deviceTopic, status: deviceStatus },
+            ].map((source) => (
+              <div className="askai-rail-alert" key={source.name}>
+                <span className={`dot ${source.status.tone}`} />
                 <span className="askai-rail-alert-main">
-                  <span className="askai-rail-alert-title">{a.title}</span>
-                  <span className="askai-rail-alert-meta">{a.detail} · {timeAgo(a.whenISO)}</span>
+                  <span className="askai-rail-alert-title">{source.name}</span>
+                  <span className="askai-rail-alert-meta" title={source.topic}>
+                    {source.status.detail}
+                  </span>
                 </span>
-                <ChevronRight size={14} className="askai-rail-alert-go" />
-              </button>
+                <span className={`badge ${source.status.tone === 'off' ? '' : source.status.tone}`}>
+                  {source.status.label}
+                </span>
+              </div>
             ))}
           </div>
-
-          <button
-            className="askai-triage"
-            disabled={running}
-            onClick={() => send('Triage all active alerts on this branch: prioritise by impact, root-cause each one, and give me a remediation plan.')}
-          >
-            <Sparkles size={14} /> Triage all alerts
-          </button>
         </div>
       </aside>
     </div>

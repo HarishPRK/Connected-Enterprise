@@ -784,7 +784,7 @@ export class IpsecSource extends EventEmitter {
           weak_signal_clients:  Number(metrics.wifi.weak_signal_clients ?? 0),
           clients_with_errors:  Number(metrics.wifi.clients_with_errors ?? 0),
           high_retrans_clients: Number(metrics.wifi.high_retrans_clients ?? 0),
-          clients: Array.isArray(metrics.wifi.clients) && metrics.wifi.clients.length > 0
+          clients: Array.isArray(metrics.wifi.clients)
             ? metrics.wifi.clients
             : (prevM?.wifi?.clients ?? []),
         } : prevM?.wifi,

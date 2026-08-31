@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { tools, executeTool } from './tools.js';
+import { askTools, executeTool } from './tools.js';
 import type { AgentClient } from './llm.js';
 
 const SYSTEM_PROMPT = `
@@ -7,9 +7,23 @@ You are the Ask-AI assistant inside Connected Enterprise — a cloud dashboard f
 SD-WAN gateways across multiple branches. The user manages those gateways and
 asks you questions about network state, devices, alerts, traffic, and policy.
 
-You have access to read-only diagnostic tools. When a question requires current
-state, USE the tools — never speculate. If a question is about how the product
-works (rather than current state), answer directly.
+You have access only to request-time, read-only Connected Enterprise tools.
+There are no simulated, example, historical-alert, controller, or write tools
+in this chat. Never invent or interpolate operational values.
+
+For every question about operational state:
+- WAN, tunnel, failover, cellular, or network health MUST use get_live_branch_wan.
+- Connected-device state or telemetry MUST use get_live_branch_devices.
+- Overall telemetry freshness MUST use both live tools.
+- Current alerts or incidents MUST use the relevant live tool, or both tools
+  when the affected surface is unclear.
+- If a tool reports availability other than "live", clearly say that no fresh
+  live sample is available and report the returned connection/freshness state.
+- If the requested history or field is not present in tool output, say it is
+  unavailable. Never fill the gap with a plausible-looking value.
+
+Questions about how the product works, with no request for operational facts,
+may be answered directly. You cannot execute or claim to execute any action.
 
 Style:
 - Be concise. 2-4 short paragraphs maximum.
@@ -28,6 +42,7 @@ export interface ChatMessage {
 
 export interface ChatRunOptions {
   messages: ChatMessage[];
+  branchId: string;
   emit: (event: string, data: Record<string, unknown>) => void;
 }
 
@@ -35,7 +50,7 @@ export interface ChatRunOptions {
  *  back to the client in `chunk` events; surfaces tool activity as `tool_using`
  *  events so the UI can show a status line while we're calling the gateway. */
 export async function runChat(client: AgentClient, model: string, opts: ChatRunOptions): Promise<void> {
-  const { messages, emit } = opts;
+  const { messages, branchId, emit } = opts;
 
   // Convert chat history to Anthropic Messages API format.
   const apiMessages: Anthropic.Messages.MessageParam[] = messages.map((m) => ({
@@ -50,9 +65,13 @@ export async function runChat(client: AgentClient, model: string, opts: ChatRunO
         model,
         max_tokens: 1024,
         system: [
-          { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+          {
+            type: 'text',
+            text: `${SYSTEM_PROMPT}\n\nSelected Connected Enterprise branch ID: ${branchId}`,
+            cache_control: { type: 'ephemeral' },
+          },
         ],
-        tools,
+        tools: askTools,
         messages: apiMessages,
       });
     } catch (err) {
@@ -82,7 +101,12 @@ export async function runChat(client: AgentClient, model: string, opts: ChatRunO
 
       for (const t of toolUseBlocks) {
         emit('tool_using', { tool: t.name, args: t.input });
-        const result = await executeTool(t.name, (t.input ?? {}) as Record<string, unknown>, approved);
+        const result = await executeTool(
+          t.name,
+          (t.input ?? {}) as Record<string, unknown>,
+          approved,
+          { branchId },
+        );
         toolResults.push({
           type: 'tool_result',
           tool_use_id: t.id,

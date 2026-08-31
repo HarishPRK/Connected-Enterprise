@@ -178,6 +178,10 @@ test('an empty prplhome roster clears stale IT/OT clients', () => {
   send([]);
 
   assert.deepEqual(rosterSizes, [1, 0]);
+  const cachedWifi = source.getSnapshot()
+    .gateways['prplhome/ipsec/metrics:qdr-mckinney']?.metrics.wifi;
+  assert.ok(cachedWifi);
+  assert.equal(cachedWifi.clients.length, 0);
 });
 
 test('same gateway identity on two MQTT topics remains isolated', () => {

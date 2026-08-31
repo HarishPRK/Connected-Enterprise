@@ -715,8 +715,9 @@ app.post('/api/ask', async (req, res) => {
   }
 
   const messages = req.body?.messages as ChatMessage[] | undefined;
-  if (!Array.isArray(messages) || messages.length === 0) {
-    res.status(400).json({ error: 'Body must include { messages: [{role, content}, ...] }' });
+  const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId.trim() : '';
+  if (!Array.isArray(messages) || messages.length === 0 || !/^[a-z0-9-]{1,64}$/.test(branchId)) {
+    res.status(400).json({ error: 'Body must include { branchId, messages: [{role, content}, ...] }' });
     return;
   }
 
@@ -739,7 +740,7 @@ app.post('/api/ask', async (req, res) => {
   res.on('close', () => clearInterval(hb));
 
   try {
-    await runChat(llm.client, llm.model, { messages, emit });
+    await runChat(llm.client, llm.model, { messages, branchId, emit });
     // eslint-disable-next-line no-console
     console.log('[ask] done');
   } catch (err) {

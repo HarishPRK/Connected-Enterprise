@@ -36,6 +36,7 @@ export function runAgentSSE(
 }
 
 export interface AskRequest {
+  branchId: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
 }
 

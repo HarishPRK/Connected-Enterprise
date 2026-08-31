@@ -1,12 +1,30 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import { deviceSource } from './deviceSource.js';
+import { ipsecSource } from './ipsecSource.js';
+import { buildLiveBranchDevices, buildLiveBranchWan } from './askLiveData.js';
+
+/** Ask AI is deliberately limited to request-time, read-only sources. Keep
+ * this allowlist separate from the legacy demo/agent tools below so an
+ * operational chat can never select a simulated diagnostic or a write tool. */
+export const askTools: Anthropic.Messages.Tool[] = [
+  {
+    name: 'get_live_branch_wan',
+    description:
+      'Read the selected branch current WAN RX/TX rates, tunnel reachability and SLA, cellular failover health, and telemetry freshness directly from Connected Enterprise. Use this for any question about WAN or path health right now.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_live_branch_devices',
+    description:
+      'Read the selected branch current Connected Enterprise device health counts plus telemetry for devices needing attention, including Wi-Fi signal, throughput, and power when reported. Use this for any question about devices right now.',
+    input_schema: { type: 'object', properties: {} },
+  },
+];
 
 /**
- * Tools the agent can call. Read tools are mocked locally for demo purposes
- * — they return realistic data drawn from the same world the UI uses.
- *
- * The single write tool (force_dhcp_renew) is intentionally guarded: it
- * returns an error telling the agent to call request_human_approval first.
- * That + the system prompt + the UI's approval gate are the safety layers.
+ * Tool catalog used by the legacy incident-agent flow. It remains isolated
+ * from Ask AI and retains its existing mocked diagnostics and approval-gated
+ * write tool for that separate demo workflow.
  */
 export const tools: Anthropic.Messages.Tool[] = [
   {
@@ -109,11 +127,31 @@ export const tools: Anthropic.Messages.Tool[] = [
 
 const mockLatencyMs = () => 200 + Math.random() * 800;
 
+export interface ToolExecutionContext {
+  branchId?: string;
+}
+
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   approvedActions: Set<string>,
+  context: ToolExecutionContext = {},
 ): Promise<unknown> {
+  // These tools read the in-memory snapshots that back Connected Enterprise's
+  // live pages at the exact moment the model asks. Never fall back to the demo
+  // implementations below when live data is absent or stale.
+  if (name === 'get_live_branch_wan') {
+    return buildLiveBranchWan(context.branchId, ipsecSource.getSnapshot());
+  }
+  if (name === 'get_live_branch_devices') {
+    return buildLiveBranchDevices(
+      context.branchId,
+      deviceSource.getSnapshot(),
+      Date.now(),
+      ipsecSource.getSnapshot(),
+    );
+  }
+
   // Simulate network latency
   await new Promise((r) => setTimeout(r, mockLatencyMs()));
 
