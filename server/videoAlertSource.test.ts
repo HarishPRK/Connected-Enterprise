@@ -3,7 +3,9 @@ import test from 'node:test';
 import {
   DEFAULT_VIDEO_ALERT_TOPIC,
   VideoAlertSource,
+  formatVideoAlertSseFrame,
   parseVideoRelayPayload,
+  resolveVideoAlertReplayCursor,
   resolveVideoAlertTopic,
   type VideoRelayCode,
 } from './videoAlertSource.js';
@@ -117,4 +119,57 @@ test('suppresses an explicit QoS redelivery and marks retained observations', ()
 
   assert.deepEqual(events, [{ code: 'ON_1', retained: true }]);
   assert.equal(source.getSnapshot().duplicateDeliveries, 1);
+});
+
+test('replays a brief ON/OFF pulse in order after a reconnect cursor', () => {
+  const source = new VideoAlertSource('relay/control');
+  source.ingest('relay/control', asArrayBuffer(encode('ON_1')));
+  const cursor = source.getSnapshot().lastEvent?.id;
+  assert.ok(cursor);
+
+  source.ingest('relay/control', asArrayBuffer(encode('ON_4')));
+  source.ingest('relay/control', asArrayBuffer(encode('OFF_4')));
+
+  const replay = source.getEventsAfter(cursor);
+  assert.deepEqual(replay.map(({ code }) => code), ['ON_4', 'OFF_4']);
+  assert.ok(replay[0].id < replay[1].id);
+});
+
+test('bounds the replay window and returns defensive event copies', () => {
+  const source = new VideoAlertSource('relay/control', 2);
+  source.ingest('relay/control', asArrayBuffer(encode('ON_1')));
+  const discardedId = source.getSnapshot().lastEvent?.id;
+  assert.ok(discardedId);
+  source.ingest('relay/control', asArrayBuffer(encode('ON_4')));
+  source.ingest('relay/control', asArrayBuffer(encode('OFF_4')));
+
+  const replay = source.getEventsAfter(0);
+  assert.deepEqual(replay.map(({ code }) => code), ['ON_4', 'OFF_4']);
+  assert.ok(replay.every(({ id }) => id > discardedId));
+
+  replay[0].code = 'OFF_1';
+  assert.equal(source.getEventsAfter(0)[0].code, 'ON_4');
+  assert.throws(() => new VideoAlertSource('relay/control', 0));
+});
+
+test('resolves a safe Last-Event-ID cursor with a query fallback', () => {
+  assert.equal(resolveVideoAlertReplayCursor(' 123 ', '456'), 123);
+  assert.equal(resolveVideoAlertReplayCursor(undefined, '456'), 456);
+  assert.equal(resolveVideoAlertReplayCursor('invalid', '456'), 456);
+  assert.equal(resolveVideoAlertReplayCursor(['123'], '456'), 456);
+  assert.equal(resolveVideoAlertReplayCursor(undefined, ['456']), null);
+  assert.equal(resolveVideoAlertReplayCursor('-1', undefined), null);
+  assert.equal(resolveVideoAlertReplayCursor('9007199254740992', undefined), null);
+  assert.equal(resolveVideoAlertReplayCursor('123\n456', undefined), null);
+});
+
+test('formats alert SSE frames with reconnect ids but leaves snapshot ids unchanged', () => {
+  assert.equal(
+    formatVideoAlertSseFrame('alert', { code: 'ON_4' }, 123),
+    'id: 123\nevent: alert\ndata: {"code":"ON_4"}\n\n',
+  );
+  assert.equal(
+    formatVideoAlertSseFrame('snapshot', { connected: true }),
+    'event: snapshot\ndata: {"connected":true}\n\n',
+  );
 });

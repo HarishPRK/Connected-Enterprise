@@ -15,6 +15,7 @@ export interface VideoRelayEvent {
   encoding: 'raw' | 'json-string' | 'json-object';
   receivedAt: number;
   retained: boolean;
+  replayed?: boolean;
 }
 
 export interface VideoRelayChannelState {
@@ -35,7 +36,7 @@ export interface UseVideoAlertsResult {
   transport: AlertTransport;
 }
 
-interface SnapshotPayload {
+export interface SnapshotPayload {
   topic: string;
   connected: boolean;
   lastError?: string | null;
@@ -121,12 +122,24 @@ export function parseVideoAlertSnapshot(data: string): SnapshotPayload {
   };
 }
 
-export function parseVideoRelayEvent(data: string): VideoRelayEvent {
-  const parsed = asObject(JSON.parse(data));
-  if (!parsed) throw new Error('Video alert event is not an object');
-  if (!Number.isSafeInteger(parsed.id) || (parsed.id as number) < 0) {
+function parseEventId(value: unknown, lastEventId?: string): number {
+  if (Number.isSafeInteger(value) && (value as number) >= 0) return value as number;
+
+  const normalized = lastEventId?.trim() ?? '';
+  if (!/^\d+$/.test(normalized)) {
     throw new Error('Video alert event has an invalid id');
   }
+  const parsed = Number(normalized);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error('Video alert event has an invalid id');
+  }
+  return parsed;
+}
+
+export function parseVideoRelayEvent(data: string, lastEventId?: string): VideoRelayEvent {
+  const parsed = asObject(JSON.parse(data));
+  if (!parsed) throw new Error('Video alert event is not an object');
+  const id = parseEventId(parsed.id, lastEventId);
   if (typeof parsed.topic !== 'string' || parsed.topic.trim() === '') {
     throw new Error('Video alert event has an invalid topic');
   }
@@ -150,9 +163,12 @@ export function parseVideoRelayEvent(data: string): VideoRelayEvent {
   if (typeof parsed.retained !== 'boolean') {
     throw new Error('Video alert event has an invalid retained flag');
   }
+  if (parsed.replayed !== undefined && typeof parsed.replayed !== 'boolean') {
+    throw new Error('Video alert event has an invalid replay flag');
+  }
 
   return {
-    id: parsed.id as number,
+    id,
     topic: parsed.topic,
     code: parsed.code as VideoRelayCode,
     state: parsed.state as VideoRelayState,
@@ -161,6 +177,7 @@ export function parseVideoRelayEvent(data: string): VideoRelayEvent {
     encoding: parsed.encoding as VideoRelayEvent['encoding'],
     receivedAt: parsed.receivedAt,
     retained: parsed.retained,
+    ...(parsed.replayed === true ? { replayed: true } : null),
   };
 }
 
@@ -172,26 +189,44 @@ let current: UseVideoAlertsResult = {
 };
 const listeners = new Set<() => void>();
 let eventSource: EventSource | null = null;
-let snapshotAbort: AbortController | null = null;
 
 function publish(next: UseVideoAlertsResult): void {
   current = next;
   for (const listener of listeners) listener();
 }
 
-function applySnapshot(snapshot: SnapshotPayload): void {
-  const channels = { ...current.channels };
+export function mergeVideoAlertSnapshot(
+  existing: UseVideoAlertsResult,
+  snapshot: SnapshotPayload,
+): UseVideoAlertsResult {
+  const channels = { ...existing.channels };
   for (const channel of CHANNELS) {
-    if (snapshot.channels?.[channel]) channels[channel] = snapshot.channels[channel];
+    const candidate = snapshot.channels?.[channel];
+    if (!candidate) continue;
+
+    const currentUpdatedAt = channels[channel].updatedAt;
+    const candidateUpdatedAt = candidate.updatedAt;
+    const candidateIsAtLeastAsFresh = currentUpdatedAt === null
+      || (candidateUpdatedAt !== null && candidateUpdatedAt >= currentUpdatedAt);
+    if (candidateIsAtLeastAsFresh) channels[channel] = candidate;
   }
-  publish({
-    ...current,
+
+  const lastReceivedAt = snapshot.receivedAt == null
+    ? existing.lastReceivedAt
+    : Math.max(existing.lastReceivedAt ?? 0, snapshot.receivedAt);
+
+  return {
+    ...existing,
     topic: snapshot.topic,
     connected: snapshot.connected,
     channels,
     lastError: snapshot.lastError ?? undefined,
-    lastReceivedAt: snapshot.receivedAt ?? current.lastReceivedAt,
-  });
+    ...(lastReceivedAt !== undefined ? { lastReceivedAt } : null),
+  };
+}
+
+function applySnapshot(snapshot: SnapshotPayload): void {
+  publish(mergeVideoAlertSnapshot(current, snapshot));
 }
 
 function applyLiveEvent(event: VideoRelayEvent): void {
@@ -218,12 +253,6 @@ function startFeed(): void {
   if (eventSource) return;
   publish({ ...current, lastLiveEvent: undefined, transport: 'connecting' });
 
-  snapshotAbort = new AbortController();
-  fetch('/api/video-alerts/snapshot', { signal: snapshotAbort.signal })
-    .then((response) => response.text())
-    .then((data) => applySnapshot(parseVideoAlertSnapshot(data)))
-    .catch(() => { /* The live stream remains the recovery path. */ });
-
   if (typeof EventSource === 'undefined') {
     publish({
       ...current,
@@ -247,7 +276,8 @@ function startFeed(): void {
     try { applySnapshot(parseVideoAlertSnapshot((event as MessageEvent).data)); } catch { /* ignore */ }
   });
   source.addEventListener('alert', (event) => {
-    try { applyLiveEvent(parseVideoRelayEvent((event as MessageEvent).data)); } catch { /* ignore */ }
+    const message = event as MessageEvent<string>;
+    try { applyLiveEvent(parseVideoRelayEvent(message.data, message.lastEventId)); } catch { /* ignore */ }
   });
   source.onerror = () => {
     if (eventSource !== source) return;
@@ -261,8 +291,6 @@ function startFeed(): void {
 }
 
 function stopFeed(): void {
-  snapshotAbort?.abort();
-  snapshotAbort = null;
   eventSource?.close();
   eventSource = null;
   current = { ...current, lastLiveEvent: undefined, transport: 'idle' };

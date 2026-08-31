@@ -23,7 +23,10 @@ import { createCorsOptionsDelegate } from './corsPolicy.js';
 import { runGatewayTwinCopilotTurn } from './gatewayTwinCopilot.js';
 import { InfluxSource, InfluxSourceError } from './influxSource.js';
 import {
+  formatVideoAlertSseFrame,
+  resolveVideoAlertReplayCursor,
   videoAlertSource,
+  type VideoAlertSseEventName,
   type VideoAlertSnapshot,
   type VideoRelayEvent,
 } from './videoAlertSource.js';
@@ -1341,8 +1344,9 @@ app.get('/api/video-alerts/snapshot', (_req, res) => {
 
 /**
  * One live browser feed for relay/control. The snapshot hydrates connection
- * and per-channel state, while only subsequent `alert` events should create a
- * toast in the browser (so a retained/stale ON is never replayed as new).
+ * and per-channel state. Numbered alert frames let EventSource reconnect with
+ * Last-Event-ID and recover a short ON/OFF pulse from the bounded server replay
+ * window; retained MQTT observations remain marked for the browser to ignore.
  */
 app.get('/api/video-alerts/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -1353,17 +1357,21 @@ app.get('/api/video-alerts/stream', (req, res) => {
   res.socket?.setNoDelay(true);
   res.socket?.setKeepAlive(true);
 
-  const emit = (event: string, data: unknown) => {
+  const emit = (event: VideoAlertSseEventName, data: unknown, eventId?: number) => {
     if (!res.writable || res.writableEnded) return;
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    res.write(formatVideoAlertSseFrame(event, data, eventId));
   };
 
   type BufferedVideoAlertEvent =
     | { event: 'alert'; data: VideoRelayEvent }
     | { event: 'status'; data: VideoAlertSnapshot };
   const buffered: BufferedVideoAlertEvent[] = [];
+  const replayedAlertIds = new Set<number>();
   let hydrating = true;
-  const deliver = (event: BufferedVideoAlertEvent) => emit(event.event, event.data);
+  const deliver = (event: BufferedVideoAlertEvent) => {
+    if (event.event === 'alert') emit(event.event, event.data, event.data.id);
+    else emit(event.event, event.data);
+  };
   const bufferOrDeliver = (event: BufferedVideoAlertEvent) => {
     if (hydrating) buffered.push(event);
     else deliver(event);
@@ -1374,9 +1382,27 @@ app.get('/api/video-alerts/stream', (req, res) => {
   const offAlert = videoAlertSource.onAlert((data) => bufferOrDeliver({ event: 'alert', data }));
   const offStatus = videoAlertSource.onStatus((data) => bufferOrDeliver({ event: 'status', data }));
   emit('snapshot', videoAlertSource.getSnapshot());
+
+  const replayCursor = resolveVideoAlertReplayCursor(
+    req.get('Last-Event-ID'),
+    req.query.lastEventId,
+  );
+  if (replayCursor !== null) {
+    for (const event of videoAlertSource.getEventsAfter(replayCursor)) {
+      replayedAlertIds.add(event.id);
+      deliver({ event: 'alert', data: { ...event, replayed: true } });
+    }
+  }
+
   hydrating = false;
-  for (const event of buffered) deliver(event);
+  for (const event of buffered) {
+    // An alert that arrived during hydration is already present in the replay
+    // snapshot above. Status frames have no event id and are always delivered.
+    if (event.event === 'alert' && replayedAlertIds.has(event.data.id)) continue;
+    deliver(event);
+  }
   buffered.length = 0;
+  replayedAlertIds.clear();
 
   const heartbeat = setInterval(() => {
     if (res.writable && !res.writableEnded) res.write(': hb\n\n');

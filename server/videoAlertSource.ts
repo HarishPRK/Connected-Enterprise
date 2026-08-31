@@ -15,6 +15,7 @@ export const VIDEO_RELAY_CHANNELS = [1, 2, 3, 4] as const;
 const MAX_RELAY_PAYLOAD_BYTES = 1_024;
 const RECENT_PACKET_TTL_MS = 30_000;
 const RECENT_PACKET_LIMIT = 64;
+export const DEFAULT_VIDEO_ALERT_REPLAY_LIMIT = 256;
 const JSON_COMMAND_FIELDS = ['command', 'cmd', 'message', 'value', 'state', 'payload'] as const;
 
 export type VideoRelayChannel = (typeof VIDEO_RELAY_CHANNELS)[number];
@@ -22,6 +23,7 @@ export type VideoRelayState = 'ON' | 'OFF';
 export type VideoRelayCode = `${VideoRelayState}_${VideoRelayChannel}`;
 export type VideoRelayLevel = 'attention' | 'warning' | 'clear' | 'critical';
 export type VideoRelayEncoding = 'raw' | 'json-string' | 'json-object';
+export type VideoAlertSseEventName = 'snapshot' | 'alert' | 'status';
 
 export interface ParsedVideoRelayCommand {
   code: VideoRelayCode;
@@ -36,6 +38,8 @@ export interface VideoRelayEvent extends ParsedVideoRelayCommand {
   topic: string;
   receivedAt: number;
   retained: boolean;
+  /** True only when the SSE endpoint recovers this event after reconnect. */
+  replayed?: boolean;
 }
 
 export interface VideoRelayChannelState {
@@ -156,6 +160,37 @@ export function resolveVideoAlertTopic(configured = process.env.IOT_VIDEO_ALERT_
   return topic;
 }
 
+function parseReplayCursor(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const candidate = value.trim();
+  if (!/^\d{1,16}$/.test(candidate)) return null;
+  const cursor = Number(candidate);
+  return Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : null;
+}
+
+/**
+ * Resolve the browser's last delivered alert id. Native EventSource reconnects
+ * with Last-Event-ID; the query value supports clients that must recreate the
+ * EventSource manually. Invalid or multi-valued inputs intentionally disable
+ * replay instead of reaching the replay store unchecked.
+ */
+export function resolveVideoAlertReplayCursor(
+  lastEventIdHeader: unknown,
+  lastEventIdQuery: unknown,
+): number | null {
+  return parseReplayCursor(lastEventIdHeader) ?? parseReplayCursor(lastEventIdQuery);
+}
+
+/** Serialize one SSE frame; only alert frames carry ids used for reconnect. */
+export function formatVideoAlertSseFrame(
+  event: VideoAlertSseEventName,
+  data: unknown,
+  eventId?: number,
+): string {
+  const id = eventId === undefined ? '' : `id: ${eventId}\n`;
+  return `${id}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
 function hashPayload(payload: Uint8Array): string {
   let hash = 0x811c9dc5;
   for (const byte of payload) {
@@ -176,6 +211,7 @@ function emptyChannelState(): Record<VideoRelayChannel, VideoRelayChannelState> 
 
 export class VideoAlertSource extends EventEmitter {
   private readonly topic: string;
+  private readonly replayLimit: number;
   private connected = false;
   private lastError: string | null = null;
   private lastEvent: VideoRelayEvent | null = null;
@@ -185,10 +221,18 @@ export class VideoAlertSource extends EventEmitter {
   private duplicateDeliveries = 0;
   private nextEventId = Date.now();
   private recentPackets = new Map<string, number>();
+  private replayEvents: VideoRelayEvent[] = [];
 
-  constructor(topic = resolveVideoAlertTopic()) {
+  constructor(
+    topic = resolveVideoAlertTopic(),
+    replayLimit = DEFAULT_VIDEO_ALERT_REPLAY_LIMIT,
+  ) {
     super();
+    if (!Number.isInteger(replayLimit) || replayLimit < 1) {
+      throw new TypeError('video alert replay limit must be a positive integer');
+    }
     this.topic = topic;
+    this.replayLimit = replayLimit;
     this.setMaxListeners(0);
   }
 
@@ -212,6 +256,18 @@ export class VideoAlertSource extends EventEmitter {
       decodeErrors: this.decodeErrors,
       duplicateDeliveries: this.duplicateDeliveries,
     };
+  }
+
+  /**
+   * Return the retained in-process relay events newer than a browser cursor.
+   * If the cursor predates the bounded window, callers receive the complete
+   * remaining window in source order. Returned objects cannot mutate storage.
+   */
+  getEventsAfter(lastEventId: number): VideoRelayEvent[] {
+    if (!Number.isSafeInteger(lastEventId) || lastEventId < 0) return [];
+    return this.replayEvents
+      .filter((event) => event.id > lastEventId)
+      .map((event) => ({ ...event }));
   }
 
   setConnectionState(connected: boolean, error: string | null = null): void {
@@ -277,6 +333,10 @@ export class VideoAlertSource extends EventEmitter {
     this.lastError = null;
     this.lastEvent = event;
     this.receivedAt = now;
+    this.replayEvents.push(event);
+    if (this.replayEvents.length > this.replayLimit) {
+      this.replayEvents.splice(0, this.replayEvents.length - this.replayLimit);
+    }
     this.emit('alert', event);
     return true;
   }

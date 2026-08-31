@@ -197,7 +197,6 @@ function StreamTile({
     setErrored(false);
     setLoaded(false);
     setIsLive(true);
-    onStreamActivity(stream, true);
     // Request fullscreen after the image element is in the DOM.
     requestAnimationFrame(() => {
       containerRef.current?.requestFullscreen?.().catch(() => {
@@ -319,8 +318,14 @@ function StreamTile({
               alt={stream.name}
               className="va-tile-stream"
               style={loaded ? undefined : { visibility: 'hidden' }}
-              onLoad={() => setLoaded(true)}
-              onError={() => setErrored(true)}
+              onLoad={() => {
+                setLoaded(true);
+                onStreamActivity(stream, true);
+              }}
+              onError={() => {
+                setErrored(true);
+                onStreamActivity(stream, false);
+              }}
               draggable={false}
             />
             {!loaded && <LoadingPlaceholder name={stream.name} url={stream.url} />}
