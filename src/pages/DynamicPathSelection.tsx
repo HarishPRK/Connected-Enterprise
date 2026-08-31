@@ -46,6 +46,7 @@ import {
   pathThresholds,
   BRANCH_TO_DEVICE_TOPIC,
   BRANCH_TO_FAILOVER_TOPIC,
+  BRANCH_TO_WAN_TOPIC,
 } from "../data/mock";
 import type {
   CellularMetrics,
@@ -714,6 +715,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   // a mapped source see the unfiltered list (handy during development).
   const branchTopic = branchId ? BRANCH_TO_FAILOVER_TOPIC[branchId] : undefined;
   const branchDeviceTopic = branchId ? BRANCH_TO_DEVICE_TOPIC[branchId] : undefined;
+  const branchWanTopic = branchId ? BRANCH_TO_WAN_TOPIC[branchId] : undefined;
   const branchList = branchTopic
     ? ipsec.list.filter((gateway) => gateway.topic === branchTopic)
     : ipsec.list;
@@ -893,6 +895,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
             effectiveList={effectiveList}
             branchTopic={branchTopic ?? null}
             deviceTopic={branchDeviceTopic ?? null}
+            wanTopic={branchWanTopic ?? null}
           />
         </div>
 
@@ -2259,6 +2262,7 @@ export function LiveIpsecCard({
   effectiveList,
   branchTopic,
   deviceTopic,
+  wanTopic,
 }: {
   ipsec: ReturnType<typeof useIpsecMetrics>;
   showSample: boolean;
@@ -2271,9 +2275,14 @@ export function LiveIpsecCard({
   /** Exact inventory topic for endpoint cards inside the topology. This stays
    *  separate from branchTopic so prpl failover and prplhome clients cannot mix. */
   deviceTopic: string | null;
+  /** Exact WAN-counter topic for the SD-WAN throughput/packet-rate badge. */
+  wanTopic?: string | null;
 }) {
   const c = useThemeColors();
   const empty = effectiveList.length === 0;
+  const liveWanState = wanTopic
+    ? ipsecStateForTopic(ipsec.list, wanTopic)
+    : undefined;
 
   // Show only the topic this branch actually consumes, not the server's full
   // multi-subscription list. The server still subscribes to all topics; the
@@ -2379,6 +2388,7 @@ export function LiveIpsecCard({
               c={c}
               sample={showSample}
               deviceTopic={deviceTopic}
+              wanState={showSample ? undefined : wanTopic ? liveWanState : g}
             />
           ))}
         </div>
@@ -2486,11 +2496,13 @@ function GatewayBlock({
   g,
   c,
   deviceTopic,
+  wanState,
 }: {
   g: IpsecGatewayState;
   c: ThemeColors;
   sample?: boolean;
   deviceTopic?: string | null;
+  wanState?: IpsecGatewayState;
 }) {
   const m = g.metrics;
   const [forceMode, setForceMode] = useState<ForceMode>("auto");
@@ -2569,41 +2581,58 @@ function GatewayBlock({
     }
   };
 
-  // Compute live WAN throughput + packet rate from successive payloads so the
-  // diagram can show a numerical badge along the active path.
-  const lastWanRef = useRef<{
-    rx: number;
-    tx: number;
+  // Keep the path model on the branch failover feed while the numerical WAN
+  // badge uses the branch's authoritative counter feed. The server-derived
+  // directional rate already handles counter resets and duplicate samples;
+  // packet rate is derived here from the same source timestamps.
+  const lastWanPacketRef = useRef<{
+    key: string;
+    sampleId: string;
     rxp: number;
     txp: number;
     ts: number;
   } | null>(null);
-  const [wanMbps, setWanMbps] = useState<number | null>(null);
+  const wanMbps = wanState?.wanRate
+    ? wanState.wanRate.rxMbps + wanState.wanRate.txMbps
+    : null;
   const [wanPps, setWanPps] = useState<number | null>(null);
   useEffect(() => {
-    const ts = g.receivedAt;
-    const rx = m.wan.rx_bytes;
-    const tx = m.wan.tx_bytes;
-    const rxp = m.wan.rx_packets;
-    const txp = m.wan.tx_packets;
-    const prev = lastWanRef.current;
-    if (prev) {
-      const dt = (ts - prev.ts) / 1000;
-      if (dt > 0.1) {
-        const bytes = Math.max(0, rx - prev.rx + (tx - prev.tx));
-        const pkts = Math.max(0, rxp - prev.rxp + (txp - prev.txp));
-        setWanMbps((bytes * 8) / dt / 1_000_000);
-        setWanPps(pkts / dt);
-      }
+    const rate = wanState?.wanRate;
+    if (!wanState || !rate) {
+      lastWanPacketRef.current = null;
+      setWanPps(null);
+      return;
     }
-    lastWanRef.current = { rx, tx, rxp, txp, ts };
-  }, [
-    g.receivedAt,
-    m.wan.rx_bytes,
-    m.wan.tx_bytes,
-    m.wan.rx_packets,
-    m.wan.tx_packets,
-  ]);
+
+    const wan = wanState.metrics.wan;
+    const key = `${wanState.topic}:${wanState.metrics.gateway.name}:${wan.ifname}`;
+    const sampleId = `${key}:${rate.sourceTimestampMs}:${rate.observedAt}`;
+    const prev = lastWanPacketRef.current;
+    if (prev?.sampleId === sampleId) return;
+
+    const next = {
+      key,
+      sampleId,
+      rxp: wan.rx_packets,
+      txp: wan.tx_packets,
+      ts: rate.sourceTimestampMs,
+    };
+    lastWanPacketRef.current = next;
+
+    if (!prev || prev.key !== key) {
+      setWanPps(null);
+      return;
+    }
+
+    const dt = (next.ts - prev.ts) / 1000;
+    const rxPackets = next.rxp - prev.rxp;
+    const txPackets = next.txp - prev.txp;
+    if (dt < 1 || dt > 30 || rxPackets < 0 || txPackets < 0) {
+      setWanPps(null);
+      return;
+    }
+    setWanPps((rxPackets + txPackets) / dt);
+  }, [wanState]);
 
   // ── Per-tunnel time-series: live throughput (Mbps), rolling latency history
   //    (for sparklines + jitter), and active-tunnel failover events. All from

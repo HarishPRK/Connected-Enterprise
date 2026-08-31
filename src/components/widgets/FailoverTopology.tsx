@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { LiveIpsecCard, SAMPLE_IPSEC_GATEWAY } from '../../pages/DynamicPathSelection';
-import { BRANCH_TO_DEVICE_TOPIC, BRANCH_TO_FAILOVER_TOPIC } from '../../data/mock';
+import {
+  BRANCH_TO_DEVICE_TOPIC,
+  BRANCH_TO_FAILOVER_TOPIC,
+  BRANCH_TO_WAN_TOPIC,
+} from '../../data/mock';
 import type { UseIpsecMetricsResult } from '../../ui/useIpsecMetrics';
 
 /** Branch-scoped Dynamic Failover diagram for the Overview page.
@@ -23,8 +27,8 @@ export function FailoverTopology({
 }) {
   const [showSample, setShowSample] = useState(false);
 
-  // Strictly scope the live gateway list to this branch's MQTT family so the
-  // Plano (rdk) and McKinney (prpl) fleets never mix on the Overview.
+  // Keep each branch's topology on its failover feed. McKinney's numerical
+  // WAN badge is selected independently from prplhome below.
   const branchTopic = BRANCH_TO_FAILOVER_TOPIC[branchId];
   const branchList = branchTopic
     ? ipsec.list.filter((gateway) => gateway.topic === branchTopic)
@@ -40,6 +44,7 @@ export function FailoverTopology({
       effectiveList={effectiveList}
       branchTopic={branchTopic ?? null}
       deviceTopic={BRANCH_TO_DEVICE_TOPIC[branchId] ?? null}
+      wanTopic={BRANCH_TO_WAN_TOPIC[branchId] ?? null}
     />
   );
 }

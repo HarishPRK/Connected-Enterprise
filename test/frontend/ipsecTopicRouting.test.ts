@@ -7,7 +7,7 @@ import {
 } from '../../src/data/mock';
 import { ipsecStateForTopic } from '../../src/ui/ipsecTopicState';
 
-test('McKinney routes only Overview WAN traffic to the prplhome feed', () => {
+test('McKinney routes failover and WAN telemetry to their authoritative feeds', () => {
   assert.equal(BRANCH_TO_FAILOVER_TOPIC['b-mck-03'], 'prpl/ipsec/metrics');
   assert.equal(BRANCH_TO_WAN_TOPIC['b-mck-03'], 'prplhome/ipsec/metrics');
   assert.equal(BRANCH_TO_DEVICE_TOPIC['b-mck-03'], 'prplhome/ipsec/metrics');
@@ -30,6 +30,21 @@ test('Dynamic Failover selects Wi-Fi state from the exact device topic', () => {
   );
   assert.equal(
     ipsecStateForTopic([failoverState], BRANCH_TO_DEVICE_TOPIC['b-mck-03']),
+    undefined,
+  );
+});
+
+test('Dynamic Failover selects WAN state from the exact WAN topic', () => {
+  const failoverState = { topic: 'prpl/ipsec/metrics', rate: 0.02 };
+  const wanState = { topic: 'prplhome/ipsec/metrics', rate: 1.1 };
+  const states = [failoverState, wanState];
+
+  assert.equal(
+    ipsecStateForTopic(states, BRANCH_TO_WAN_TOPIC['b-mck-03']),
+    wanState,
+  );
+  assert.equal(
+    ipsecStateForTopic([failoverState], BRANCH_TO_WAN_TOPIC['b-mck-03']),
     undefined,
   );
 });

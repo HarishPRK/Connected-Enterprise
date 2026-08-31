@@ -167,16 +167,18 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
         setOverlays: (o) => send('set-overlays', o),
         setHostRoster: (hostRoster) => {
           pendingHostRoster.current = hostRoster
-          if (hostBridgeReady.current) send('set-hosts', { hosts: hostRoster })
+          if (!hostBridgeSrc || hostBridgeReady.current) {
+            send('set-hosts', { hosts: hostRoster })
+          }
         },
         openAgent: () => {
-          if (hostBridgeReady.current) send('open-agent')
+          if (!hostBridgeSrc || hostBridgeReady.current) send('open-agent')
           else pendingAgentOpen.current = true
         },
         focusPart: (id) => send('focus-part', { id }),
         requestState: () => send('get-state'),
       }
-    }, [send])
+    }, [hostBridgeSrc, send])
 
     const installHostBridge = () => {
       hostBridgeReady.current = false

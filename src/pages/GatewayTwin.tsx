@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { ExternalLink, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import GatewayTwinEmbed, {
   type GatewayTwinHandle,
@@ -7,21 +7,14 @@ import GatewayTwinEmbed, {
   type TwinScenario,
   type TwinState,
 } from '../components/GatewayTwinEmbed';
-import {
-  BRANCH_TO_DEVICE_TOPIC,
-  BRANCH_TO_IPSEC_SOURCE,
-  branches,
-} from '../data/mock';
-import { gatewayTwinHostRoster } from '../ui/gatewayTwinHosts';
+import { BRANCH_TO_IPSEC_SOURCE, branches } from '../data/mock';
 import { GATEWAY_TWIN_OPEN_AGENT_EVENT } from '../ui/gatewayTwinAgent';
-import { useDevices } from '../ui/useDevices';
 import { useToast } from '../ui/Toast';
 
 /* ─────────── Gateway Digital Twin
- * Embeds the GW Operational Twin widget (public/widgets/gw-twin — built from
- * the GW-Operational-Twin repo via `npm run build:embed`). The widget keeps a
- * complete in-browser TR-181 simulator as a per-field fallback while
- * Connected Enterprise's AWS IoT session supplies the live OSPv2 overlay. */
+ * Embeds the hosted GW Operational Twin inside CE's existing application frame.
+ * Runtime controls continue over the widget's origin-checked postMessage
+ * protocol; a bounded fallback handles hosted authentication/startup failures. */
 
 const SCENARIOS: Array<{ id: TwinScenario; label: string }> = [
   { id: 'normal', label: 'Normal' },
@@ -38,6 +31,8 @@ interface GatewayTwinPageProps {
 }
 
 const LIVE_STALE_MS = 150_000;
+const HOSTED_TWIN_URL = 'https://twin.connectedenterprise.app/';
+const TWIN_READY_TIMEOUT_MS = 12_000;
 
 function sourceStatus(
   liveEnabled: boolean,
@@ -75,32 +70,25 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
   const [scenario, setScenario] = useState<TwinScenario>('normal');
   const [twinState, setTwinState] = useState<TwinState>();
   const [ready, setReady] = useState(false);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
+  const [frameAttempt, setFrameAttempt] = useState(0);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const { push } = useToast();
-  const deviceInventory = useDevices();
   const branch = branches.find((item) => item.id === branchId) ?? branches[0];
   // The current OSPv2 DeviceInfo topics belong to the prpl gateway family.
   // Other branches intentionally render the same complete simulator without
   // mislabelling that gateway's measurements as their own.
   const liveEnabled = BRANCH_TO_IPSEC_SOURCE[branchId] === 'prpl';
-  const deviceTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
-  const hostRoster = useMemo(
-    () => gatewayTwinHostRoster(deviceInventory.devices, {
-      locationSource: BRANCH_TO_IPSEC_SOURCE[branchId],
-      inventoryTopic: deviceTopic,
-      inventoryTopicsSeen: deviceInventory.inventoryTopicsSeen,
-    }),
-    [
-      branchId,
-      deviceInventory.devices,
-      deviceInventory.inventoryTopicsSeen,
-      deviceTopic,
-    ],
-  );
   const status = useMemo(
-    () => sourceStatus(liveEnabled, twinState?.live),
-    [liveEnabled, twinState?.live],
+    () => loadTimedOut
+      ? {
+          label: 'Twin unavailable',
+          detail: 'The hosted Twin did not become ready',
+          tone: 'error',
+        }
+      : sourceStatus(liveEnabled, twinState?.live),
+    [liveEnabled, loadTimedOut, twinState?.live],
   );
 
   const reportFullscreenError = useCallback((detail?: string) => {
@@ -133,12 +121,13 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
   }, [reportFullscreenError]);
 
   useEffect(() => {
-    if (!ready) return;
-    // Keep live roster ownership separate from overlay visibility. The `hosts`
-    // prop below establishes the initial default; the iframe HUD owns the
-    // operator's choice after that, even as inventory snapshots keep arriving.
-    twin.current?.setHostRoster(liveEnabled ? hostRoster : null);
-  }, [hostRoster, liveEnabled, ready]);
+    if (ready) return;
+    const timeout = window.setTimeout(
+      () => setLoadTimedOut(true),
+      TWIN_READY_TIMEOUT_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [frameAttempt, ready]);
 
   useEffect(() => {
     const openAgent = () => twin.current?.openAgent();
@@ -166,6 +155,13 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
         error instanceof Error ? error.message : undefined,
       );
     }
+  };
+
+  const retryHostedTwin = () => {
+    setReady(false);
+    setLoadTimedOut(false);
+    setTwinState(undefined);
+    setFrameAttempt((attempt) => attempt + 1);
   };
 
   return (
@@ -227,29 +223,68 @@ export function GatewayTwinPage({ branchId }: GatewayTwinPageProps) {
         }
       />
       <div className="gateway-twin-frame" data-source-tone={status.tone}>
-        {!ready && (
+        {!ready && (loadTimedOut ? (
+          <div
+            className="gateway-twin-loading"
+            role="alert"
+            style={{
+              flexDirection: 'column',
+              padding: 24,
+              pointerEvents: 'auto',
+              textAlign: 'center',
+            }}
+          >
+            <strong style={{ color: 'var(--text)', fontSize: 15 }}>
+              Hosted Twin did not become ready
+            </strong>
+            <span style={{ maxWidth: 480 }}>
+              Authentication may be required. Open the hosted Twin in a new tab,
+              sign in, then retry the embedded view.
+            </span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="gateway-twin-fullscreen-button"
+                onClick={() => window.open(
+                  HOSTED_TWIN_URL,
+                  '_blank',
+                  'noopener,noreferrer',
+                )}
+              >
+                <ExternalLink size={16} aria-hidden="true" />
+                Open Twin to sign in
+              </button>
+              <button
+                type="button"
+                className="gateway-twin-fullscreen-button"
+                onClick={retryHostedTwin}
+              >
+                <RefreshCw size={16} aria-hidden="true" />
+                Retry embedded view
+              </button>
+            </div>
+          </div>
+        ) : (
           <div className="gateway-twin-loading" role="status">
             <span className="gateway-twin-loading-mark" aria-hidden="true" />
             Preparing the operational twin
           </div>
-        )}
+        ))}
         <GatewayTwinEmbed
-          key={`${branchId}:${liveEnabled ? 'live' : 'sim'}`}
+          key={`${branchId}:${liveEnabled ? 'live' : 'sim'}:${frameAttempt}`}
           ref={twin}
+          src={HOSTED_TWIN_URL}
           scenario={scenario}
           live={liveEnabled}
           hosts={liveEnabled}
-          hostBridgeSrc="/widgets/gw-twin/ce-host-inventory-bridge.js"
-          onReady={() => setReady(true)}
+          onReady={() => {
+            setLoadTimedOut(false);
+            setReady(true);
+          }}
           onState={(state) => {
             setTwinState(state);
             setScenario(state.scenario);
           }}
-          onHostBridgeError={(error) => push({
-            kind: 'error',
-            title: 'IT/OT roster unavailable',
-            detail: error.message,
-          })}
         />
       </div>
     </div>
