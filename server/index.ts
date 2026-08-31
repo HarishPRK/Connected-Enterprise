@@ -22,6 +22,11 @@ import { createOnboardingRouter } from './onboardingRoutes.js';
 import { createCorsOptionsDelegate } from './corsPolicy.js';
 import { runGatewayTwinCopilotTurn } from './gatewayTwinCopilot.js';
 import { InfluxSource, InfluxSourceError } from './influxSource.js';
+import {
+  videoAlertSource,
+  type VideoAlertSnapshot,
+  type VideoRelayEvent,
+} from './videoAlertSource.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -1326,6 +1331,63 @@ app.post('/api/devices/shelly/control', async (req, res) => {
   } else {
     res.status(502).json({ ok: false, deviceId, action, error: result.error ?? 'shelly command failed' });
   }
+});
+
+/* ─────────── Video Analytics safety alerts (AWS IoT → SSE) ─────────── */
+
+app.get('/api/video-alerts/snapshot', (_req, res) => {
+  res.json(videoAlertSource.getSnapshot());
+});
+
+/**
+ * One live browser feed for relay/control. The snapshot hydrates connection
+ * and per-channel state, while only subsequent `alert` events should create a
+ * toast in the browser (so a retained/stale ON is never replayed as new).
+ */
+app.get('/api/video-alerts/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+  res.socket?.setKeepAlive(true);
+
+  const emit = (event: string, data: unknown) => {
+    if (!res.writable || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  type BufferedVideoAlertEvent =
+    | { event: 'alert'; data: VideoRelayEvent }
+    | { event: 'status'; data: VideoAlertSnapshot };
+  const buffered: BufferedVideoAlertEvent[] = [];
+  let hydrating = true;
+  const deliver = (event: BufferedVideoAlertEvent) => emit(event.event, event.data);
+  const bufferOrDeliver = (event: BufferedVideoAlertEvent) => {
+    if (hydrating) buffered.push(event);
+    else deliver(event);
+  };
+
+  // Subscribe before hydrating so a command arriving between listener setup
+  // and the snapshot cannot disappear from the live event stream.
+  const offAlert = videoAlertSource.onAlert((data) => bufferOrDeliver({ event: 'alert', data }));
+  const offStatus = videoAlertSource.onStatus((data) => bufferOrDeliver({ event: 'status', data }));
+  emit('snapshot', videoAlertSource.getSnapshot());
+  hydrating = false;
+  for (const event of buffered) deliver(event);
+  buffered.length = 0;
+
+  const heartbeat = setInterval(() => {
+    if (res.writable && !res.writableEnded) res.write(': hb\n\n');
+  }, 15_000);
+
+  req.on('close', () => {
+    offAlert();
+    offStatus();
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  });
 });
 
 /* ─────────── Video analytics proxy ───────────

@@ -27,6 +27,7 @@ import {
   advanceWanTrafficRate,
   type WanCounterSample,
 } from './wanTrafficRate.js';
+import { videoAlertSource } from './videoAlertSource.js';
 
 const ENDPOINT  = process.env.IOT_ENDPOINT ?? 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';
 const REGION    = process.env.IOT_REGION   ?? process.env.AWS_REGION ?? 'us-east-1';
@@ -34,6 +35,7 @@ const CLIENT_ID = process.env.IOT_CLIENT_ID ?? `ce-server-${Math.random().toStri
 const SUBSCRIBE_MAX_ATTEMPTS = 3;
 const SUBSCRIBE_RETRY_BASE_MS = 250;
 const GATEWAY_TWIN_RETRY_MS = 5_000;
+const VIDEO_ALERT_RETRY_MS = 30_000;
 
 // We subscribe to one topic per gateway family. Defaults cover Plano (rdk),
 // the original McKinney topic (prpl), and the QDR McKinney topic (prplhome).
@@ -274,6 +276,8 @@ export class IpsecSource extends EventEmitter {
   private gatewayTwinSubscribedTopics = new Set<string>();
   private gatewayTwinSubscriptionGeneration = 0;
   private gatewayTwinRetryTimer?: NodeJS.Timeout;
+  private videoAlertSubscribed = false;
+  private videoAlertRetryTimer?: NodeJS.Timeout;
   /** Serializes full subscription refreshes so a reconnect cannot race the
    *  initial registration pass or another resume event. */
   private subscriptionRefresh: Promise<void> = Promise.resolve();
@@ -325,6 +329,7 @@ export class IpsecSource extends EventEmitter {
       console.warn('[ipsec] No AWS credentials (set AWS_ACCESS_KEY_ID / AWS_PROFILE, or AWS_USE_INSTANCE_ROLE=1 on EC2) — skipping IoT subscription. The dashboard will return an empty snapshot.');
       this.lastError = 'no-aws-credentials';
       gatewayTwinSource.setConnectionState('offline', this.lastError);
+      videoAlertSource.setConnectionState(false, this.lastError);
       return;
     }
 
@@ -348,6 +353,7 @@ export class IpsecSource extends EventEmitter {
         this.connected = true;
         this.lastError = undefined;
         gatewayTwinSource.setConnectionState('connecting');
+        videoAlertSource.setConnectionState(false);
         // eslint-disable-next-line no-console
         console.log(`[ipsec] connected to ${ENDPOINT} as ${CLIENT_ID}, subscribing to [${SUBSCRIBE_TOPICS.join(', ')}]`);
         this.emit('status', { connected: true });
@@ -356,6 +362,7 @@ export class IpsecSource extends EventEmitter {
         this.connected = false;
         this.lastError = err?.error ?? String(err);
         this.resetGatewayTwinSubscriptions();
+        this.resetVideoAlertSubscription(this.lastError);
         gatewayTwinSource.setConnectionState('reconnecting', this.lastError);
         // eslint-disable-next-line no-console
         console.warn('[ipsec] connection interrupted:', this.lastError);
@@ -369,12 +376,18 @@ export class IpsecSource extends EventEmitter {
         // path control, inventory, AAR, Matter, and Shelly feeds all recover.
         if (!sessionPresent) {
           this.resetGatewayTwinSubscriptions();
+          this.resetVideoAlertSubscription();
           gatewayTwinSource.setConnectionState('connecting');
           void this.refreshSubscriptions();
         } else if (this.gatewayTwinSubscribed) {
           gatewayTwinSource.setConnectionState('connected');
         } else {
           void this.subscribeGatewayTwinTopics();
+        }
+        if (sessionPresent) {
+          void this.subscribeVideoAlertTopic().catch((error) => {
+            console.error('[video-alerts] failed to restore subscription:', error);
+          });
         }
         // eslint-disable-next-line no-console
         console.log('[ipsec] connection resumed');
@@ -383,6 +396,7 @@ export class IpsecSource extends EventEmitter {
       this.connection.on('disconnect', () => {
         this.connected = false;
         this.resetGatewayTwinSubscriptions();
+        this.resetVideoAlertSubscription('AWS IoT connection is offline');
         gatewayTwinSource.setConnectionState('offline');
         // eslint-disable-next-line no-console
         console.log('[ipsec] disconnected');
@@ -405,6 +419,7 @@ export class IpsecSource extends EventEmitter {
       // eslint-disable-next-line no-console
       console.error('[ipsec] failed to connect/subscribe:', err);
       this.emit('status', { connected: false, reason: this.lastError });
+      videoAlertSource.setConnectionState(false, this.lastError);
       if (!this.gatewayTwinSubscribed) {
         gatewayTwinSource.setConnectionState('error', this.lastError);
       }
@@ -464,6 +479,16 @@ export class IpsecSource extends EventEmitter {
     // The Gateway Twin shares this exact connection. It owns decoding, history,
     // and SSE state, but never creates a second MQTT client.
     await this.subscribeGatewayTwinTopics();
+
+    // Video Analytics alerts are a separate optional topic family. A denied
+    // relay/control SUBACK must not take IPsec, inventory, or the Twin offline.
+    try {
+      await this.subscribeVideoAlertTopic();
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      failures.push(`video-alerts:${videoAlertSource.getTopic()} (${detail})`);
+      console.error(`[video-alerts] failed to subscribe to ${videoAlertSource.getTopic()}:`, err);
+    }
 
     for (const prefix of PATH_PREFIXES) {
       const topic = pathResultTopic(prefix);
@@ -603,6 +628,59 @@ export class IpsecSource extends EventEmitter {
     if (this.gatewayTwinRetryTimer) {
       clearTimeout(this.gatewayTwinRetryTimer);
       this.gatewayTwinRetryTimer = undefined;
+    }
+  }
+
+  private resetVideoAlertSubscription(reason: string | null = null): void {
+    this.videoAlertSubscribed = false;
+    if (this.videoAlertRetryTimer) {
+      clearTimeout(this.videoAlertRetryTimer);
+      this.videoAlertRetryTimer = undefined;
+    }
+    videoAlertSource.setConnectionState(false, reason);
+  }
+
+  private scheduleVideoAlertRetry(): void {
+    if (this.videoAlertRetryTimer || !this.connected || this.videoAlertSubscribed) return;
+    this.videoAlertRetryTimer = setTimeout(() => {
+      this.videoAlertRetryTimer = undefined;
+      if (!this.connected || this.videoAlertSubscribed) return;
+      void this.subscribeVideoAlertTopic().catch((error) => {
+        console.error('[video-alerts] subscription retry failed:', error);
+      });
+    }, VIDEO_ALERT_RETRY_MS);
+    this.videoAlertRetryTimer.unref?.();
+  }
+
+  private async subscribeVideoAlertTopic(): Promise<void> {
+    if (this.videoAlertSubscribed) return;
+    if (!this.connection) {
+      throw new Error('AWS IoT connection is not initialized');
+    }
+
+    const topic = videoAlertSource.getTopic();
+    try {
+      await this.subscribeTopicWithRetry(
+        'video-alerts',
+        topic,
+        mqtt.QoS.AtLeastOnce,
+        (inputTopic, payload, duplicate, _qos, retained) => {
+          videoAlertSource.ingest(inputTopic, payload, duplicate, retained);
+        },
+      );
+      this.videoAlertSubscribed = true;
+      if (this.videoAlertRetryTimer) {
+        clearTimeout(this.videoAlertRetryTimer);
+        this.videoAlertRetryTimer = undefined;
+      }
+      videoAlertSource.setConnectionState(true);
+      console.log(`[video-alerts] subscribed to ${topic} on the shared IoT connection`);
+    } catch (error) {
+      this.videoAlertSubscribed = false;
+      const detail = error instanceof Error ? error.message : String(error);
+      videoAlertSource.setConnectionState(false, detail);
+      this.scheduleVideoAlertRetry();
+      throw error;
     }
   }
 

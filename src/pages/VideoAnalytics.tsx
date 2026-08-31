@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { useToast } from '../ui/Toast';
+import { useVideoAlerts } from '../ui/useVideoAlerts';
+import { buildVideoAlertToast } from '../features/videoAnalytics/videoAlertCopy';
 import {
-  AlertCircle, Cpu, Loader2, Maximize2, Minimize2, Play, RefreshCw, Square, Video, Wifi,
+  AlertCircle, Cpu, Loader2, Maximize2, Minimize2, Play, RefreshCw, Siren, Square, Video, Wifi,
 } from 'lucide-react';
 
 type StreamGroup = 'Nvidia' | 'Hailo';
@@ -47,6 +49,34 @@ const GROUP_META: Record<StreamGroup, { color: string; sub: string }> = {
 export function VideoAnalyticsPage() {
   const nvidia = useMemo(() => STREAMS.filter((s) => s.group === 'Nvidia'), []);
   const hailo  = useMemo(() => STREAMS.filter((s) => s.group === 'Hailo'),  []);
+  const { push } = useToast();
+  const relay = useVideoAlerts();
+  const activeStreamRef = useRef<VideoStream | null>(null);
+  const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
+  const activeStream = useMemo(
+    () => STREAMS.find((stream) => stream.id === activeStreamId),
+    [activeStreamId],
+  );
+
+  const handleStreamActivity = useCallback((stream: VideoStream, active: boolean) => {
+    if (active) {
+      activeStreamRef.current = stream;
+      setActiveStreamId(stream.id);
+      return;
+    }
+    if (activeStreamRef.current?.id === stream.id) {
+      activeStreamRef.current = null;
+      setActiveStreamId(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    const event = relay.lastLiveEvent;
+    // OFF messages clear server state without creating noisy resolution
+    // toasts. Retained messages are excluded by useVideoAlerts.
+    if (!event || event.state !== 'ON') return;
+    push(buildVideoAlertToast(event, activeStreamRef.current ?? undefined));
+  }, [push, relay.lastLiveEvent]);
 
   return (
     <>
@@ -60,21 +90,36 @@ export function VideoAnalyticsPage() {
         <Kpi label="Nvidia analytics" value={String(nvidia.length)} sub="GPU inference"           icon={Cpu}  accent="var(--ok)" />
         <Kpi label="Hailo analytics"  value={String(hailo.length)}  sub="NPU inference"           icon={Cpu}  accent="var(--accent3)" />
         <Kpi label="Transport"        value="MJPEG / HTTP"          sub="loaded on demand"        icon={Wifi} accent="var(--accent2)" />
+        <Kpi
+          label="Safety relay"
+          value={relay.connected ? 'Listening' : 'Waiting'}
+          sub={`${relay.topic} · ${activeStream ? activeStream.name : 'open a feed for context'}`}
+          icon={Siren}
+          accent={relay.connected ? 'var(--ok)' : 'var(--warn)'}
+        />
       </div>
 
       <div className="grid">
         <div className="col-12">
-          <StreamGroupCard group="Nvidia" streams={nvidia} />
+          <StreamGroupCard group="Nvidia" streams={nvidia} onStreamActivity={handleStreamActivity} />
         </div>
         <div className="col-12">
-          <StreamGroupCard group="Hailo" streams={hailo} />
+          <StreamGroupCard group="Hailo" streams={hailo} onStreamActivity={handleStreamActivity} />
         </div>
       </div>
     </>
   );
 }
 
-function StreamGroupCard({ group, streams }: { group: StreamGroup; streams: VideoStream[] }) {
+function StreamGroupCard({
+  group,
+  streams,
+  onStreamActivity,
+}: {
+  group: StreamGroup;
+  streams: VideoStream[];
+  onStreamActivity: (stream: VideoStream, active: boolean) => void;
+}) {
   const meta = GROUP_META[group];
   return (
     <Card
@@ -102,7 +147,9 @@ function StreamGroupCard({ group, streams }: { group: StreamGroup; streams: Vide
       }
     >
       <div className="va-grid">
-        {streams.map((s) => <StreamTile key={s.id} stream={s} />)}
+        {streams.map((s) => (
+          <StreamTile key={s.id} stream={s} onStreamActivity={onStreamActivity} />
+        ))}
       </div>
     </Card>
   );
@@ -110,7 +157,13 @@ function StreamGroupCard({ group, streams }: { group: StreamGroup; streams: Vide
 
 /* ─────────── Stream tile ─────────── */
 
-function StreamTile({ stream }: { stream: VideoStream }) {
+function StreamTile({
+  stream,
+  onStreamActivity,
+}: {
+  stream: VideoStream;
+  onStreamActivity: (stream: VideoStream, active: boolean) => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { push } = useToast();
   /** When `true`, the <img> for the stream is mounted (network request fires). */
@@ -130,16 +183,21 @@ function StreamTile({ stream }: { stream: VideoStream }) {
       if (!inFs) {
         setIsLive(false);
         setErrored(false);
+        onStreamActivity(stream, false);
       }
     }
     document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, []);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      onStreamActivity(stream, false);
+    };
+  }, [onStreamActivity, stream]);
 
   function openStream() {
     setErrored(false);
     setLoaded(false);
     setIsLive(true);
+    onStreamActivity(stream, true);
     // Request fullscreen after the image element is in the DOM.
     requestAnimationFrame(() => {
       containerRef.current?.requestFullscreen?.().catch(() => {
@@ -156,6 +214,7 @@ function StreamTile({ stream }: { stream: VideoStream }) {
     setIsLive(false);
     setErrored(false);
     setLoaded(false);
+    onStreamActivity(stream, false);
   }
 
   async function stopStream() {
