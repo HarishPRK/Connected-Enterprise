@@ -13,6 +13,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { fetchOnboardingOperation } from './api';
+import { isAuthenticatedPullConfirmedOperation } from './gatewayProfileDeploymentEligibility';
 import type { OnboardingOperation, OnboardingState, Site } from './types';
 import { isOperationHealthy, isOperationTerminal } from './types';
 import type { OnboardingStreamState } from './useOnboardingData';
@@ -29,6 +30,7 @@ interface LifecycleMilestone {
   state: OnboardingState;
   label: string;
   description: string;
+  preferDescription?: boolean;
 }
 
 const ONBOARD_MILESTONES: LifecycleMilestone[] = [
@@ -58,6 +60,11 @@ const PROFILE_DEPLOY_MILESTONES: LifecycleMilestone[] = [
   { state: 'APPLYING', label: 'Applying configuration', description: 'The gateway is applying the candidate transaction with its watchdog armed.' },
   { state: 'HEALTH_CHECK', label: 'Validating health', description: 'Management connectivity and network services are being confirmed.' },
   { state: 'APPLIED_HEALTHY', label: 'Applied healthy', description: 'The gateway acknowledged the exact version and passed health checks.' },
+];
+
+const AUTHENTICATED_PULL_MILESTONES: LifecycleMilestone[] = [
+  { state: 'PROFILE_STAGED', label: 'Generation staged', description: 'The Controller payload and automatic profile assignment were staged for authenticated gateway retrieval.', preferDescription: true },
+  { state: 'APPLIED_HEALTHY', label: 'Retrieved by gateway', description: 'The authenticated gateway retrieved the Controller payload and assignment generation.' },
 ];
 
 function formatTimestamp(value?: string): string {
@@ -105,7 +112,7 @@ function MilestoneList({
             </span>
             <div>
               <strong>{milestone.label}</strong>
-              <span>{timeline?.detail ?? milestone.description}</span>
+              <span>{milestone.preferDescription ? milestone.description : timeline?.detail ?? milestone.description}</span>
             </div>
             <time dateTime={timeline?.at}>
               {timeline ? formatTimestamp(timeline.at) : complete ? 'Completed' : current ? 'In progress' : 'Waiting'}
@@ -147,7 +154,10 @@ export function OperationProgress({
     };
   }, [operation, onUpdate]);
 
-  const milestones = operation.type === 'DECOMMISSION'
+  const pullConfirmed = isAuthenticatedPullConfirmedOperation(operation);
+  const milestones = pullConfirmed
+    ? AUTHENTICATED_PULL_MILESTONES
+    : operation.type === 'DECOMMISSION'
     ? DECOMMISSION_MILESTONES
     : operation.type === 'PROFILE_DEPLOY'
       ? PROFILE_DEPLOY_MILESTONES
@@ -160,7 +170,9 @@ export function OperationProgress({
     && hasReachedMilestone(operation, 'OPERATIONAL_IDENTITY_ISSUED');
   const profileValidationStarted = operation.type === 'ONBOARD'
     && hasReachedMilestone(operation, 'PROFILE_STAGED');
-  const summaryLabel = healthy
+  const summaryLabel = pullConfirmed
+    ? 'Controller configuration retrieved'
+    : healthy
     ? 'Configuration applied and healthy'
     : failed
       ? rolledBack ? 'Activation failed; known-good profile restored' : 'Operation needs attention'
@@ -181,8 +193,8 @@ export function OperationProgress({
             {operation.type === 'DECOMMISSION'
               ? 'Gateway decommissioning'
               : operation.type === 'PROFILE_DEPLOY'
-                ? 'Profile deployment progress'
-                : 'Gateway onboarding and profile validation'}
+                ? pullConfirmed ? 'Controller delivery progress' : 'Profile deployment progress'
+                : pullConfirmed ? 'Gateway onboarding and Controller delivery' : 'Gateway onboarding and profile validation'}
           </h2>
           <p>{operation.serialNumber} · {site ? `${site.name}, ${site.location}` : operation.siteId}</p>
         </div>
@@ -213,7 +225,7 @@ export function OperationProgress({
             </div>
           </div>
 
-          {operation.type === 'ONBOARD' ? (
+          {operation.type === 'ONBOARD' && !pullConfirmed ? (
             <div className="ce-onb-phase-stack">
               <section className="ce-onb-phase" aria-labelledby="gateway-onboarding-phase-title">
                 <div className="ce-onb-phase-head">
@@ -264,7 +276,11 @@ export function OperationProgress({
               </section>
             </div>
           ) : (
-            <MilestoneList milestones={milestones} operation={operation} label="Operation milestones" />
+            <MilestoneList
+              milestones={milestones}
+              operation={operation}
+              label={pullConfirmed ? 'Authenticated Controller retrieval milestones' : 'Operation milestones'}
+            />
           )}
 
           {(operation.state === 'ROLLING_BACK' || operation.state === 'ROLLED_BACK') && (
@@ -285,9 +301,11 @@ export function OperationProgress({
             <div className="ce-onb-success-panel" role="status">
               <CheckCircle2 size={24} aria-hidden="true" />
               <div>
-                <strong>APPLIED_HEALTHY</strong>
+                <strong>{pullConfirmed ? 'Retrieved successfully' : 'APPLIED_HEALTHY'}</strong>
                 <span>
-                  {operation.type === 'PROFILE_DEPLOY'
+                  {pullConfirmed
+                    ? `The authenticated gateway retrieved Controller generation ${operation.deploymentGeneration}. This gateway version does not report apply or health separately.`
+                    : operation.type === 'PROFILE_DEPLOY'
                     ? 'The gateway applied the assigned version and confirmed management health.'
                     : 'The gateway reconnected with its operational identity, applied the assigned version, and confirmed management health.'}
                 </span>
@@ -297,19 +315,19 @@ export function OperationProgress({
         </div>
 
         <aside className="ce-onb-operation-aside" aria-label="Operation details">
-          <h3>{operation.type === 'PROFILE_DEPLOY' ? 'Deployment contract' : operation.type === 'DECOMMISSION' ? 'Retirement contract' : 'Activation contract'}</h3>
+          <h3>{pullConfirmed ? 'Controller delivery contract' : operation.type === 'PROFILE_DEPLOY' ? 'Deployment contract' : operation.type === 'DECOMMISSION' ? 'Retirement contract' : 'Activation contract'}</h3>
           <dl>
             <div><dt>Serial</dt><dd>{operation.serialNumber}</dd></div>
             <div><dt>Site</dt><dd>{site?.name ?? operation.siteId}</dd></div>
-            {operation.profileVersionId && <div><dt>Profile version ID</dt><dd className="mono">{operation.profileVersionId}</dd></div>}
+            {operation.profileVersionId && <div><dt>{pullConfirmed ? 'Assignment profile ID' : 'Profile version ID'}</dt><dd className="mono">{operation.profileVersionId}</dd></div>}
             <div><dt>Generation</dt><dd>{operation.deploymentGeneration}</dd></div>
             <div><dt>Started</dt><dd>{formatTimestamp(operation.createdAt)}</dd></div>
             <div><dt>Updated</dt><dd>{formatTimestamp(operation.updatedAt)}</dd></div>
           </dl>
           <div className="ce-onb-operation-assurances">
             <span><ShieldCheck size={15} aria-hidden="true" />Per-device operational identity</span>
-            <span><FileCheck2 size={15} aria-hidden="true" />Immutable profile version</span>
-            <span><Radio size={15} aria-hidden="true" />Device-confirmed apply state</span>
+            <span><FileCheck2 size={15} aria-hidden="true" />{pullConfirmed ? 'Controller payload and assignment generation' : 'Immutable profile version'}</span>
+            <span><Radio size={15} aria-hidden="true" />{pullConfirmed ? 'Authenticated gateway retrieval' : 'Device-confirmed apply state'}</span>
             <span><Clock3 size={15} aria-hidden="true" />Monotonic deployment generation</span>
           </div>
           <button type="button" onClick={onBack}>

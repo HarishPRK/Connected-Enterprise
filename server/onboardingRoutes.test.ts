@@ -26,6 +26,20 @@ const schemaV2CoreParameters = {
   defaultRouteMetric: 100,
 };
 
+const controllerProvisioning = {
+  usp: {
+    controller_endpoint_id: 'proto::Controller-ip-172-31-2-12',
+    mtp: 'MQTT',
+    mqtt: {
+      broker: 'broker.hivemq.com',
+      port: 1883,
+      protocol_version: '5.0',
+      transport: 'TCP/IP',
+      controller_topic: 'controller/proto::Controller-ip-172-31-2-12',
+    },
+  },
+} as const;
+
 describe('onboarding HTTP API', () => {
   let server: Server;
   let baseUrl: string;
@@ -76,6 +90,32 @@ describe('onboarding HTTP API', () => {
     assert.equal(response.status, 428);
     const body = await response.json() as { error: { code: string } };
     assert.equal(body.error.code, 'IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('saves the Controller USP/MQTT provisioning and exposes it in the tenant snapshot', async () => {
+    const response = await fetch(`${baseUrl}/controller`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'route-controller-01',
+      },
+      body: JSON.stringify(controllerProvisioning),
+    });
+    assert.equal(response.status, 200);
+    const controller = await response.json() as {
+      configuration: typeof controllerProvisioning;
+      configurationChecksum: string;
+      revision: string;
+      updatedAt: string;
+    };
+    assert.deepEqual(controller.configuration.usp, controllerProvisioning.usp);
+    assert.match(controller.configurationChecksum, /^[a-f0-9]{64}$/);
+    assert.match(controller.revision, /^controller_[a-f0-9]{32}$/);
+    assert.ok(Number.isFinite(Date.parse(controller.updatedAt)));
+
+    const snapshotResponse = await fetch(`${baseUrl}/snapshot`);
+    const snapshot = await snapshotResponse.json() as { controller?: typeof controller };
+    assert.deepEqual(snapshot.controller, controller);
   });
 
   it('ignores payload tenant assertions and returns authoritative identity', async () => {

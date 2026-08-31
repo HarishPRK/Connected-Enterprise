@@ -163,6 +163,44 @@ New UI profile requests explicitly send numeric `schemaVersion: 2`. Requests tha
 
 Dormant static WAN/DNS values may be omitted or empty. Likewise, DHCP pool values may be omitted while the LAN DHCP server is disabled. The v2 core LAN/WAN/DNS/NTP/forwarding/NAT catalog fields are required, and as soon as a mode activates its conditional values, the API validates the complete active combination before publishing an immutable version. Validation also rejects unsafe/reserved IPv4 addresses, overlapping LAN and static-WAN subnets, duplicate DNS/NTP endpoints, and masquerading without IPv4 forwarding.
 
+## Controller provisioning source
+
+The **Controller** onboarding tab stores one tenant-wide USP/MQTT provisioning object. Only a platform or tenant administrator may save it. The form captures Controller Endpoint ID, MTP, MQTT broker and port, protocol version, transport, and Controller topic before gateway onboarding. This is configuration data, not another HTTP URL for Lambda to call. Saving it does not change the gateway command: the gateway continues to SigV4-sign and curl the same API Gateway configuration URL.
+
+The control-plane API validates the fields, constructs a deterministic JSON body, records its SHA-256 and immutable revision metadata in DynamoDB, and returns this structure directly from the device configuration Lambda:
+
+```json
+{
+  "usp": {
+    "controller_endpoint_id": "proto::Controller-ip-172-31-2-12",
+    "mtp": "MQTT",
+    "mqtt": {
+      "broker": "broker.hivemq.com",
+      "port": 1883,
+      "protocol_version": "5.0",
+      "transport": "TCP/IP",
+      "controller_topic": "controller/proto::Controller-ip-172-31-2-12"
+    }
+  }
+}
+```
+
+The gateway receives this object as the entire response body—not a `GATEWAY_CONFIGURATION` object containing it. Response metadata stays outside the JSON in `x-ce-configuration-source`, `x-ce-generation`, and `x-ce-profile-version-id` headers; Controller responses also carry `x-ce-confirmation-method: AUTHENTICATED_CONFIGURATION_PULL`. A normal `curl` therefore prints only the provisioned USP/MQTT JSON. The configuration Lambda performs no outbound HTTP or DNS request and never dereferences the broker or topic values.
+
+The gateway continues to call the stack's `DeviceConfigurationUrlTemplate` output, with its Thing name, operational certificate ID, and desired generation substituted:
+
+```bash
+curl --fail-with-body \
+  --aws-sigv4 "aws:amz:us-east-1:execute-api" \
+  --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
+  -H "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
+  "${DEVICE_CONFIGURATION_URL}?generation=${GENERATION}"
+```
+
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` are the short-lived credentials obtained from the IoT Credentials Provider through `GatewayConfigRoleAliasName`; they are not the gateway certificate files themselves.
+
+Before application begins, the first explicit save may supersede an S3 delivery for the same gateway generation, and an explicit provisioning update may supersede the previous Controller revision. Once a gateway starts applying or has applied a generation, assign a new generation (the same profile version may be selected) to consume newly saved Controller details. The persisted revision makes repeat pulls byte-identical, and the gateway reports the exact response-body checksum in its status acknowledgement. A malformed or inconsistent Controller record fails closed and never silently falls back to S3.
+
 ## Gateway contract
 
 1. Validate WAN, DNS, NTP, TLS hostname, and the ATS trust chain.
@@ -171,9 +209,9 @@ Dormant static WAN/DNS values may be omitted or empty. Likewise, DHCP pool value
 4. Persist the new operational certificate/key before calling `RegisterThing`, then call `RegisterThing` with only `SerialNumber`. Subscribe to accepted/rejected topics before publishing.
 5. Disconnect the bootstrap session and use only the assigned Thing name plus permanent operational certificate/key. If the gateway also connects to MQTT for optional Shadow or Job notifications, its MQTT client ID must equal that Thing name.
 6. Call the IoT Credentials Provider with the configured role alias and Thing-name header. Use the returned short-lived AWS credentials to SigV4-sign `GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration?generation={generation}`. Poll the next monotonic generation with backoff; named Shadow `configuration` or an IoT Job may optionally accelerate discovery of a later generation, but neither is required for the pull.
-7. Consume the `GATEWAY_CONFIGURATION` JSON returned by the signed GET. Read the allowlisted `gateway`, `assignment`, and complete inline `configuration` objects; verify the compact `integrity` claim with the pinned KMS public key, require `gatewayMetadataSha256` to equal the SHA-256 of the canonical `gateway` object, check its Thing/gateway/generation/profile binding and expiry, canonicalize the configuration, and require its SHA-256 to equal `integrity.profileSha256` and `assignment.profileChecksum`. No second S3 download is required by the gateway.
-8. Stage and translate the vendor-neutral profile through the gateway data model, apply transactionally, health-check, and roll back on failure.
-9. SigV4-sign status acknowledgements with the same short-lived role credentials and send them to `POST /device/v1/things/{thingName}/certificates/{certificateId}/status`. `APPLIED_HEALTHY` must include `generation`, `profileVersionId`, and `profileChecksum`, where the checksum is the lowercase SHA-256 digest from the authoritative descriptor.
+7. Read `x-ce-configuration-source`, `x-ce-generation`, and `x-ce-profile-version-id`, then consume the JSON returned by the signed GET. In S3 mode, read the `GATEWAY_CONFIGURATION` object's allowlisted `gateway`, `assignment`, complete inline `configuration`, and compact `integrity` claim; verify its KMS signature and hashes as before. In Controller mode, the whole response is the Controller object, with no CE envelope, and the authenticated GET atomically records the Controller plus its automatic profile assignment as pull-confirmed. No second download is required in either mode.
+8. Consume the returned configuration through the gateway's local data model. S3 profile mode stages and applies the vendor-neutral profile transactionally with health checks and rollback; the current Controller compatibility mode does not separately report those phases to the control plane.
+9. For the current Controller compatibility flow, no status POST is required: successful authenticated retrieval closes the operation in green **Retrieved** state, explicitly recording that apply and health were not separately reported. S3 mode continues to SigV4-sign status acknowledgements to `POST /device/v1/things/{thingName}/certificates/{certificateId}/status`. Future Controller firmware may use the same endpoint; `APPLIED_HEALTHY` must then include the response header's `generation` and `profileVersionId` plus the lowercase SHA-256 of the exact UTF-8 response body.
 10. If the candidate fails and the gateway restores its last-known-good configuration, `ROLLED_BACK` must attest that restored configuration with the same `generation` plus the **previously applied** `profileVersionId` and `profileChecksum`. A missing, mismatched, or unverifiable rollback target—including an initial onboarding attempt with no healthy baseline—causes quarantine instead of returning the gateway to an assignable state.
 
 After the first authenticated configuration request completes, AWS schedules the bootstrap certificate for deactivation. The gateway continues only with its operational identity and must not fall back to the bootstrap credential.

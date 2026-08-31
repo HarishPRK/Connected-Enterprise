@@ -16,6 +16,7 @@ export const bootstrapCertificatePk = (certificateId: string): string => `BOOTST
 export const profileSk = (profileId: string): string => `PROFILE#${profileId}`;
 export const profileVersionSk = (profileId: string, version: number): string =>
   `PROFILE_VERSION#${profileId}#${String(version).padStart(10, '0')}`;
+export const controllerSk = (): 'CONTROLLER' => 'CONTROLLER';
 export const gatewaySk = (gatewayId: string): string => `GATEWAY#${gatewayId}`;
 export const operationSk = (operationId: string): string => `OPERATION#${operationId}`;
 export const idempotencySk = (route: string, key: string): string =>

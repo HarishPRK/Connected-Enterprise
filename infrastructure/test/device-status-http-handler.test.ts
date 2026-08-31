@@ -384,6 +384,111 @@ test('authoritative status core can be called directly without MQTT broker field
   assert.equal(setup.transactions.length, 1);
 });
 
+test('healthy status attests the internally recorded controller payload checksum', async () => {
+  const {
+    recordAuthoritativeDeviceStatus,
+    DeviceStatusConflictError,
+  } = await import('../lambda/iot-status-handler.js');
+  const controllerChecksum = 'c'.repeat(64);
+  const controllerRevision = `controller_${'c'.repeat(32)}`;
+  const controllerUpdatedAt = '2026-08-17T11:30:00.000Z';
+  const setup = coreHarness();
+  for (const record of [setup.records.gateway, setup.records.deployment]) {
+    Object.assign(record, {
+      configurationSource: 'CONTROLLER',
+      deliveredConfigurationGeneration: GENERATION,
+      deliveredConfigurationChecksum: controllerChecksum,
+      controllerConfigurationRevision: controllerRevision,
+      controllerConfigurationUpdatedAt: controllerUpdatedAt,
+    });
+  }
+
+  const disposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    {
+      generation: GENERATION,
+      status: 'APPLIED_HEALTHY',
+      profileVersionId: PROFILE_VERSION_ID,
+      profileChecksum: controllerChecksum,
+    },
+    context,
+    setup.value,
+  );
+  assert.equal(disposition, 'APPLIED');
+  const transaction = setup.transactions[0] as Array<{
+    Update?: { ConditionExpression?: string; ExpressionAttributeValues?: Record<string, unknown> };
+  }>;
+  for (const update of transaction.slice(0, 2).map((item) => item.Update)) {
+    assert.match(String(update?.ConditionExpression), /configurationSource = :configurationSource/);
+    assert.match(String(update?.ConditionExpression), /deliveredConfigurationChecksum = :authoritativeConfigurationChecksum/);
+    assert.equal(update?.ExpressionAttributeValues?.[':configurationSource'], 'CONTROLLER');
+    assert.equal(update?.ExpressionAttributeValues?.[':authoritativeConfigurationChecksum'], controllerChecksum);
+    assert.equal(update?.ExpressionAttributeValues?.[':profileChecksum'], controllerChecksum);
+  }
+
+  const refreshed = coreHarness({
+    gatewayState: 'APPLIED_HEALTHY',
+    deploymentStatus: 'APPLIED_HEALTHY',
+    operationState: 'APPLIED_HEALTHY',
+  });
+  for (const record of [refreshed.records.gateway, refreshed.records.deployment]) {
+    Object.assign(record, {
+      configurationSource: 'CONTROLLER',
+      deliveredConfigurationGeneration: GENERATION,
+      deliveredConfigurationChecksum: controllerChecksum,
+      controllerConfigurationRevision: controllerRevision,
+      controllerConfigurationUpdatedAt: controllerUpdatedAt,
+      appliedProfileVersionId: PROFILE_VERSION_ID,
+      appliedProfileChecksum: PROFILE_CHECKSUM,
+    });
+  }
+  const refreshDisposition = await recordAuthoritativeDeviceStatus(
+    { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+    {
+      generation: GENERATION,
+      status: 'APPLIED_HEALTHY',
+      profileVersionId: PROFILE_VERSION_ID,
+      profileChecksum: controllerChecksum,
+    },
+    context,
+    refreshed.value,
+  );
+  assert.equal(refreshDisposition, 'STALE_NOOP');
+  assert.deepEqual(refreshed.transactions, [],
+    'terminal generation attestation is immutable and cannot be refreshed in place');
+
+  const inconsistent = coreHarness();
+  Object.assign(inconsistent.records.gateway, {
+    configurationSource: 'CONTROLLER',
+    deliveredConfigurationGeneration: GENERATION,
+    deliveredConfigurationChecksum: controllerChecksum,
+    controllerConfigurationRevision: controllerRevision,
+    controllerConfigurationUpdatedAt: controllerUpdatedAt,
+  });
+  Object.assign(inconsistent.records.deployment, {
+    configurationSource: 'CONTROLLER',
+    deliveredConfigurationGeneration: GENERATION,
+    deliveredConfigurationChecksum: 'e'.repeat(64),
+    controllerConfigurationRevision: controllerRevision,
+    controllerConfigurationUpdatedAt: controllerUpdatedAt,
+  });
+  await assert.rejects(
+    recordAuthoritativeDeviceStatus(
+      { thingName: THING_NAME, certificateId: CERTIFICATE_ID },
+      {
+        generation: GENERATION,
+        status: 'APPLIED_HEALTHY',
+        profileVersionId: PROFILE_VERSION_ID,
+        profileChecksum: controllerChecksum,
+      },
+      context,
+      inconsistent.value,
+    ),
+    DeviceStatusConflictError,
+  );
+  assert.deepEqual(inconsistent.transactions, []);
+});
+
 test('authoritative status core fails closed when desiredGeneration is missing', async () => {
   const {
     recordAuthoritativeDeviceStatus,

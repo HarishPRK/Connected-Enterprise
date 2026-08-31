@@ -48,6 +48,13 @@ export function publicOperation(item: Record<string, unknown>): Record<string, u
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     steps: item.steps,
+    ...(item.configurationSource === 'S3' || item.configurationSource === 'CONTROLLER'
+      ? { configurationSource: item.configurationSource }
+      : {}),
+    ...(item.configurationConfirmationMethod === 'AUTHENTICATED_CONFIGURATION_PULL'
+      ? { configurationConfirmationMethod: item.configurationConfirmationMethod }
+      : {}),
+    ...(item.configurationConfirmedAt ? { configurationConfirmedAt: item.configurationConfirmedAt } : {}),
     ...(item.nextTransitionAt ? { nextTransitionAt: item.nextTransitionAt } : {}),
     ...(item.failure ? { failure: item.failure } : {}),
     ...(item.error ? { error: item.error } : {}),

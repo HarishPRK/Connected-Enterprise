@@ -349,7 +349,13 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       sid: 'ReadAndRecordAuthorizedConfigurationDelivery',
       // DynamoDB authorizes transactions using the permissions for each
       // underlying item action, not a TransactWriteItems IAM action.
-      actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+      actions: [
+        'dynamodb:ConditionCheckItem',
+        'dynamodb:GetItem',
+        'dynamodb:Query',
+        'dynamodb:PutItem',
+        'dynamodb:UpdateItem',
+      ],
       resources: [table.tableArn, `${table.tableArn}/index/GSI1`],
     }));
     deviceConfigHttpFunction.addToRolePolicy(new iam.PolicyStatement({
@@ -438,6 +444,7 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     addJwtRoute('/api/onboarding/claims/verify', apigwv2.HttpMethod.POST);
     addJwtRoute('/api/onboarding/bootstrap-packages', apigwv2.HttpMethod.POST);
     addJwtRoute('/api/onboarding/profiles', apigwv2.HttpMethod.POST);
+    addJwtRoute('/api/onboarding/controller', apigwv2.HttpMethod.POST);
     addJwtRoute('/api/onboarding/operations', apigwv2.HttpMethod.POST);
     addJwtRoute('/api/onboarding/operations/{operationId}', apigwv2.HttpMethod.GET);
     addJwtRoute('/api/onboarding/gateways/{gatewayId}/decommission', apigwv2.HttpMethod.POST);

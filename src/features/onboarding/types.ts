@@ -18,6 +18,8 @@ export const ONBOARDING_STATES = [
 export type OnboardingState = (typeof ONBOARDING_STATES)[number];
 export type OperationType = 'ONBOARD' | 'PROFILE_DEPLOY' | 'DECOMMISSION';
 export type OperationStatus = 'IN_PROGRESS' | 'SUCCEEDED' | 'FAILED';
+export type ConfigurationSource = 'S3' | 'CONTROLLER';
+export type ConfigurationConfirmationMethod = 'AUTHENTICATED_CONFIGURATION_PULL';
 export type GatewayState =
   | 'UNCLAIMED'
   | 'QUARANTINED'
@@ -31,6 +33,27 @@ export type GatewayState =
 export interface Tenant {
   id: string;
   name: string;
+}
+
+export interface ControllerProvisioning {
+  usp: {
+    controller_endpoint_id: string;
+    mtp: 'MQTT';
+    mqtt: {
+      broker: string;
+      port: number;
+      protocol_version: '5.0';
+      transport: 'TCP/IP';
+      controller_topic: string;
+    };
+  };
+}
+
+export interface ControllerConfiguration {
+  configuration: ControllerProvisioning;
+  configurationChecksum: string;
+  revision: string;
+  updatedAt: string;
 }
 
 export interface Site {
@@ -60,6 +83,9 @@ export interface Gateway {
   profileVersionId?: string;
   desiredProfileVersionId?: string;
   appliedProfileChecksum?: string;
+  configurationSource?: ConfigurationSource;
+  configurationConfirmationMethod?: ConfigurationConfirmationMethod;
+  configurationConfirmedAt?: string;
   lastSeenAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -100,6 +126,9 @@ export interface OnboardingOperation {
   profileVersionId?: string;
   previousProfileVersionId?: string;
   deploymentGeneration: number;
+  configurationSource?: ConfigurationSource;
+  configurationConfirmationMethod?: ConfigurationConfirmationMethod;
+  configurationConfirmedAt?: string;
   timeline: OperationTimelineEntry[];
   createdAt: string;
   updatedAt: string;
@@ -115,6 +144,7 @@ export interface OnboardingSnapshot {
   generatedAt: string;
   mode: 'local-simulator' | 'aws';
   tenant: Tenant;
+  controller?: ControllerConfiguration;
   sites: Site[];
   gatewayModels: GatewayModel[];
   gateways: Gateway[];
@@ -153,11 +183,12 @@ export interface BootstrapPackageInput {
 }
 
 export interface OnboardingEventEnvelope {
-  type?: 'snapshot' | 'operation' | 'gateway' | 'profile';
+  type?: 'snapshot' | 'operation' | 'gateway' | 'profile' | 'controller';
   snapshot?: OnboardingSnapshot;
   operation?: OnboardingOperation;
   gateway?: Gateway;
   profile?: ProfileVersion;
+  controller?: ControllerConfiguration;
 }
 
 export function siteLabel(site: Site): string {

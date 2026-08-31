@@ -80,14 +80,13 @@ sudo setcap 'cap_net_bind_service=+ep' $(readlink -f $(which node))
 
 > This grants the `node` binary the single privilege of binding to ports below 1024. The actual process still runs as `ubuntu` (not root).
 
-### 2.4 · Clone, install, build
+### 2.4 · Clone and install
 
 ```bash
 cd ~
 git clone <YOUR-REPO-URL> connected-enterprise
 cd connected-enterprise
 npm ci
-npm run build
 ```
 
 > If your repo is private: set up [GitHub deploy keys](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) first or use a personal access token in the clone URL (`https://<TOKEN>@github.com/...`).
@@ -103,10 +102,22 @@ AWS_BEARER_TOKEN_BEDROCK=bedrock-api-key-PASTE-YOURS-HERE
 AGENT_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0
 IOT_IPSEC_TOPICS=rdk/ipsec/metrics,prpl/ipsec/metrics,prplhome/ipsec/metrics
 IOT_IPSEC_DEVICE_TOPICS=rdk/ipsec/metrics,prplhome/ipsec/metrics
+VITE_ONBOARDING_API_URL=<ApiUrl CloudFormation output>
+VITE_ONBOARDING_COGNITO_DOMAIN=<CognitoHostedUiBaseUrl CloudFormation output>
+VITE_ONBOARDING_COGNITO_CLIENT_ID=<CognitoSpaClientId CloudFormation output>
+VITE_ONBOARDING_REDIRECT_URI=https://connectedenterprise.app/onboarding
+VITE_ONBOARDING_LOGOUT_URI=https://connectedenterprise.app/onboarding
+VITE_ONBOARDING_DISABLE_SSE=true
 EOF
 
 chmod 600 .env
+npm run build
 ```
+
+Replace the three onboarding placeholders with the outputs from
+`ConnectedEnterpriseOnboarding-dev` before running the build. Vite embeds these
+values into the browser bundle, so creating or changing `.env` after
+`npm run build` does not update onboarding.
 
 ### 2.6 · Start with PM2
 
@@ -158,7 +169,7 @@ ssh ubuntu@<ELASTIC-IP>
 cd ~/connected-enterprise
 git pull
 npm ci             # only if package.json changed
-npm run build
+npm run build       # reads the retained VITE_ONBOARDING_* values from .env
 pm2 restart connected-enterprise
 ```
 

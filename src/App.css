@@ -4118,9 +4118,10 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 18px; border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
 }
-.modal-body { padding: 18px; overflow-y: auto; font-size: 13.5px; color: var(--text-dim); line-height: 1.55; }
-.modal-foot { padding: 14px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+.modal-body { min-height: 0; padding: 18px; overflow-y: auto; font-size: 13.5px; color: var(--text-dim); line-height: 1.55; }
+.modal-foot { padding: 14px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; flex: 0 0 auto; }
 
 /* ───── Drawer ───── */
 .drawer-backdrop {

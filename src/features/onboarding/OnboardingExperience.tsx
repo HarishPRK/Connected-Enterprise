@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { CloudCog, FileKey2, FileLock2, LogOut, MapPin, PackagePlus, Radio, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CloudCog, FileKey2, FileLock2, LogOut, MapPin, PackagePlus, Radio, RefreshCw, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { PageHeader } from '../../components/PageHeader';
 import { BootstrapPackageManager } from './BootstrapPackageManager';
+import { ControllerManager } from './ControllerManager';
 import { GatewayInventory } from './GatewayInventory';
 import { OnboardingWizard } from './OnboardingWizard';
 import { OperationProgress } from './OperationProgress';
@@ -10,7 +11,8 @@ import type { OnboardingOperation } from './types';
 import { useOnboardingData } from './useOnboardingData';
 import { useOnboardingAuth } from './onboardingAuthContext';
 
-type Surface = 'gateways' | 'profiles' | 'bootstrap' | 'wizard' | 'operation';
+type WorkspaceSurface = 'gateways' | 'profiles' | 'controller' | 'bootstrap';
+type Surface = WorkspaceSurface | 'wizard' | 'operation';
 
 export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: string }) {
   const { user, signOut } = useOnboardingAuth();
@@ -23,6 +25,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     refresh,
     upsertOperation,
     upsertProfile,
+    upsertController,
   } = useOnboardingData();
   const localSimulator = snapshot?.mode === 'local-simulator';
   const tenantRole = user?.tenantRole;
@@ -33,6 +36,32 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
   const [surface, setSurface] = useState<Surface>('gateways');
   const [operationId, setOperationId] = useState<string>();
   const [wizardSerial, setWizardSerial] = useState('');
+  const workspaceSurfaces: WorkspaceSurface[] = canIssueBootstrapPackage
+    ? ['gateways', 'profiles', 'controller', 'bootstrap']
+    : ['gateways', 'profiles', 'controller'];
+
+  const onWorkspaceTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const focusedTab = (event.target as HTMLElement).closest<HTMLButtonElement>('[role="tab"]');
+    const focusedSurface = workspaceSurfaces.find((candidate) => focusedTab?.id === `ce-onb-${candidate}-tab`);
+    const currentIndex = focusedSurface ? workspaceSurfaces.indexOf(focusedSurface) : workspaceSurfaces.indexOf(surface as WorkspaceSurface);
+    if (currentIndex < 0) return;
+
+    event.preventDefault();
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? workspaceSurfaces.length - 1
+        : event.key === 'ArrowRight'
+          ? (currentIndex + 1) % workspaceSurfaces.length
+          : (currentIndex - 1 + workspaceSurfaces.length) % workspaceSurfaces.length;
+    const nextSurface = workspaceSurfaces[nextIndex];
+    setSurface(nextSurface);
+    const tablist = event.currentTarget;
+    window.requestAnimationFrame(() => {
+      tablist.querySelector<HTMLButtonElement>(`#ce-onb-${nextSurface}-tab`)?.focus();
+    });
+  };
 
   const openOperation = (operation: OnboardingOperation) => {
     upsertOperation(operation);
@@ -51,7 +80,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     <div className="ce-onb-page">
       <PageHeader
         title="Gateway Onboarding"
-        subtitle="Verify factory serials, assign immutable profiles, and confirm device health."
+        subtitle="Verify factory serials, assign immutable profiles, and confirm configuration delivery and reported device health."
         right={snapshot && (
           <div className="ce-onb-page-context">
             <span><ShieldCheck size={13} aria-hidden="true" />{snapshot.tenant.name}</span>
@@ -92,15 +121,16 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
             </div>
           )}
 
-          {(surface === 'gateways' || surface === 'profiles' || surface === 'bootstrap') && (
+          {(surface === 'gateways' || surface === 'profiles' || surface === 'controller' || surface === 'bootstrap') && (
             <div className="ce-onb-command-bar">
-              <div className="ce-onb-tabs" role="tablist" aria-label="Onboarding workspace">
+              <div className="ce-onb-tabs" role="tablist" aria-label="Onboarding workspace" onKeyDown={onWorkspaceTabKeyDown}>
                 <button
                   id="ce-onb-gateways-tab"
                   type="button"
                   role="tab"
                   aria-selected={surface === 'gateways'}
                   aria-controls="ce-onb-gateways-panel"
+                  tabIndex={surface === 'gateways' ? 0 : -1}
                   onClick={() => setSurface('gateways')}
                 >
                   <CloudCog size={15} aria-hidden="true" />Gateways <span>{snapshot.gateways.length}</span>
@@ -111,9 +141,21 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                   role="tab"
                   aria-selected={surface === 'profiles'}
                   aria-controls="ce-onb-profiles-panel"
+                  tabIndex={surface === 'profiles' ? 0 : -1}
                   onClick={() => setSurface('profiles')}
                 >
                   <FileLock2 size={15} aria-hidden="true" />Profiles <span>{snapshot.profiles.length}</span>
+                </button>
+                <button
+                  id="ce-onb-controller-tab"
+                  type="button"
+                  role="tab"
+                  aria-selected={surface === 'controller'}
+                  aria-controls="ce-onb-controller-panel"
+                  tabIndex={surface === 'controller' ? 0 : -1}
+                  onClick={() => setSurface('controller')}
+                >
+                  <ServerCog size={15} aria-hidden="true" />Controller
                 </button>
                 {canIssueBootstrapPackage && (
                   <button
@@ -122,6 +164,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                     role="tab"
                     aria-selected={surface === 'bootstrap'}
                     aria-controls="ce-onb-bootstrap-panel"
+                    tabIndex={surface === 'bootstrap' ? 0 : -1}
                     onClick={() => setSurface('bootstrap')}
                   >
                     <FileKey2 size={15} aria-hidden="true" />Bootstrap
@@ -148,6 +191,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                 models={snapshot.gatewayModels}
                 profiles={snapshot.profiles}
                 operations={snapshot.operations}
+                controller={snapshot.controller}
                 preferredSiteId={preferredSiteId}
                 refreshing={refreshing}
                 canVerifyDevice={canOperate}
@@ -167,6 +211,16 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                 models={snapshot.gatewayModels}
                 canPublish={canAdminister}
                 onProfileCreated={upsertProfile}
+              />
+            </div>
+          )}
+
+          {surface === 'controller' && (
+            <div id="ce-onb-controller-panel" role="tabpanel" aria-labelledby="ce-onb-controller-tab">
+              <ControllerManager
+                controller={snapshot.controller}
+                canConfigure={canAdminister}
+                onControllerSaved={upsertController}
               />
             </div>
           )}

@@ -4,6 +4,8 @@ import { isIP } from 'node:net';
 import type { OnboardingRepository } from './onboardingStore.js';
 import type {
   AuditEvent,
+  ControllerConfiguration,
+  ControllerProvisioning,
   Gateway,
   GatewayModel,
   IdempotencyRecord,
@@ -19,6 +21,7 @@ import type {
   TenantState,
   VerificationResult,
 } from './onboardingTypes.js';
+import { controllerProvisioningBody, normalizeControllerProvisioning } from './controllerConfiguration.js';
 
 const GATEWAY_MODELS: GatewayModel[] = [
   {
@@ -879,6 +882,68 @@ export class OnboardingService {
     return clone(profile);
   }
 
+  async saveController(
+    context: OperatorContext,
+    input: unknown,
+    idempotencyKey: string,
+  ): Promise<ControllerConfiguration> {
+    assertIdempotencyKey(idempotencyKey);
+    let provisioning: ControllerProvisioning;
+    try {
+      provisioning = normalizeControllerProvisioning(input);
+    } catch (error) {
+      throw new OnboardingError(
+        400,
+        'INVALID_CONTROLLER_CONFIGURATION',
+        error instanceof Error ? error.message : 'Enter valid Controller provisioning details.',
+      );
+    }
+    const configurationBody = controllerProvisioningBody(provisioning);
+    const configurationChecksum = sha256(configurationBody);
+
+    const controller = await this.transaction((database) => {
+      const tenant = this.ensureTenant(database, context.tenantId);
+      return this.idempotent(database, context, 'save-controller', idempotencyKey, provisioning, () => {
+        const updatedAt = iso(this.now());
+        const unchanged = tenant.controller?.configurationChecksum === configurationChecksum;
+        const value: ControllerConfiguration = unchanged
+          ? tenant.controller as ControllerConfiguration
+          : {
+              configuration: provisioning,
+              configurationChecksum,
+              revision: `controller_${randomUUID().replaceAll('-', '')}`,
+              updatedAt,
+            };
+        tenant.controller = value;
+        tenant.audit.push(newAudit(
+          context.tenantId,
+          context.actorId,
+          unchanged ? 'CONTROLLER_CONFIGURATION_CONFIRMED' : 'CONTROLLER_CONFIGURATION_UPDATED',
+          'controller',
+          'tenant-controller',
+          'SUCCESS',
+          updatedAt,
+        ));
+        tenant.outbox.push(newOutbox(
+          context.tenantId,
+          'ControllerConfigurationUpdated',
+          'tenant-controller',
+          updatedAt,
+          {
+            controllerEndpointId: provisioning.usp.controller_endpoint_id,
+            mtp: provisioning.usp.mtp,
+            broker: provisioning.usp.mqtt.broker,
+            configurationChecksum,
+            revision: value.revision,
+          },
+        ));
+        return value;
+      });
+    });
+    this.emit(context.tenantId, 'ControllerConfigurationUpdated', 'tenant-controller');
+    return clone(controller);
+  }
+
   async startOnboarding(
     context: OperatorContext,
     input: { verificationId: string; siteId: string; profileVersionId: string },
@@ -1068,10 +1133,6 @@ export class OnboardingService {
         if (profile.modelId !== gateway.modelId) {
           throw new OnboardingError(409, 'PROFILE_INCOMPATIBLE', 'Selected profile is not compatible with this gateway model.');
         }
-        if (profile.id === gateway.profileVersionId) {
-          throw new OnboardingError(409, 'PROFILE_ALREADY_ASSIGNED', 'The gateway already has this immutable profile version assigned.');
-        }
-
         const createdAt = iso(this.now());
         const previousProfileVersionId = supersededOperation?.previousProfileVersionId ?? gateway.profileVersionId;
         const deploymentGeneration = gateway.deploymentGeneration + 1;
@@ -1396,6 +1457,7 @@ export class OnboardingService {
       generatedAt: iso(this.now()),
       mode: this.mode,
       tenant: tenant.tenant,
+      ...(tenant.controller ? { controller: tenant.controller } : {}),
       sites: tenant.sites,
       gatewayModels: GATEWAY_MODELS,
       gateways: tenant.gateways,

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useEscape } from './Toast';
 import { X } from 'lucide-react';
 
@@ -14,7 +15,7 @@ interface ModalProps {
 export function Modal({ open, onClose, title, children, footer, width = 460 }: ModalProps) {
   useEscape(onClose, open);
   if (!open) return null;
-  return (
+  return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div
         className="modal"
@@ -33,6 +34,7 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }: M
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

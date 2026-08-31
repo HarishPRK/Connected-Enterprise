@@ -22,6 +22,7 @@ import { tenantContext, requireRole } from './shared/auth.js';
 import {
   auditSk,
   ConflictError,
+  controllerSk,
   ddb,
   deploymentSk,
   gatewaySk,
@@ -52,6 +53,13 @@ import {
   createBootstrapPackageArchive,
   type BootstrapPackageMetadata,
 } from './shared/bootstrap-package.js';
+import {
+  controllerConfigurationDocument,
+  ControllerConfigurationError,
+  storedControllerConfiguration,
+  type ControllerConfigurationDocument,
+  type StoredControllerConfiguration,
+} from './shared/controller-configuration.js';
 
 const s3 = new S3Client({});
 const iot = new IoTClient({});
@@ -63,7 +71,11 @@ type ProfileDeliveryMode = 'PULL' | 'SHADOW' | 'JOB';
 
 interface SupersededProfileAssignment {
   descriptor: Record<string, unknown>;
+  legacyHttpCompletion: boolean;
   operationId: string;
+  operationState: 'PROFILE_STAGED' | 'APPLIED_HEALTHY';
+  operationStatus: 'IN_PROGRESS' | 'SUCCEEDED';
+  operationTimeline?: Record<string, unknown>[];
   operationType: 'ONBOARD' | 'PROFILE_DEPLOY';
   profileVersionId: string;
   tenantId: string;
@@ -95,6 +107,9 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) 
       case 'POST /api/onboarding/profiles':
         requireRole(context, 'platform_admin', 'tenant_admin');
         return await createUiProfileVersion(event, context);
+      case 'POST /api/onboarding/controller':
+        requireRole(context, 'platform_admin', 'tenant_admin');
+        return await configureController(event, context);
       case 'POST /api/onboarding/operations':
         requireRole(context, 'platform_admin', 'tenant_admin', 'operator');
         return await createOperation(event, context);
@@ -125,8 +140,9 @@ export const handler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) 
 
 async function snapshot(tenantId: string): Promise<Record<string, unknown>> {
   const tenantKey = tenantPk(tenantId);
-  const [tenantResult, sites, gatewayModels, profiles, gateways, recentOperations] = await Promise.all([
+  const [tenantResult, controllerResult, sites, gatewayModels, profiles, gateways, recentOperations] = await Promise.all([
     ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: { PK: tenantKey, SK: 'METADATA' }, ConsistentRead: true })),
+    ddb.send(new GetCommand({ TableName: TABLE_NAME, Key: { PK: tenantKey, SK: controllerSk() }, ConsistentRead: true })),
     queryTenantEntityPrefix(tenantId, 'SITE#', 'SITE', 250),
     queryTenantEntityPrefix(tenantId, 'MODEL#', 'GATEWAY_MODEL', 100),
     queryTenantEntityPrefix(tenantId, 'PROFILE_VERSION#', 'PROFILE_VERSION', 500),
@@ -142,16 +158,154 @@ async function snapshot(tenantId: string): Promise<Record<string, unknown>> {
     if (typeof operation.operationId === 'string') operationMap.set(operation.operationId, operation);
   }
   const tenant = tenantResult.Item;
+  const controller = publicControllerConfiguration(controllerResult.Item, tenantId);
   return {
     generatedAt: new Date().toISOString(),
     mode: 'aws',
     tenant: { id: tenantId, name: tenant?.name ?? tenantId },
+    ...(controller ? { controller } : {}),
     gatewayModels: gatewayModels.map(publicGatewayModel),
     gateways: gateways.map(publicGateway),
     profiles: profiles.map(publicUiProfileVersion),
     sites: sites.map(publicSite),
     operations: [...operationMap.values()].map(publicOperation),
   };
+}
+
+async function configureController(
+  event: APIGatewayProxyEventV2WithJWTAuthorizer,
+  context: ReturnType<typeof tenantContext>,
+) {
+  const body = parseJsonBody<Record<string, unknown>>(event, 8 * 1024);
+  let requested: ControllerConfigurationDocument;
+  try {
+    requested = controllerConfigurationDocument(body);
+  } catch (error) {
+    if (error instanceof ControllerConfigurationError) throw new InputError(error.message);
+    throw error;
+  }
+
+  const key = idempotencyKey(event);
+  const requestHash = sha256(canonicalJson({
+    route: event.routeKey,
+    configurationChecksum: requested.configurationChecksum,
+  }));
+  const idempotencyReplay = await existingIdempotency(context.tenantId, event.routeKey, key, requestHash);
+  if (idempotencyReplay) return json(idempotencyReplay.statusCode ?? 200, idempotencyReplay.response);
+
+  const tenantKey = tenantPk(context.tenantId);
+  const currentResult = await ddb.send(new GetCommand({
+    TableName: TABLE_NAME,
+    Key: { PK: tenantKey, SK: controllerSk() },
+    ConsistentRead: true,
+  }));
+  const current = currentResult.Item;
+  let storedCurrent: StoredControllerConfiguration | undefined;
+  if (current) {
+    if (current.entityType !== 'CONTROLLER_CONFIGURATION'
+      || current.PK !== tenantKey
+      || current.SK !== controllerSk()
+      || current.tenantId !== context.tenantId) {
+      throw new ConflictError('Controller configuration is inconsistent');
+    }
+    try {
+      storedCurrent = storedControllerConfiguration(current);
+    } catch {
+      throw new ConflictError('Controller configuration is inconsistent');
+    }
+  }
+
+  const previous = storedCurrent;
+  const unchanged = previous !== undefined
+    && previous.configurationBody === requested.configurationBody
+    && previous.configurationChecksum === requested.configurationChecksum;
+  const mutationAt = new Date().toISOString();
+  const revision = previous !== undefined && unchanged
+    ? previous.revision
+    : newId('controller');
+  const updatedAt = previous !== undefined && unchanged ? previous.updatedAt : mutationAt;
+  const response = publicControllerDocument({ ...requested, revision, updatedAt });
+  const controllerMutation = !previous
+    ? {
+        Put: {
+          TableName: TABLE_NAME,
+          Item: {
+            PK: tenantKey,
+            SK: controllerSk(),
+            entityType: 'CONTROLLER_CONFIGURATION',
+            tenantId: context.tenantId,
+            ...requested,
+            revision,
+            updatedAt,
+            updatedBy: context.subject,
+          },
+          ConditionExpression: 'attribute_not_exists(PK)',
+        },
+      }
+    : unchanged
+      ? {
+          ConditionCheck: {
+            TableName: TABLE_NAME,
+            Key: { PK: tenantKey, SK: controllerSk() },
+            ConditionExpression: 'entityType = :entity AND tenantId = :tenantId AND configuration = :configuration AND configurationBody = :configurationBody AND configurationChecksum = :configurationChecksum AND revision = :revision AND updatedAt = :updatedAt',
+            ExpressionAttributeValues: {
+              ':entity': 'CONTROLLER_CONFIGURATION',
+              ':tenantId': context.tenantId,
+              ':configuration': requested.configuration,
+              ':configurationBody': requested.configurationBody,
+              ':configurationChecksum': requested.configurationChecksum,
+              ':revision': revision,
+              ':updatedAt': updatedAt,
+            },
+          },
+        }
+      : {
+          Update: {
+            TableName: TABLE_NAME,
+            Key: { PK: tenantKey, SK: controllerSk() },
+            UpdateExpression: 'SET configuration = :configuration, configurationBody = :configurationBody, configurationChecksum = :configurationChecksum, revision = :revision, updatedAt = :updatedAt, updatedBy = :updatedBy',
+            ConditionExpression: 'entityType = :entity AND tenantId = :tenantId AND configuration = :previousConfiguration AND configurationBody = :previousConfigurationBody AND configurationChecksum = :previousConfigurationChecksum AND revision = :previousRevision AND updatedAt = :previousUpdatedAt',
+            ExpressionAttributeValues: {
+              ':entity': 'CONTROLLER_CONFIGURATION',
+              ':tenantId': context.tenantId,
+              ':configuration': requested.configuration,
+              ':configurationBody': requested.configurationBody,
+              ':configurationChecksum': requested.configurationChecksum,
+              ':revision': revision,
+              ':updatedAt': updatedAt,
+              ':updatedBy': context.subject,
+              ':previousConfiguration': previous.configuration,
+              ':previousConfigurationBody': previous.configurationBody,
+              ':previousConfigurationChecksum': previous.configurationChecksum,
+              ':previousRevision': previous.revision,
+              ':previousUpdatedAt': previous.updatedAt,
+            },
+          },
+        };
+  await ddb.send(new TransactWriteCommand({ TransactItems: [
+    controllerMutation,
+    {
+      Put: {
+        TableName: TABLE_NAME,
+        Item: idempotencyItem(context.tenantId, event.routeKey, key, requestHash, response, 200),
+        ConditionExpression: 'attribute_not_exists(PK)',
+      },
+    },
+    {
+      Put: {
+        TableName: TABLE_NAME,
+        Item: auditItem(
+          context,
+          unchanged ? 'CONTROLLER_CONFIGURATION_CONFIRMED' : 'CONTROLLER_CONFIGURATION_UPDATED',
+          'tenant-controller',
+          mutationAt,
+          { revision, configurationChecksum: requested.configurationChecksum },
+        ),
+        ConditionExpression: 'attribute_not_exists(PK)',
+      },
+    },
+  ] }));
+  return json(200, response);
 }
 
 async function createBootstrapPackage(
@@ -1213,7 +1367,7 @@ async function assignProfile(
         Key: { PK: tenantPk(context.tenantId), SK: gatewaySk(gatewayId) },
         UpdateExpression: 'SET generation = :generation, desiredGeneration = :generation, desiredProfileVersionId = :versionId, signedDescriptor = :descriptor, operationId = :operationId, #state = :available, health = :applying, updatedAt = :now',
         ConditionExpression: supersededAssignment
-          ? 'entityType = :gateway AND tenantId = :tenantId AND gatewayId = :gatewayId AND thingName = :thingName AND certificateId = :certificateId AND generation = :current AND desiredGeneration = :current AND desiredProfileVersionId = :supersededProfileVersionId AND operationId = :supersededOperationId AND signedDescriptor = :supersededDescriptor AND #state = :currentState AND certificateStatus = :active AND (attribute_not_exists(dispatchLeaseExpiresAtEpoch) OR dispatchLeaseExpiresAtEpoch < :nowEpoch)'
+          ? `entityType = :gateway AND tenantId = :tenantId AND gatewayId = :gatewayId AND thingName = :thingName AND certificateId = :certificateId AND generation = :current AND desiredGeneration = :current AND desiredProfileVersionId = :supersededProfileVersionId AND operationId = :supersededOperationId AND signedDescriptor = :supersededDescriptor AND #state = :currentState AND certificateStatus = :active AND (attribute_not_exists(dispatchLeaseExpiresAtEpoch) OR dispatchLeaseExpiresAtEpoch < :nowEpoch)${supersededAssignment.legacyHttpCompletion ? ' AND health = :applying AND attribute_not_exists(appliedGeneration) AND attribute_not_exists(appliedProfileVersionId) AND attribute_not_exists(appliedProfileChecksum) AND attribute_not_exists(healthyAt) AND attribute_not_exists(profileValidatedAt)' : ''}`
           : 'entityType = :gateway AND generation = :current AND #state = :currentState AND #state IN (:healthy, :rolledBack) AND certificateStatus = :active AND (attribute_not_exists(dispatchLeaseExpiresAtEpoch) OR dispatchLeaseExpiresAtEpoch < :nowEpoch)',
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
@@ -1242,7 +1396,7 @@ async function assignProfile(
           TableName: TABLE_NAME,
           Key: { PK: tenantPk(context.tenantId), SK: deploymentSk(gatewayId, currentGeneration) },
           UpdateExpression: 'SET #status = :superseded, supersededAt = :now, supersededByGeneration = :nextGeneration, supersededByOperationId = :nextOperationId, updatedAt = :now',
-          ConditionExpression: 'entityType = :deployment AND tenantId = :tenantId AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND #descriptor = :descriptor AND #status = :delivered',
+          ConditionExpression: `entityType = :deployment AND tenantId = :tenantId AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND #descriptor = :descriptor AND #status = :delivered${supersededAssignment.legacyHttpCompletion ? ' AND attribute_not_exists(appliedProfileVersionId) AND attribute_not_exists(appliedProfileChecksum) AND attribute_not_exists(completedAt) AND attribute_not_exists(validatedAt)' : ''}`,
           ExpressionAttributeNames: { '#descriptor': 'descriptor', '#status': 'status' },
           ExpressionAttributeValues: {
             ':deployment': 'DEPLOYMENT', ':gatewayId': gatewayId, ':generation': currentGeneration,
@@ -1257,18 +1411,25 @@ async function assignProfile(
         Update: {
           TableName: TABLE_NAME,
           Key: { PK: tenantPk(context.tenantId), SK: operationSk(supersededAssignment.operationId) },
-          UpdateExpression: 'SET operationStatus = :failed, #state = :failed, supersededAt = :now, supersededByGeneration = :nextGeneration, supersededByOperationId = :nextOperationId, failure = :failure, updatedAt = :now, timeline = list_append(if_not_exists(timeline, :empty), :events)',
-          ConditionExpression: 'entityType = :operation AND tenantId = :tenantId AND operationId = :operationId AND #type = :operationType AND gatewayId = :gatewayId AND deploymentGeneration = :generation AND profileVersionId = :profileVersionId AND operationStatus = :inProgress AND #state = :profileStaged',
-          ExpressionAttributeNames: { '#state': 'state', '#type': 'type' },
+          UpdateExpression: 'SET operationStatus = :failed, #state = :failed, supersededAt = :now, supersededByGeneration = :nextGeneration, supersededByOperationId = :nextOperationId, failure = :failure, updatedAt = :now, #timeline = list_append(if_not_exists(#timeline, :empty), :events)',
+          ConditionExpression: `entityType = :operation AND tenantId = :tenantId AND operationId = :operationId AND #type = :operationType AND gatewayId = :gatewayId AND deploymentGeneration = :generation AND profileVersionId = :profileVersionId AND operationStatus = :supersededOperationStatus AND #state = :supersededOperationState${supersededAssignment.legacyHttpCompletion ? ' AND #timeline = :supersededTimeline' : ''}`,
+          ExpressionAttributeNames: { '#state': 'state', '#type': 'type', '#timeline': 'timeline' },
           ExpressionAttributeValues: {
             ':operation': 'OPERATION', ':tenantId': supersededAssignment.tenantId,
             ':operationId': supersededAssignment.operationId, ':operationType': supersededAssignment.operationType, ':gatewayId': gatewayId,
             ':generation': currentGeneration, ':profileVersionId': supersededAssignment.profileVersionId,
-            ':inProgress': 'IN_PROGRESS', ':profileStaged': 'PROFILE_STAGED', ':failed': 'FAILED',
+            ':supersededOperationStatus': supersededAssignment.operationStatus,
+            ':supersededOperationState': supersededAssignment.operationState,
+            ...(supersededAssignment.legacyHttpCompletion ? {
+              ':supersededTimeline': supersededAssignment.operationTimeline,
+            } : {}),
+            ':failed': 'FAILED',
             ':nextGeneration': generation, ':nextOperationId': operationId, ':now': now, ':empty': [],
             ':failure': {
               code: 'PROFILE_ASSIGNMENT_SUPERSEDED',
-              message: 'Profile assignment was superseded by a newer profile deployment.',
+              message: supersededAssignment.legacyHttpCompletion
+                ? 'Legacy HTTPS fetch completion was superseded because no device health acknowledgement was recorded.'
+                : 'Profile assignment was superseded by a newer profile deployment.',
               rolledBack: false,
             },
             ':events': [{
@@ -1301,6 +1462,7 @@ async function assignProfile(
         supersededGeneration: currentGeneration,
         supersedeGeneration,
         supersededOperationId: supersededAssignment.operationId,
+        recoveredLegacyHttpCompletion: supersededAssignment.legacyHttpCompletion,
       } : {}),
     }), ConditionExpression: 'attribute_not_exists(PK)' } },
   ] }));
@@ -1367,19 +1529,44 @@ export function profileAssignmentSupersedeAuthority(
     || canonicalJson(deployment.descriptor) !== canonicalJson(signedDescriptor)) {
     return conflict();
   }
+  const operationStatus = operation.operationStatus;
+  const operationState = operation.state;
+  const operationTimeline = Array.isArray(operation.timeline)
+    ? operation.timeline as Record<string, unknown>[]
+    : undefined;
+  const ordinaryUnconfirmedAssignment = operationStatus === 'IN_PROGRESS'
+    && operationState === 'PROFILE_STAGED';
+  const legacyHttpCompletion = operationType === 'PROFILE_DEPLOY'
+    && hasConfigurationClaim
+    && operationStatus === 'SUCCEEDED'
+    && operationState === 'APPLIED_HEALTHY'
+    && gateway.health === 'APPLYING'
+    && gateway.appliedGeneration == null
+    && gateway.appliedProfileVersionId == null
+    && gateway.appliedProfileChecksum == null
+    && gateway.healthyAt == null
+    && gateway.profileValidatedAt == null
+    && deployment.appliedProfileVersionId == null
+    && deployment.appliedProfileChecksum == null
+    && deployment.completedAt == null
+    && deployment.validatedAt == null
+    && hasLegacyHttpCompletionMarker(operation.timeline);
   if (operation.entityType !== 'OPERATION'
     || operation.tenantId !== tenantId
     || operation.operationId !== operationId
     || operation.gatewayId !== gatewayId
     || Number(operation.deploymentGeneration) !== generation
     || operation.profileVersionId !== profileVersionId
-    || operation.operationStatus !== 'IN_PROGRESS'
-    || operation.state !== 'PROFILE_STAGED') {
+    || (!ordinaryUnconfirmedAssignment && !legacyHttpCompletion)) {
     return conflict();
   }
   return {
     descriptor: signedDescriptor,
+    legacyHttpCompletion,
     operationId,
+    operationState: operationState as SupersededProfileAssignment['operationState'],
+    operationStatus: operationStatus as SupersededProfileAssignment['operationStatus'],
+    ...(legacyHttpCompletion && operationTimeline ? { operationTimeline } : {}),
     operationType,
     profileVersionId,
     tenantId,
@@ -1387,6 +1574,17 @@ export function profileAssignmentSupersedeAuthority(
     certificateId,
     requiresExplicitConfirmation: hasConfigurationClaim,
   };
+}
+
+function hasLegacyHttpCompletionMarker(value: unknown): boolean {
+  return Array.isArray(value) && value.some((entry) => (
+    entry != null
+      && typeof entry === 'object'
+      && !Array.isArray(entry)
+      && (entry as Record<string, unknown>).state === 'APPLIED_HEALTHY'
+      && typeof (entry as Record<string, unknown>).detail === 'string'
+      && ((entry as Record<string, unknown>).detail as string).includes('health-validated via HTTPS fetch')
+  ));
 }
 
 export function assertProfileAssignmentSupersedeConfirmation(
@@ -1598,6 +1796,9 @@ function optionalPositiveInteger(value: unknown, label: string): number | undefi
 
 export function publicGateway(item: Record<string, unknown>) {
   const rawState = String(item.state ?? 'PENDING');
+  const deploymentGeneration = item.generation ?? 0;
+  const currentGenerationConfirmed = item.appliedGeneration === deploymentGeneration;
+  const currentGenerationDelivered = item.deliveredConfigurationGeneration === deploymentGeneration;
   const state = rawState === 'DECOMMISSIONED' ? 'DECOMMISSIONED'
     : rawState === 'DECOMMISSIONING' ? 'DECOMMISSIONING'
       : rawState === 'QUARANTINED' || rawState === 'RECOVERY_LOCKED' ? 'QUARANTINED'
@@ -1617,11 +1818,49 @@ export function publicGateway(item: Record<string, unknown>) {
     id: item.gatewayId, thingName: item.thingName, serialNumber: item.serialNumber,
     modelId: item.modelId ?? item.model, hardwareRevision: item.hardwareRevision ?? item.hardwareId,
     siteId: item.siteId, state, certificateState, health,
-    deploymentGeneration: item.generation ?? 0,
+    deploymentGeneration,
     profileVersionId: item.appliedProfileVersionId,
     desiredProfileVersionId: item.desiredProfileVersionId,
     appliedProfileChecksum: item.appliedProfileChecksum,
+    ...(currentGenerationDelivered && (item.configurationSource === 'S3' || item.configurationSource === 'CONTROLLER')
+      ? { configurationSource: item.configurationSource }
+      : {}),
+    ...(currentGenerationConfirmed && item.configurationConfirmationMethod === 'AUTHENTICATED_CONFIGURATION_PULL'
+      ? { configurationConfirmationMethod: item.configurationConfirmationMethod }
+      : {}),
+    ...(currentGenerationConfirmed && item.configurationConfirmedAt
+      ? { configurationConfirmedAt: item.configurationConfirmedAt }
+      : {}),
     lastSeenAt: item.lastSeenAt, createdAt: item.createdAt, updatedAt: item.updatedAt,
+  };
+}
+
+function publicControllerConfiguration(
+  item: Record<string, unknown> | undefined,
+  tenantId: string,
+): ReturnType<typeof publicControllerDocument> | undefined {
+  if (!item) return undefined;
+  if (item.entityType !== 'CONTROLLER_CONFIGURATION'
+    || item.PK !== tenantPk(tenantId)
+    || item.SK !== controllerSk()
+    || item.tenantId !== tenantId) {
+    throw new Error('Controller configuration is inconsistent');
+  }
+  try {
+    return publicControllerDocument(storedControllerConfiguration(item));
+  } catch {
+    throw new Error('Controller configuration is inconsistent');
+  }
+}
+
+function publicControllerDocument(
+  value: ControllerConfigurationDocument & { revision: string; updatedAt: string },
+) {
+  return {
+    configuration: value.configuration,
+    configurationChecksum: value.configurationChecksum,
+    revision: value.revision,
+    updatedAt: value.updatedAt,
   };
 }
 

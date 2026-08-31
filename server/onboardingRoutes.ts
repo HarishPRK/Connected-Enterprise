@@ -135,6 +135,11 @@ export async function createOnboardingRouter(options: RouterOptions = {}): Promi
     res.status(201).json(result);
   });
 
+  router.post('/controller', async (req, res) => {
+    const result = await service.saveController(context(req), req.body, idempotencyKey(req));
+    res.status(200).json(result);
+  });
+
   router.post('/operations', async (req, res) => {
     const result = await service.startOnboarding(context(req), {
       verificationId: req.body?.verificationId,

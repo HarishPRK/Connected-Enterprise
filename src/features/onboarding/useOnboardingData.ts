@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchOnboardingSnapshot, ONBOARDING_EVENTS_URL } from './api';
 import { onboardingSseEnabled } from './auth';
+import { isControllerConfiguration } from './controllerUsp';
 import type {
+  ControllerConfiguration,
   Gateway,
   OnboardingEventEnvelope,
   OnboardingOperation,
@@ -20,6 +22,7 @@ interface UseOnboardingDataResult {
   refresh: () => Promise<void>;
   upsertOperation: (operation: OnboardingOperation) => void;
   upsertProfile: (profile: ProfileVersion) => void;
+  upsertController: (controller: ControllerConfiguration) => void;
 }
 
 function isSnapshot(value: unknown): value is OnboardingSnapshot {
@@ -27,7 +30,8 @@ function isSnapshot(value: unknown): value is OnboardingSnapshot {
   const candidate = value as Partial<OnboardingSnapshot>;
   return Array.isArray(candidate.gateways)
     && Array.isArray(candidate.profiles)
-    && Array.isArray(candidate.sites);
+    && Array.isArray(candidate.sites)
+    && (candidate.controller === undefined || isControllerConfiguration(candidate.controller));
 }
 
 function isOperation(value: unknown): value is OnboardingOperation {
@@ -96,6 +100,12 @@ export function useOnboardingData(): UseOnboardingDataResult {
       : current);
   }, []);
 
+  const upsertController = useCallback((controller: ControllerConfiguration) => {
+    setSnapshot((current) => current
+      ? { ...current, controller }
+      : current);
+  }, []);
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -157,7 +167,7 @@ export function useOnboardingData(): UseOnboardingDataResult {
 
     const applyEvent = (raw: string, kind?: string) => {
       try {
-        const parsed = JSON.parse(raw) as OnboardingEventEnvelope | OnboardingSnapshot | OnboardingOperation | Gateway | ProfileVersion;
+        const parsed = JSON.parse(raw) as OnboardingEventEnvelope | OnboardingSnapshot | OnboardingOperation | Gateway | ProfileVersion | ControllerConfiguration;
         if (kind === 'snapshot' && isSnapshot(parsed)) {
           applySnapshot(parsed);
           return;
@@ -174,12 +184,17 @@ export function useOnboardingData(): UseOnboardingDataResult {
           upsertProfile(parsed);
           return;
         }
+        if (kind === 'controller' && isControllerConfiguration(parsed)) {
+          upsertController(parsed);
+          return;
+        }
 
         const envelope = parsed as OnboardingEventEnvelope;
         if (envelope.snapshot && isSnapshot(envelope.snapshot)) applySnapshot(envelope.snapshot);
         if (envelope.operation && isOperation(envelope.operation)) upsertOperation(envelope.operation);
         if (envelope.gateway && isGateway(envelope.gateway)) upsertGateway(envelope.gateway);
         if (envelope.profile && isProfile(envelope.profile)) upsertProfile(envelope.profile);
+        if (envelope.controller && isControllerConfiguration(envelope.controller)) upsertController(envelope.controller);
 
         if (isSnapshot(parsed)) applySnapshot(parsed);
         else if (isOperation(parsed)) upsertOperation(parsed);
@@ -189,22 +204,23 @@ export function useOnboardingData(): UseOnboardingDataResult {
       }
     };
 
-    const listen = (kind: 'snapshot' | 'operation' | 'gateway' | 'profile') => {
+    const listen = (kind: 'snapshot' | 'operation' | 'gateway' | 'profile' | 'controller') => {
       source.addEventListener(kind, (event) => applyEvent((event as MessageEvent<string>).data, kind));
     };
     listen('snapshot');
     listen('operation');
     listen('gateway');
     listen('profile');
+    listen('controller');
     source.onmessage = (event) => applyEvent(event.data);
     source.onopen = () => setStreamState('connected');
     source.onerror = () => setStreamState('reconnecting');
 
     return () => source.close();
-  }, [applySnapshot, upsertGateway, upsertOperation, upsertProfile]);
+  }, [applySnapshot, upsertController, upsertGateway, upsertOperation, upsertProfile]);
 
   return useMemo(
-    () => ({ snapshot, loading, refreshing, error, streamState, refresh, upsertOperation, upsertProfile }),
-    [snapshot, loading, refreshing, error, streamState, refresh, upsertOperation, upsertProfile],
+    () => ({ snapshot, loading, refreshing, error, streamState, refresh, upsertOperation, upsertProfile, upsertController }),
+    [snapshot, loading, refreshing, error, streamState, refresh, upsertOperation, upsertProfile, upsertController],
   );
 }

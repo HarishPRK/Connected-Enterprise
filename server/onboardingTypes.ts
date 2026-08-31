@@ -18,6 +18,8 @@ export const ONBOARDING_STATES = [
 export type OnboardingState = (typeof ONBOARDING_STATES)[number];
 export type OperationType = 'ONBOARD' | 'PROFILE_DEPLOY' | 'DECOMMISSION';
 export type OperationStatus = 'IN_PROGRESS' | 'SUCCEEDED' | 'FAILED';
+export type ConfigurationSource = 'S3' | 'CONTROLLER';
+export type ConfigurationConfirmationMethod = 'AUTHENTICATED_CONFIGURATION_PULL';
 export type GatewayState =
   | 'UNCLAIMED'
   | 'QUARANTINED'
@@ -32,6 +34,27 @@ export interface OperatorContext {
   tenantId: string;
   actorId: string;
   actorEmail?: string;
+}
+
+export interface ControllerProvisioning {
+  usp: {
+    controller_endpoint_id: string;
+    mtp: 'MQTT';
+    mqtt: {
+      broker: string;
+      port: number;
+      protocol_version: '5.0';
+      transport: 'TCP/IP';
+      controller_topic: string;
+    };
+  };
+}
+
+export interface ControllerConfiguration {
+  configuration: ControllerProvisioning;
+  configurationChecksum: string;
+  revision: string;
+  updatedAt: string;
 }
 
 export interface Site {
@@ -61,6 +84,9 @@ export interface Gateway {
   profileVersionId?: string;
   desiredProfileVersionId?: string;
   appliedProfileChecksum?: string;
+  configurationSource?: ConfigurationSource;
+  configurationConfirmationMethod?: ConfigurationConfirmationMethod;
+  configurationConfirmedAt?: string;
   lastSeenAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -127,6 +153,9 @@ export interface OnboardingOperation {
   profileVersionId?: string;
   previousProfileVersionId?: string;
   deploymentGeneration: number;
+  configurationSource?: ConfigurationSource;
+  configurationConfirmationMethod?: ConfigurationConfirmationMethod;
+  configurationConfirmedAt?: string;
   timeline: OperationTimelineEntry[];
   createdAt: string;
   updatedAt: string;
@@ -143,7 +172,7 @@ export interface AuditEvent {
   tenantId: string;
   actorId: string;
   action: string;
-  targetType: 'gateway' | 'profile' | 'operation' | 'verification';
+  targetType: 'controller' | 'gateway' | 'profile' | 'operation' | 'verification';
   targetId: string;
   result: 'SUCCESS' | 'DENIED' | 'FAILED';
   requestId: string;
@@ -172,6 +201,7 @@ export interface IdempotencyRecord {
 
 export interface TenantState {
   tenant: { id: string; name: string };
+  controller?: ControllerConfiguration;
   sites: Site[];
   gateways: Gateway[];
   profiles: ProfileVersion[];
@@ -192,6 +222,7 @@ export interface OnboardingSnapshot {
   generatedAt: string;
   mode: 'local-simulator' | 'aws';
   tenant: TenantState['tenant'];
+  controller?: ControllerConfiguration;
   sites: Site[];
   gatewayModels: GatewayModel[];
   gateways: Gateway[];

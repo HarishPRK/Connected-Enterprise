@@ -90,6 +90,7 @@ export async function runAgent(client: AgentClient, model: string, opts: RunOpti
           t.name,
           (t.input ?? {}) as Record<string, unknown>,
           approvedActions,
+          { branchId: incident.branchId },
         );
 
         const ok = !(typeof result === 'object' && result !== null && 'error' in (result as object));

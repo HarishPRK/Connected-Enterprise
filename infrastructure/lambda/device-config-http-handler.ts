@@ -14,6 +14,7 @@ import {
 } from './shared/config.js';
 import {
   auditSk,
+  controllerSk,
   ddb,
   deploymentSk,
   gatewaySk,
@@ -31,6 +32,10 @@ import {
   PermanentIdentityFinalizationError,
   type PermanentIdentityFinalizationDependencies,
 } from './shared/permanent-identity.js';
+import {
+  storedControllerConfiguration,
+  type StoredControllerConfiguration,
+} from './shared/controller-configuration.js';
 
 const ROUTE_KEY = 'GET /device/v1/things/{thingName}/certificates/{certificateId}/configuration';
 const GATEWAY_CONFIG_ROLE_NAME = process.env.GATEWAY_CONFIG_ROLE_NAME?.trim() ?? '';
@@ -38,7 +43,9 @@ const MAX_PROFILE_BYTES = 1024 * 1024;
 const THING_NAME_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
 const CERTIFICATE_ID_PATTERN = /^[a-f0-9]{64}$/i;
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
+const CONTROLLER_REVISION_PATTERN = /^controller_[a-f0-9]{32}$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+const AUTHENTICATED_CONFIGURATION_PULL = 'AUTHENTICATED_CONFIGURATION_PULL';
 const ACTIVE_GATEWAY_STATES = new Set([
   'PERMANENT_IDENTITY_ACTIVE',
   'PROFILE_AVAILABLE',
@@ -136,6 +143,28 @@ interface ConfigurationAuthority {
   profileVersionId: string;
   descriptor: Item;
   objectKey: string;
+  controller?: StoredControllerConfiguration;
+}
+
+interface ConfigurationDeliverySource {
+  kind: 'S3' | 'CONTROLLER';
+  checksum: string;
+  retrievedAt: string;
+  controllerRevision?: string;
+  controllerUpdatedAt?: string;
+}
+
+interface RecordedConfigurationDelivery {
+  kind: 'S3' | 'CONTROLLER';
+  generation: number;
+  checksum: string;
+  controllerRevision?: string;
+  controllerUpdatedAt?: string;
+}
+
+interface ObservedSourceCondition {
+  expression: string;
+  values: Item;
 }
 
 class DeviceConfigurationError extends Error {
@@ -197,12 +226,37 @@ export function createDeviceConfigurationHandler(
     try {
       const request = authorizedRequest(event, requestId);
       const authority = await configurationAuthority(request, dependencies);
+      if (authority.controller) {
+        assertControllerRetrievalAllowed(authority);
+        const source: ConfigurationDeliverySource = {
+          kind: 'CONTROLLER',
+          checksum: authority.controller.configurationChecksum,
+          retrievedAt: dependencies.now().toISOString(),
+          controllerRevision: authority.controller.revision,
+          controllerUpdatedAt: authority.controller.updatedAt,
+        };
+        assertControllerDeliveryConsistency(authority, source);
+        await recordHttpDelivery(authority, request, context, dependencies, source);
+        return rawJson(
+          200,
+          authority.controller.configurationBody,
+          requestId,
+          configurationResponseHeaders(authority, source.kind),
+        );
+      }
+
+      const source: ConfigurationDeliverySource = {
+        kind: 'S3',
+        checksum: requiredStoredString(authority.descriptor.profileSha256, unavailable),
+        retrievedAt: dependencies.now().toISOString(),
+      };
+      assertS3DeliveryConsistency(authority, source);
       const profileBytes = await dependencies.loadProfileArtifact(authority.objectKey);
       const configuration = verifiedProfileDocument(profileBytes, authority);
       const gateway = publicGatewayConfiguration(authority.gateway, authority);
       const integrity = compactConfigurationClaim(authority, gateway);
 
-      await recordHttpDelivery(authority, request, context, dependencies);
+      await recordHttpDelivery(authority, request, context, dependencies, source);
 
       return json(200, {
         type: 'GATEWAY_CONFIGURATION',
@@ -212,7 +266,7 @@ export function createDeviceConfigurationHandler(
         assignment: publicAssignment(authority),
         configuration,
         integrity,
-      }, requestId);
+      }, requestId, configurationResponseHeaders(authority, source.kind));
     } catch (error) {
       if (error instanceof DeviceConfigurationError) {
         return json(error.statusCode, {
@@ -401,6 +455,22 @@ async function configurationAuthority(
     throw unavailable();
   }
 
+  const controllerItem = await dependencies.getItem({ PK: expectedPk, SK: controllerSk() });
+  let controller: ConfigurationAuthority['controller'];
+  if (controllerItem) {
+    if (controllerItem.entityType !== 'CONTROLLER_CONFIGURATION'
+      || controllerItem.PK !== expectedPk
+      || controllerItem.SK !== controllerSk()
+      || controllerItem.tenantId !== tenantId) {
+      throw unavailable();
+    }
+    try {
+      controller = storedControllerConfiguration(controllerItem);
+    } catch {
+      throw unavailable();
+    }
+  }
+
   return {
     gateway,
     deployment,
@@ -415,6 +485,7 @@ async function configurationAuthority(
     profileVersionId: desiredProfileVersionId,
     descriptor,
     objectKey,
+    ...(controller ? { controller } : {}),
   };
 }
 
@@ -547,6 +618,216 @@ function publicAssignment(authority: ConfigurationAuthority): Item {
   };
 }
 
+function assertControllerDeliveryConsistency(
+  authority: ConfigurationAuthority,
+  source: ConfigurationDeliverySource,
+): void {
+  if (source.kind !== 'CONTROLLER'
+    || !source.controllerRevision
+    || !source.controllerUpdatedAt) throw unavailable();
+  const gatewayRecorded = currentGenerationDelivery(authority.gateway, authority.generation);
+  const deploymentRecorded = currentGenerationDelivery(authority.deployment, authority.generation);
+  if (!gatewayRecorded && !deploymentRecorded) {
+    if (!ordinaryFirstControllerDelivery(authority)
+      && !exactPreApplyControllerTransition(authority)) throw unavailable();
+    return;
+  }
+  if (!gatewayRecorded
+    || !deploymentRecorded
+    || !recordedDeliveriesMatch(gatewayRecorded, deploymentRecorded)) throw unavailable();
+  if (recordedDeliveryMatchesSource(gatewayRecorded, source)) return;
+  if (!exactPreApplyControllerTransition(authority)) throw unavailable();
+
+  if (gatewayRecorded.kind === 'S3') {
+    // An explicit tenant Controller activation is allowed to replace the
+    // generation's prior S3 delivery. The transaction below fences this exact
+    // S3 checksum on both records before installing Controller authority.
+    return;
+  }
+
+  if (gatewayRecorded.controllerRevision !== source.controllerRevision
+    || gatewayRecorded.controllerUpdatedAt !== source.controllerUpdatedAt) {
+    // A changed admin-controlled configuration revision may supersede a previous
+    // Controller delivery immediately. Payload drift inside one exact revision
+    // remains forbidden, so a dynamic Controller cannot silently rewrite an
+    // already-delivered generation.
+    return;
+  }
+  throw unavailable();
+}
+
+function assertControllerRetrievalAllowed(authority: ConfigurationAuthority): void {
+  if (!authority.controller) throw unavailable();
+  const gatewayRecorded = currentGenerationDelivery(authority.gateway, authority.generation);
+  const deploymentRecorded = currentGenerationDelivery(authority.deployment, authority.generation);
+  if (!gatewayRecorded && !deploymentRecorded) {
+    if (!ordinaryFirstControllerDelivery(authority)
+      && !exactPreApplyControllerTransition(authority)) throw unavailable();
+    return;
+  }
+  if (!gatewayRecorded
+    || !deploymentRecorded
+    || !recordedDeliveriesMatch(gatewayRecorded, deploymentRecorded)) throw unavailable();
+  const sameControllerRevision = gatewayRecorded.kind === 'CONTROLLER'
+    && gatewayRecorded.controllerRevision === authority.controller.revision
+    && gatewayRecorded.controllerUpdatedAt === authority.controller.updatedAt;
+  if (sameControllerRevision) return;
+  if (!exactPreApplyControllerTransition(authority)) throw unavailable();
+}
+
+function ordinaryFirstControllerDelivery(authority: ConfigurationAuthority): boolean {
+  return DELIVERY_GATEWAY_STATES.has(String(authority.gateway.state))
+    && DELIVERY_DEPLOYMENT_STATES.has(String(authority.deployment.status))
+    && authority.operationStatus === 'IN_PROGRESS'
+    && (DELIVERY_OPERATION_STATES.has(String(authority.operation.state))
+      || (authority.operationType === 'PROFILE_DEPLOY'
+        && HTTP_COMPLETE_OPERATION_STATES.has(String(authority.operation.state))));
+}
+
+function exactPreApplyControllerTransition(authority: ConfigurationAuthority): boolean {
+  return authority.gateway.state === 'PROFILE_DELIVERED'
+    && authority.deployment.status === 'PROFILE_DELIVERED'
+    && authority.operation.state === 'PROFILE_STAGED'
+    && authority.operationStatus === 'IN_PROGRESS';
+}
+
+function assertS3DeliveryConsistency(
+  authority: ConfigurationAuthority,
+  source: ConfigurationDeliverySource,
+): void {
+  if (source.kind !== 'S3') throw unavailable();
+  const gatewayRecorded = currentGenerationDelivery(authority.gateway, authority.generation);
+  const deploymentRecorded = currentGenerationDelivery(authority.deployment, authority.generation);
+  if (!gatewayRecorded && !deploymentRecorded) return;
+  if (!gatewayRecorded
+    || !deploymentRecorded
+    || !recordedDeliveriesMatch(gatewayRecorded, deploymentRecorded)
+    || gatewayRecorded.kind !== 'S3'
+    || !recordedDeliveryMatchesSource(gatewayRecorded, source)) {
+    // Controller activation is one-way for a generation. Removing or corrupting
+    // the singleton cannot make the device silently fall back to S3.
+    throw unavailable();
+  }
+}
+
+function observedSourceCondition(
+  item: Item,
+  generation: number,
+  prefix: 'gateway' | 'deployment',
+): ObservedSourceCondition {
+  const recorded = recordedConfigurationDelivery(item, generation);
+  if (!recorded) {
+    return {
+      expression: [
+        'attribute_not_exists(deliveredConfigurationGeneration)',
+        'attribute_not_exists(configurationSource)',
+        'attribute_not_exists(deliveredConfigurationChecksum)',
+      ].join(' AND '),
+      values: {},
+    };
+  }
+  const generationToken = `:${prefix}ObservedConfigurationGeneration`;
+  const sourceToken = `:${prefix}ObservedConfigurationSource`;
+  const checksumToken = `:${prefix}ObservedConfigurationChecksum`;
+  const revisionToken = `:${prefix}ObservedControllerRevision`;
+  const updatedAtToken = `:${prefix}ObservedControllerUpdatedAt`;
+  return {
+    expression: [
+      `deliveredConfigurationGeneration = ${generationToken}`,
+      `configurationSource = ${sourceToken}`,
+      `deliveredConfigurationChecksum = ${checksumToken}`,
+      ...(recorded.kind === 'CONTROLLER' ? [
+        `controllerConfigurationRevision = ${revisionToken}`,
+        `controllerConfigurationUpdatedAt = ${updatedAtToken}`,
+      ] : []),
+    ].join(' AND '),
+    values: {
+      [generationToken]: recorded.generation,
+      [sourceToken]: recorded.kind,
+      [checksumToken]: recorded.checksum,
+      ...(recorded.kind === 'CONTROLLER' ? {
+        [revisionToken]: recorded.controllerRevision,
+        [updatedAtToken]: recorded.controllerUpdatedAt,
+      } : {}),
+    },
+  };
+}
+
+function recordedDeliverySourceMatches(
+  item: Item,
+  source: ConfigurationDeliverySource,
+  generation: number,
+): boolean {
+  return item.deliveredConfigurationGeneration === generation
+    && item.configurationSource === source.kind
+    && item.deliveredConfigurationChecksum === source.checksum
+    && (source.kind !== 'CONTROLLER'
+      || (item.controllerConfigurationRevision === source.controllerRevision
+        && item.controllerConfigurationUpdatedAt === source.controllerUpdatedAt));
+}
+
+function currentGenerationDelivery(
+  item: Item,
+  generation: number,
+): RecordedConfigurationDelivery | undefined {
+  const recorded = recordedConfigurationDelivery(item, generation);
+  return recorded?.generation === generation ? recorded : undefined;
+}
+
+function recordedConfigurationDelivery(
+  item: Item,
+  maximumGeneration: number,
+): RecordedConfigurationDelivery | undefined {
+  const generation = item.deliveredConfigurationGeneration;
+  const kind = item.configurationSource;
+  const checksum = item.deliveredConfigurationChecksum;
+  const corePresent = generation !== undefined || kind !== undefined || checksum !== undefined;
+  if (!corePresent) {
+    if (item.controllerConfigurationRevision !== undefined
+      || item.controllerConfigurationUpdatedAt !== undefined) throw unavailable();
+    return undefined;
+  }
+  if (typeof generation !== 'number'
+    || !Number.isSafeInteger(generation)
+    || generation < 1
+    || generation > maximumGeneration
+    || (kind !== 'S3' && kind !== 'CONTROLLER')
+    || typeof checksum !== 'string'
+    || !CHECKSUM_PATTERN.test(checksum)) throw unavailable();
+  if (kind === 'CONTROLLER') {
+    const controllerRevision = item.controllerConfigurationRevision;
+    const controllerUpdatedAt = item.controllerConfigurationUpdatedAt;
+    if (typeof controllerRevision !== 'string'
+      || !CONTROLLER_REVISION_PATTERN.test(controllerRevision)
+      || typeof controllerUpdatedAt !== 'string'
+      || !Number.isFinite(Date.parse(controllerUpdatedAt))) throw unavailable();
+    return { kind, generation, checksum, controllerRevision, controllerUpdatedAt };
+  }
+  return { kind, generation, checksum };
+}
+
+function recordedDeliveriesMatch(
+  left: RecordedConfigurationDelivery,
+  right: RecordedConfigurationDelivery,
+): boolean {
+  return left.kind === right.kind
+    && left.generation === right.generation
+    && left.checksum === right.checksum
+    && left.controllerRevision === right.controllerRevision
+    && left.controllerUpdatedAt === right.controllerUpdatedAt;
+}
+
+function recordedDeliveryMatchesSource(
+  recorded: RecordedConfigurationDelivery,
+  source: ConfigurationDeliverySource,
+): boolean {
+  return recorded.kind === source.kind
+    && recorded.checksum === source.checksum
+    && (recorded.kind !== 'CONTROLLER'
+      || (recorded.controllerRevision === source.controllerRevision
+        && recorded.controllerUpdatedAt === source.controllerUpdatedAt));
+}
+
 function profileSchemaVersion(value: unknown): string | number {
   if (typeof value === 'string' && value.length > 0 && value.length <= 32) return value;
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value;
@@ -558,6 +839,7 @@ async function recordHttpDelivery(
   request: AuthorizedRequest,
   context: Context,
   dependencies: DeviceConfigurationDependencies,
+  source: ConfigurationDeliverySource,
 ): Promise<void> {
   const now = dependencies.now().toISOString();
   const gatewayState = String(authority.gateway.state);
@@ -565,24 +847,59 @@ async function recordHttpDelivery(
   const transitionGateway = DELIVERY_GATEWAY_STATES.has(gatewayState);
   const transitionDeployment = DELIVERY_DEPLOYMENT_STATES.has(deploymentState);
   const transitionOperation = DELIVERY_OPERATION_STATES.has(String(authority.operation.state));
-  const transitionOperationWithProfileDeploy = authority.operationType === 'PROFILE_DEPLOY'
-    && HTTP_COMPLETE_OPERATION_STATES.has(String(authority.operation.state))
-    && String(authority.operation.operationStatus) === 'IN_PROGRESS';
+  const pullConfirmsControllerDeployment = source.kind === 'CONTROLLER'
+    && authority.operationStatus === 'IN_PROGRESS'
+    && (ordinaryFirstControllerDelivery(authority)
+      || exactPreApplyControllerTransition(authority));
   const tenantKey = tenantPk(authority.tenantId);
+  const sourceUpdate = [
+    'configurationSource = :configurationSource',
+    'deliveredConfigurationGeneration = :configurationGeneration',
+    'deliveredConfigurationChecksum = :configurationChecksum',
+    'configurationRetrievedAt = :configurationRetrievedAt',
+    ...(source.kind === 'CONTROLLER' ? [
+      'controllerConfigurationRevision = :controllerRevision',
+      'controllerConfigurationUpdatedAt = :controllerUpdatedAt',
+    ] : []),
+  ].join(', ');
+  const gatewaySourceCondition = observedSourceCondition(authority.gateway, authority.generation, 'gateway');
+  const deploymentSourceCondition = observedSourceCondition(authority.deployment, authority.generation, 'deployment');
+  const sourceValues = {
+    ':configurationSource': source.kind,
+    ':configurationGeneration': authority.generation,
+    ':configurationChecksum': source.checksum,
+    ':configurationRetrievedAt': source.retrievedAt,
+    ...(source.kind === 'CONTROLLER' ? {
+      ':controllerRevision': source.controllerRevision,
+      ':controllerUpdatedAt': source.controllerUpdatedAt,
+    } : {}),
+  };
 
-  // Once this exact generation has been delivered, later polls are read-only.
-  // This avoids permanent audit growth and DDB write amplification across a
-  // large fleet while the strong reads above still reauthorize every request.
-  if (!transitionGateway && !transitionDeployment && !transitionOperation && !transitionOperationWithProfileDeploy) return;
+  // Polls of the same authoritative source/revision are read-only. An explicit
+  // S3-to-Controller activation or Controller endpoint revision still records
+  // the new internal checksum atomically for subsequent status attestation.
+  const sourceTransition = source.kind === 'CONTROLLER'
+    && (!recordedDeliverySourceMatches(authority.gateway, source, authority.generation)
+      || !recordedDeliverySourceMatches(authority.deployment, source, authority.generation));
+  if (!transitionGateway
+    && !transitionDeployment
+    && !transitionOperation
+    && !pullConfirmsControllerDeployment
+    && !sourceTransition) {
+    await fenceReadOnlyDelivery(authority, request, source, tenantKey, dependencies);
+    return;
+  }
 
   const transaction: TransactItems = [
     {
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: gatewaySk(authority.gatewayId) },
-        UpdateExpression: transitionGateway
-          ? 'SET #state = :delivered, lastAuthenticatedAt = :now, lastConfigRequestAt = :now, updatedAt = :now'
-          : 'SET lastAuthenticatedAt = :now, lastConfigRequestAt = :now, updatedAt = :now',
+        UpdateExpression: pullConfirmsControllerDeployment
+          ? `SET #state = :appliedHealthy, health = :pullConfirmedHealth, lastAuthenticatedAt = :now, lastConfigRequestAt = :now, lastSeenAt = :now, updatedAt = :now, appliedGeneration = :generation, appliedProfileVersionId = :profileVersionId, appliedProfileChecksum = :configurationChecksum, configurationConfirmationMethod = :pullConfirmationMethod, configurationConfirmedAt = :now, ${sourceUpdate} REMOVE lastError, healthyAt, profileValidatedAt, dispatchLeaseId, dispatchLeaseGeneration, dispatchLeaseExpiresAtEpoch`
+          : transitionGateway
+            ? `SET #state = :delivered, lastAuthenticatedAt = :now, lastConfigRequestAt = :now, updatedAt = :now, ${sourceUpdate}`
+            : `SET lastAuthenticatedAt = :now, lastConfigRequestAt = :now, updatedAt = :now, ${sourceUpdate}`,
         ConditionExpression: [
           'entityType = :gateway',
           '#state = :observedState',
@@ -594,6 +911,7 @@ async function recordHttpDelivery(
           'desiredProfileVersionId = :profileVersionId',
           'operationId = :operationId',
           'signedDescriptor = :descriptor',
+          gatewaySourceCondition.expression,
         ].join(' AND '),
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
@@ -607,7 +925,13 @@ async function recordHttpDelivery(
           ':profileVersionId': authority.profileVersionId,
           ':operationId': authority.operationId,
           ':descriptor': authority.descriptor,
-          ...(transitionGateway ? { ':delivered': 'PROFILE_DELIVERED' } : {}),
+          ...sourceValues,
+          ...gatewaySourceCondition.values,
+          ...(pullConfirmsControllerDeployment ? {
+            ':appliedHealthy': 'APPLIED_HEALTHY',
+            ':pullConfirmedHealth': 'UNKNOWN',
+            ':pullConfirmationMethod': AUTHENTICATED_CONFIGURATION_PULL,
+          } : transitionGateway ? { ':delivered': 'PROFILE_DELIVERED' } : {}),
           ':now': now,
         },
       },
@@ -616,9 +940,11 @@ async function recordHttpDelivery(
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: deploymentSk(authority.gatewayId, authority.generation) },
-        UpdateExpression: transitionDeployment
-          ? 'SET #status = :delivered, deliveredAt = if_not_exists(deliveredAt, :now), lastDeliveredAt = :now, updatedAt = :now'
-          : 'SET lastDeliveredAt = :now, updatedAt = :now',
+        UpdateExpression: pullConfirmsControllerDeployment
+          ? `SET #status = :appliedHealthy, deliveredAt = if_not_exists(deliveredAt, :now), lastDeliveredAt = :now, completedAt = :now, updatedAt = :now, appliedProfileVersionId = :profileVersionId, appliedProfileChecksum = :configurationChecksum, configurationConfirmationMethod = :pullConfirmationMethod, configurationConfirmedAt = :now, ${sourceUpdate} REMOVE #error, validatedAt`
+          : transitionDeployment
+            ? `SET #status = :delivered, deliveredAt = if_not_exists(deliveredAt, :now), lastDeliveredAt = :now, updatedAt = :now, ${sourceUpdate}`
+            : `SET lastDeliveredAt = :now, updatedAt = :now, ${sourceUpdate}`,
         ConditionExpression: [
           'entityType = :deployment',
           '#status = :observedStatus',
@@ -627,10 +953,12 @@ async function recordHttpDelivery(
           'profileVersionId = :profileVersionId',
           'operationId = :operationId',
           '#descriptor = :descriptor',
+          deploymentSourceCondition.expression,
         ].join(' AND '),
         ExpressionAttributeNames: {
           '#descriptor': 'descriptor',
           '#status': 'status',
+          ...(pullConfirmsControllerDeployment ? { '#error': 'error' } : {}),
         },
         ExpressionAttributeValues: {
           ':deployment': 'DEPLOYMENT',
@@ -640,27 +968,35 @@ async function recordHttpDelivery(
           ':profileVersionId': authority.profileVersionId,
           ':operationId': authority.operationId,
           ':descriptor': authority.descriptor,
-          ...(transitionDeployment ? { ':delivered': 'PROFILE_DELIVERED' } : {}),
+          ...sourceValues,
+          ...deploymentSourceCondition.values,
+          ...(pullConfirmsControllerDeployment ? {
+            ':appliedHealthy': 'APPLIED_HEALTHY',
+            ':pullConfirmationMethod': AUTHENTICATED_CONFIGURATION_PULL,
+          } : transitionDeployment ? { ':delivered': 'PROFILE_DELIVERED' } : {}),
           ':now': now,
         },
       },
     },
   ];
 
-  if (transitionOperation || transitionOperationWithProfileDeploy) {
-    const operationAppliedByHttp = transitionOperationWithProfileDeploy
+  if (transitionOperation || pullConfirmsControllerDeployment) {
+    const configurationLabel = source.kind === 'CONTROLLER'
+      ? 'Controller configuration'
+      : 'Signed profile';
+    const operationAppliedByHttp = pullConfirmsControllerDeployment
       ? {
-        nextState: 'APPLIED_HEALTHY',
-        nextOperationStatus: 'SUCCEEDED',
-        timelineState: 'APPLIED_HEALTHY',
-        applyDetail: `Signed profile generation ${authority.generation} was applied and health-validated via HTTPS fetch.`
-      }
+          nextState: 'APPLIED_HEALTHY',
+          nextOperationStatus: 'SUCCEEDED',
+          timelineState: 'APPLIED_HEALTHY',
+          applyDetail: `Authenticated gateway retrieval confirmed Controller configuration and profile assignment generation ${authority.generation}. Apply and health were not reported separately.`,
+        }
       : {
-        nextState: 'PROFILE_STAGED',
-        nextOperationStatus: 'IN_PROGRESS',
-        timelineState: 'PROFILE_STAGED',
-        applyDetail: `Signed profile generation ${authority.generation} delivered over authenticated HTTPS.`,
-      };
+          nextState: 'PROFILE_STAGED',
+          nextOperationStatus: 'IN_PROGRESS',
+          timelineState: 'PROFILE_STAGED',
+          applyDetail: `${configurationLabel} generation ${authority.generation} delivered over authenticated HTTPS.`,
+        };
     const observedSteps = canonicalOperationSteps(authority.operation.steps);
     const observedTimeline = canonicalOperationTimeline(authority.operation.timeline);
     const nextSteps = observedSteps.map((step) => ({ ...step }));
@@ -675,23 +1011,24 @@ async function recordHttpDelivery(
       key: 'profile',
       label: 'Signed profile delivered',
       status: 'complete',
-      detail: `Signed profile generation ${authority.generation} delivered.`,
+      detail: pullConfirmsControllerDeployment
+        ? `Controller payload and automatic profile assignment generation ${authority.generation} were retrieved by the authenticated gateway.`
+        : `${configurationLabel} generation ${authority.generation} delivered.`,
       timestamp: now,
     };
-    if (operationAppliedByHttp.nextState === 'APPLIED_HEALTHY') {
+    if (pullConfirmsControllerDeployment) {
       nextSteps[3] = {
         key: 'apply',
         label: 'Profile applied transactionally',
         status: 'complete',
-        detail: `Signed profile generation ${authority.generation} was applied in watchdog transaction.`,
+        detail: 'Authenticated configuration retrieval is accepted as deployment confirmation for this gateway version.',
         timestamp: now,
       };
       nextSteps[4] = {
         key: 'health',
         label: 'Connectivity and service health validated',
-        status: 'complete',
-        detail: 'Gateway configuration application was accepted by AWS API polling flow.',
-        timestamp: now,
+        status: 'pending',
+        detail: 'No separate device apply or health report is available in authenticated-pull compatibility mode.',
       };
     }
     const nextTimeline = [
@@ -707,7 +1044,9 @@ async function recordHttpDelivery(
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: operationSk(authority.operationId) },
-        UpdateExpression: 'SET operationStatus = :nextOperationStatus, #state = :nextOperationState, deploymentGeneration = :generation, updatedAt = :now, #steps = :nextSteps, #timeline = :nextTimeline',
+        UpdateExpression: pullConfirmsControllerDeployment
+          ? 'SET operationStatus = :nextOperationStatus, #state = :nextOperationState, deploymentGeneration = :generation, updatedAt = :now, #steps = :nextSteps, #timeline = :nextTimeline, configurationSource = :configurationSource, configurationConfirmationMethod = :pullConfirmationMethod, configurationConfirmedAt = :now REMOVE #error, failure'
+          : 'SET operationStatus = :nextOperationStatus, #state = :nextOperationState, deploymentGeneration = :generation, updatedAt = :now, #steps = :nextSteps, #timeline = :nextTimeline',
         ConditionExpression: [
           'entityType = :operation',
           'tenantId = :tenantId',
@@ -726,6 +1065,7 @@ async function recordHttpDelivery(
           '#steps': 'steps',
           '#timeline': 'timeline',
           '#type': 'type',
+          ...(pullConfirmsControllerDeployment ? { '#error': 'error' } : {}),
         },
         ExpressionAttributeValues: {
           ':operation': 'OPERATION',
@@ -744,10 +1084,16 @@ async function recordHttpDelivery(
           ':now': now,
           ':nextSteps': nextSteps,
           ':nextTimeline': nextTimeline,
+          ...(pullConfirmsControllerDeployment ? {
+            ':configurationSource': source.kind,
+            ':pullConfirmationMethod': AUTHENTICATED_CONFIGURATION_PULL,
+          } : {}),
         },
       },
     });
   }
+
+  transaction.push(deliverySingletonFence(authority, source, tenantKey));
 
   const auditId = `http_${context.awsRequestId}`.slice(0, 160);
   transaction.push({
@@ -761,11 +1107,22 @@ async function recordHttpDelivery(
         tenantId: authority.tenantId,
         actorSubject: authority.certificatePrincipal,
         actorRole: 'DEVICE',
-        action: 'SIGNED_PROFILE_DELIVERED_HTTP',
+        action: source.kind === 'CONTROLLER'
+          ? pullConfirmsControllerDeployment
+            ? 'CONTROLLER_CONFIGURATION_PULL_CONFIRMED'
+            : 'CONTROLLER_CONFIGURATION_DELIVERED_HTTP'
+          : 'SIGNED_PROFILE_DELIVERED_HTTP',
         targetId: authority.gatewayId,
         details: {
           generation: authority.generation,
           profileVersionId: authority.profileVersionId,
+          configurationSource: source.kind,
+          configurationChecksum: source.checksum,
+          ...(pullConfirmsControllerDeployment ? {
+            configurationConfirmationMethod: AUTHENTICATED_CONFIGURATION_PULL,
+            deviceApplyReported: false,
+            deviceHealthReported: false,
+          } : {}),
           thingName: request.thingName,
         },
         outcome: 'SUCCESS',
@@ -782,10 +1139,11 @@ async function recordHttpDelivery(
     // Concurrent pulls can race on the first delivery transition. Accept the
     // loser only if consistent rereads prove this exact assignment moved
     // forward and the certificate is still active.
-    const [gateway, deployment, operation] = await Promise.all([
+    const [gateway, deployment, operation, controllerConfiguration] = await Promise.all([
       dependencies.getItem({ PK: tenantKey, SK: gatewaySk(authority.gatewayId) }),
       dependencies.getItem({ PK: tenantKey, SK: deploymentSk(authority.gatewayId, authority.generation) }),
       dependencies.getItem({ PK: tenantKey, SK: operationSk(authority.operationId) }),
+      dependencies.getItem({ PK: tenantKey, SK: controllerSk() }),
     ]);
     if (deliveryRaceResolved({
       gateway,
@@ -793,6 +1151,8 @@ async function recordHttpDelivery(
       operation,
       authority,
       request,
+      source,
+      controllerConfiguration,
       tenantKey,
     })) {
       return;
@@ -807,16 +1167,55 @@ function deliveryRaceResolved(input: {
   operation: Item | undefined;
   authority: ConfigurationAuthority;
   request: AuthorizedRequest;
+  source: ConfigurationDeliverySource;
+  controllerConfiguration: Item | undefined;
   tenantKey: string;
 }): boolean {
-  const { gateway, deployment, operation, authority, request, tenantKey } = input;
+  const {
+    gateway,
+    deployment,
+    operation,
+    authority,
+    request,
+    source,
+    controllerConfiguration,
+    tenantKey,
+  } = input;
   try {
     canonicalOperationSteps(operation?.steps);
     canonicalOperationTimeline(operation?.timeline);
   } catch {
     return false;
   }
-  return gateway?.entityType === 'GATEWAY'
+  const pullConfirmationWasRequired = source.kind === 'CONTROLLER'
+    && authority.operationStatus === 'IN_PROGRESS'
+    && (ordinaryFirstControllerDelivery(authority)
+      || exactPreApplyControllerTransition(authority));
+  const pullConfirmationMatches = !pullConfirmationWasRequired || (
+    gateway?.state === 'APPLIED_HEALTHY'
+      && gateway.health === 'UNKNOWN'
+      && gateway.appliedGeneration === authority.generation
+      && gateway.appliedProfileVersionId === authority.profileVersionId
+      && gateway.appliedProfileChecksum === source.checksum
+      && gateway.configurationConfirmationMethod === AUTHENTICATED_CONFIGURATION_PULL
+      && typeof gateway.configurationConfirmedAt === 'string'
+      && Number.isFinite(Date.parse(gateway.configurationConfirmedAt))
+      && deployment?.status === 'APPLIED_HEALTHY'
+      && deployment.appliedProfileVersionId === authority.profileVersionId
+      && deployment.appliedProfileChecksum === source.checksum
+      && deployment.configurationConfirmationMethod === AUTHENTICATED_CONFIGURATION_PULL
+      && typeof deployment.configurationConfirmedAt === 'string'
+      && Number.isFinite(Date.parse(deployment.configurationConfirmedAt))
+      && operation?.state === 'APPLIED_HEALTHY'
+      && operation.operationStatus === 'SUCCEEDED'
+      && operation.configurationSource === 'CONTROLLER'
+      && operation.configurationConfirmationMethod === AUTHENTICATED_CONFIGURATION_PULL
+      && typeof operation.configurationConfirmedAt === 'string'
+      && Number.isFinite(Date.parse(operation.configurationConfirmedAt))
+  );
+  return pullConfirmationMatches
+      && singletonFenceMatches(controllerConfiguration, authority, source, tenantKey)
+      && gateway?.entityType === 'GATEWAY'
       && gateway.PK === tenantKey
       && gateway.SK === gatewaySk(authority.gatewayId)
       && gateway.tenantId === authority.tenantId
@@ -829,6 +1228,7 @@ function deliveryRaceResolved(input: {
       && gateway.operationId === authority.operationId
       && isRecord(gateway.signedDescriptor)
       && canonicalJson(gateway.signedDescriptor) === canonicalJson(authority.descriptor)
+      && recordedDeliverySourceMatches(gateway, source, authority.generation)
       && FORWARD_DELIVERY_STATES.has(String(gateway.state))
       && deployment?.entityType === 'DEPLOYMENT'
       && deployment.PK === tenantKey
@@ -840,6 +1240,7 @@ function deliveryRaceResolved(input: {
       && deployment.operationId === authority.operationId
       && isRecord(deployment.descriptor)
       && canonicalJson(deployment.descriptor) === canonicalJson(authority.descriptor)
+      && recordedDeliverySourceMatches(deployment, source, authority.generation)
       && FORWARD_DELIVERY_STATES.has(String(deployment.status))
       && operation?.entityType === 'OPERATION'
       && operation.PK === tenantKey
@@ -853,6 +1254,186 @@ function deliveryRaceResolved(input: {
       && OPERATION_STATUSES.has(String(operation.operationStatus))
       && validOperationStatus(String(operation.state), String(operation.operationStatus))
       && FORWARD_OPERATION_STATES.has(String(operation.state));
+}
+
+function deliverySingletonFence(
+  authority: ConfigurationAuthority,
+  source: ConfigurationDeliverySource,
+  tenantKey: string,
+): TransactItems[number] {
+  if (source.kind === 'CONTROLLER' && authority.controller) {
+    return {
+      ConditionCheck: {
+        TableName: TABLE_NAME,
+        Key: { PK: tenantKey, SK: controllerSk() },
+        ConditionExpression: 'entityType = :controller AND tenantId = :tenantId AND configuration = :controllerConfiguration AND configurationBody = :controllerBody AND configurationChecksum = :controllerChecksum AND revision = :controllerRevision AND updatedAt = :controllerUpdatedAt',
+        ExpressionAttributeValues: {
+          ':controller': 'CONTROLLER_CONFIGURATION',
+          ':tenantId': authority.tenantId,
+          ':controllerConfiguration': authority.controller.configuration,
+          ':controllerBody': authority.controller.configurationBody,
+          ':controllerChecksum': authority.controller.configurationChecksum,
+          ':controllerRevision': authority.controller.revision,
+          ':controllerUpdatedAt': authority.controller.updatedAt,
+        },
+      },
+    };
+  }
+  if (source.kind !== 'S3') throw unavailable();
+  return {
+    ConditionCheck: {
+      TableName: TABLE_NAME,
+      Key: { PK: tenantKey, SK: controllerSk() },
+      ConditionExpression: 'attribute_not_exists(PK)',
+    },
+  };
+}
+
+function readOnlyDeliveryFences(
+  authority: ConfigurationAuthority,
+  request: AuthorizedRequest,
+  source: ConfigurationDeliverySource,
+  tenantKey: string,
+): TransactItems {
+  const gatewaySource = observedSourceCondition(authority.gateway, authority.generation, 'gateway');
+  const deploymentSource = observedSourceCondition(authority.deployment, authority.generation, 'deployment');
+  return [
+    {
+      ConditionCheck: {
+        TableName: TABLE_NAME,
+        Key: { PK: tenantKey, SK: gatewaySk(authority.gatewayId) },
+        ConditionExpression: [
+          'entityType = :gateway',
+          'tenantId = :tenantId',
+          'gatewayId = :gatewayId',
+          '#state = :observedState',
+          'certificateStatus = :active',
+          'thingName = :thingName',
+          'certificateId = :certificateId',
+          'certificatePrincipal = :certificatePrincipal',
+          'desiredGeneration = :generation',
+          'desiredProfileVersionId = :profileVersionId',
+          'operationId = :operationId',
+          'signedDescriptor = :descriptor',
+          gatewaySource.expression,
+        ].join(' AND '),
+        ExpressionAttributeNames: { '#state': 'state' },
+        ExpressionAttributeValues: {
+          ':gateway': 'GATEWAY',
+          ':tenantId': authority.tenantId,
+          ':gatewayId': authority.gatewayId,
+          ':observedState': authority.gateway.state,
+          ':active': 'ACTIVE',
+          ':thingName': request.thingName,
+          ':certificateId': request.certificateId,
+          ':certificatePrincipal': authority.certificatePrincipal,
+          ':generation': authority.generation,
+          ':profileVersionId': authority.profileVersionId,
+          ':operationId': authority.operationId,
+          ':descriptor': authority.descriptor,
+          ...gatewaySource.values,
+        },
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: TABLE_NAME,
+        Key: { PK: tenantKey, SK: deploymentSk(authority.gatewayId, authority.generation) },
+        ConditionExpression: [
+          'entityType = :deployment',
+          'tenantId = :tenantId',
+          'gatewayId = :gatewayId',
+          '#status = :observedStatus',
+          'generation = :generation',
+          'profileVersionId = :profileVersionId',
+          'operationId = :operationId',
+          '#descriptor = :descriptor',
+          deploymentSource.expression,
+        ].join(' AND '),
+        ExpressionAttributeNames: {
+          '#descriptor': 'descriptor',
+          '#status': 'status',
+        },
+        ExpressionAttributeValues: {
+          ':deployment': 'DEPLOYMENT',
+          ':tenantId': authority.tenantId,
+          ':gatewayId': authority.gatewayId,
+          ':observedStatus': authority.deployment.status,
+          ':generation': authority.generation,
+          ':profileVersionId': authority.profileVersionId,
+          ':operationId': authority.operationId,
+          ':descriptor': authority.descriptor,
+          ...deploymentSource.values,
+        },
+      },
+    },
+    {
+      ConditionCheck: {
+        TableName: TABLE_NAME,
+        Key: { PK: tenantKey, SK: operationSk(authority.operationId) },
+        ConditionExpression: [
+          'entityType = :operation',
+          'tenantId = :tenantId',
+          'operationId = :operationId',
+          '#type = :operationType',
+          'gatewayId = :gatewayId',
+          'profileVersionId = :profileVersionId',
+          'deploymentGeneration = :generation',
+          'operationStatus = :operationStatus',
+          '#state = :observedState',
+        ].join(' AND '),
+        ExpressionAttributeNames: {
+          '#state': 'state',
+          '#type': 'type',
+        },
+        ExpressionAttributeValues: {
+          ':operation': 'OPERATION',
+          ':tenantId': authority.tenantId,
+          ':operationId': authority.operationId,
+          ':operationType': authority.operationType,
+          ':gatewayId': authority.gatewayId,
+          ':profileVersionId': authority.profileVersionId,
+          ':generation': authority.generation,
+          ':operationStatus': authority.operationStatus,
+          ':observedState': authority.operation.state,
+        },
+      },
+    },
+    deliverySingletonFence(authority, source, tenantKey),
+  ];
+}
+
+async function fenceReadOnlyDelivery(
+  authority: ConfigurationAuthority,
+  request: AuthorizedRequest,
+  source: ConfigurationDeliverySource,
+  tenantKey: string,
+  dependencies: DeviceConfigurationDependencies,
+): Promise<void> {
+  await dependencies.transactWrite(readOnlyDeliveryFences(authority, request, source, tenantKey));
+}
+
+function singletonFenceMatches(
+  controllerConfiguration: Item | undefined,
+  authority: ConfigurationAuthority,
+  source: ConfigurationDeliverySource,
+  tenantKey: string,
+): boolean {
+  if (source.kind === 'S3') return controllerConfiguration === undefined;
+  if (!authority.controller
+    || controllerConfiguration?.PK !== tenantKey
+    || controllerConfiguration.SK !== controllerSk()
+    || controllerConfiguration.entityType !== 'CONTROLLER_CONFIGURATION'
+    || controllerConfiguration.tenantId !== authority.tenantId) return false;
+  try {
+    const stored = storedControllerConfiguration(controllerConfiguration);
+    return stored.configurationBody === authority.controller.configurationBody
+      && stored.configurationChecksum === authority.controller.configurationChecksum
+      && stored.revision === authority.controller.revision
+      && stored.updatedAt === authority.controller.updatedAt;
+  } catch {
+    return false;
+  }
 }
 
 function isReconcilableTransactionCancellation(error: unknown): boolean {
@@ -1039,7 +1620,35 @@ function safeRequestId(value: unknown): string | undefined {
   return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : undefined;
 }
 
-function json(statusCode: number, body: unknown, requestId: string): APIGatewayProxyStructuredResultV2 {
+function configurationResponseHeaders(
+  authority: ConfigurationAuthority,
+  source: ConfigurationDeliverySource['kind'],
+): Record<string, string> {
+  return {
+    'x-ce-configuration-source': source,
+    'x-ce-generation': String(authority.generation),
+    'x-ce-profile-version-id': authority.profileVersionId,
+    ...(source === 'CONTROLLER' ? {
+      'x-ce-confirmation-method': AUTHENTICATED_CONFIGURATION_PULL,
+    } : {}),
+  };
+}
+
+function json(
+  statusCode: number,
+  body: unknown,
+  requestId: string,
+  additionalHeaders: Record<string, string> = {},
+): APIGatewayProxyStructuredResultV2 {
+  return rawJson(statusCode, JSON.stringify(body), requestId, additionalHeaders);
+}
+
+function rawJson(
+  statusCode: number,
+  body: string,
+  requestId: string,
+  additionalHeaders: Record<string, string> = {},
+): APIGatewayProxyStructuredResultV2 {
   return {
     statusCode,
     headers: {
@@ -1049,7 +1658,8 @@ function json(statusCode: number, body: unknown, requestId: string): APIGatewayP
       'x-frame-options': 'DENY',
       'referrer-policy': 'no-referrer',
       'x-request-id': requestId,
+      ...additionalHeaders,
     },
-    body: JSON.stringify(body),
+    body,
   };
 }

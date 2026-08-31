@@ -44,6 +44,21 @@ const PROFILE_DOCUMENT = {
 const PROFILE_CANONICAL = '{"modelId":"ce-gateway-v1","parameters":{"dnsCacheEntries":1000,"dnsTcpEnabled":true,"lanIpAddress":"10.10.10.1","lanPrefixLength":24,"wanMtu":1500},"schemaVersion":1}';
 const PROFILE_BYTES = Buffer.from(PROFILE_CANONICAL);
 const PROFILE_SHA256 = createHash('sha256').update(PROFILE_BYTES).digest('hex');
+const CONTROLLER_UPDATED_AT = '2026-08-17T11:30:00.000Z';
+const OLD_CONTROLLER_UPDATED_AT = '2026-08-16T11:30:00.000Z';
+const CONTROLLER_REVISION = `controller_${'b'.repeat(32)}`;
+const OLD_CONTROLLER_REVISION = `controller_${'a'.repeat(32)}`;
+const UPDATED_CONTROLLER_REVISION = `controller_${'c'.repeat(32)}`;
+const CONTROLLER_RESPONSE_BODY = '{"usp":{"controller_endpoint_id":"proto::Controller-ip-172-31-2-12","mtp":"MQTT","mqtt":{"broker":"broker.hivemq.com","port":1883,"protocol_version":"5.0","transport":"TCP/IP","controller_topic":"controller/proto::Controller-ip-172-31-2-12"}}}';
+const CONTROLLER_CONFIGURATION = JSON.parse(CONTROLLER_RESPONSE_BODY) as Item;
+const CONTROLLER_CONFIGURATION_SHA256 = createHash('sha256')
+  .update(CONTROLLER_RESPONSE_BODY)
+  .digest('hex');
+const UPDATED_CONTROLLER_RESPONSE_BODY = '{"usp":{"controller_endpoint_id":"proto::Controller-ip-172-31-2-13","mtp":"MQTT","mqtt":{"broker":"broker.hivemq.com","port":1883,"protocol_version":"5.0","transport":"TCP/IP","controller_topic":"controller/proto::Controller-ip-172-31-2-13"}}}';
+const UPDATED_CONTROLLER_CONFIGURATION = JSON.parse(UPDATED_CONTROLLER_RESPONSE_BODY) as Item;
+const UPDATED_CONTROLLER_CONFIGURATION_SHA256 = createHash('sha256')
+  .update(UPDATED_CONTROLLER_RESPONSE_BODY)
+  .digest('hex');
 const GATEWAY_METADATA = {
   gatewayId: GATEWAY_ID,
   thingName: THING_NAME,
@@ -95,25 +110,36 @@ function operationTimeline(): Item[] {
 
 function assertExactExpressionBindings(transaction: unknown[]): void {
   transaction.forEach((action, index) => {
-    const update = (action as {
+    const statement = (action as {
       Update?: {
         UpdateExpression?: string;
         ConditionExpression?: string;
         ExpressionAttributeNames?: Record<string, string>;
         ExpressionAttributeValues?: Record<string, unknown>;
       };
-    }).Update;
-    if (!update) return;
-    const expression = `${update.UpdateExpression ?? ''} ${update.ConditionExpression ?? ''}`;
+      ConditionCheck?: {
+        ConditionExpression?: string;
+        ExpressionAttributeNames?: Record<string, string>;
+        ExpressionAttributeValues?: Record<string, unknown>;
+      };
+    }).Update ?? (action as {
+      ConditionCheck?: {
+        ConditionExpression?: string;
+        ExpressionAttributeNames?: Record<string, string>;
+        ExpressionAttributeValues?: Record<string, unknown>;
+      };
+    }).ConditionCheck;
+    if (!statement) return;
+    const expression = `${'UpdateExpression' in statement ? statement.UpdateExpression ?? '' : ''} ${statement.ConditionExpression ?? ''}`;
     const referencedValues = [...new Set(expression.match(/:[A-Za-z0-9_]+/g) ?? [])].sort();
-    const suppliedValues = Object.keys(update.ExpressionAttributeValues ?? {}).sort();
+    const suppliedValues = Object.keys(statement.ExpressionAttributeValues ?? {}).sort();
     assert.deepEqual(
       suppliedValues,
       referencedValues,
       `transaction update ${index} must supply every value token exactly once and no unused values`,
     );
     const referencedNames = [...new Set(expression.match(/#[A-Za-z0-9_]+/g) ?? [])].sort();
-    const suppliedNames = Object.keys(update.ExpressionAttributeNames ?? {}).sort();
+    const suppliedNames = Object.keys(statement.ExpressionAttributeNames ?? {}).sort();
     assert.deepEqual(
       suppliedNames,
       referencedNames,
@@ -219,6 +245,22 @@ function records() {
   return { descriptor, gateway, deployment, operation };
 }
 
+function controllerRecord(overrides: Item = {}): Item {
+  return {
+    PK: TENANT_KEY,
+    SK: 'CONTROLLER',
+    entityType: 'CONTROLLER_CONFIGURATION',
+    tenantId: TENANT_ID,
+    configuration: CONTROLLER_CONFIGURATION,
+    configurationBody: CONTROLLER_RESPONSE_BODY,
+    configurationChecksum: CONTROLLER_CONFIGURATION_SHA256,
+    revision: CONTROLLER_REVISION,
+    updatedAt: CONTROLLER_UPDATED_AT,
+    updatedBy: 'admin-a',
+    ...overrides,
+  };
+}
+
 function event(overrides: Partial<APIGatewayProxyEventV2WithIAMAuthorizer> = {}): APIGatewayProxyEventV2WithIAMAuthorizer {
   return {
     version: '2.0',
@@ -267,6 +309,7 @@ const context = { awsRequestId: 'lambda-request-1' } as Context;
 function fixture(options: {
   firstUse?: boolean;
   profileArtifact?: Uint8Array;
+  controller?: Item;
   mutateDescriptor?: (descriptor: Item) => void;
   mutateGateway?: (gateway: Item) => void;
   mutateDeployment?: (deployment: Item) => void;
@@ -326,6 +369,7 @@ function fixture(options: {
     [`${TENANT_KEY}|${DEPLOYMENT_KEY}`, state.deployment],
     [`${TENANT_KEY}|${OPERATION_KEY}`, state.operation],
   ]);
+  if (options.controller) items.set(`${TENANT_KEY}|CONTROLLER`, options.controller);
   if (options.firstUse) {
     items.set(`${MANUFACTURING_KEY}|MANUFACTURING`, manufacturing);
     items.set(`${BOOTSTRAP_BINDING_KEY}|BINDING`, bootstrapBinding);
@@ -387,6 +431,9 @@ test('secured device configuration GET returns only device-ready gateway and pro
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers?.['cache-control'], 'no-store');
   assert.equal(response.headers?.['x-request-id'], 'api-request-1');
+  assert.equal(response.headers?.['x-ce-configuration-source'], 'S3');
+  assert.equal(response.headers?.['x-ce-generation'], String(GENERATION));
+  assert.equal(response.headers?.['x-ce-profile-version-id'], PROFILE_VERSION_ID);
   const body = JSON.parse(String(response.body)) as Record<string, unknown>;
   assert.equal(body.type, 'GATEWAY_CONFIGURATION');
   assert.equal(body.responseVersion, 1);
@@ -409,7 +456,8 @@ test('secured device configuration GET returns only device-ready gateway and pro
   assert.equal(setup.transactions.length, 1);
   const transaction = setup.transactions[0];
   assert.ok(transaction);
-  assert.equal(transaction.length, 4, 'gateway, deployment, operation, and audit are committed together');
+  assert.equal(transaction.length, 5,
+    'gateway, deployment, operation, Controller-absence fence, and audit are committed together');
   const deploymentUpdate = (transaction[1] as {
     Update?: {
       ConditionExpression?: string;
@@ -426,6 +474,11 @@ test('secured device configuration GET returns only device-ready gateway and pro
   assert.match(serialized, /certificateStatus = :active/);
   assert.match(serialized, /signedDescriptor = :descriptor/);
   assert.match(serialized, /SIGNED_PROFILE_DELIVERED_HTTP/);
+  const controllerAbsenceFence = (transaction[3] as {
+    ConditionCheck?: { Key?: Item; ConditionExpression?: string };
+  }).ConditionCheck;
+  assert.deepEqual(controllerAbsenceFence?.Key, { PK: TENANT_KEY, SK: 'CONTROLLER' });
+  assert.equal(controllerAbsenceFence?.ConditionExpression, 'attribute_not_exists(PK)');
   assertExactExpressionBindings(transaction);
 
   const operationUpdate = (transaction[2] as {
@@ -448,19 +501,511 @@ test('secured device configuration GET returns only device-ready gateway and pro
   assert.deepEqual(operationUpdate.ExpressionAttributeValues?.[':observedTimeline'], setup.operation.timeline);
 });
 
+test('configured controller returns its JSON object as the exact top-level device response', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const setup = fixture({ controller: controllerRecord() });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers?.['content-type'], 'application/json; charset=utf-8');
+  assert.equal(response.headers?.['cache-control'], 'no-store');
+  assert.equal(response.headers?.['x-ce-configuration-source'], 'CONTROLLER');
+  assert.equal(response.headers?.['x-ce-confirmation-method'], 'AUTHENTICATED_CONFIGURATION_PULL');
+  assert.equal(response.headers?.['x-ce-generation'], String(GENERATION));
+  assert.equal(response.headers?.['x-ce-profile-version-id'], PROFILE_VERSION_ID);
+  assert.equal(response.body, CONTROLLER_RESPONSE_BODY,
+    'the representative Controller payload formatting and key order are preserved byte-for-byte');
+  const body = JSON.parse(String(response.body)) as Item;
+  for (const controlPlaneField of [
+    'type',
+    'responseVersion',
+    'requestId',
+    'gateway',
+    'assignment',
+    'configuration',
+    'source',
+    'integrity',
+    'configurationChecksum',
+  ]) assert.equal(body[controlPlaneField], undefined, `${controlPlaneField} is not injected into controller JSON`);
+  assert.deepEqual(setup.loadedProfileKeys, [], 'the controller path does not read the S3 profile object');
+
+  assert.equal(setup.transactions.length, 1);
+  const transaction = setup.transactions[0];
+  assert.ok(transaction);
+  assert.equal(transaction.length, 5,
+    'gateway, deployment, operation, controller revision fence, and audit commit atomically');
+  assertExactExpressionBindings(transaction);
+  const controllerFence = (transaction[3] as {
+    ConditionCheck?: { Key?: Item; ConditionExpression?: string; ExpressionAttributeValues?: Item };
+  }).ConditionCheck;
+  assert.deepEqual(controllerFence?.Key, { PK: TENANT_KEY, SK: 'CONTROLLER' });
+  assert.match(String(controllerFence?.ConditionExpression), /configurationBody = :controllerBody/);
+  assert.match(String(controllerFence?.ConditionExpression), /configurationChecksum = :controllerChecksum/);
+  assert.match(String(controllerFence?.ConditionExpression), /revision = :controllerRevision/);
+  assert.equal(controllerFence?.ExpressionAttributeValues?.[':controllerBody'], CONTROLLER_RESPONSE_BODY);
+  assert.equal(controllerFence?.ExpressionAttributeValues?.[':controllerChecksum'], CONTROLLER_CONFIGURATION_SHA256);
+  assert.equal(controllerFence?.ExpressionAttributeValues?.[':controllerRevision'], CONTROLLER_REVISION);
+  const serializedTransaction = JSON.stringify(transaction);
+  assert.match(serializedTransaction, /CONTROLLER_CONFIGURATION_PULL_CONFIRMED/);
+  assert.match(serializedTransaction, /AUTHENTICATED_CONFIGURATION_PULL/);
+  assert.match(serializedTransaction, /"deviceApplyReported":false/);
+  assert.match(serializedTransaction, /"deviceHealthReported":false/);
+  assert.match(serializedTransaction, new RegExp(CONTROLLER_CONFIGURATION_SHA256));
+  const gatewayValues = (transaction[0] as {
+    Update?: { ExpressionAttributeValues?: Item };
+  }).Update?.ExpressionAttributeValues;
+  assert.equal(gatewayValues?.[':configurationChecksum'], CONTROLLER_CONFIGURATION_SHA256,
+    'the recorded authority hashes the exact raw body returned to the gateway');
+  assert.equal(gatewayValues?.[':controllerRevision'], CONTROLLER_REVISION);
+  assert.equal(gatewayValues?.[':appliedHealthy'], 'APPLIED_HEALTHY');
+  assert.equal(gatewayValues?.[':pullConfirmedHealth'], 'UNKNOWN');
+  assert.equal(gatewayValues?.[':pullConfirmationMethod'], 'AUTHENTICATED_CONFIGURATION_PULL');
+  const deploymentValues = (transaction[1] as {
+    Update?: { ExpressionAttributeValues?: Item };
+  }).Update?.ExpressionAttributeValues;
+  assert.equal(deploymentValues?.[':appliedHealthy'], 'APPLIED_HEALTHY');
+  assert.equal(deploymentValues?.[':pullConfirmationMethod'], 'AUTHENTICATED_CONFIGURATION_PULL');
+  const operationValues = (transaction[2] as {
+    Update?: { ExpressionAttributeValues?: Item };
+  }).Update?.ExpressionAttributeValues;
+  assert.equal(operationValues?.[':nextOperationState'], 'APPLIED_HEALTHY');
+  assert.equal(operationValues?.[':nextOperationStatus'], 'SUCCEEDED');
+  assert.equal(operationValues?.[':configurationSource'], 'CONTROLLER');
+  assert.equal(operationValues?.[':pullConfirmationMethod'], 'AUTHENTICATED_CONFIGURATION_PULL');
+  const nextSteps = operationValues?.[':nextSteps'] as Item[];
+  assert.equal(nextSteps[2]?.status, 'complete');
+  assert.equal(nextSteps[3]?.status, 'complete');
+  assert.equal(nextSteps[4]?.status, 'pending', 'pull confirmation does not invent a health report');
+  const nextTimeline = operationValues?.[':nextTimeline'] as Item[];
+  assert.equal(nextTimeline.at(-1)?.state, 'APPLIED_HEALTHY');
+  assert.match(String(nextTimeline.at(-1)?.detail), /Apply and health were not reported separately/);
+  assert.doesNotMatch(String(nextTimeline.at(-1)?.detail), /passed health|health-validated|gateway reported/i);
+});
+
+test('a staged profile deployment becomes pull-confirmed when its Controller generation is retrieved', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const setup = fixture({
+    controller: controllerRecord(),
+    mutateOperation: (operation) => {
+      operation.type = 'PROFILE_DEPLOY';
+      operation.state = 'PROFILE_STAGED';
+      operation.timeline = [{
+        state: 'PROFILE_STAGED',
+        at: '2026-08-17T11:59:00.000Z',
+        detail: `Signed profile generation ${GENERATION} is queued for delivery.`,
+      }];
+      const steps = operation.steps as Item[];
+      steps[2] = {
+        key: 'profile',
+        label: 'Signed profile delivered',
+        status: 'in_progress',
+        detail: 'Signed descriptor is queued for delivery.',
+        timestamp: '2026-08-17T11:59:00.000Z',
+      };
+    },
+  });
+
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body, CONTROLLER_RESPONSE_BODY);
+  assert.equal(setup.transactions.length, 1);
+  const transaction = setup.transactions[0];
+  assert.equal(transaction?.length, 5,
+    'gateway, deployment, operation, Controller fence, and audit become consistent atomically');
+  assertExactExpressionBindings(transaction ?? []);
+  const operationValues = (transaction?.[2] as {
+    Update?: { ExpressionAttributeValues?: Item };
+  }).Update?.ExpressionAttributeValues;
+  assert.equal(operationValues?.[':observedState'], 'PROFILE_STAGED');
+  assert.equal(operationValues?.[':nextOperationState'], 'APPLIED_HEALTHY');
+  assert.equal(operationValues?.[':nextOperationStatus'], 'SUCCEEDED');
+  assert.equal(operationValues?.[':pullConfirmationMethod'], 'AUTHENTICATED_CONFIGURATION_PULL');
+  assert.match(JSON.stringify(transaction), /CONTROLLER_CONFIGURATION_PULL_CONFIRMED/);
+});
+
+test('corrupt stored Controller documents fail closed without falling back to S3', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  for (const controller of [
+    controllerRecord({ configurationBody: '{"tampered":true}' }),
+    controllerRecord({ configurationChecksum: 'f'.repeat(64) }),
+    controllerRecord({ revision: 0 }),
+    controllerRecord({ configuration: { usp: { mtp: 'HTTP' } } }),
+  ]) {
+    const setup = fixture({ controller });
+    const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+    assert.equal(response.statusCode, 409);
+    assert.equal((JSON.parse(String(response.body)) as Item).code, 'CONFIGURATION_NOT_AVAILABLE');
+    assert.deepEqual(setup.loadedProfileKeys, []);
+    assert.deepEqual(setup.transactions, []);
+  }
+});
+
+test('saving a controller immediately replaces a same-generation S3 delivery under exact fences', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const recordS3Delivery = (item: Item) => {
+    item.configurationSource = 'S3';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = PROFILE_SHA256;
+  };
+  const setup = fixture({
+    controller: controllerRecord(),
+    mutateGateway: (gateway) => {
+      gateway.state = 'PROFILE_DELIVERED';
+      recordS3Delivery(gateway);
+    },
+    mutateDeployment: (deployment) => {
+      deployment.status = 'PROFILE_DELIVERED';
+      recordS3Delivery(deployment);
+    },
+    mutateOperation: (operation) => { operation.state = 'PROFILE_STAGED'; },
+  });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body, CONTROLLER_RESPONSE_BODY);
+  assert.deepEqual(setup.loadedProfileKeys, []);
+  const transaction = setup.transactions[0];
+  assert.ok(transaction);
+  assert.equal(transaction.length, 5, 'gateway, deployment, operation, controller fence, and audit switch atomically');
+  assertExactExpressionBindings(transaction);
+  for (const action of transaction.slice(0, 2)) {
+    const update = (action as {
+      Update?: { ConditionExpression?: string; ExpressionAttributeValues?: Item };
+    }).Update;
+    assert.match(String(update?.ConditionExpression), /ObservedConfigurationSource/);
+    assert.ok(Object.values(update?.ExpressionAttributeValues ?? {}).includes('S3'));
+    assert.ok(Object.values(update?.ExpressionAttributeValues ?? {}).includes(PROFILE_SHA256));
+    assert.equal(update?.ExpressionAttributeValues?.[':configurationSource'], 'CONTROLLER');
+    assert.equal(update?.ExpressionAttributeValues?.[':configurationChecksum'], CONTROLLER_CONFIGURATION_SHA256);
+  }
+});
+
+test('an explicit saved configuration revision immediately replaces an older same-generation controller delivery', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const oldPayloadChecksum = 'e'.repeat(64);
+  const recordOldControllerDelivery = (item: Item) => {
+    item.configurationSource = 'CONTROLLER';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = oldPayloadChecksum;
+    item.controllerConfigurationRevision = OLD_CONTROLLER_REVISION;
+    item.controllerConfigurationUpdatedAt = OLD_CONTROLLER_UPDATED_AT;
+  };
+  const setup = fixture({
+    controller: controllerRecord(),
+    mutateGateway: (gateway) => {
+      gateway.state = 'PROFILE_DELIVERED';
+      recordOldControllerDelivery(gateway);
+    },
+    mutateDeployment: (deployment) => {
+      deployment.status = 'PROFILE_DELIVERED';
+      recordOldControllerDelivery(deployment);
+    },
+    mutateOperation: (operation) => { operation.state = 'PROFILE_STAGED'; },
+  });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body, CONTROLLER_RESPONSE_BODY);
+  const transaction = setup.transactions[0];
+  assert.ok(transaction);
+  assert.equal(transaction.length, 5);
+  assertExactExpressionBindings(transaction);
+  for (const action of transaction.slice(0, 2)) {
+    const values = (action as { Update?: { ExpressionAttributeValues?: Item } })
+      .Update?.ExpressionAttributeValues ?? {};
+    assert.ok(Object.values(values).includes(oldPayloadChecksum));
+    assert.ok(Object.values(values).includes(OLD_CONTROLLER_REVISION));
+    assert.ok(Object.values(values).includes(OLD_CONTROLLER_UPDATED_AT));
+    assert.equal(values[':controllerRevision'], CONTROLLER_REVISION);
+    assert.equal(values[':controllerUpdatedAt'], CONTROLLER_UPDATED_AT);
+    assert.equal(values[':configurationChecksum'], CONTROLLER_CONFIGURATION_SHA256);
+  }
+});
+
+test('controller source transitions are rejected once apply has started', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const cases = [
+    {
+      label: 'S3 to Controller after apply succeeded',
+      gatewayState: 'APPLIED_HEALTHY',
+      deploymentState: 'APPLIED_HEALTHY',
+      operationState: 'APPLIED_HEALTHY',
+      operationStatus: 'SUCCEEDED',
+      recordDelivery(item: Item) {
+        item.configurationSource = 'S3';
+        item.deliveredConfigurationGeneration = GENERATION;
+        item.deliveredConfigurationChecksum = PROFILE_SHA256;
+      },
+    },
+    {
+      label: 'Controller revision change while applying',
+      gatewayState: 'APPLYING',
+      deploymentState: 'APPLYING',
+      operationState: 'APPLYING',
+      operationStatus: 'IN_PROGRESS',
+      recordDelivery(item: Item) {
+        item.configurationSource = 'CONTROLLER';
+        item.deliveredConfigurationGeneration = GENERATION;
+        item.deliveredConfigurationChecksum = 'e'.repeat(64);
+        item.controllerConfigurationRevision = OLD_CONTROLLER_REVISION;
+        item.controllerConfigurationUpdatedAt = OLD_CONTROLLER_UPDATED_AT;
+      },
+    },
+  ];
+
+  for (const blocked of cases) {
+    const setup = fixture({
+      controller: controllerRecord(),
+      mutateGateway: (gateway) => {
+        gateway.state = blocked.gatewayState;
+        blocked.recordDelivery(gateway);
+      },
+      mutateDeployment: (deployment) => {
+        deployment.status = blocked.deploymentState;
+        blocked.recordDelivery(deployment);
+      },
+      mutateOperation: (operation) => {
+        operation.state = blocked.operationState;
+        operation.operationStatus = blocked.operationStatus;
+      },
+    });
+    const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+    assert.equal(response.statusCode, 409, blocked.label);
+    assert.equal((JSON.parse(String(response.body)) as Item).code, 'CONFIGURATION_NOT_AVAILABLE');
+    assert.deepEqual(setup.loadedProfileKeys, [], blocked.label);
+    assert.deepEqual(setup.transactions, [], blocked.label);
+  }
+});
+
+test('same controller revision remains a read-only pull after apply is healthy', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const recordControllerDelivery = (item: Item) => {
+    item.configurationSource = 'CONTROLLER';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = CONTROLLER_CONFIGURATION_SHA256;
+    item.controllerConfigurationRevision = CONTROLLER_REVISION;
+    item.controllerConfigurationUpdatedAt = CONTROLLER_UPDATED_AT;
+  };
+  const setup = fixture({
+    controller: controllerRecord(),
+    mutateGateway: (gateway) => {
+      gateway.state = 'APPLIED_HEALTHY';
+      recordControllerDelivery(gateway);
+    },
+    mutateDeployment: (deployment) => {
+      deployment.status = 'APPLIED_HEALTHY';
+      recordControllerDelivery(deployment);
+    },
+    mutateOperation: (operation) => {
+      operation.state = 'APPLIED_HEALTHY';
+      operation.operationStatus = 'SUCCEEDED';
+    },
+  });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body, CONTROLLER_RESPONSE_BODY);
+  assert.equal(setup.transactions.length, 1);
+  const transaction = setup.transactions[0];
+  assert.equal(transaction?.length, 4,
+    'repeat pulls fence gateway, deployment, operation, and Controller revision together');
+  assertExactExpressionBindings(transaction ?? []);
+  const gatewayCondition = (transaction?.[0] as {
+    ConditionCheck?: { ConditionExpression?: string; ExpressionAttributeValues?: Item };
+  }).ConditionCheck;
+  assert.match(String(gatewayCondition?.ConditionExpression), /certificateStatus = :active/);
+  assert.match(String(gatewayCondition?.ConditionExpression), /signedDescriptor = :descriptor/);
+  assert.match(String(gatewayCondition?.ConditionExpression), /configurationSource = :gatewayObservedConfigurationSource/);
+  const condition = (transaction?.[3] as {
+    ConditionCheck?: { ConditionExpression?: string; ExpressionAttributeValues?: Item };
+  }).ConditionCheck;
+  assert.match(String(condition?.ConditionExpression), /configurationBody = :controllerBody/);
+  assert.equal(condition?.ExpressionAttributeValues?.[':controllerBody'], CONTROLLER_RESPONSE_BODY);
+  assert.equal(condition?.ExpressionAttributeValues?.[':controllerChecksum'], CONTROLLER_CONFIGURATION_SHA256);
+  assert.equal(condition?.ExpressionAttributeValues?.[':controllerRevision'], CONTROLLER_REVISION);
+  assert.equal(condition?.ExpressionAttributeValues?.[':controllerUpdatedAt'], CONTROLLER_UPDATED_AT);
+});
+
+test('a read-only Controller pull cannot return an old revision after an admin update wins', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const recordControllerDelivery = (item: Item) => {
+    item.configurationSource = 'CONTROLLER';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = CONTROLLER_CONFIGURATION_SHA256;
+    item.controllerConfigurationRevision = CONTROLLER_REVISION;
+    item.controllerConfigurationUpdatedAt = CONTROLLER_UPDATED_AT;
+  };
+  const setup = fixture({
+    controller: controllerRecord(),
+    mutateGateway: (gateway) => {
+      gateway.state = 'APPLIED_HEALTHY';
+      recordControllerDelivery(gateway);
+    },
+    mutateDeployment: (deployment) => {
+      deployment.status = 'APPLIED_HEALTHY';
+      recordControllerDelivery(deployment);
+    },
+    mutateOperation: (operation) => {
+      operation.state = 'APPLIED_HEALTHY';
+      operation.operationStatus = 'SUCCEEDED';
+    },
+  });
+  const originalGetItem = setup.dependencies.getItem;
+  let controllerUpdated = false;
+  setup.dependencies.getItem = async (key) => {
+    if (key.PK === TENANT_KEY && key.SK === 'CONTROLLER' && controllerUpdated) {
+      return {
+        ...controllerRecord(),
+        configuration: UPDATED_CONTROLLER_CONFIGURATION,
+        configurationBody: UPDATED_CONTROLLER_RESPONSE_BODY,
+        configurationChecksum: UPDATED_CONTROLLER_CONFIGURATION_SHA256,
+        revision: UPDATED_CONTROLLER_REVISION,
+        updatedAt: '2026-08-18T11:30:00.000Z',
+      };
+    }
+    return originalGetItem(key);
+  };
+  setup.dependencies.transactWrite = async (transaction) => {
+    setup.transactions.push(transaction);
+    controllerUpdated = true;
+    throw Object.assign(new Error('Controller revision update won'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+    });
+  };
+
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 500);
+  assert.equal((JSON.parse(String(response.body)) as Item).code, 'INTERNAL_ERROR');
+  assert.notEqual(response.body, CONTROLLER_RESPONSE_BODY);
+  assert.equal(setup.transactions.length, 1);
+  const condition = (setup.transactions[0]?.[3] as {
+    ConditionCheck?: { ExpressionAttributeValues?: Item };
+  }).ConditionCheck;
+  assert.equal(condition?.ExpressionAttributeValues?.[':controllerBody'], CONTROLLER_RESPONSE_BODY);
+  assert.equal(condition?.ExpressionAttributeValues?.[':controllerChecksum'], CONTROLLER_CONFIGURATION_SHA256);
+  assert.equal(condition?.ExpressionAttributeValues?.[':controllerRevision'], CONTROLLER_REVISION);
+  assert.equal(condition?.ExpressionAttributeValues?.[':controllerUpdatedAt'], CONTROLLER_UPDATED_AT);
+});
+
+test('a read-only Controller pull fails closed when decommissioning wins the authorization fence', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const recordControllerDelivery = (item: Item) => {
+    item.configurationSource = 'CONTROLLER';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = CONTROLLER_CONFIGURATION_SHA256;
+    item.controllerConfigurationRevision = CONTROLLER_REVISION;
+    item.controllerConfigurationUpdatedAt = CONTROLLER_UPDATED_AT;
+  };
+  const setup = fixture({
+    controller: controllerRecord(),
+    mutateGateway: (gateway) => {
+      gateway.state = 'APPLIED_HEALTHY';
+      recordControllerDelivery(gateway);
+    },
+    mutateDeployment: (deployment) => {
+      deployment.status = 'APPLIED_HEALTHY';
+      recordControllerDelivery(deployment);
+    },
+    mutateOperation: (operation) => {
+      operation.state = 'APPLIED_HEALTHY';
+      operation.operationStatus = 'SUCCEEDED';
+    },
+  });
+  setup.dependencies.transactWrite = async (transaction) => {
+    setup.transactions.push(transaction);
+    setup.gateway.certificateStatus = 'INACTIVE';
+    setup.gateway.state = 'DECOMMISSIONED';
+    throw Object.assign(new Error('decommission won'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+    });
+  };
+
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 500);
+  assert.equal((JSON.parse(String(response.body)) as Item).code, 'INTERNAL_ERROR');
+  assert.notEqual(response.body, CONTROLLER_RESPONSE_BODY);
+  const gatewayCondition = (setup.transactions[0]?.[0] as {
+    ConditionCheck?: { ConditionExpression?: string };
+  }).ConditionCheck;
+  assert.match(String(gatewayCondition?.ConditionExpression), /certificateStatus = :active/);
+});
+
+test('same-generation controller payload drift fails closed without overwriting delivery authority', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const recordDelivery = (item: Item) => {
+    item.configurationSource = 'CONTROLLER';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = 'd'.repeat(64);
+    item.controllerConfigurationRevision = CONTROLLER_REVISION;
+    item.controllerConfigurationUpdatedAt = CONTROLLER_UPDATED_AT;
+  };
+  const setup = fixture({
+    controller: controllerRecord(),
+    mutateGateway: (gateway) => {
+      gateway.state = 'PROFILE_DELIVERED';
+      recordDelivery(gateway);
+    },
+    mutateDeployment: (deployment) => {
+      deployment.status = 'PROFILE_DELIVERED';
+      recordDelivery(deployment);
+    },
+    mutateOperation: (operation) => { operation.state = 'PROFILE_STAGED'; },
+  });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 409);
+  assert.equal((JSON.parse(String(response.body)) as Item).code, 'CONFIGURATION_NOT_AVAILABLE');
+  assert.deepEqual(setup.loadedProfileKeys, []);
+  assert.deepEqual(setup.transactions, []);
+});
+
+test('removing a configured controller never falls back to S3 for a controller-delivered generation', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const recordControllerDelivery = (item: Item) => {
+    item.configurationSource = 'CONTROLLER';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = CONTROLLER_CONFIGURATION_SHA256;
+    item.controllerConfigurationRevision = CONTROLLER_REVISION;
+    item.controllerConfigurationUpdatedAt = CONTROLLER_UPDATED_AT;
+  };
+  const setup = fixture({
+    mutateGateway: (gateway) => {
+      gateway.state = 'PROFILE_DELIVERED';
+      recordControllerDelivery(gateway);
+    },
+    mutateDeployment: (deployment) => {
+      deployment.status = 'PROFILE_DELIVERED';
+      recordControllerDelivery(deployment);
+    },
+    mutateOperation: (operation) => { operation.state = 'PROFILE_STAGED'; },
+  });
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 409);
+  assert.equal((JSON.parse(String(response.body)) as Item).code, 'CONFIGURATION_NOT_AVAILABLE');
+  assert.deepEqual(setup.loadedProfileKeys, [], 'S3 is not read after controller authority was recorded');
+  assert.deepEqual(setup.transactions, []);
+});
+
 test('configuration delivery transactions remain valid across partial forward-state retries', async () => {
   const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
   const cases = [
     {
       label: 'gateway already delivered',
       mutateGateway: (gateway: Item) => { gateway.state = 'PROFILE_DELIVERED'; },
-      mutateDeployment: (_deployment: Item) => {},
+      mutateDeployment: () => {},
       gatewayUsesDelivered: false,
       deploymentUsesDelivered: true,
     },
     {
       label: 'deployment already delivered',
-      mutateGateway: (_gateway: Item) => {},
+      mutateGateway: () => {},
       mutateDeployment: (deployment: Item) => { deployment.status = 'PROFILE_DELIVERED'; },
       gatewayUsesDelivered: true,
       deploymentUsesDelivered: false,
@@ -478,7 +1023,8 @@ test('configuration delivery transactions remain valid across partial forward-st
     assert.equal(setup.transactions.length, 1, retryCase.label);
     const transaction = setup.transactions[0];
     assert.ok(transaction);
-    assert.equal(transaction.length, 3, `${retryCase.label}: gateway, deployment, and audit remain atomic`);
+    assert.equal(transaction.length, 4,
+      `${retryCase.label}: gateway, deployment, Controller-absence fence, and audit remain atomic`);
     assertExactExpressionBindings(transaction);
 
     const gatewayUpdate = (transaction[0] as {
@@ -523,18 +1069,12 @@ test('generation-two PROFILE_AVAILABLE records deliver without regressing an alr
   assert.equal(setup.transactions.length, 1);
   const transaction = setup.transactions[0];
   assert.ok(transaction);
-  assert.equal(transaction.length, 4, 'gateway, deployment, operation, and audit updates for first staged delivery');
-  const operationUpdate = (transaction[2] as {
-    Update?: { UpdateExpression?: string; ExpressionAttributeValues?: Record<string, unknown>; };
-  }).Update;
-  assert.ok(operationUpdate);
-  assert.match(operationUpdate.UpdateExpression ?? '', /operationStatus = :nextOperationStatus/);
-  assert.equal(operationUpdate.ExpressionAttributeValues?.[':nextOperationStatus'], 'SUCCEEDED');
-  assert.equal(operationUpdate.ExpressionAttributeValues?.[':nextOperationState'], 'APPLIED_HEALTHY');
-  const nextSteps = operationUpdate.ExpressionAttributeValues?.[':nextSteps'];
-  assert.ok(Array.isArray(nextSteps) && nextSteps.length >= 5);
-  assert.equal((nextSteps[3] as Item)?.status, 'complete');
-  assert.equal((nextSteps[4] as Item)?.status, 'complete');
+  assert.equal(transaction.length, 4,
+    'gateway, deployment, Controller-absence fence, and audit update without completing apply');
+  assert.ok((transaction[2] as { ConditionCheck?: unknown }).ConditionCheck);
+  assert.doesNotMatch(JSON.stringify(transaction), /"SUCCEEDED"|"APPLIED_HEALTHY"/);
+  assert.equal(setup.operation.state, 'PROFILE_STAGED');
+  assert.equal(setup.operation.operationStatus, 'IN_PROGRESS');
   assertExactExpressionBindings(transaction);
 });
 
@@ -716,6 +1256,11 @@ test('a genuine first-delivery transaction race returns the configuration after 
     setup.transactions.push(transaction);
     setup.gateway.state = 'PROFILE_DELIVERED';
     setup.deployment.status = 'PROFILE_DELIVERED';
+    for (const record of [setup.gateway, setup.deployment]) {
+      record.configurationSource = 'S3';
+      record.deliveredConfigurationGeneration = GENERATION;
+      record.deliveredConfigurationChecksum = PROFILE_SHA256;
+    }
     setup.operation.state = 'PROFILE_STAGED';
     const operationUpdate = (transaction[2] as {
       Update?: { ExpressionAttributeValues?: Record<string, unknown> };
@@ -731,6 +1276,74 @@ test('a genuine first-delivery transaction race returns the configuration after 
   const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
   assert.equal(response.statusCode, 200);
   assert.equal(setup.transactions.length, 1);
+});
+
+test('an S3 delivery race cannot be reconciled after a Controller save wins', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const setup = fixture();
+  const originalGetItem = setup.dependencies.getItem;
+  let controllerSaved = false;
+  setup.dependencies.getItem = async (key) => {
+    if (key.PK === TENANT_KEY && key.SK === 'CONTROLLER' && controllerSaved) return controllerRecord();
+    return originalGetItem(key);
+  };
+  setup.dependencies.transactWrite = async (transaction) => {
+    setup.transactions.push(transaction);
+    // Even if an unrelated concurrent S3 pull advanced all lifecycle records,
+    // this request must not return its S3 body after Controller activation.
+    setup.gateway.state = 'PROFILE_DELIVERED';
+    setup.deployment.status = 'PROFILE_DELIVERED';
+    for (const record of [setup.gateway, setup.deployment]) {
+      record.configurationSource = 'S3';
+      record.deliveredConfigurationGeneration = GENERATION;
+      record.deliveredConfigurationChecksum = PROFILE_SHA256;
+    }
+    setup.operation.state = 'PROFILE_STAGED';
+    const operationUpdate = (transaction[2] as {
+      Update?: { ExpressionAttributeValues?: Record<string, unknown> };
+    }).Update;
+    setup.operation.steps = operationUpdate?.ExpressionAttributeValues?.[':nextSteps'];
+    setup.operation.timeline = operationUpdate?.ExpressionAttributeValues?.[':nextTimeline'];
+    controllerSaved = true;
+    throw Object.assign(new Error('Controller save won the serializable transaction'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+    });
+  };
+
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+  assert.equal(response.statusCode, 500);
+  assert.equal((JSON.parse(String(response.body)) as Item).code, 'INTERNAL_ERROR');
+  assert.equal(setup.transactions.length, 1);
+});
+
+test('delivery-race reconciliation rejects a mismatched recorded S3 checksum', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const setup = fixture();
+  setup.dependencies.transactWrite = async (transaction) => {
+    setup.transactions.push(transaction);
+    setup.gateway.state = 'PROFILE_DELIVERED';
+    setup.deployment.status = 'PROFILE_DELIVERED';
+    for (const record of [setup.gateway, setup.deployment]) {
+      record.configurationSource = 'S3';
+      record.deliveredConfigurationGeneration = GENERATION;
+      record.deliveredConfigurationChecksum = 'f'.repeat(64);
+    }
+    setup.operation.state = 'PROFILE_STAGED';
+    const operationUpdate = (transaction[2] as {
+      Update?: { ExpressionAttributeValues?: Record<string, unknown> };
+    }).Update;
+    setup.operation.steps = operationUpdate?.ExpressionAttributeValues?.[':nextSteps'];
+    setup.operation.timeline = operationUpdate?.ExpressionAttributeValues?.[':nextTimeline'];
+    throw Object.assign(new Error('a different S3 authority won'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+    });
+  };
+
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+  assert.equal(response.statusCode, 500);
+  assert.equal((JSON.parse(String(response.body)) as Item).code, 'INTERNAL_ERROR');
 });
 
 test('a delivery race fails closed when the operation did not advance with the assignment', async () => {
@@ -772,7 +1385,7 @@ test('access and validation failures are never reclassified as successful delive
 
     const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
     assert.equal(response.statusCode, 500, errorName);
-    assert.equal(getCount, 3, `${errorName} must not trigger race-reconciliation rereads`);
+    assert.equal(getCount, 4, `${errorName} must not trigger race-reconciliation rereads`);
   }
 });
 
@@ -808,18 +1421,25 @@ test('transaction cancellations without an explicit race reason fail closed', as
 
     const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
     assert.equal(response.statusCode, 500);
-    assert.equal(getCount, 3, 'non-race cancellation must not trigger reconciliation rereads');
+    assert.equal(getCount, 4, 'non-race cancellation must not trigger reconciliation rereads');
   }
 });
 
 test('an applied healthy gateway may repeat a pull read-only without regressing operation state', async () => {
   const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const recordS3Delivery = (item: Item) => {
+    item.configurationSource = 'S3';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = PROFILE_SHA256;
+  };
   const setup = fixture({
     mutateGateway: (gateway) => {
       gateway.state = 'APPLIED_HEALTHY';
+      recordS3Delivery(gateway);
     },
     mutateDeployment: (deployment) => {
       deployment.status = 'APPLIED_HEALTHY';
+      recordS3Delivery(deployment);
     },
     mutateOperation: (operation) => {
       operation.state = 'APPLIED_HEALTHY';
@@ -829,7 +1449,114 @@ test('an applied healthy gateway may repeat a pull read-only without regressing 
   const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
 
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(setup.transactions, [], 'unchanged-generation repeat pulls do not amplify DDB writes or audits');
+  assert.equal(setup.transactions.length, 1,
+    'unchanged-generation repeat pulls atomically fence their complete delivery authority');
+  const transaction = setup.transactions[0];
+  assert.equal(transaction?.length, 4);
+  assertExactExpressionBindings(transaction ?? []);
+  const gatewayCondition = (transaction?.[0] as {
+    ConditionCheck?: { ConditionExpression?: string };
+  }).ConditionCheck;
+  assert.match(String(gatewayCondition?.ConditionExpression), /certificateStatus = :active/);
+  assert.match(String(gatewayCondition?.ConditionExpression), /desiredGeneration = :generation/);
+  assert.match(String(gatewayCondition?.ConditionExpression), /configurationSource = :gatewayObservedConfigurationSource/);
+  const condition = (transaction?.[3] as {
+    ConditionCheck?: { Key?: Item; ConditionExpression?: string };
+  }).ConditionCheck;
+  assert.deepEqual(condition?.Key, { PK: TENANT_KEY, SK: 'CONTROLLER' });
+  assert.equal(condition?.ConditionExpression, 'attribute_not_exists(PK)');
+});
+
+test('a read-only S3 pull cannot return legacy configuration after a Controller save wins', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const recordS3Delivery = (item: Item) => {
+    item.configurationSource = 'S3';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = PROFILE_SHA256;
+  };
+  const setup = fixture({
+    mutateGateway: (gateway) => {
+      gateway.state = 'APPLIED_HEALTHY';
+      recordS3Delivery(gateway);
+    },
+    mutateDeployment: (deployment) => {
+      deployment.status = 'APPLIED_HEALTHY';
+      recordS3Delivery(deployment);
+    },
+    mutateOperation: (operation) => {
+      operation.state = 'APPLIED_HEALTHY';
+      operation.operationStatus = 'SUCCEEDED';
+    },
+  });
+  const originalGetItem = setup.dependencies.getItem;
+  let controllerSaved = false;
+  setup.dependencies.getItem = async (key) => {
+    if (key.PK === TENANT_KEY && key.SK === 'CONTROLLER' && controllerSaved) return controllerRecord();
+    return originalGetItem(key);
+  };
+  setup.dependencies.transactWrite = async (transaction) => {
+    setup.transactions.push(transaction);
+    controllerSaved = true;
+    throw Object.assign(new Error('Controller save won'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+    });
+  };
+
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 500);
+  assert.equal((JSON.parse(String(response.body)) as Item).code, 'INTERNAL_ERROR');
+  assert.equal(setup.loadedProfileKeys.length, 1, 'the immutable object read occurred before the singleton fence');
+  assert.equal(setup.transactions.length, 1);
+  const condition = (setup.transactions[0]?.[3] as {
+    ConditionCheck?: { ConditionExpression?: string };
+  }).ConditionCheck;
+  assert.equal(condition?.ConditionExpression, 'attribute_not_exists(PK)');
+});
+
+test('a read-only S3 pull fails closed when a new profile generation wins the assignment fence', async () => {
+  const { createDeviceConfigurationHandler } = await import('../lambda/device-config-http-handler.js');
+  const recordS3Delivery = (item: Item) => {
+    item.configurationSource = 'S3';
+    item.deliveredConfigurationGeneration = GENERATION;
+    item.deliveredConfigurationChecksum = PROFILE_SHA256;
+  };
+  const setup = fixture({
+    mutateGateway: (gateway) => {
+      gateway.state = 'APPLIED_HEALTHY';
+      recordS3Delivery(gateway);
+    },
+    mutateDeployment: (deployment) => {
+      deployment.status = 'APPLIED_HEALTHY';
+      recordS3Delivery(deployment);
+    },
+    mutateOperation: (operation) => {
+      operation.state = 'APPLIED_HEALTHY';
+      operation.operationStatus = 'SUCCEEDED';
+    },
+  });
+  setup.dependencies.transactWrite = async (transaction) => {
+    setup.transactions.push(transaction);
+    setup.gateway.desiredGeneration = GENERATION + 1;
+    setup.gateway.desiredProfileVersionId = 'pv-2';
+    setup.gateway.operationId = 'operation-b';
+    throw Object.assign(new Error('new assignment won'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+    });
+  };
+
+  const response = await createDeviceConfigurationHandler(setup.dependencies)(event(), context);
+
+  assert.equal(response.statusCode, 500);
+  assert.equal((JSON.parse(String(response.body)) as Item).code, 'INTERNAL_ERROR');
+  const gatewayCondition = (setup.transactions[0]?.[0] as {
+    ConditionCheck?: { ConditionExpression?: string };
+  }).ConditionCheck;
+  assert.match(String(gatewayCondition?.ConditionExpression), /desiredGeneration = :generation/);
+  assert.match(String(gatewayCondition?.ConditionExpression), /desiredProfileVersionId = :profileVersionId/);
+  assert.match(String(gatewayCondition?.ConditionExpression), /operationId = :operationId/);
 });
 
 test('legacy assignments without a persisted compact claim fail closed before delivery', async () => {

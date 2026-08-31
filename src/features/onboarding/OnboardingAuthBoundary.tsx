@@ -44,7 +44,7 @@ export function OnboardingAuthBoundary({ children }: { children: ReactNode }) {
     <div className="ce-onb-page">
       <PageHeader
         title="Gateway Onboarding"
-        subtitle="Verify factory serials, assign immutable profiles, and confirm device health."
+        subtitle="Verify factory serials, assign immutable profiles, and confirm configuration delivery and reported device health."
       />
       <section className="ce-onb-auth-gate" aria-labelledby="onboarding-auth-title">
         <span className={`ce-onb-auth-mark${state === 'error' ? ' is-error' : ''}`}>

@@ -6,6 +6,19 @@ import type { OperatorContext } from './onboardingTypes.js';
 
 const tenantA: OperatorContext = { tenantId: 'tenant_demo', actorId: 'operator_a' };
 const tenantB: OperatorContext = { tenantId: 'tenant_other', actorId: 'operator_b' };
+const controllerProvisioning = {
+  usp: {
+    controller_endpoint_id: 'proto::Controller-ip-172-31-2-12',
+    mtp: 'MQTT',
+    mqtt: {
+      broker: 'broker.hivemq.com',
+      port: 1883,
+      protocol_version: '5.0',
+      transport: 'TCP/IP',
+      controller_topic: 'controller/proto::Controller-ip-172-31-2-12',
+    },
+  },
+} as const;
 
 async function setup(options: { simulateDevice?: boolean } = {}) {
   let current = new Date('2026-08-16T12:00:00.000Z');
@@ -83,6 +96,39 @@ describe('OnboardingService', () => {
       }, 'verify-replay-01'),
       (error: unknown) => error instanceof OnboardingError && error.code === 'IDEMPOTENCY_CONFLICT',
     );
+  });
+
+  it('persists tenant-scoped Controller provisioning and rejects malformed details', async () => {
+    const { service, repository } = await setup();
+    const saved = await service.saveController(tenantA, controllerProvisioning, 'controller-save-01');
+
+    assert.deepEqual(saved.configuration.usp, controllerProvisioning.usp);
+    assert.match(saved.configurationChecksum, /^[a-f0-9]{64}$/);
+    assert.match(saved.revision, /^controller_[a-f0-9]{32}$/);
+    assert.deepEqual((await service.getSnapshot(tenantA)).controller, saved);
+    assert.equal((await service.getSnapshot(tenantB)).controller, undefined);
+    assert.deepEqual(
+      await service.saveController(tenantA, controllerProvisioning, 'controller-save-01'),
+      saved,
+    );
+
+    const database = await repository.load();
+    assert.equal(database?.tenants.tenant_demo.audit.at(-1)?.action, 'CONTROLLER_CONFIGURATION_UPDATED');
+    assert.equal(database?.tenants.tenant_demo.audit.at(-1)?.targetType, 'controller');
+
+    for (const [index, provisioning] of [
+      {},
+      { ...controllerProvisioning, extra: true },
+      { usp: { ...controllerProvisioning.usp, mtp: 'HTTP' } },
+      { usp: { ...controllerProvisioning.usp, mqtt: { ...controllerProvisioning.usp.mqtt, port: 0 } } },
+      { usp: { ...controllerProvisioning.usp, mqtt: { ...controllerProvisioning.usp.mqtt, broker: 'mqtt://broker.hivemq.com' } } },
+      { usp: { ...controllerProvisioning.usp, mqtt: { ...controllerProvisioning.usp.mqtt, controller_topic: 'controller/#' } } },
+    ].entries()) {
+      await assert.rejects(
+        service.saveController(tenantA, provisioning, `controller-bad-${index}`),
+        (error: unknown) => error instanceof OnboardingError && error.code === 'INVALID_CONTROLLER_CONFIGURATION',
+      );
+    }
   });
 
   it('enforces the factory serial grammar', async () => {
@@ -425,6 +471,35 @@ describe('OnboardingService', () => {
     const updatedGateway = (await service.getSnapshot(tenantA)).gateways[0];
     assert.equal(updatedGateway.profileVersionId, successor.id);
     assert.equal(updatedGateway.deploymentGeneration, 2);
+  });
+
+  it('redeploys the current profile as a new generation after Controller provisioning changes', async () => {
+    const { service, advance } = await setup({ simulateDevice: true });
+    const verification = await verifiedGateway(service);
+    const profile = (await service.getSnapshot(tenantA)).profiles.find(
+      (candidate) => candidate.modelId === verification.identity.modelId,
+    );
+    assert.ok(profile);
+    const onboard = await service.startOnboarding(tenantA, {
+      verificationId: verification.verificationId,
+      siteId: verification.allowedSites[0].id,
+      profileVersionId: profile.id,
+    }, 'onboard-controller-redeploy');
+    advance(10_000);
+    await service.reconcileAll();
+    assert.equal((await service.getOperation(tenantA, onboard.id)).state, 'APPLIED_HEALTHY');
+
+    await service.saveController(tenantA, controllerProvisioning, 'controller-before-redeploy');
+    const gateway = (await service.getSnapshot(tenantA)).gateways[0];
+    const deployment = await service.assignProfile(tenantA, gateway.id, {
+      profileVersionId: profile.id,
+      deliveryMode: 'PULL',
+    }, 'assign-controller-redeploy');
+
+    assert.equal(deployment.profileVersionId, profile.id);
+    assert.equal(deployment.previousProfileVersionId, profile.id);
+    assert.equal(deployment.deploymentGeneration, onboard.deploymentGeneration + 1);
+    assert.equal(deployment.state, 'PROFILE_STAGED');
   });
 
   it('supersedes only the exact unconfirmed profile generation and keeps pull delivery broker-free', async () => {

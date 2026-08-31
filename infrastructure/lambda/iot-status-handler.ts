@@ -7,6 +7,7 @@ import { canonicalJson } from './shared/profile.js';
 
 const TOPIC_PREFIX = 'ce/v1/gateways/';
 const STATUS_SUFFIX = '/status';
+const CONTROLLER_REVISION_PATTERN = /^controller_[a-f0-9]{32}$/;
 
 export type DeviceStatus = 'APPLYING' | 'HEALTH_CHECK' | 'APPLIED_HEALTHY' | 'FAILED' | 'ROLLING_BACK' | 'ROLLED_BACK';
 type UiOperationStatus = 'IN_PROGRESS' | 'SUCCEEDED' | 'FAILED';
@@ -16,6 +17,14 @@ export type DeviceStatusRecordDisposition = 'APPLIED' | 'STALE_NOOP' | 'QUARANTI
 type Item = Record<string, unknown>;
 type TransactItems = NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']>;
 type TransitionEntity = 'gateway' | 'deployment' | 'operation';
+
+interface AuthoritativeConfigurationDelivery {
+  kind: 'S3' | 'CONTROLLER';
+  checksum: string;
+  recorded: boolean;
+  controllerRevision?: string;
+  controllerUpdatedAt?: string;
+}
 
 const EARLY_STATE_ORDER_BY_ENTITY: Record<TransitionEntity, readonly string[]> = {
   gateway: ['PERMANENT_IDENTITY_ACTIVE', 'PROFILE_AVAILABLE', 'PROFILE_DELIVERED'],
@@ -205,7 +214,8 @@ export async function recordAuthoritativeDeviceStatus(
       || canonicalJson(gateway.signedDescriptor) !== canonicalJson(descriptor)))) {
     throw new DeviceStatusConflictError('Authoritative deployment lineage is inconsistent');
   }
-  const authoritativeChecksum = requiredChecksum(descriptor.profileSha256, 'deployment descriptor profileSha256');
+  const configurationDelivery = authoritativeConfigurationDelivery(gateway, deployment, descriptor, generation);
+  const authoritativeChecksum = configurationDelivery.checksum;
   let reportedChecksum: string | undefined;
   let rollbackProfileVersionId: string | undefined;
   let rollbackProfileChecksum: string | undefined;
@@ -305,13 +315,33 @@ export async function recordAuthoritativeDeviceStatus(
   const rollbackLeaseExpiry = status === 'ROLLED_BACK' ? Math.floor(observedAt.getTime() / 1000) + 60 : undefined;
   const gatewayUpdate = gatewayUpdateExpression(status);
   const deploymentUpdate = deploymentUpdateExpression(status);
+  const deliveryCondition = configurationDelivery.recorded
+    ? [
+        ' AND configurationSource = :configurationSource',
+        ' AND deliveredConfigurationGeneration = :configurationGeneration',
+        ' AND deliveredConfigurationChecksum = :authoritativeConfigurationChecksum',
+        ...(configurationDelivery.kind === 'CONTROLLER' ? [
+          ' AND controllerConfigurationRevision = :controllerRevision',
+          ' AND controllerConfigurationUpdatedAt = :controllerUpdatedAt',
+        ] : []),
+      ].join('')
+    : '';
+  const deliveryConditionValues = configurationDelivery.recorded ? {
+    ':configurationSource': configurationDelivery.kind,
+    ':configurationGeneration': generation,
+    ':authoritativeConfigurationChecksum': authoritativeChecksum,
+    ...(configurationDelivery.kind === 'CONTROLLER' ? {
+      ':controllerRevision': configurationDelivery.controllerRevision,
+      ':controllerUpdatedAt': configurationDelivery.controllerUpdatedAt,
+    } : {}),
+  } : {};
   const transaction: TransactItems = [];
   if (transitionGateway) transaction.push({
       Update: {
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: gatewaySk(gatewayId) },
         UpdateExpression: gatewayUpdate.expression,
-        ConditionExpression: 'entityType = :gateway AND tenantId = :tenantId AND gatewayId = :gatewayId AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :certificatePrincipal AND certificateStatus = :active AND desiredGeneration = :generation AND desiredProfileVersionId = :profileVersionId AND operationId = :operationId AND signedDescriptor = :descriptor AND #state = :current',
+        ConditionExpression: `entityType = :gateway AND tenantId = :tenantId AND gatewayId = :gatewayId AND thingName = :thingName AND certificateId = :certificateId AND certificatePrincipal = :certificatePrincipal AND certificateStatus = :active AND desiredGeneration = :generation AND desiredProfileVersionId = :profileVersionId AND operationId = :operationId AND signedDescriptor = :descriptor AND #state = :current${deliveryCondition}`,
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':gateway': 'GATEWAY',
@@ -331,6 +361,7 @@ export async function recordAuthoritativeDeviceStatus(
             : status === 'FAILED' || status === 'ROLLING_BACK' || status === 'ROLLED_BACK' ? 'DEGRADED'
               : 'APPLYING',
           ':now': now,
+          ...deliveryConditionValues,
           ...(status === 'APPLIED_HEALTHY' ? { ':profileChecksum': reportedChecksum } : {}),
           ...(status === 'ROLLED_BACK' ? {
             ':rollbackProfileVersionId': rollbackProfileVersionId,
@@ -347,7 +378,7 @@ export async function recordAuthoritativeDeviceStatus(
         TableName: TABLE_NAME,
         Key: { PK: tenantKey, SK: deploymentSk(gatewayId, generation) },
         UpdateExpression: deploymentUpdate.expression,
-        ConditionExpression: 'entityType = :deployment AND tenantId = :tenantId AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND #descriptor = :descriptor AND #status = :current',
+        ConditionExpression: `entityType = :deployment AND tenantId = :tenantId AND gatewayId = :gatewayId AND generation = :generation AND profileVersionId = :profileVersionId AND operationId = :operationId AND #descriptor = :descriptor AND #status = :current${deliveryCondition}`,
         ExpressionAttributeNames: { '#status': 'status', '#error': 'error', '#descriptor': 'descriptor' },
         ExpressionAttributeValues: {
           ':deployment': 'DEPLOYMENT',
@@ -360,6 +391,7 @@ export async function recordAuthoritativeDeviceStatus(
           ':current': deploymentStatus,
           ':next': status,
           ':now': now,
+          ...deliveryConditionValues,
           ...(status === 'APPLIED_HEALTHY' ? { ':profileChecksum': reportedChecksum } : {}),
           ...(status === 'ROLLED_BACK' ? {
             ':rollbackProfileVersionId': rollbackProfileVersionId,
@@ -555,9 +587,14 @@ async function committedStatusRecovery(input: {
   if (!exactGateway || !exactDeployment || !exactOperation) return 'MISMATCH';
 
   let authoritativeChecksum: string;
-  let assignmentIntact = false;
+  let assignmentIntact: boolean;
   try {
-    authoritativeChecksum = requiredChecksum(input.descriptor.profileSha256, 'descriptor profileSha256');
+    authoritativeChecksum = authoritativeConfigurationDelivery(
+      gateway,
+      deployment,
+      input.descriptor,
+      input.generation,
+    ).checksum;
     if (!isRecord(deployment.descriptor)
       || canonicalJson(deployment.descriptor) !== canonicalJson(input.descriptor)) return 'MISMATCH';
     assignmentIntact = gateway.desiredProfileVersionId === input.profileVersionId
@@ -634,7 +671,7 @@ async function committedQuarantineMatches(input: {
     input.dependencies.getItem({ PK: tenantKey, SK: operationSk(input.operationId) }),
   ]);
   if (!gateway || !deployment || !operation) return false;
-  let descriptorMatches = false;
+  let descriptorMatches: boolean;
   try {
     descriptorMatches = isRecord(deployment.descriptor)
       && canonicalJson(deployment.descriptor) === canonicalJson(input.descriptor);
@@ -1002,6 +1039,64 @@ function safeDetail(value: unknown): string | undefined {
   return normalized.slice(0, 500);
 }
 
+function authoritativeConfigurationDelivery(
+  gateway: Item,
+  deployment: Item,
+  descriptor: Item,
+  generation: number,
+): AuthoritativeConfigurationDelivery {
+  const source = deployment.configurationSource;
+  const deliveredGeneration = deployment.deliveredConfigurationGeneration;
+  const deliveredChecksum = deployment.deliveredConfigurationChecksum;
+  const deploymentRecorded = source !== undefined
+    || deliveredGeneration !== undefined
+    || deliveredChecksum !== undefined;
+  const gatewayRecorded = gateway.configurationSource !== undefined
+    || gateway.deliveredConfigurationGeneration !== undefined
+    || gateway.deliveredConfigurationChecksum !== undefined;
+  if (!deploymentRecorded && !gatewayRecorded) {
+    return {
+      kind: 'S3',
+      checksum: requiredChecksum(descriptor.profileSha256, 'deployment descriptor profileSha256'),
+      recorded: false,
+    };
+  }
+  if (!deploymentRecorded || !gatewayRecorded) {
+    throw new DeviceStatusConflictError('Configuration delivery source is incomplete');
+  }
+  if (source !== 'S3' && source !== 'CONTROLLER') {
+    throw new DeviceStatusConflictError('Configuration delivery source is invalid');
+  }
+  if (deliveredGeneration !== generation
+    || gateway.configurationSource !== source
+    || gateway.deliveredConfigurationGeneration !== generation
+    || gateway.deliveredConfigurationChecksum !== deliveredChecksum) {
+    throw new DeviceStatusConflictError('Configuration delivery source is inconsistent');
+  }
+  const checksum = requiredChecksum(deliveredChecksum, 'delivered configuration checksum');
+  if (source === 'S3'
+    && checksum !== requiredChecksum(descriptor.profileSha256, 'deployment descriptor profileSha256')) {
+    throw new DeviceStatusConflictError('S3 configuration checksum does not match the signed profile');
+  }
+  if (source === 'CONTROLLER') {
+    const revision = requiredControllerRevision(deployment.controllerConfigurationRevision);
+    const updatedAt = requiredStoredString(deployment.controllerConfigurationUpdatedAt, 'controller configuration updatedAt');
+    if (gateway.controllerConfigurationRevision !== revision
+      || gateway.controllerConfigurationUpdatedAt !== updatedAt
+      || !Number.isFinite(Date.parse(updatedAt))) {
+      throw new DeviceStatusConflictError('Controller delivery revision is inconsistent');
+    }
+    return {
+      kind: source,
+      checksum,
+      recorded: true,
+      controllerRevision: revision,
+      controllerUpdatedAt: updatedAt,
+    };
+  }
+  return { kind: source, checksum, recorded: true };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -1034,5 +1129,12 @@ function positiveInteger(value: unknown, label: string): number {
 
 function requiredChecksum(value: unknown, label: string): string {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) throw new Error(`${label} must be a lowercase SHA-256 digest`);
+  return value;
+}
+
+function requiredControllerRevision(value: unknown): string {
+  if (typeof value !== 'string' || !CONTROLLER_REVISION_PATTERN.test(value)) {
+    throw new Error('controller configuration revision must be a valid revision identifier');
+  }
   return value;
 }

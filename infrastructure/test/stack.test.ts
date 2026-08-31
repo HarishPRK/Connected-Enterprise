@@ -596,6 +596,7 @@ test('HTTP handler exposes the exact Connected Enterprise onboarding contract', 
     'POST /api/onboarding/claims/verify',
     'POST /api/onboarding/bootstrap-packages',
     'POST /api/onboarding/profiles',
+    'POST /api/onboarding/controller',
     'POST /api/onboarding/operations',
     'GET /api/onboarding/operations/{operationId}',
     'POST /api/onboarding/gateways/{gatewayId}/decommission',
@@ -603,6 +604,14 @@ test('HTTP handler exposes the exact Connected Enterprise onboarding contract', 
   ]) assert.match(source, new RegExp(route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(source, /tenantContext\(event\)/);
   assert.doesNotMatch(source, /body\.tenantId/);
+  assert.match(source, /case 'POST \/api\/onboarding\/controller':[\s\S]*?requireRole\(context, 'platform_admin', 'tenant_admin'\)/);
+  assert.match(source, /entityType: 'CONTROLLER_CONFIGURATION'/);
+  assert.match(source, /SK: controllerSk\(\)/);
+  assert.match(source, /CONTROLLER_CONFIGURATION_(?:CONFIRMED|UPDATED)/);
+  assert.match(source, /configurationBody/);
+  assert.match(source, /configurationChecksum/);
+  assert.match(source, /revision/);
+  assert.doesNotMatch(source, /normalizeControllerEndpoint|fetchControllerConfiguration|httpsRequest/);
   assert.match(authSource, /claims\.token_use !== 'access'/);
 });
 
@@ -613,6 +622,7 @@ test('HTTP API declares exact JWT routes so Lambda receives exact routeKey value
     'POST /api/onboarding/claims/verify',
     'POST /api/onboarding/bootstrap-packages',
     'POST /api/onboarding/profiles',
+    'POST /api/onboarding/controller',
     'POST /api/onboarding/operations',
     'GET /api/onboarding/operations/{operationId}',
     'POST /api/onboarding/gateways/{gatewayId}/decommission',
@@ -817,6 +827,7 @@ test('fleet configuration pull and status acknowledgement use one exact IoT cred
     resource.Type === 'AWS::IAM::Policy'
     && JSON.stringify(resource.Properties?.Roles ?? []).includes(`\"Ref\":\"${configRoleLogicalId}\"`));
   const configPermissions = JSON.stringify(configRolePolicies);
+  assert.match(configPermissions, /dynamodb:ConditionCheckItem/);
   assert.match(configPermissions, /dynamodb:GetItem/);
   assert.match(configPermissions, /dynamodb:Query/);
   assert.match(configPermissions, /dynamodb:PutItem/);
@@ -1257,7 +1268,10 @@ test('delivered profile deployments are superseded only from exact lease-free as
     modernAuthority,
     {
       descriptor,
+      legacyHttpCompletion: false,
       operationId: 'op-1',
+      operationState: 'PROFILE_STAGED',
+      operationStatus: 'IN_PROGRESS',
       operationType: 'PROFILE_DEPLOY',
       profileVersionId: 'pv-1',
       tenantId: 'tenant-a',
@@ -1266,6 +1280,26 @@ test('delivered profile deployments are superseded only from exact lease-free as
       requiresExplicitConfirmation: true,
     },
   );
+  const legacyHttpCompletedOperation = {
+    ...operation,
+    operationStatus: 'SUCCEEDED',
+    state: 'APPLIED_HEALTHY',
+    timeline: [{
+      state: 'APPLIED_HEALTHY',
+      at: '2026-08-19T13:09:37.000Z',
+      detail: 'Signed profile generation 1 was applied and health-validated via HTTPS fetch.',
+    }],
+  };
+  const legacyHttpCompletionAuthority = profileAssignmentSupersedeAuthority(
+    { ...gateway, health: 'APPLYING' },
+    deployment,
+    legacyHttpCompletedOperation,
+    nowEpoch,
+  );
+  assert.equal(legacyHttpCompletionAuthority.legacyHttpCompletion, true);
+  assert.equal(legacyHttpCompletionAuthority.operationStatus, 'SUCCEEDED');
+  assert.equal(legacyHttpCompletionAuthority.operationState, 'APPLIED_HEALTHY');
+  assert.equal(legacyHttpCompletionAuthority.requiresExplicitConfirmation, true);
   const legacyDescriptor: Record<string, unknown> = { ...descriptor };
   delete legacyDescriptor.configurationClaim;
   const legacyAuthority = profileAssignmentSupersedeAuthority(
@@ -1301,6 +1335,9 @@ test('delivered profile deployments are superseded only from exact lease-free as
     [gateway, deployment, { ...operation, type: 'ONBOARD' }],
     [{ ...gateway, signedDescriptor: legacyDescriptor }, { ...deployment, descriptor: legacyDescriptor }, operation],
     [gateway, deployment, { ...operation, operationStatus: 'SUCCEEDED' }],
+    [{ ...gateway, health: 'HEALTHY' }, deployment, legacyHttpCompletedOperation],
+    [{ ...gateway, health: 'APPLYING', appliedGeneration: 1 }, deployment, legacyHttpCompletedOperation],
+    [{ ...gateway, health: 'APPLYING' }, deployment, { ...legacyHttpCompletedOperation, timeline: [] }],
     [gateway, deployment, { ...operation, operationId: 'op-racing' }],
   ];
   for (const authority of rejectedAuthorities) {
@@ -1328,6 +1365,9 @@ test('delivered profile deployments are superseded only from exact lease-free as
   assert.match(api, /#type = :operationType/);
   assert.match(api, /deliveryMode === 'PULL' \? \[\] : \[\{/);
   assert.match(api, /#state IN \(:healthy, :rolledBack\)/);
+  assert.match(api, /attribute_not_exists\(appliedGeneration\)/);
+  assert.match(api, /attribute_not_exists\(completedAt\)/);
+  assert.match(api, /#timeline = :supersededTimeline/);
 });
 
 test('signing key identity is inside signed manifests and retrieval validation', () => {
@@ -1358,6 +1398,49 @@ test('gateway projection preserves quarantine and authoritative certificate stat
   assert.equal(rolledBack.state, 'ROLLED_BACK');
   assert.equal(rolledBack.profileVersionId, 'pv-applied');
   assert.equal(rolledBack.desiredProfileVersionId, 'pv-failed');
+
+  const pullConfirmed = publicGateway({
+    state: 'APPLIED_HEALTHY',
+    health: 'UNKNOWN',
+    certificateStatus: 'ACTIVE',
+    generation: 4,
+    appliedGeneration: 4,
+    deliveredConfigurationGeneration: 4,
+    configurationSource: 'CONTROLLER',
+    configurationConfirmationMethod: 'AUTHENTICATED_CONFIGURATION_PULL',
+    configurationConfirmedAt: '2026-08-27T17:30:00.000Z',
+  });
+  assert.equal(pullConfirmed.state, 'ACTIVE');
+  assert.equal(pullConfirmed.health, 'UNKNOWN');
+  assert.equal(pullConfirmed.configurationSource, 'CONTROLLER');
+  assert.equal(pullConfirmed.configurationConfirmationMethod, 'AUTHENTICATED_CONFIGURATION_PULL');
+  assert.equal(pullConfirmed.configurationConfirmedAt, '2026-08-27T17:30:00.000Z');
+
+  const supersededPullMarker = publicGateway({
+    ...pullConfirmed,
+    state: 'PROFILE_AVAILABLE',
+    generation: 5,
+    appliedGeneration: 4,
+    deliveredConfigurationGeneration: 4,
+  });
+  assert.equal(supersededPullMarker.configurationConfirmationMethod, undefined);
+  assert.equal(supersededPullMarker.configurationSource, undefined);
+});
+
+test('operation projection exposes authenticated pull evidence for truthful UI copy', async () => {
+  const { publicOperation } = await import('../lambda/shared/models.js');
+  const operation = publicOperation({
+    operationId: 'op-pull-confirmed',
+    type: 'PROFILE_DEPLOY',
+    operationStatus: 'SUCCEEDED',
+    state: 'APPLIED_HEALTHY',
+    configurationSource: 'CONTROLLER',
+    configurationConfirmationMethod: 'AUTHENTICATED_CONFIGURATION_PULL',
+    configurationConfirmedAt: '2026-08-27T17:30:00.000Z',
+  });
+  assert.equal(operation.configurationSource, 'CONTROLLER');
+  assert.equal(operation.configurationConfirmationMethod, 'AUTHENTICATED_CONFIGURATION_PULL');
+  assert.equal(operation.configurationConfirmedAt, '2026-08-27T17:30:00.000Z');
 });
 
 test('rollback convergence validates target, preserves generation, and clears failed desired shadow', () => {
@@ -1381,6 +1464,8 @@ test('snapshot reads bounded entity namespaces and includes active operations wi
   assert.match(api, /recentTenantOperations\(tenantId, 100\)/);
   assert.match(api, /operationsById/);
   assert.match(api, /BatchGetCommand/);
+  assert.match(api, /SK: controllerSk\(\)/);
+  assert.match(api, /publicControllerConfiguration\(controllerResult\.Item, tenantId\)/);
   assert.doesNotMatch(api, /async function tenantItems/);
   assert.doesNotMatch(api, /Tenant snapshot exceeds/);
   assert.match(ddbSource, /PROFILE_VERSION#/);

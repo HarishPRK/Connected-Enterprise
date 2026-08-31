@@ -1,5 +1,7 @@
 import type {
   BootstrapPackageInput,
+  ControllerConfiguration,
+  ControllerProvisioning,
   CreateProfileVersionInput,
   OnboardingOperation,
   OnboardingSnapshot,
@@ -186,6 +188,20 @@ export async function createProfileVersion(
     signal,
   );
   return 'profile' in result ? result.profile : result;
+}
+
+export async function saveControllerConfiguration(
+  provisioning: ControllerProvisioning,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<ControllerConfiguration> {
+  const result = await postJson<ControllerConfiguration | { controller: ControllerConfiguration }>(
+    '/api/onboarding/controller',
+    provisioning,
+    idempotencyKey,
+    signal,
+  );
+  return 'controller' in result ? result.controller : result;
 }
 
 export async function generateBootstrapPackage(
