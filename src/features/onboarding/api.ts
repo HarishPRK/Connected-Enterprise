@@ -145,10 +145,11 @@ export async function decommissionGateway(
   confirmation: string,
   idempotencyKey: string,
   signal?: AbortSignal,
+  resetForOnboarding = false,
 ): Promise<OnboardingOperation> {
   const result = await postJson<OnboardingOperation | { operation: OnboardingOperation }>(
     `/api/onboarding/gateways/${encodeURIComponent(gatewayId)}/decommission`,
-    { confirmation },
+    { confirmation, resetForOnboarding },
     idempotencyKey,
     signal,
   );

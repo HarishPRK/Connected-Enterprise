@@ -45,7 +45,7 @@ function timeAgo(iso: string) {
 
 /* ── Synthetic 14-day incident trend ──────────────────────────────────────
  * Deterministic per-day counts so the chart looks alive without changing on
- * each re-render. Stack components: auto-resolved (Claude agent), still-open
+ * each re-render. Stack components: auto-resolved, still-open
  * (in flight), escalated (handed to NetEng). */
 interface TrendPoint {
   day: string;
@@ -88,7 +88,7 @@ const liveIncidentTemplate = (): Incident => ({
   confidence: 0.62,
   steps: [
     { id: 'l1', ts: 0,    kind: 'system',     content: 'Anomaly: POS-02 packet loss 8.4% (baseline <0.5%)' },
-    { id: 'l2', ts: 1100, kind: 'system',     content: 'Auto-assigned to IT Specialist (model: claude-sonnet-4-6)' },
+    { id: 'l2', ts: 1100, kind: 'system',     content: 'Auto-assigned to IT Specialist' },
     { id: 'l3', ts: 2400, kind: 'thought',    content: 'Payment terminal with sustained loss is high impact. Pulling Wi-Fi signal first to rule out RF.' },
     { id: 'l4', ts: 3700, kind: 'tool_call',  tool: 'get_wifi_client', args: { mac: 'AA:11:22:33:44:5A' }, content: 'Reading POS-02 Wi-Fi state' },
     { id: 'l5', ts: 5100, kind: 'tool_result',tool: 'get_wifi_client', ok: true, resultPreview: '{ rssi: -78, retries: 31%, channel: 36, neighbors: 9 }', content: 'Marginal signal: -78 dBm with 31% retries, 9 neighbor APs on ch 36' },
@@ -158,8 +158,8 @@ export function IncidentsPage() {
     return counts;
   }, [allList]);
 
-  // ─── Live Claude agent runner ───
-  // Streams real Claude responses via /api/agent/run and appends them as
+  // ─── Live incident analysis runner ───
+  // Streams operational responses via /api/agent/run and appends them as
   // additional steps onto the incident in-place.
   const [liveRunningId, setLiveRunningId] = useState<string | null>(null);
   const stopLiveRef = useRef<(() => void) | null>(null);
@@ -193,7 +193,7 @@ export function IncidentsPage() {
       id: `live-${Date.now()}`,
       ts: 0,
       kind: 'system',
-      content: '── Live Claude agent attached · streaming responses ──',
+      content: '── Live incident analysis attached · reading current telemetry ──',
     });
 
     let stepIdx = 1;
@@ -216,6 +216,10 @@ export function IncidentsPage() {
           // ── Terminal events: shape final incident state, don't render as steps ──
           if (event === 'done') {
             const reason = (data.reason as string) ?? 'end_turn';
+            if (reason === 'analysis_complete') {
+              setIncidentStatus(inc.id, 'triaging');
+              return;
+            }
             if (sawProposal || reason === 'awaiting_approval') {
               setIncidentStatus(inc.id, 'awaiting_approval');
             } else {
@@ -356,7 +360,7 @@ export function IncidentsPage() {
     <>
       <PageHeader
         title="Incidents"
-        subtitle="Anomalies become incidents, get assigned to a Claude agent, and resolve themselves — with humans in the loop for risky actions."
+        subtitle="Anomalies become incidents, receive a live operational analysis, and keep humans in the loop for risky actions."
         right={
           <div className="toolbar">
             <button><Filter size={14} />Saved filters</button>
@@ -505,8 +509,8 @@ function IncidentDetail({
               <span className="dot err" style={{ marginRight: 4 }} />Stop live agent
             </button>
           ) : (
-            <button onClick={onRunLive} className="primary" title="Stream real Claude responses for this incident">
-              <Sparkles size={14} />Run live Claude agent
+            <button onClick={onRunLive} className="primary" title="Analyze this incident using current telemetry">
+              <Sparkles size={14} />Run live analysis
             </button>
           )}
         </div>
@@ -665,7 +669,7 @@ function StepBlock({
     accent === 'warn' ? 'var(--warn)' :
     accent === 'err'  ? 'var(--err)'  : 'var(--accent)';
   // Run incoming text through the markdown renderer so **bold**, *italic*,
-  // bullet lists etc. coming back from the live Claude agent render cleanly.
+  // bullet lists etc. coming back from the live analysis render cleanly.
   const body =
     typeof children === 'string'
       ? <RichText text={children} />

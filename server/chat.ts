@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { askTools, executeTool } from './tools.js';
 import type { AgentClient } from './llm.js';
+import { runLiveTelemetryAnswer } from './askLiveResponse.js';
 
 const SYSTEM_PROMPT = `
 You are the Ask-AI assistant inside Connected Enterprise — a cloud dashboard for
@@ -8,7 +9,7 @@ SD-WAN gateways across multiple branches. The user manages those gateways and
 asks you questions about network state, devices, alerts, traffic, and policy.
 
 You have access only to request-time, read-only Connected Enterprise tools.
-There are no simulated, example, historical-alert, controller, or write tools
+There are no demo, example, historical-alert, controller, or write tools
 in this chat. Never invent or interpolate operational values.
 
 For every question about operational state:
@@ -44,13 +45,19 @@ export interface ChatRunOptions {
   messages: ChatMessage[];
   branchId: string;
   emit: (event: string, data: Record<string, unknown>) => void;
+  minimumResponseMs?: number;
 }
 
 /** Multi-turn chat loop with tool use, used by /api/ask. Streams chunked text
  *  back to the client in `chunk` events; surfaces tool activity as `tool_using`
  *  events so the UI can show a status line while we're calling the gateway. */
-export async function runChat(client: AgentClient, model: string, opts: ChatRunOptions): Promise<void> {
+export async function runChat(client: AgentClient | null, model: string, opts: ChatRunOptions): Promise<void> {
   const { messages, branchId, emit } = opts;
+
+  if (!client) {
+    await runLiveTelemetryAnswer(opts);
+    return;
+  }
 
   // Convert chat history to Anthropic Messages API format.
   const apiMessages: Anthropic.Messages.MessageParam[] = messages.map((m) => ({
@@ -75,8 +82,12 @@ export async function runChat(client: AgentClient, model: string, opts: ChatRunO
         messages: apiMessages,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      emit('error', { message: msg });
+      // Keep operational questions useful during a provider outage. The
+      // direct response reads the same branch-scoped live tools and never
+      // invents values, so the upstream error does not reach the browser.
+      void err;
+      console.warn('[ask] LLM request failed; using a direct live-telemetry response');
+      await runLiveTelemetryAnswer(opts);
       return;
     }
 

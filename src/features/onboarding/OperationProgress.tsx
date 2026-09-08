@@ -55,6 +55,11 @@ const DECOMMISSION_MILESTONES: LifecycleMilestone[] = [
   { state: 'DECOMMISSIONED', label: 'Decommissioned', description: 'The gateway is retained as an auditable retired record.' },
 ];
 
+const RESET_MILESTONES: LifecycleMilestone[] = [
+  { state: 'DECOMMISSIONING', label: 'Removing AWS registration', description: 'Disconnecting the gateway and removing its dedicated AWS identity. The serial stays reserved until cleanup succeeds.' },
+  { state: 'DECOMMISSIONED', label: 'Ready to onboard again', description: 'Create a new bootstrap package for this serial. Onboarding starts at generation 5.' },
+];
+
 const PROFILE_DEPLOY_MILESTONES: LifecycleMilestone[] = [
   { state: 'PROFILE_STAGED', label: 'Profile staged', description: 'The signed assignment is queued for this gateway.' },
   { state: 'APPLYING', label: 'Applying configuration', description: 'The gateway is applying the candidate transaction with its watchdog armed.' },
@@ -158,7 +163,7 @@ export function OperationProgress({
   const milestones = pullConfirmed
     ? AUTHENTICATED_PULL_MILESTONES
     : operation.type === 'DECOMMISSION'
-    ? DECOMMISSION_MILESTONES
+    ? operation.resetForOnboarding ? RESET_MILESTONES : DECOMMISSION_MILESTONES
     : operation.type === 'PROFILE_DEPLOY'
       ? PROFILE_DEPLOY_MILESTONES
       : ONBOARD_OPERATION_MILESTONES;
@@ -210,6 +215,10 @@ export function OperationProgress({
 
       <div className="ce-onb-operation-layout">
         <div className="ce-onb-progress-rail" aria-live="polite">
+          {operation.resetError && <div className="ce-onb-alert is-error" role="alert">
+            <TriangleAlert size={18} aria-hidden="true" />
+            <span>AWS cleanup needs a retry: {operation.resetError} The serial is still reserved. Return to inventory and choose Retry AWS reset.</span>
+          </div>}
           <div className="ce-onb-operation-summary">
             <span className={`ce-onb-operation-mark${healthy ? ' is-success' : failed ? ' is-error' : ''}`}>
               {healthy
@@ -221,7 +230,7 @@ export function OperationProgress({
             <div>
               <small>Operation {operation.id}</small>
               <strong>{summaryLabel}</strong>
-              <span>Deployment generation {operation.deploymentGeneration}</span>
+              <span>{operation.resetForOnboarding ? 'Fresh onboarding will start at generation 5' : `Deployment generation ${operation.deploymentGeneration}`}</span>
             </div>
           </div>
 
@@ -331,7 +340,7 @@ export function OperationProgress({
             <span><Clock3 size={15} aria-hidden="true" />Monotonic deployment generation</span>
           </div>
           <button type="button" onClick={onBack}>
-            {isOperationTerminal(operation) ? 'Return to inventory' : 'Leave operation running'}
+            {isOperationTerminal(operation) || operation.resetError ? 'Return to inventory' : 'Leave operation running'}
           </button>
           {!isOperationTerminal(operation) && (
             <p>Safe to leave; progress resumes when the gateway reconnects.</p>

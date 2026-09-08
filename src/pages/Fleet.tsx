@@ -88,7 +88,7 @@ export function FleetPage() {
       <div style={{ marginTop: 16, marginBottom: 16 }}>
         <AiInsightCard
           topic="fleet"
-          subtitle="Bedrock executive readout across all branches"
+          subtitle="Executive readout across all branches"
           data={{
             totals,
             branches: enriched.map((b) => ({

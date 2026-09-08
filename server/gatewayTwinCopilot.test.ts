@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import type Anthropic from '@anthropic-ai/sdk';
 import {
   GATEWAY_TWIN_COPILOT_ACTIONS,
+  runGatewayTwinDirectTurn,
   runGatewayTwinCopilotTurn,
 } from './gatewayTwinCopilot.js';
 import type { AgentClient } from './llm.js';
@@ -54,6 +55,22 @@ const payload = {
 };
 
 describe('Gateway Twin copilot', () => {
+  it('answers status questions directly from the submitted gateway context', async () => {
+    const result = await runGatewayTwinDirectTurn(payload, { minimumResponseMs: 0 });
+    assert.match(result.message, /CPU 17%/);
+    assert.deepEqual(result.actions, []);
+    assert.equal(result.provenance, 'telemetry');
+  });
+
+  it('maps direct visual requests to the existing action allowlist', async () => {
+    const result = await runGatewayTwinDirectTurn({
+      messages: [{ role: 'user', content: 'Show me the Wi-Fi radios' }],
+      context: { cpuPct: 17 },
+    }, { minimumResponseMs: 0 });
+    assert.deepEqual(result.actions, ['radios']);
+    assert.match(result.message, /radio view/);
+  });
+
   it('returns a grounded text response using the embedded-client contract', async () => {
     const { client, calls } = fakeClient([
       response([

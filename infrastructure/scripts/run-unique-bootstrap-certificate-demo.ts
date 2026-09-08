@@ -103,8 +103,8 @@ async function main(): Promise<void> {
     requireString(record.enrollmentAuthorizedAt, 'manufacturing enrollmentAuthorizedAt'),
     'manufacturing enrollmentAuthorizedAt',
   );
-  const generation = requirePositiveInteger(record.generation ?? 1, 'manufacturing generation');
-  if (generation !== 1) throw new Error('Initial onboarding must use generation 1');
+  const descriptor = record.signedDescriptor as Record<string, unknown> | undefined;
+  const generation = requirePositiveInteger(descriptor?.generation, 'reserved assignment generation');
 
   const tenantKey = `TENANT#${tenantId}`;
   const [gateway, operation, deployment, bootstrapBinding] = await Promise.all([

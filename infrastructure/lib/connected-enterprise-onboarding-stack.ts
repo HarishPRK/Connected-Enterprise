@@ -925,9 +925,10 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     const outboxFunction = new lambdaNodejs.NodejsFunction(this, 'OutboxFunction', {
       ...functionDefaults,
       functionName: `connected-enterprise-onboarding-${stage}-outbox`,
+      description: 'Gateway outbox and audited AWS registration reset',
       entry: entry('outbox-handler.ts'),
       handler: 'handler',
-      timeout: Duration.seconds(30),
+      timeout: Duration.seconds(120),
       reservedConcurrentExecutions: 25,
       logGroup: logGroup('outbox', logs.RetentionDays.THREE_MONTHS),
       environment: {
@@ -950,6 +951,27 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
     outboxFunction.addToRolePolicy(new iam.PolicyStatement({
       actions: ['iot:DeleteConnection'], resources: [iotArn('client/gw-*')],
     }));
+    if (stage === 'dev') {
+      outboxFunction.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['iot:DescribeThing', 'iot:ListThingPrincipals', 'iot:DetachThingPrincipal', 'iot:DeleteThing',
+          'iot:ListNamedShadowsForThing', 'iot:DeleteThingShadow', 'iot:ListThingGroupsForThing', 'iot:ListJobExecutionsForThing'],
+        resources: [iotArn('thing/gw-*')],
+      }));
+      outboxFunction.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['iot:DescribeCertificate', 'iot:ListPrincipalThings', 'iot:ListAttachedPolicies', 'iot:DeleteCertificate',
+          'iot:DetachThingPrincipal', 'iot:DetachPolicy'],
+        resources: [iotArn('cert/*')],
+      }));
+      outboxFunction.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['iot:DetachPolicy'], resources: [iotArn('policy/ConnectedEnterpriseGateway*')],
+      }));
+      outboxFunction.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['iot:RemoveThingFromThingGroup'], resources: [iotArn('thing/gw-*'), iotArn('thinggroup/connected-enterprise-gateways-*')],
+      }));
+      outboxFunction.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['iot:DeleteJob'], resources: [iotArn('job/ce-*')],
+      }));
+    }
     const streamTable = dynamodb.Table.fromTableAttributes(this, 'ControlPlaneStreamReference', {
       tableArn: table.tableArn,
       tableStreamArn: table.tableStreamArn!,

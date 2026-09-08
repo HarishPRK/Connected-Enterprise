@@ -106,7 +106,7 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
         <div className="col-12">
           <AiInsightCard
             topic="app-routing"
-            subtitle="Bedrock review of routing policies vs SLA classes"
+            subtitle="Review of routing policies against SLA classes"
             data={{
               totals,
               categories: appCategories.map((c) => ({

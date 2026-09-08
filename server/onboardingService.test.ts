@@ -57,7 +57,8 @@ describe('OnboardingService', () => {
       siteId: verification.allowedSites[0].id,
       profileVersionId: profile.id,
     }, 'onboard-key-0001');
-    assert.equal(operation.deploymentGeneration, 1);
+    assert.equal(snapshot.initialDeploymentGeneration, 5);
+    assert.equal(operation.deploymentGeneration, 5);
     assert.equal(operation.state, 'CLAIM_ACCEPTED');
     await assert.rejects(
       verifiedGateway(service, 'verify-after-consumed'),
@@ -455,7 +456,7 @@ describe('OnboardingService', () => {
     }, 'assign-deploy-01');
     assert.equal(deployment.type, 'PROFILE_DEPLOY');
     assert.equal(deployment.state, 'PROFILE_STAGED');
-    assert.equal(deployment.deploymentGeneration, 2);
+    assert.equal(deployment.deploymentGeneration, 6);
 
     advance(10_000);
     await service.reconcileAll();
@@ -470,7 +471,7 @@ describe('OnboardingService', () => {
     ]);
     const updatedGateway = (await service.getSnapshot(tenantA)).gateways[0];
     assert.equal(updatedGateway.profileVersionId, successor.id);
-    assert.equal(updatedGateway.deploymentGeneration, 2);
+    assert.equal(updatedGateway.deploymentGeneration, 6);
   });
 
   it('redeploys the current profile as a new generation after Controller provisioning changes', async () => {
@@ -553,7 +554,7 @@ describe('OnboardingService', () => {
       service.assignProfile(tenantA, gateway.id, {
         profileVersionId: generationThreeProfile.id,
         deliveryMode: 'PULL',
-        supersedeGeneration: 1,
+        supersedeGeneration: onboard.deploymentGeneration,
       }, 'assign-supersede-stale'),
       (error: unknown) => error instanceof OnboardingError && error.code === 'SUPERSEDE_GENERATION_MISMATCH',
     );
@@ -561,9 +562,9 @@ describe('OnboardingService', () => {
     const generationThree = await service.assignProfile(tenantA, gateway.id, {
       profileVersionId: generationThreeProfile.id,
       deliveryMode: 'PULL',
-      supersedeGeneration: 2,
+      supersedeGeneration: generationTwo.deploymentGeneration,
     }, 'assign-supersede-03');
-    assert.equal(generationThree.deploymentGeneration, 3);
+    assert.equal(generationThree.deploymentGeneration, generationTwo.deploymentGeneration + 1);
     assert.equal(generationThree.previousProfileVersionId, initial.id);
     const superseded = await service.getOperation(tenantA, generationTwo.id);
     assert.equal(superseded.status, 'FAILED');
@@ -599,7 +600,7 @@ describe('OnboardingService', () => {
     const decommission = await service.decommissionGateway(tenantA, gateway.id, {
       confirmation: gateway.serialNumber,
     }, 'decom-key-00001');
-    assert.equal(decommission.deploymentGeneration, 2);
+    assert.equal(decommission.deploymentGeneration, 6);
     advance(10_000);
     await service.reconcileAll();
     const finalSnapshot = await service.getSnapshot(tenantA);

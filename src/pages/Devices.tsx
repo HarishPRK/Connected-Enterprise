@@ -261,7 +261,7 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
       <div style={{ marginTop: 16, marginBottom: 16 }}>
         <AiInsightCard
           topic={domain === 'IT' ? 'it-devices' : 'ot-devices'}
-          subtitle={`Bedrock analysis of the current ${domain} inventory`}
+          subtitle={`Analysis of the current ${domain} inventory`}
           data={{
             domain,
             total: list.length,

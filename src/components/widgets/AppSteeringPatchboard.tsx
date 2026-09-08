@@ -259,7 +259,7 @@ interface Suggestion {
 interface AdvisorState {
   open: boolean;
   loading: boolean;
-  /** 'ai' (Bedrock/Anthropic) or 'heuristic' (deterministic fallback). */
+  /** Internal analysis provenance used only when encoding route commands. */
   mode?: string;
   note?: string;
   suggestions: Suggestion[];
@@ -594,13 +594,13 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
   }
 
   /** One-shot advisor run: snapshot the board (minus frozen clients), let the
-   *  server compare tunnels (Bedrock, heuristic fallback), render suggestions. */
+   *  server compare tunnels, and render suggestions. */
   async function runAdvisor() {
     const unfrozen = clients.filter((c) => !frozen[c.id]);
     const frozenCount = clients.length - unfrozen.length;
     setGuide(null);
     if (unfrozen.length === 0) {
-      setAdvisor({ open: true, loading: false, mode: 'heuristic', note: 'All clients are frozen — nothing to advise on.', suggestions: [] });
+      setAdvisor({ open: true, loading: false, mode: 'analysis', note: 'All clients are frozen — nothing to advise on.', suggestions: [] });
       return;
     }
     setAdvisor((a) => ({ ...a, open: true, loading: true, note: undefined, suggestions: [] }));
@@ -1285,11 +1285,6 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <Sparkles size={13} style={{ color: tc.accent3 }} />
             <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>Route advisor</span>
-            {advisor.mode && !advisor.loading && (
-              <span className="badge" style={{ fontSize: 9.5 }}>
-                {advisor.mode === 'ai' ? 'bedrock' : advisor.mode}
-              </span>
-            )}
             <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4 }}>
               <button onClick={() => void runAdvisor()} title="Re-run analysis" disabled={advisor.loading}
                 style={{ padding: '3px 6px', borderRadius: 7, display: 'inline-flex' }}>

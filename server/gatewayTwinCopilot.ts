@@ -37,7 +37,7 @@ export interface GatewayTwinCopilotReply {
   message: string;
   actions: GatewayTwinCopilotAction[];
   modelId: string;
-  provenance: 'aws-bedrock';
+  provenance: 'aws-bedrock' | 'telemetry';
   usage: {
     inputTokens: number;
     outputTokens: number;
@@ -47,6 +47,8 @@ export interface GatewayTwinCopilotReply {
 
 export interface GatewayTwinCopilotOptions {
   signal?: AbortSignal;
+  /** Test-only override for the direct-response loading window. */
+  minimumResponseMs?: number;
 }
 
 const ACTION_IDS = new Set<string>(
@@ -180,6 +182,118 @@ function actionFromToolUse(toolUse: Anthropic.Messages.ToolUseBlock): string {
   if (!toolUse.input || typeof toolUse.input !== 'object' || Array.isArray(toolUse.input)) return '';
   const action = (toolUse.input as Record<string, unknown>).action;
   return typeof action === 'string' ? action : '';
+}
+
+const DIRECT_ACTION_MATCHERS: readonly [GatewayTwinCopilotAction, RegExp][] = [
+  ['thermals', /\b(thermal|thermals|temperature|temp|heat|hot|cooling|soc)\b/i],
+  ['overheat', /\b(overheat|thermal alarm|heat scenario)\b/i],
+  ['failover', /\b(failover|fail over|fiber down|switch to 5g|cellular backup)\b/i],
+  ['radios', /\b(radios?|wi-?fi|wireless|rf|coverage|bands?|channels?)\b/i],
+  ['explode', /\b(explode|exploded|teardown|take it apart|disassemble|internals)\b/i],
+  ['reset', /\b(reset|reassemble|home view|clear (?:the )?view)\b/i],
+  ['speedtest', /\b(speed ?test|bandwidth test|throughput test)\b/i],
+  ['architecture', /\b(architecture|software stack|prpl ?os|firmware layers?)\b/i],
+  ['hosts', /\b(hosts?|connected devices?|connected clients?|who is connected)\b/i],
+  ['boot', /\b(reboot|restart|cold boot|boot sequence|power cycle)\b/i],
+  ['status', /\b(status|summary|health|overview|snapshot|vitals|sitrep)\b/i],
+];
+
+function directAction(question: string): GatewayTwinCopilotAction | undefined {
+  return DIRECT_ACTION_MATCHERS.find(([, matcher]) => matcher.test(question))?.[0];
+}
+
+interface ContextFact {
+  path: string;
+  value: string | number | boolean;
+}
+
+function contextFacts(value: unknown, prefix = '', facts: ContextFact[] = []): ContextFact[] {
+  if (facts.length >= 120 || value == null) return facts;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    if (prefix && (typeof value !== 'string' || value.trim())) facts.push({ path: prefix, value });
+    return facts;
+  }
+  if (Array.isArray(value)) {
+    value.slice(0, 12).forEach((item, index) => contextFacts(item, `${prefix}[${index}]`, facts));
+    return facts;
+  }
+  if (typeof value === 'object') {
+    Object.entries(value as Record<string, unknown>).slice(0, 40).forEach(([key, item]) => {
+      contextFacts(item, prefix ? `${prefix}.${key}` : key, facts);
+    });
+  }
+  return facts;
+}
+
+function findFact(facts: ContextFact[], matcher: RegExp): ContextFact | undefined {
+  return facts.find((fact) => matcher.test(fact.path));
+}
+
+function factText(fact: ContextFact | undefined, label: string, suffix = ''): string | undefined {
+  return fact ? `${label} ${fact.value}${suffix}` : undefined;
+}
+
+function directGatewayMessage(question: string, context: Record<string, unknown>, action: GatewayTwinCopilotAction | undefined): string {
+  const facts = contextFacts(context);
+  const cpu = findFact(facts, /(^|\.)(cpuPct|cpu_percent|cpu)$/i);
+  const memory = findFact(facts, /(^|\.)(memPct|memoryPct|memory_percent)$/i);
+  const temperature = findFact(facts, /(^|\.)(socTempC|temperatureC|tempC|valueC)$/i);
+  const fiber = findFact(facts, /fiber.*(link|status)|ports\.fiber\.link/i);
+  const latency = findFact(facts, /(fiber|wan).*(latencyMs|latency_ms)$/i);
+  const loss = findFact(facts, /(fiber|wan).*(packetLossPct|loss_percent)$/i);
+  const hosts = findFact(facts, /(^|\.)(activeHosts|active_clients|hostCount)$/i);
+
+  if (action && action !== 'status') {
+    const labels: Record<GatewayTwinCopilotAction, string> = {
+      thermals: 'Opening the thermal view using the current gateway state.',
+      overheat: 'Running the thermal-alarm demonstration in the twin.',
+      failover: 'Running the fiber-to-5G path transition in the twin.',
+      radios: 'Opening the Wi-Fi radio view and coverage rings.',
+      explode: 'Opening the exploded hardware view.',
+      reset: 'Resetting the twin to its normal overview.',
+      speedtest: 'Starting the XGS-PON speed-test visualization.',
+      architecture: 'Opening the prplOS software architecture view.',
+      hosts: 'Opening the connected-host view.',
+      boot: 'Starting the gateway boot-sequence visualization.',
+      status: '',
+    };
+    return labels[action];
+  }
+
+  const requestedThermals = /\b(thermal|temperature|temp|heat|hot|soc)\b/i.test(question);
+  const requestedWan = /\b(wan|fiber|5g|cellular|latency|loss|internet|throughput)\b/i.test(question);
+  const summary = requestedThermals
+    ? [factText(temperature, 'SoC', ' °C'), factText(cpu, 'CPU', '%'), factText(memory, 'memory', '%')]
+    : requestedWan
+      ? [factText(fiber, 'Fiber'), factText(latency, 'latency', ' ms'), factText(loss, 'packet loss', '%')]
+      : [factText(cpu, 'CPU', '%'), factText(temperature, 'SoC', ' °C'), factText(hosts, 'active hosts')];
+  const available = summary.filter((item): item is string => item != null);
+  if (available.length > 0) return `Current gateway snapshot: ${available.join(' · ')}.`;
+  return 'The gateway context is available, but the requested measurement is not present in the current snapshot.';
+}
+
+export async function runGatewayTwinDirectTurn(
+  payload: unknown,
+  options: GatewayTwinCopilotOptions = {},
+): Promise<GatewayTwinCopilotReply> {
+  const startedAt = Date.now();
+  const request = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const messages = normalizeMessages(request.messages);
+  serializeContext(request.context);
+  const context = request.context as Record<string, unknown>;
+  const questionBlock = messages.at(-1)?.content;
+  const question = typeof questionBlock === 'string' ? questionBlock : '';
+  const action = directAction(question);
+  const minimumResponseMs = Math.max(0, options.minimumResponseMs ?? 1_250);
+  const remaining = minimumResponseMs - (Date.now() - startedAt);
+  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+  return {
+    message: directGatewayMessage(question, context, action),
+    actions: action && action !== 'status' ? [action] : [],
+    modelId: 'telemetry-analysis',
+    provenance: 'telemetry',
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+  };
 }
 
 export async function runGatewayTwinCopilotTurn(

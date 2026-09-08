@@ -912,8 +912,8 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           </div>
         )}
 
-        {/* AI Insight — Bedrock Claude reads the latest IPsec snapshot and
-            streams a plain-English analysis. Only shown when we have data. */}
+        {/* AI Insight reads the latest IPsec snapshot and streams a concise
+            analysis. Only shown when we have data. */}
         {liveState && (
           <div className="col-12">
             <IpsecAiInsightsCard
@@ -1404,7 +1404,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
 
 /* ---------- Sub-components ---------- */
 
-/* ───── AI Insight card — streams Bedrock analysis of the live snapshot ─── */
+/* ───── AI Insight card — analyzes the live snapshot ───── */
 /* ───── Enterprise Operations card ─────
  * Tiles that translate the raw IPsec payload into language enterprise
  * stakeholders care about: availability, path stability, SLA compliance,
@@ -1691,7 +1691,7 @@ function IpsecAiInsightsCard({
             {fmtAgo(lastRunAt)}
           </span>
         ) : (
-          "Bedrock Claude interpreting your gateway telemetry"
+          "Interpreting the latest gateway telemetry"
         )
       }
       right={

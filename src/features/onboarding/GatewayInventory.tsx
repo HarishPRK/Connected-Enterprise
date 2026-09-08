@@ -45,6 +45,7 @@ interface GatewayInventoryProps {
   refreshing: boolean;
   canVerifyDevice: boolean;
   canDecommission: boolean;
+  canResetRegistration?: boolean;
   canDeployProfile: boolean;
   onRefresh: () => void;
   onVerifyDevice: () => void;
@@ -128,6 +129,7 @@ export function GatewayInventory({
   refreshing,
   canVerifyDevice,
   canDecommission,
+  canResetRegistration = false,
   canDeployProfile,
   onRefresh,
   onVerifyDevice,
@@ -139,6 +141,7 @@ export function GatewayInventory({
   const [decommissioning, setDecommissioning] = useState(false);
   const [decommissionError, setDecommissionError] = useState<string>();
   const [idempotencyKey, setIdempotencyKey] = useState(() => createIdempotencyKey('decommission'));
+  const [resetForOnboarding, setResetForOnboarding] = useState(false);
   const [deployTarget, setDeployTarget] = useState<Gateway>();
   const [deployProfileId, setDeployProfileId] = useState('');
   const [deliveryMode, setDeliveryMode] = useState<'PULL' | 'SHADOW' | 'JOB'>('PULL');
@@ -154,7 +157,8 @@ export function GatewayInventory({
     ? gateways.filter((gateway) => gateway.siteId === preferredSiteId)
     : gateways;
 
-  const openDecommission = (gateway: Gateway) => {
+  const openDecommission = (gateway: Gateway, reset = false) => {
+    setResetForOnboarding(reset);
     setDecommissionTarget(gateway);
     setConfirmation('');
     setDecommissionError(undefined);
@@ -177,6 +181,8 @@ export function GatewayInventory({
         decommissionTarget.id,
         confirmation,
         idempotencyKey,
+        undefined,
+        resetForOnboarding,
       );
       setDecommissionTarget(undefined);
       setConfirmation('');
@@ -184,8 +190,10 @@ export function GatewayInventory({
       onOperation(operation);
       push({
         kind: 'warn',
-        title: 'Decommission started',
-        detail: `${decommissionTarget.serialNumber} will have its certificate deactivated and MQTT session cleared.`,
+        title: resetForOnboarding ? 'AWS reset started' : 'Decommission started',
+        detail: resetForOnboarding
+          ? `${decommissionTarget.serialNumber} will be available for onboarding after AWS cleanup completes.`
+          : `${decommissionTarget.serialNumber} will have its certificate deactivated and MQTT session cleared.`,
       });
     } catch (cause) {
       setDecommissionError(cause instanceof Error ? cause.message : 'Unable to start decommissioning.');
@@ -385,6 +393,14 @@ export function GatewayInventory({
                       <PowerOff size={14} aria-hidden="true" />Decommission
                     </button>
                   )}
+                  {canDecommission && canResetRegistration && (
+                    <button type="button" className="ce-onb-danger-outline"
+                      onClick={() => openDecommission(gateway, true)}
+                      disabled={!(gateway.certificateState === 'ACTIVE' || (gateway.certificateState === 'PENDING' && gatewayOperation?.state === 'CLAIM_ACCEPTED') || gateway.state === 'DECOMMISSIONED' || gatewayOperation?.resetError)}>
+                      <PowerOff size={14} aria-hidden="true" />
+                      {gatewayOperation?.resetError ? 'Retry AWS reset' : gateway.certificateState === 'PENDING' ? 'Cancel & reset onboarding' : gateway.state === 'DECOMMISSIONED' ? 'Reset for onboarding' : 'Decommission & reset'}
+                    </button>
+                  )}
                 </div>
               </li>
             );
@@ -529,7 +545,7 @@ export function GatewayInventory({
       <Modal
         open={Boolean(decommissionTarget)}
         onClose={closeDecommission}
-        title="Decommission gateway"
+        title={resetForOnboarding ? 'Reset gateway for onboarding' : 'Decommission gateway'}
         width={540}
         footer={(
           <>
@@ -541,7 +557,7 @@ export function GatewayInventory({
               disabled={decommissioning || confirmation !== decommissionTarget?.serialNumber}
             >
               {decommissioning ? <span className="ce-onb-spinner" aria-hidden="true" /> : <PowerOff size={14} aria-hidden="true" />}
-              {decommissioning ? 'Starting…' : 'Decommission gateway'}
+              {decommissioning ? 'Starting…' : resetForOnboarding ? 'Decommission & reset in AWS' : 'Decommission gateway'}
             </button>
           </>
         )}
@@ -550,8 +566,11 @@ export function GatewayInventory({
           <div className="ce-onb-decommission-dialog">
             <div className="ce-onb-alert is-warning">
               <TriangleAlert size={18} aria-hidden="true" />
-              <span>This starts certificate deactivation and clears the gateway’s MQTT session. It does not merely remove a row.</span>
+              <span>{resetForOnboarding
+                ? 'This disconnects the gateway and removes its AWS Thing, bootstrap and operational certificates, shadows, and active registration. Audit history is retained.'
+                : 'This deactivates the certificate and clears the MQTT session. The serial stays registered; use Reset for onboarding to reuse it.'}</span>
             </div>
+            {resetForOnboarding && <p>After cleanup succeeds, create a new bootstrap ZIP for this serial. Fresh onboarding starts at <strong>generation 5</strong>. The previous credentials will stop working.</p>}
             <p>
               To protect <strong>{decommissionTarget.serialNumber}</strong>, enter its complete serial number to confirm.
             </p>

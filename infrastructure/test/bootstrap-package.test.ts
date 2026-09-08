@@ -28,6 +28,7 @@ test('one-time bootstrap archive contains only the expected credential and metad
     privateKey: '-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----',
     metadata: {
       formatVersion: 1,
+      initialGeneration: 5,
       issuedAt: '2026-08-19T12:00:00.000Z',
       serialNumber: 'CE-GW-00043',
       certificateId: 'a'.repeat(64),
@@ -60,5 +61,7 @@ test('one-time bootstrap archive contains only the expected credential and metad
   const metadata = JSON.parse(entries.get('bootstrap-metadata.json') ?? '{}') as Record<string, unknown>;
   assert.equal(metadata.serialNumber, 'CE-GW-00043');
   assert.equal(metadata.certificateId, 'a'.repeat(64));
+  assert.equal(metadata.initialGeneration, 5);
+  assert.match(entries.get('README.txt') ?? '', /request generation=5/);
   assert.equal(metadata.privateKey, undefined);
 });

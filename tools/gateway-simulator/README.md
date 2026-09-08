@@ -50,7 +50,7 @@ npm run sim:gateway -- `
   --endpoint <iot-data-endpoint> `
   --template <fleet-template-name> `
   --serial <fresh-canonical-serial> `
-  --generation 1 `
+  --generation 5 `
   --state-dir "<fresh-per-device-state-directory>" `
   --bootstrap-cert "<fresh-per-device-state-directory>\bootstrap-certificate.pem" `
   --bootstrap-key "<fresh-per-device-state-directory>\bootstrap-private-key.pem" `
@@ -76,6 +76,11 @@ not that the profile was applied. Run the same command again **without**
 `APPLIED_HEALTHY`.
 
 ## Existing identity demo command
+
+Fresh registrations start at generation **5**, which is also the simulator default.
+Later deployments advance to 6, 7, and so on. For an existing registration, use its
+actual generation from the UI; changing the default does not renumber it. The
+historical demo identity below still uses generation 1.
 
 From the repository root in PowerShell:
 

@@ -50,7 +50,48 @@ test('Ask chat sends only live read-only tools and the selected branch context',
     ['get_live_branch_wan', 'get_live_branch_devices'],
   );
   const system = calls[0].system as Anthropic.Messages.TextBlockParam[];
-  assert.match(system[0].text, /no simulated/i);
+  assert.match(system[0].text, /no demo/i);
   assert.match(system[0].text, /Selected Connected Enterprise branch ID: b-mck-03/);
   assert.deepEqual(events, ['chunk', 'done']);
+});
+
+test('Ask chat uses a direct live response when the LLM fails', async () => {
+  const create = (async () => {
+    throw new Error('Bedrock 400 Bad Request: Error 002');
+  }) as AgentClient['messages']['create'];
+  const events: { event: string; data: Record<string, unknown> }[] = [];
+
+  await runChat(
+    { messages: { create } },
+    'test-model',
+    {
+      branchId: 'b-pln-01',
+      messages: [{ role: 'user', content: 'Are any IPsec tunnels unreachable right now?' }],
+      emit: (event, data) => events.push({ event, data }),
+      minimumResponseMs: 0,
+    },
+  );
+
+  assert.ok(!events.some(({ event }) => event === 'error'));
+  assert.ok(events.some(({ event }) => event === 'tool_using'));
+  assert.match(String(events.find(({ event }) => event === 'chunk')?.data.text), /^\*\*WAN\/IPsec/);
+  assert.equal(events.find(({ event }) => event === 'done')?.data.mode, 'live-telemetry');
+});
+
+test('Ask chat uses a direct live response when no LLM is configured', async () => {
+  const events: { event: string; data: Record<string, unknown> }[] = [];
+
+  await runChat(
+    null,
+    'unused-model',
+    {
+      branchId: 'b-pln-01',
+      messages: [{ role: 'user', content: 'How many devices are healthy or offline right now?' }],
+      emit: (event, data) => events.push({ event, data }),
+      minimumResponseMs: 0,
+    },
+  );
+
+  assert.ok(!events.some(({ event }) => event === 'error'));
+  assert.equal(events.find(({ event }) => event === 'done')?.data.mode, 'live-telemetry');
 });

@@ -426,7 +426,7 @@ test('preloaded unique bootstrap onboarding retains exact certificate, tenant, a
   assert.match(preHook, /BOOTSTRAP_CERTIFICATE_BINDING/);
   assert.match(preHook, /enrollmentAuthorizedAt = :enrollmentAuthorizedAt/);
   assert.match(preHook, /ENROLLMENT_PENDING/);
-  assert.match(preHook, /deploymentSk\(record\.gatewayId, 1\)/);
+  assert.match(preHook, /deploymentSk\(record\.gatewayId, generation\)/);
   assert.doesNotMatch(preHook, /verificationExpiresAtEpoch|VERIFICATION#|verification expired/);
   assert.doesNotMatch(preHook, /HardwareId|HardwareProof|hardwareId|hardwareProof|requireHardwareId/);
   for (const source of [api, preHook, config, outbox]) {

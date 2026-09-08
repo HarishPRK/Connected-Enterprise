@@ -1,5 +1,6 @@
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { INITIAL_ONBOARDING_GENERATION } from '../../../shared/onboarding-policy.js';
 
 export interface Options {
   endpoint: string;
@@ -89,7 +90,7 @@ export function parseOptions(
     endpoint,
     templateName,
     serialNumber,
-    generation: positiveInteger(option(values, 'generation', 'CE_SIM_GENERATION', environment) ?? '1', 'generation'),
+    generation: positiveInteger(option(values, 'generation', 'CE_SIM_GENERATION', environment) ?? String(INITIAL_ONBOARDING_GENERATION), 'generation'),
     stateDirectory,
     bootstrapCertificate,
     bootstrapPrivateKey,

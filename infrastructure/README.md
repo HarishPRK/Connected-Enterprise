@@ -14,6 +14,15 @@ This isolated AWS CDK application defines `ConnectedEnterpriseOnboarding-dev` in
 
 ## Local validation
 
+Every fresh gateway registration starts at deployment generation **5**. Subsequent
+profile assignments increment the stored generation (6, 7, …). The selected immutable
+profile version is independent of this counter. Existing registrations keep their
+generation. The API snapshot and new bootstrap ZIP metadata expose the starting
+generation, and the provisioning hook follows the server-reserved assignment.
+
+When rolling out this policy, update the pre-provisioning hook before the API so the
+hook accepts generation 5 before new reservations use it.
+
 ```powershell
 cd infrastructure
 npm ci

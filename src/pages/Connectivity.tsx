@@ -107,7 +107,7 @@ export function Connectivity() {
         <div className="col-12">
           <AiInsightCard
             topic="connectivity"
-            subtitle="Bedrock analysis of WAN health, reachability, DNS and recent events"
+            subtitle="Analysis of WAN health, reachability, DNS and recent events"
             data={{
               fiber: fiberLink,
               fiveG: fiveGLink,

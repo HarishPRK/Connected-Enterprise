@@ -1,0 +1,150 @@
+{
+  "generator": "Blender 4.5.13 LTS",
+  "source": "assets/build_cooler.py",
+  "coordinateSystem": "glTF +Y up; +Z front; floor origin",
+  "dimensionsMeters": {
+    "width": 0.79,
+    "height": 2.0,
+    "depth": 0.89
+  },
+  "door": {
+    "pivotNode": "DoorPivot",
+    "position": [
+      -0.355,
+      1.065,
+      0.397
+    ],
+    "axis": "Y",
+    "closedRadians": 0,
+    "openRadians": -1.919862,
+    "childNodes": [
+      "DoorFrame",
+      "GlassGasket",
+      "Glass",
+      "DoorHandle",
+      "DoorHinge",
+      "DoorHinge.001"
+    ]
+  },
+  "shelves": {
+    "rows": 5,
+    "columns": 8,
+    "rowOrder": "bottom to top",
+    "yCoordinates": [
+      0.415,
+      0.677,
+      0.939,
+      1.201,
+      1.463
+    ]
+  },
+  "stockNodes": [
+    "Stock_0_0",
+    "Stock_0_1",
+    "Stock_0_2",
+    "Stock_0_3",
+    "Stock_0_4",
+    "Stock_0_5",
+    "Stock_0_6",
+    "Stock_0_7",
+    "Stock_1_0",
+    "Stock_1_1",
+    "Stock_1_2",
+    "Stock_1_3",
+    "Stock_1_4",
+    "Stock_1_5",
+    "Stock_1_6",
+    "Stock_1_7",
+    "Stock_2_0",
+    "Stock_2_1",
+    "Stock_2_2",
+    "Stock_2_3",
+    "Stock_2_4",
+    "Stock_2_5",
+    "Stock_2_6",
+    "Stock_2_7",
+    "Stock_3_0",
+    "Stock_3_1",
+    "Stock_3_2",
+    "Stock_3_3",
+    "Stock_3_4",
+    "Stock_3_5",
+    "Stock_3_6",
+    "Stock_3_7",
+    "Stock_4_0",
+    "Stock_4_1",
+    "Stock_4_2",
+    "Stock_4_3",
+    "Stock_4_4",
+    "Stock_4_5",
+    "Stock_4_6",
+    "Stock_4_7"
+  ],
+  "interactions": [
+    "DoorFrame",
+    "DoorHandle",
+    "Glass",
+    "CompressorGrille",
+    "Thermostat",
+    "Shelf_0",
+    "Shelf_1",
+    "Shelf_2",
+    "Shelf_3",
+    "Shelf_4"
+  ],
+  "hudCoordinates": {
+    "airSensor": [
+      0.285,
+      1.697,
+      0.08
+    ],
+    "compressor": [
+      0.13,
+      0.22,
+      0.42
+    ],
+    "thermostat": [
+      0.214,
+      1.837,
+      0.43
+    ]
+  },
+  "triangleCount": 98349,
+  "meshObjects": 87,
+  "glbBytes": 1143404,
+  "ambientOcclusion": {
+    "baked": true,
+    "engine": "Cycles",
+    "samples": 12,
+    "resolution": [
+      1024,
+      1024
+    ],
+    "file": "cooler-ao.png",
+    "range": [
+      0.0,
+      1.0
+    ],
+    "receivingObjects": [
+      "OuterCabinet",
+      "InteriorLiner",
+      "CompressorGrille",
+      "AdjustableShelfRails",
+      "LED_Channels",
+      "Shelf_0",
+      "Shelf_1",
+      "Shelf_2",
+      "Shelf_3",
+      "Shelf_4"
+    ],
+    "gltfChannel": "occlusionTexture"
+  },
+  "compression": "KHR_draco_mesh_compression",
+  "environment": {
+    "file": "studio.hdr",
+    "source": "https://polyhaven.com/a/studio_small_09",
+    "author": "Sergej Majboroda",
+    "license": "CC0"
+  },
+  "branding": "Illustrative Coca-Cola / Imbera inspired concept, not a manufacturer CAD model."
+}

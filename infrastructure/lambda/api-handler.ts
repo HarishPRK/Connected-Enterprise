@@ -17,7 +17,8 @@ import {
   QueryCommand,
   TransactWriteCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { ARTIFACT_BUCKET, TABLE_NAME } from './shared/config.js';
+import { ARTIFACT_BUCKET, STAGE, TABLE_NAME } from './shared/config.js';
+import { requestGatewayReset } from './shared/gateway-reset.js';
 import { tenantContext, requireRole } from './shared/auth.js';
 import {
   auditSk,
@@ -46,6 +47,7 @@ import {
   validateProfile,
 } from './shared/profile.js';
 import { INITIAL_OPERATION_STEPS, publicOperation } from './shared/models.js';
+import { INITIAL_ONBOARDING_GENERATION } from '../../shared/onboarding-policy.js';
 import { uiProfileSchemaVersion, validateUiProfileParameters } from './shared/ui-profile.js';
 import { assertProfileCompatibility, assertProfileLineageModel } from './shared/compatibility.js';
 import { normalizePresentedSerial } from './shared/manufacturing-credentials.js';
@@ -162,6 +164,8 @@ async function snapshot(tenantId: string): Promise<Record<string, unknown>> {
   return {
     generatedAt: new Date().toISOString(),
     mode: 'aws',
+    initialDeploymentGeneration: INITIAL_ONBOARDING_GENERATION,
+    canResetGatewayRegistration: STAGE === 'dev',
     tenant: { id: tenantId, name: tenant?.name ?? tenantId },
     ...(controller ? { controller } : {}),
     gatewayModels: gatewayModels.map(publicGatewayModel),
@@ -421,6 +425,7 @@ async function createBootstrapPackage(
 
   const metadata: BootstrapPackageMetadata = {
     formatVersion: 1,
+    initialGeneration: INITIAL_ONBOARDING_GENERATION,
     issuedAt,
     serialNumber,
     certificateId,
@@ -825,22 +830,22 @@ async function createOperation(
       hardwareRevision: record.hardwareRevision ?? 'UNKNOWN',
       siteId,
     }),
-    generation: 1,
+    generation: INITIAL_ONBOARDING_GENERATION,
     profileVersion,
     issuedAt: now,
   });
   const operation = {
     PK: tenantPk(context.tenantId), SK: operationSk(operationId), entityType: 'OPERATION', tenantId: context.tenantId,
     operationId, gatewayId, serialNumber, siteId, profileVersionId, deliveryMode,
-    type: 'ONBOARD', operationStatus: 'IN_PROGRESS', state: 'CLAIM_ACCEPTED', deploymentGeneration: 1,
+    type: 'ONBOARD', operationStatus: 'IN_PROGRESS', state: 'CLAIM_ACCEPTED', deploymentGeneration: INITIAL_ONBOARDING_GENERATION,
     timeline: [{ state: 'CLAIM_ACCEPTED', at: now, detail: 'An authenticated operator reserved the tenant-bound serial inventory record.' }],
     status: 'WAITING_FOR_DEVICE', steps, createdAt: now, updatedAt: now,
     GSI3PK: `${tenantPk(context.tenantId)}#OPERATION`, GSI3SK: `${now}#${operationId}`,
   };
   const deploymentId = newId('dep');
   const deployment = {
-    PK: tenantPk(context.tenantId), SK: deploymentSk(gatewayId, 1),
-    entityType: 'DEPLOYMENT', tenantId: context.tenantId, deploymentId, gatewayId, generation: 1,
+    PK: tenantPk(context.tenantId), SK: deploymentSk(gatewayId, INITIAL_ONBOARDING_GENERATION),
+    entityType: 'DEPLOYMENT', tenantId: context.tenantId, deploymentId, gatewayId, generation: INITIAL_ONBOARDING_GENERATION,
     profileVersionId, operationId, status: 'WAITING_FOR_DEVICE', descriptor: signedDescriptor,
     deliveryMode, createdAt: now, updatedAt: now,
   };
@@ -887,7 +892,8 @@ async function createOperation(
           PK: tenantPk(context.tenantId), SK: gatewaySk(gatewayId), entityType: 'GATEWAY', tenantId: context.tenantId,
           gatewayId, thingName, serialNumber, manufacturer: record.manufacturer,
           model: record.model, modelId: record.modelId ?? record.model, hardwareRevision: record.hardwareRevision ?? 'UNKNOWN',
-          siteId, state: 'PENDING', certificateState: 'PENDING', health: 'UNKNOWN', generation: 1, desiredGeneration: 1,
+          siteId, state: 'PENDING', certificateState: 'PENDING', health: 'UNKNOWN',
+          generation: INITIAL_ONBOARDING_GENERATION, desiredGeneration: INITIAL_ONBOARDING_GENERATION,
           desiredProfileVersionId: profileVersionId, operationId, signedDescriptor, createdAt: now, updatedAt: now,
           GSI1PK: `THING#${thingName}`, GSI1SK: tenantPk(context.tenantId),
         },
@@ -1053,8 +1059,10 @@ async function decommissionGateway(
   const gatewayId = normalizeIdentifier(event.pathParameters?.gatewayId, 'gatewayId');
   const body = parseJsonBody<Record<string, unknown>>(event, 8 * 1024);
   const confirmation = requiredText(body.confirmation, 'confirmation', 128);
+  if (body.resetForOnboarding !== undefined && typeof body.resetForOnboarding !== 'boolean') throw new InputError('resetForOnboarding must be a boolean');
+  const resetForOnboarding = body.resetForOnboarding === true;
   const key = idempotencyKey(event);
-  const requestHash = sha256(canonicalJson({ route: event.routeKey, gatewayId, confirmationHash: sha256(confirmation) }));
+  const requestHash = sha256(canonicalJson({ route: event.routeKey, gatewayId, confirmationHash: sha256(confirmation), ...(resetForOnboarding ? { resetForOnboarding } : {}) }));
   const existing = await existingIdempotency(context.tenantId, event.routeKey, key, requestHash);
   if (existing) return json(existing.statusCode ?? 202, existing.response);
 
@@ -1066,6 +1074,11 @@ async function decommissionGateway(
   const gateway = result.Item;
   if (!gateway || gateway.entityType !== 'GATEWAY') throw new NotFoundError('Gateway not found');
   if (confirmation !== gateway.serialNumber) throw new InputError('Type the gateway serial number exactly to confirm decommissioning');
+  if (resetForOnboarding) {
+    const operation = await requestGatewayReset(context, gateway, (item) =>
+      idempotencyItem(context.tenantId, event.routeKey, key, requestHash, publicOperation(item), 202));
+    return json(202, publicOperation(operation));
+  }
   if (gateway.state === 'DECOMMISSIONED' || gateway.state === 'DECOMMISSIONING') {
     throw new ConflictError('Gateway is already decommissioned or decommissioning');
   }
@@ -1819,6 +1832,7 @@ export function publicGateway(item: Record<string, unknown>) {
     modelId: item.modelId ?? item.model, hardwareRevision: item.hardwareRevision ?? item.hardwareId,
     siteId: item.siteId, state, certificateState, health,
     deploymentGeneration,
+    ...(item.resetOperationId ? { resetForOnboarding: true } : {}),
     profileVersionId: item.appliedProfileVersionId,
     desiredProfileVersionId: item.desiredProfileVersionId,
     appliedProfileChecksum: item.appliedProfileChecksum,

@@ -22,6 +22,7 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 
 export interface BootstrapPackageMetadata {
   formatVersion: 1;
+  initialGeneration: number;
   issuedAt: string;
   serialNumber: string;
   certificateId: string;
@@ -57,12 +58,15 @@ export function createBootstrapPackageArchive(input: BootstrapPackageInput): Buf
     'CONNECTED ENTERPRISE — ONE-TIME GATEWAY BOOTSTRAP PACKAGE',
     '',
     `Serial: ${input.metadata.serialNumber}`,
+    `Initial deployment generation: ${input.metadata.initialGeneration}`,
     `AWS IoT certificate ID: ${input.metadata.certificateId}`,
     '',
     'This archive contains the only exported copy of the bootstrap private key.',
     'Move it directly into protected storage on the gateway identified above.',
     'Do not reuse this credential on another gateway or commit these files to source control.',
     'After permanent identity is finalized, the bootstrap certificate is deactivated automatically.',
+    `For the first configuration fetch, request generation=${input.metadata.initialGeneration}.`,
+    'For subsequent deployments, request the generation shown in the onboarding UI.',
     '',
     'Files:',
     '- bootstrap-certificate.pem — AWS IoT bootstrap client certificate',

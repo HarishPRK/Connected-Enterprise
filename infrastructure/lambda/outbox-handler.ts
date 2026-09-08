@@ -13,6 +13,7 @@ import {
 } from '@aws-sdk/client-iot-data-plane';
 import { GetCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { resetGatewayRegistration } from './shared/gateway-reset.js';
 import type { Context, DynamoDBRecord, DynamoDBStreamHandler } from 'aws-lambda';
 import {
   AWS_ACCOUNT_ID,
@@ -35,7 +36,7 @@ import {
 const CONFIG_SHADOW_NAME = 'configuration';
 
 type OutboxEventType = 'UPDATE_CONFIG_SHADOW' | 'CREATE_JOB' | 'CLEAR_CONFIG_SHADOW'
-  | 'DEACTIVATE_BOOTSTRAP_CERTIFICATE' | 'DECOMMISSION_GATEWAY';
+  | 'DEACTIVATE_BOOTSTRAP_CERTIFICATE' | 'DECOMMISSION_GATEWAY' | 'RESET_GATEWAY_REGISTRATION';
 export type DeliveryFenceDisposition = 'CURRENT' | 'SUPERSEDED' | 'DELIVERY_OBSERVED';
 
 interface OutboxItem extends Record<string, unknown> {
@@ -95,6 +96,10 @@ async function processRecord(record: DynamoDBRecord, context: Context): Promise<
   const outbox = outboxItem(current, pk, sk);
 
   try {
+    if (outbox.eventType === 'RESET_GATEWAY_REGISTRATION') {
+      await resetGatewayRegistration(outbox, `${context.awsRequestId}:${outbox.outboxId}`);
+      return;
+    }
     let reference: Record<string, unknown>;
     if (outbox.eventType === 'UPDATE_CONFIG_SHADOW') {
       if (!await acquireDeliveryFence(outbox, context)) return;
@@ -116,6 +121,18 @@ async function processRecord(record: DynamoDBRecord, context: Context): Promise<
     await markSent(outbox, reference, context);
   } catch (error) {
     await markFailed(outbox, error);
+    if (outbox.eventType === 'RESET_GATEWAY_REGISTRATION' && outbox.operationId) {
+      try {
+        await ddb.send(new UpdateCommand({ TableName: TABLE_NAME,
+          Key: { PK: outbox.PK, SK: operationSk(outbox.operationId) },
+          UpdateExpression: 'SET resetError = :error',
+          ConditionExpression: 'resetForOnboarding = :yes AND attribute_not_exists(registrationReleased)',
+          ExpressionAttributeValues: { ':yes': true, ':error': sanitizedError(error) },
+        }));
+      } catch (updateError) {
+        if (errorName(updateError) !== 'ConditionalCheckFailedException') throw updateError;
+      }
+    }
     console.error(JSON.stringify({
       level: 'error',
       action: 'outbox-dispatch-failed',
@@ -171,7 +188,7 @@ async function acquireRollbackClearFence(outbox: OutboxItem, context: Context): 
     return true;
   }
   const leaseId = `${context.awsRequestId}:${outbox.outboxId}`.slice(0, 128);
-  const leaseExpiry = nowEpoch + 60;
+  const leaseExpiry = nowEpoch + 150;
   await ddb.send(new TransactWriteCommand({ TransactItems: [
     {
       Update: {
@@ -286,7 +303,7 @@ async function acquireDeliveryFence(outbox: OutboxItem, context: Context): Promi
 
   const nowEpoch = Math.floor(Date.now() / 1000);
   const leaseId = `${context.awsRequestId}:${outbox.outboxId}`.slice(0, 128);
-  const leaseExpiresAtEpoch = nowEpoch + 60;
+  const leaseExpiresAtEpoch = nowEpoch + 150;
   try {
     await ddb.send(new TransactWriteCommand({ TransactItems: [
       {
@@ -947,7 +964,7 @@ function outboxItem(value: Record<string, unknown>, expectedPk: string, expected
 
 function outboxEventType(value: unknown): OutboxEventType {
   if (value === 'UPDATE_CONFIG_SHADOW' || value === 'CREATE_JOB' || value === 'CLEAR_CONFIG_SHADOW'
-    || value === 'DEACTIVATE_BOOTSTRAP_CERTIFICATE' || value === 'DECOMMISSION_GATEWAY') return value;
+    || value === 'DEACTIVATE_BOOTSTRAP_CERTIFICATE' || value === 'DECOMMISSION_GATEWAY' || value === 'RESET_GATEWAY_REGISTRATION') return value;
   throw new Error('Unsupported outbox event type');
 }
 

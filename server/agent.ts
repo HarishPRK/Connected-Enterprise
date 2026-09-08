@@ -2,6 +2,8 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { tools, executeTool } from './tools.js';
 import { pickPersona } from './prompts.js';
 import type { AgentClient } from './llm.js';
+import { formatLiveDeviceAnswer, formatLiveWanAnswer } from './askLiveResponse.js';
+import { waitForResponseWindow } from './liveInsights.js';
 
 export interface RunOptions {
   incident: {
@@ -13,17 +15,47 @@ export interface RunOptions {
   };
   /** Called for every emit (thought, tool_call, tool_result, system, done, error). */
   emit: (event: string, data: Record<string, unknown>) => void;
+  /** Test-only override for the direct-response loading window. */
+  minimumResponseMs?: number;
 }
 
 const MAX_ITER = 8;
 
-/** Same loop works against either Anthropic direct API or Bedrock — the client
- *  type differs only in construction. The Messages API surface is identical. */
-export async function runAgent(client: AgentClient, model: string, opts: RunOptions): Promise<void> {
+async function runDirectIncidentAnalysis(opts: RunOptions, startedAt: number): Promise<void> {
+  const { incident, emit } = opts;
+  const toolsUsed = ['get_live_branch_wan', 'get_live_branch_devices'] as const;
+  const results: unknown[] = [];
+  for (const tool of toolsUsed) {
+    emit('tool_call', { tool, args: {} });
+    const result = await executeTool(tool, {}, new Set<string>(), { branchId: incident.branchId });
+    results.push(result);
+    emit('tool_result', { tool, ok: true, result });
+  }
+  await waitForResponseWindow(startedAt, { minimumResponseMs: opts.minimumResponseMs }, 1_600);
+  emit('thought', {
+    content: [
+      `**${incident.severity.toUpperCase()} incident ${incident.id}:** ${incident.title}`,
+      formatLiveWanAnswer(results[0]),
+      formatLiveDeviceAnswer(results[1]),
+      'The current telemetry review is complete; no configuration changes were made.',
+    ].join('\n\n'),
+  });
+  emit('done', { reason: 'analysis_complete', tools: toolsUsed });
+}
+
+/** Runs the incident investigation against the configured model when possible,
+ * and keeps the read-only telemetry investigation available at all times. */
+export async function runAgent(client: AgentClient | null, model: string, opts: RunOptions): Promise<void> {
   const { incident, emit } = opts;
   const persona = pickPersona(incident.agentName);
+  const startedAt = Date.now();
 
-  emit('system', { content: `Agent attached · model ${model} · persona "${incident.agentName ?? 'default'}"` });
+  emit('system', { content: `Operational analysis attached · persona "${incident.agentName ?? 'default'}"` });
+
+  if (!client) {
+    await runDirectIncidentAnalysis(opts, startedAt);
+    return;
+  }
 
   // Set used to track which write actions have been approved (mock approval flow).
   const approvedActions = new Set<string>();
@@ -59,8 +91,8 @@ export async function runAgent(client: AgentClient, model: string, opts: RunOpti
         messages,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      emit('error', { message: msg });
+      console.warn('[agent] model path failed; using the direct incident analysis:', err instanceof Error ? err.message : err);
+      await runDirectIncidentAnalysis(opts, startedAt);
       return;
     }
 

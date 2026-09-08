@@ -16,7 +16,7 @@ export function AiInsightCard({
   topic,
   data,
   title = 'AI Insight',
-  subtitle = 'Bedrock-powered analysis of this page',
+  subtitle = 'Analysis of the current page state',
   autoRun = true,
 }: {
   topic: Topic;

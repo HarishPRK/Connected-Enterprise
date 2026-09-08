@@ -220,6 +220,7 @@ export interface OnboardingDatabase {
 
 export interface OnboardingSnapshot {
   generatedAt: string;
+  initialDeploymentGeneration: number;
   mode: 'local-simulator' | 'aws';
   tenant: TenantState['tenant'];
   controller?: ControllerConfiguration;

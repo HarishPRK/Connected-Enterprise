@@ -11,6 +11,15 @@ test('bootstrap credential options default to dedicated files in the device stat
 
   assert.equal(options.bootstrapCertificate, join(stateDirectory, 'bootstrap-certificate.pem'));
   assert.equal(options.bootstrapPrivateKey, join(stateDirectory, 'bootstrap-private-key.pem'));
+  assert.equal(options.generation, 5);
+});
+
+test('an explicit generation supports existing registrations and later deployments', async (context) => {
+  const stateDirectory = await temporaryStateDirectory(context);
+  const args = requiredArgs(stateDirectory);
+  assert.equal(parseOptions([...args, '--generation', '1'], {}).generation, 1);
+  assert.equal(parseOptions(args, { CE_SIM_GENERATION: '6' }).generation, 6);
+  assert.equal(parseOptions([...args, '--generation', '7'], { CE_SIM_GENERATION: '6' }).generation, 7);
 });
 
 test('explicit bootstrap credential flags resolve files associated with this device state', async (context) => {

@@ -22,6 +22,7 @@ import type {
   VerificationResult,
 } from './onboardingTypes.js';
 import { controllerProvisioningBody, normalizeControllerProvisioning } from './controllerConfiguration.js';
+import { INITIAL_ONBOARDING_GENERATION } from '../shared/onboarding-policy.js';
 
 const GATEWAY_MODELS: GatewayModel[] = [
   {
@@ -987,7 +988,9 @@ export class OnboardingService {
 
         const createdAt = iso(this.now());
         const gatewayId = existingGateway?.id ?? `gw_${sha256(`${context.tenantId}:${verification.serialNumber}`).slice(0, 16)}`;
-        const deploymentGeneration = (existingGateway?.deploymentGeneration ?? 0) + 1;
+        const deploymentGeneration = existingGateway
+          ? existingGateway.deploymentGeneration + 1
+          : INITIAL_ONBOARDING_GENERATION;
         const thingName = `ce-${slug(context.tenantId).slice(0, 18)}-${slug(verification.serialNumber).slice(0, 28)}`;
         const previousProfileVersionId = existingGateway?.profileVersionId;
         const gateway: Gateway = {
@@ -1456,6 +1459,7 @@ export class OnboardingService {
     return {
       generatedAt: iso(this.now()),
       mode: this.mode,
+      initialDeploymentGeneration: INITIAL_ONBOARDING_GENERATION,
       tenant: tenant.tenant,
       ...(tenant.controller ? { controller: tenant.controller } : {}),
       sites: tenant.sites,

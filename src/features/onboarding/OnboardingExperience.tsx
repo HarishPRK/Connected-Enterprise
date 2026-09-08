@@ -196,6 +196,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                 refreshing={refreshing}
                 canVerifyDevice={canOperate}
                 canDecommission={canAdminister}
+                canResetRegistration={snapshot.canResetGatewayRegistration}
                 canDeployProfile={canOperate}
                 onRefresh={() => void refresh()}
                 onVerifyDevice={() => setSurface('wizard')}

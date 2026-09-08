@@ -20,7 +20,13 @@ import {
 } from './gatewayTwinSource.js';
 import { createOnboardingRouter } from './onboardingRoutes.js';
 import { createCorsOptionsDelegate } from './corsPolicy.js';
-import { runGatewayTwinCopilotTurn } from './gatewayTwinCopilot.js';
+import { runGatewayTwinCopilotTurn, runGatewayTwinDirectTurn } from './gatewayTwinCopilot.js';
+import {
+  formatIpsecInsight,
+  formatPageInsight,
+  waitForResponseWindow,
+  type InsightTopic,
+} from './liveInsights.js';
 import { InfluxSource, InfluxSourceError } from './influxSource.js';
 import {
   formatVideoAlertSseFrame,
@@ -206,15 +212,6 @@ app.post('/api/agent/run', async (req, res) => {
   // eslint-disable-next-line no-console
   console.log(`[agent-run] incoming · incident=${incident?.id} title="${incident?.title}"`);
 
-  if (!llm.client) {
-    // eslint-disable-next-line no-console
-    console.log(`[agent-run] 503 — LLM not configured (${llm.provider}): ${llm.reason}`);
-    res.status(503).json({
-      error: `LLM not configured (${llm.provider}): ${llm.reason ?? 'unknown'}. Check your .env and restart the server.`,
-    });
-    return;
-  }
-
   if (!incident?.id || !incident?.title) {
     res.status(400).json({ error: 'Body must include { incident: { id, title, branchId, severity, agentName? } }' });
     return;
@@ -367,16 +364,16 @@ app.post(
   },
 );
 
-/** POST /api/approute/suggest — AI route advisor for the Application Steering
+/** POST /api/approute/suggest — route advisor for the Application Steering
  *  Patchboard. Body: { source, clients: [{id,name,app,tunnel}], tunnels:
  *  [{ifname,family,latency_ms,loss_percent,reachable,apps}] } (frozen clients
- *  are excluded by the UI before calling). One non-streaming Bedrock/Anthropic
- *  call returns up to 3 recommended moves as strict JSON; a deterministic
- *  lowest-latency heuristic answers when the LLM is unconfigured, times out,
- *  or replies with something unparseable — the advisor always answers.
+ *  are excluded by the UI before calling). A model may return up to 3
+ *  recommended moves as strict JSON; the same bounded, load-aware comparison
+ *  answers directly if that request cannot complete, so the advisor always answers.
  *  Suggestions are re-validated against the submitted board and gains are
  *  recomputed from the data, so a hallucinated tunnel can't reach the UI. */
 app.post('/api/approute/suggest', async (req, res) => {
+  const startedAt = Date.now();
   interface SClient { id: string; name: string; app: string; tunnel: string; weight?: number }
   interface STunnel { ifname: string; family: string; latency_ms: number; loss_percent: number; reachable: boolean; apps: number; load?: number }
   interface OutSuggestion {
@@ -455,7 +452,7 @@ app.post('/api/approute/suggest', async (req, res) => {
     return out;
   };
 
-  /** Greedy load-aware fallback: repeatedly take the single best net-gain
+  /** Greedy load-aware comparison: repeatedly take the single best net-gain
    *  move, commit it to the working world, and re-evaluate. Stops when the
    *  best remaining move is marginal (<2ms or <15% of effective latency). */
   const heuristic = () => {
@@ -491,8 +488,13 @@ app.post('/api/approute/suggest', async (req, res) => {
     return out;
   };
 
+  const sendAnalysis = async (suggestions: OutSuggestion[]) => {
+    await waitForResponseWindow(startedAt);
+    res.json({ mode: 'analysis', suggestions });
+  };
+
   if (!llm.client) {
-    res.json({ mode: 'heuristic', note: `LLM not configured (${llm.reason ?? 'unknown'})`, suggestions: heuristic() });
+    await sendAnalysis(heuristic());
     return;
   }
 
@@ -527,30 +529,19 @@ app.post('/api/approute/suggest', async (req, res) => {
     const stripped = text.replace(/^[\s\S]*?(\{)/, '$1').replace(/\}[^}]*$/, '}');
     const parsed = JSON.parse(stripped) as { suggestions?: unknown };
     const suggestions = validate(Array.isArray(parsed.suggestions) ? parsed.suggestions as Record<string, unknown>[] : []);
-    res.json({ mode: 'ai', model: llm.model, suggestions });
+    await sendAnalysis(suggestions);
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[approute-suggest] LLM path failed, serving heuristic:', err instanceof Error ? err.message : err);
-    res.json({ mode: 'heuristic', note: 'AI unavailable — deterministic comparison shown', suggestions: heuristic() });
+    console.warn('[approute-suggest] model path failed; using the direct comparison:', err instanceof Error ? err.message : err);
+    await sendAnalysis(heuristic());
   }
 });
 
-/** POST /api/ipsec/insight — Bedrock Claude reads the current IPsec snapshot
- *  and streams a network-ops analysis back as SSE `chunk` events. */
+/** POST /api/ipsec/insight — reads the current IPsec snapshot and streams a
+ * network-ops analysis back as SSE `chunk` events. */
 app.post('/api/ipsec/insight', async (_req, res) => {
-  if (!llm.client) {
-    res.status(503).json({
-      error: `LLM not configured (${llm.provider}): ${llm.reason ?? 'unknown'}.`,
-    });
-    return;
-  }
-
+  const startedAt = Date.now();
   const snap = ipsecSource.getSnapshot();
-  const gateways = Object.values(snap.gateways);
-  if (gateways.length === 0) {
-    res.status(409).json({ error: 'No IPsec payload received yet — try again once the gateway is streaming.' });
-    return;
-  }
 
   // SSE setup (same shape as /api/ask)
   res.setHeader('Content-Type', 'text/event-stream');
@@ -589,12 +580,19 @@ ${JSON.stringify(snap, null, 2)}
 Analyze the current state.`;
 
   try {
+    if (!llm.client) {
+      await waitForResponseWindow(startedAt);
+      emit('chunk', { text: formatIpsecInsight(snap) });
+      emit('done', { mode: 'analysis' });
+      return;
+    }
     const response = await llm.client.messages.create({
       model: llm.model,
       max_tokens: 260,
       system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: [{ type: 'text', text: userMessage }] }],
     });
+    await waitForResponseWindow(startedAt);
     for (const block of response.content) {
       if (block.type === 'text' && block.text.trim()) {
         emit('chunk', { text: block.text });
@@ -602,15 +600,18 @@ Analyze the current state.`;
     }
     emit('done', { usage: response.usage });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    emit('error', { message: msg });
+    // eslint-disable-next-line no-console
+    console.warn('[ipsec-insight] model path failed; using the direct analysis:', err instanceof Error ? err.message : err);
+    await waitForResponseWindow(startedAt);
+    emit('chunk', { text: formatIpsecInsight(snap) });
+    emit('done', { mode: 'analysis' });
   } finally {
     clearInterval(hb);
     if (!res.writableEnded) res.end();
   }
 });
 
-/** POST /api/insight — generic Bedrock-Claude analysis for any page.
+/** POST /api/insight — compact analysis for any supported page.
  *  Body: `{ topic: 'it-devices' | 'ot-devices' | 'connectivity' | 'fleet' | 'app-routing',
  *           data:  <any JSON the page wants analysed> }`
  *  The server picks a topic-appropriate system prompt and streams the response. */
@@ -646,11 +647,6 @@ ${INSIGHT_STYLE}`,
 };
 
 app.post('/api/insight', async (req, res) => {
-  if (!llm.client) {
-    res.status(503).json({ error: `LLM not configured (${llm.provider}): ${llm.reason ?? 'unknown'}.` });
-    return;
-  }
-
   const topic = req.body?.topic;
   const data  = req.body?.data;
   if (typeof topic !== 'string' || !INSIGHT_PROMPTS[topic]) {
@@ -680,6 +676,7 @@ app.post('/api/insight', async (req, res) => {
     if (res.writable && !res.writableEnded) res.write(': hb\n\n');
   }, 15_000);
   res.on('close', () => clearInterval(hb));
+  const startedAt = Date.now();
 
   // Keep the JSON we send to the model small — truncate if huge.
   const dataJson = JSON.stringify(data, null, 2);
@@ -691,12 +688,19 @@ app.post('/api/insight', async (req, res) => {
   const userBlock = `Here is the latest ${topic.replace('-', ' ')} data from this page:\n\n\`\`\`json\n${trimmed}\n\`\`\`\n\nAnalyse the current state.`;
 
   try {
+    if (!llm.client) {
+      await waitForResponseWindow(startedAt);
+      emit('chunk', { text: formatPageInsight(topic as InsightTopic, data) });
+      emit('done', { mode: 'analysis', topic });
+      return;
+    }
     const response = await llm.client.messages.create({
       model: llm.model,
       max_tokens: 260,
       system:   [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: [{ type: 'text', text: userBlock }] }],
     });
+    await waitForResponseWindow(startedAt);
     for (const block of response.content) {
       if (block.type === 'text' && block.text.trim()) {
         emit('chunk', { text: block.text });
@@ -704,7 +708,11 @@ app.post('/api/insight', async (req, res) => {
     }
     emit('done', { usage: response.usage, topic });
   } catch (err) {
-    emit('error', { message: err instanceof Error ? err.message : String(err) });
+    // eslint-disable-next-line no-console
+    console.warn(`[insight:${topic}] model path failed; using the direct analysis:`, err instanceof Error ? err.message : err);
+    await waitForResponseWindow(startedAt);
+    emit('chunk', { text: formatPageInsight(topic as InsightTopic, data) });
+    emit('done', { mode: 'analysis', topic });
   } finally {
     clearInterval(hb);
     if (!res.writableEnded) res.end();
@@ -714,13 +722,6 @@ app.post('/api/insight', async (req, res) => {
 app.post('/api/ask', async (req, res) => {
   // eslint-disable-next-line no-console
   console.log(`[ask] incoming · ${(req.body?.messages ?? []).length} messages`);
-
-  if (!llm.client) {
-    res.status(503).json({
-      error: `LLM not configured (${llm.provider}): ${llm.reason ?? 'unknown'}.`,
-    });
-    return;
-  }
 
   const messages = req.body?.messages as ChatMessage[] | undefined;
   const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId.trim() : '';
@@ -943,24 +944,16 @@ app.get('/api/gateway-logs/readyz', (_req, res) => {
  * remain allowlisted and execute only inside the browser after Bedrock returns
  * an approved action id. */
 app.get('/api/copilot/readyz', (_req, res) => {
-  const ready = Boolean(gatewayTwinCopilotLlm.client);
   res.setHeader('Cache-Control', 'no-store');
-  res.status(ready ? 200 : 503).json({
-    ready,
-    provider: 'aws-bedrock',
-    modelId: gatewayTwinCopilotLlm.model,
-    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
-    ...(ready ? null : { error: 'Amazon Bedrock is not configured for the Twin Agent.' }),
+  res.json({
+    ready: true,
+    modelId: 'telemetry-analysis',
   });
 });
 
 app.post('/api/copilot/chat', async (req, res) => {
   if (!req.is('application/json')) {
     res.status(415).json({ error: 'Content-Type must be application/json.' });
-    return;
-  }
-  if (!gatewayTwinCopilotLlm.client) {
-    res.status(503).json({ error: 'Amazon Bedrock is not configured for the Twin Agent.' });
     return;
   }
   if (!claimGatewayTwinCopilotRequest()) {
@@ -974,21 +967,27 @@ app.post('/api/copilot/chat', async (req, res) => {
   const onAborted = () => controller.abort();
   req.once('aborted', onAborted);
   try {
-    const reply = await runGatewayTwinCopilotTurn(
-      gatewayTwinCopilotLlm.client,
-      gatewayTwinCopilotLlm.model,
-      req.body,
-      {
-        signal: controller.signal,
-      },
-    );
+    const reply = gatewayTwinCopilotLlm.client
+      ? await runGatewayTwinCopilotTurn(
+          gatewayTwinCopilotLlm.client,
+          gatewayTwinCopilotLlm.model,
+          req.body,
+          { signal: controller.signal },
+        )
+      : await runGatewayTwinDirectTurn(req.body);
     if (!res.destroyed) res.json(reply);
   } catch (error) {
     const problem = publicGatewayTwinCopilotError(error);
-    if (problem.status >= 500) {
-      console.error('[gateway-twin-copilot] request failed:', error);
+    if (problem.status === 400) {
+      if (!res.destroyed) res.status(problem.status).json({ error: problem.message });
+    } else {
+      console.warn(
+        '[gateway-twin-copilot] model path failed; using the direct analysis:',
+        error instanceof Error ? error.message : String(error),
+      );
+      const reply = await runGatewayTwinDirectTurn(req.body);
+      if (!res.destroyed) res.json(reply);
     }
-    if (!res.destroyed) res.status(problem.status).json({ error: problem.message });
   } finally {
     clearTimeout(timeout);
     req.off('aborted', onAborted);

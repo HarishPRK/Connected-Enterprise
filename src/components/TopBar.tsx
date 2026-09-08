@@ -32,7 +32,7 @@ export function TopBar({
           <img src="/capgemini.jpg" alt="Capgemini" />
         </span>
         <span>
-          Connected Enterprise / ANIRA 2.0
+          Connected Enterprise
           <small>Cloud operations</small>
         </span>
       </div>

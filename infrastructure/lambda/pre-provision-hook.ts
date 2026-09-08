@@ -88,6 +88,12 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
     }
     const verificationId = record.verificationId;
     const enrollmentAuthorizedAt = record.enrollmentAuthorizedAt;
+    // Follow the server-reserved assignment, including reservations made before
+    // the initial-generation policy changed. Never take this from the device.
+    const generation = record.signedDescriptor?.generation;
+    if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 1) {
+      return deny('reserved assignment generation is missing or invalid');
+    }
 
     const certificatePrincipal = `arn:aws:iot:${AWS_REGION_NAME}:${AWS_ACCOUNT_ID}:cert/${certificateId}`;
     const now = new Date().toISOString();
@@ -114,6 +120,7 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
                 'bootstrapCertificateStatus = :bootstrapCertificateActive',
                 'verificationId = :verificationId',
                 'enrollmentAuthorizedAt = :enrollmentAuthorizedAt',
+                'signedDescriptor.generation = :generation',
                 '(attribute_not_exists(certificateId) OR certificateId = :certificateId)',
               ].join(' AND '),
               ExpressionAttributeNames: { '#state': 'state' },
@@ -122,6 +129,7 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
                 ':provisioning': 'PROVISIONING',
                 ':verificationId': verificationId,
                 ':enrollmentAuthorizedAt': enrollmentAuthorizedAt,
+                ':generation': generation,
                 ':tenantId': record.tenantId,
                 ':manufacturingEntity': 'MANUFACTURING',
                 ':gatewayId': record.gatewayId,
@@ -160,7 +168,7 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
                 ':state': 'IDENTITY_PROVISIONING',
                 ':certificatePending': 'PENDING_ACTIVATION',
                 ':certificateUnassigned': 'PENDING',
-                ':generation': 1,
+                ':generation': generation,
                 ':now': now,
                 ':thingLookup': `THING#${thingName}`,
                 ':thingSort': tenantKey,
@@ -186,7 +194,7 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
                 ':siteId': record.siteId,
                 ':profileVersionId': record.profileVersionId,
                 ':deliveryMode': record.deliveryMode,
-                ':generation': 1,
+                ':generation': generation,
                 ':inProgress': 'IN_PROGRESS',
                 ':claimAccepted': 'CLAIM_ACCEPTED',
                 ':waiting': 'WAITING_FOR_DEVICE',
@@ -219,13 +227,13 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
           {
             ConditionCheck: {
               TableName: TABLE_NAME,
-              Key: { PK: tenantKey, SK: deploymentSk(record.gatewayId, 1) },
+              Key: { PK: tenantKey, SK: deploymentSk(record.gatewayId, generation) },
               ConditionExpression: 'entityType = :entity AND tenantId = :tenantId AND gatewayId = :gatewayId AND operationId = :operationId AND profileVersionId = :profileVersionId AND deliveryMode = :deliveryMode AND generation = :generation AND #status = :waiting',
               ExpressionAttributeNames: { '#status': 'status' },
               ExpressionAttributeValues: {
                 ':entity': 'DEPLOYMENT', ':tenantId': record.tenantId, ':gatewayId': record.gatewayId,
                 ':operationId': record.operationId, ':profileVersionId': record.profileVersionId,
-                ':deliveryMode': record.deliveryMode, ':generation': 1, ':waiting': 'WAITING_FOR_DEVICE',
+                ':deliveryMode': record.deliveryMode, ':generation': generation, ':waiting': 'WAITING_FOR_DEVICE',
               },
             },
           },

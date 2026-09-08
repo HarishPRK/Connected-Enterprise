@@ -116,6 +116,9 @@ export interface OperationTimelineEntry {
 }
 
 export interface OnboardingOperation {
+  resetForOnboarding?: boolean;
+  registrationReleased?: boolean;
+  resetError?: string;
   id: string;
   type: OperationType;
   status: OperationStatus;
@@ -141,7 +144,9 @@ export interface OnboardingOperation {
 }
 
 export interface OnboardingSnapshot {
+  canResetGatewayRegistration?: boolean;
   generatedAt: string;
+  initialDeploymentGeneration?: number;
   mode: 'local-simulator' | 'aws';
   tenant: Tenant;
   controller?: ControllerConfiguration;

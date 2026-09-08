@@ -44,14 +44,14 @@ export function runAskSSE(req: AskRequest, handlers: AgentRunHandlers): () => vo
   return _streamSSE('/api/ask', req, handlers);
 }
 
-/** Streams a Bedrock-Claude analysis of the live IPsec snapshot back to the
+/** Streams an analysis of the live IPsec snapshot back to the
  *  caller via SSE `chunk` events. No request body — the server reads the
  *  current snapshot itself. */
 export function runIpsecInsightSSE(handlers: AgentRunHandlers): () => void {
   return _streamSSE('/api/ipsec/insight', {}, handlers);
 }
 
-/** Generic Bedrock-Claude analysis for any page. Caller provides the topic
+/** Generic analysis for any page. Caller provides the topic
  *  (which picks a system prompt server-side) and a JSON payload describing
  *  the page's current state. Streams `chunk` events back. */
 export function runInsightSSE(
