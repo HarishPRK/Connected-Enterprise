@@ -122,10 +122,14 @@ values into the browser bundle, so creating or changing `.env` after
 ### 2.6 · Start with PM2
 
 ```bash
-pm2 start npm --name connected-enterprise -- run start
+pm2 startOrRestart ecosystem.config.cjs --update-env
 pm2 save
 pm2 startup systemd -u ubuntu --hp /home/ubuntu      # then copy/paste the line it prints
 ```
+
+The ecosystem file sets PM2's working directory to this checkout, so it serves
+the `dist` directory built here. Restarting only by process name can retain an
+older release directory. Verify `exec cwd` with `pm2 describe connected-enterprise`.
 
 Verify the process is healthy:
 
@@ -167,10 +171,11 @@ You should see the dashboard load. The browser will show **"Not secure"** in the
 ```bash
 ssh ubuntu@<ELASTIC-IP>
 cd ~/connected-enterprise
-git pull
-npm ci             # only if package.json changed
+git pull --ff-only
+npm ci
 npm run build       # reads the retained VITE_ONBOARDING_* values from .env
-pm2 restart connected-enterprise
+pm2 startOrRestart ecosystem.config.cjs --update-env
+pm2 save
 ```
 
 ### Inspect logs
@@ -185,7 +190,7 @@ pm2 monit                    # live dashboard
 ```bash
 cd ~/connected-enterprise
 nano .env                    # edit AWS_BEARER_TOKEN_BEDROCK
-pm2 restart connected-enterprise
+pm2 startOrRestart ecosystem.config.cjs --update-env
 ```
 
 ### Check the server's view of itself
