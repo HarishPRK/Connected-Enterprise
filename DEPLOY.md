@@ -127,9 +127,21 @@ pm2 save
 pm2 startup systemd -u ubuntu --hp /home/ubuntu      # then copy/paste the line it prints
 ```
 
-The ecosystem file sets PM2's working directory to this checkout, so it serves
-the `dist` directory built here. Restarting only by process name can retain an
-older release directory. Verify `exec cwd` with `pm2 describe connected-enterprise`.
+The ecosystem file sets PM2's working directory when the process is created, so
+it serves the `dist` directory built here. Verify `exec cwd` with
+`pm2 describe connected-enterprise`.
+
+If an existing process points to an older release directory, restarting it can
+retain that directory even when using the ecosystem file. After verifying the
+checkout has the active `.env`, runtime data, and a successful build, recreate
+that process once, then verify the health endpoint before saving:
+
+```bash
+pm2 delete connected-enterprise
+pm2 start ecosystem.config.cjs --only connected-enterprise
+curl --fail http://localhost/api/health
+pm2 save
+```
 
 Verify the process is healthy:
 
