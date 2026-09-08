@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+# Local EC2 deployment rollback copies
+/dist.previous-*/
+/server/*.bak
 infrastructure/cdk.out/
 infrastructure/cdk-outputs.json
 tools/gateway-simulator/.state/
