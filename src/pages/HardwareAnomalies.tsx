@@ -32,7 +32,7 @@ import {
 import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
 import { useTheme, useThemeColors } from '../ui/Theme';
-import { CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
+import { ANOMALY_REASON_LABELS, CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
 import {
   useHardwareAnomalies,
   type HardwareAnomalyPoint,
@@ -285,7 +285,16 @@ export function HardwareAnomaliesPage() {
               {data.reasonCodes.map((reason, index) => (
                 <div key={`${JSON.stringify(reason.tags)}-${index}`}>
                   <dt>{Object.values(reason.tags).join(' · ') || 'BGW620'}</dt>
-                  <dd><strong>{reason.code}</strong><time dateTime={reason.time}>{formatTableTime(reason.time)}</time></dd>
+                  <dd>
+                    <strong className="anomaly-reason-value" data-tone={reason.code === 0 ? 'ok' : 'err'}>
+                      {reason.code === 0
+                        ? <CheckCircle2 size={20} aria-hidden="true" />
+                        : <TriangleAlert size={20} aria-hidden="true" />}
+                      <span>{ANOMALY_REASON_LABELS[reason.code] ?? 'Unknown Anomaly'}</span>
+                    </strong>
+                    <span className="anomaly-reason-code">Code {reason.code}</span>
+                    <time dateTime={reason.time}>{formatTableTime(reason.time)}</time>
+                  </dd>
                 </div>
               ))}
             </dl>
