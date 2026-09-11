@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CONNTRACK_MEASUREMENTS, type ConntrackMeasurement, type EagleTelemetry } from '../../shared/eagleTelemetry';
 
 export const HARDWARE_ANOMALIES_ENDPOINT = '/api/hardware-metrics/anomalies' as const;
 
@@ -26,7 +27,7 @@ export interface HardwareAnomalyAggregations {
   anomalyThreshold: 'mean' | 'last';
 }
 
-export interface HardwareAnomalyResponse {
+export interface HardwareAnomalyResponse extends EagleTelemetry {
   source: HardwareAnomalySource;
   range: HardwareAnomalyRange;
   window: string;
@@ -101,6 +102,26 @@ function parseResponse(value: unknown): HardwareAnomalyResponse {
   const source = isRecord(value.source) ? value.source : {};
   const range = isRecord(value.range) ? value.range : {};
   const aggregations = isRecord(value.aggregations) ? value.aggregations : {};
+  const parseTags = (raw: unknown): Record<string, string> => isRecord(raw)
+    ? Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+    : {};
+  const validTime = (raw: unknown): raw is string => typeof raw === 'string' && Number.isFinite(Date.parse(raw));
+  const reasonCodes: EagleTelemetry['reasonCodes'] = Array.isArray(value.reasonCodes)
+    ? value.reasonCodes.flatMap((item: unknown) => {
+      if (!isRecord(item) || !validTime(item.time) || finiteNumber(item.code) === null) return [];
+      return [{ time: item.time, code: finiteNumber(item.code)!, tags: parseTags(item.tags) }];
+    }) : [];
+  const conntrack: EagleTelemetry['conntrack'] = Array.isArray(value.conntrack)
+    ? value.conntrack.flatMap((item: unknown) => {
+      if (!isRecord(item) || typeof item.id !== 'string'
+        || !CONNTRACK_MEASUREMENTS.includes(item.measurement as ConntrackMeasurement) || !Array.isArray(item.points)) return [];
+      return [{ id: item.id, measurement: item.measurement as ConntrackMeasurement, tags: parseTags(item.tags),
+        points: item.points.flatMap((point: unknown) => {
+          if (!isRecord(point) || !validTime(point.time) || finiteNumber(point.value) === null) return [];
+          return [{ time: point.time, value: finiteNumber(point.value)! }];
+        }),
+      }];
+    }) : [];
 
   return {
     source: {
@@ -119,6 +140,8 @@ function parseResponse(value: unknown): HardwareAnomalyResponse {
       anomalyThreshold: aggregations.anomalyThreshold === 'last' ? 'last' : 'mean',
     },
     points,
+    reasonCodes,
+    conntrack,
   };
 }
 

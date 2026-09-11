@@ -32,6 +32,7 @@ import {
 import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
 import { useTheme, useThemeColors } from '../ui/Theme';
+import { CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
 import {
   useHardwareAnomalies,
   type HardwareAnomalyPoint,
@@ -217,8 +218,8 @@ export function HardwareAnomaliesPage() {
   return (
     <div className="anomaly-page">
       <PageHeader
-        title="Hardware Anomalies"
-        subtitle="BGW620 · R95VA4GP000041 · Reconstruction error compared with the learned anomaly threshold"
+        title="EA:GLE"
+        subtitle="BGW620 · Hardware anomaly detection and connection tracking"
         right={
           <div className="anomaly-header-tools">
             <SourceStatus
@@ -275,6 +276,23 @@ export function HardwareAnomaliesPage() {
         </div>
       )}
 
+      {data && (
+        <Card className="anomaly-reason-card" title="Anomaly reason code" sub="Latest reported value per series in the selected range">
+          {data.reasonCodes.length === 0 ? (
+            <p className="anomaly-panel-empty">No reason code reported in this range.</p>
+          ) : (
+            <dl className="anomaly-reason-list">
+              {data.reasonCodes.map((reason, index) => (
+                <div key={`${JSON.stringify(reason.tags)}-${index}`}>
+                  <dt>{Object.values(reason.tags).join(' · ') || 'BGW620'}</dt>
+                  <dd><strong>{reason.code}</strong><time dateTime={reason.time}>{formatTableTime(reason.time)}</time></dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </Card>
+      )}
+
       {loading && !data ? (
         <AnomalyLoadingState />
       ) : error && !data ? (
@@ -323,10 +341,10 @@ export function HardwareAnomaliesPage() {
                 title={
                   <span className="anomaly-card-title">
                     <Activity size={15} aria-hidden="true" />
-                    Threshold corridor
+                    Hardware Anomalies
                   </span>
                 }
-                sub={`MSE and learned threshold · ${data?.window || range.window} aggregation window · fixed Y scale 0–2`}
+                sub={`R95VA4GP000041 · MSE and learned threshold · ${data?.window || range.window} aggregation window · fixed Y scale 0–2`}
                 right={
                   <div className="anomaly-chart-legend" aria-label="Chart legend">
                     <span><i className="mse" />Reconstruction error</span>
@@ -353,7 +371,71 @@ export function HardwareAnomaliesPage() {
           </div>
         </>
       )}
+      {data && <ConntrackChart series={data.conntrack} range={rangeKey} window={data.window || range.window} />}
     </div>
+  );
+}
+
+const CONNTRACK_LABELS = { conntrack_total: 'Total', conntrack_tcp: 'TCP', conntrack_udp: 'UDP', conntrack_icmp: 'ICMP', conntrack_other: 'Other' };
+
+function ConntrackChart({ series, range, window }: { series: ConntrackSeries[]; range: RangeKey; window: string }) {
+  const colors = useThemeColors();
+  const { theme } = useTheme();
+  const palette = theme === 'light'
+    ? ['#475569', '#047857', '#be185d', '#1d4ed8', '#92400e']
+    : ['#cbd5e1', '#34d399', '#f472b6', '#60a5fa', '#fbbf24'];
+  const orderedSeries = useMemo(() => [...series].sort((a, b) => (
+    CONNTRACK_MEASUREMENTS.indexOf(a.measurement) - CONNTRACK_MEASUREMENTS.indexOf(b.measurement)
+  )), [series]);
+  const chartPoints = useMemo(() => {
+    const byTime = new Map<number, Record<string, number>>();
+    orderedSeries.forEach((item, index) => item.points.forEach((point) => {
+      const timestamp = Date.parse(point.time);
+      const row = byTime.get(timestamp) ?? { timestamp };
+      row[`series${index}`] = point.value;
+      byTime.set(timestamp, row);
+    }));
+    return [...byTime.values()].sort((a, b) => a.timestamp - b.timestamp);
+  }, [orderedSeries]);
+  const label = (item: ConntrackSeries) => [CONNTRACK_LABELS[item.measurement], ...Object.values(item.tags)].join(' · ');
+  const seriesColor = (item: ConntrackSeries) => palette[CONNTRACK_MEASUREMENTS.indexOf(item.measurement)];
+
+  return (
+    <Card className="anomaly-conntrack-card" title="Conntrack (Connection Tracking)" sub={`BGW620 · Mean connection counts · ${window} aggregation window`}>
+      {chartPoints.length === 0 ? (
+        <p className="anomaly-panel-empty">No connection-tracking samples in this range. Choose a longer range or refresh.</p>
+      ) : (
+        <>
+          <div className="anomaly-chart-legend" aria-label="Connection tracking legend">
+            {orderedSeries.map((item) => <span key={item.id}><i style={{ background: seriesColor(item) }} />{label(item)}</span>)}
+          </div>
+          <figure className="anomaly-trace" aria-label="Connection counts over the selected range">
+            <div className="anomaly-chart">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 360 }}>
+                <ComposedChart data={chartPoints} margin={{ top: 12, right: 14, left: 2, bottom: 2 }} accessibilityLayer aria-label="Connection tracking chart">
+                  <CartesianGrid stroke={colors.chartGrid} strokeDasharray="3 5" vertical={false} />
+                  <XAxis dataKey="timestamp" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(value: number) => formatAxisTime(value, range)} stroke={colors.textDim} tickLine={false} axisLine={false} minTickGap={52} fontSize={11} tickMargin={10} />
+                  <YAxis domain={[0, 'auto']} stroke={colors.textDim} tickLine={false} axisLine={false} width={58} fontSize={11} />
+                  <Tooltip
+                    position={{ x: 8, y: 8 }}
+                    wrapperStyle={{ maxWidth: 'calc(100% - 16px)' }}
+                    itemStyle={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}
+                    labelStyle={{ whiteSpace: 'normal' }}
+                    labelFormatter={(value) => formatTableTime(new Date(Number(value)).toISOString())}
+                    formatter={(value) => typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(value)}
+                    contentStyle={{ background: colors.panelSolid, borderColor: colors.chartGrid, color: colors.textDim, borderRadius: 12, fontSize: 12 }}
+                  />
+                  {orderedSeries.map((item, index) => (
+                    <Line key={item.id} dataKey={`series${index}`} name={label(item)} type="linear" stroke={seriesColor(item)} strokeWidth={item.measurement === 'conntrack_total' ? 2.5 : 1.8} strokeDasharray={item.measurement === 'conntrack_total' ? '7 4' : undefined} dot={item.points.length === 1} isAnimationActive={false} />
+                  ))}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </figure>
+          <div className="anomaly-trace-meta"><span><strong>{chartPoints.length.toLocaleString()}</strong> sampled windows</span><span><strong>mean</strong> aggregation</span></div>
+        </>
+      )}
+    </Card>
   );
 }
 

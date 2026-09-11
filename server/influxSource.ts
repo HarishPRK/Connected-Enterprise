@@ -1,3 +1,5 @@
+import { CONNTRACK_MEASUREMENTS, type ConntrackMeasurement, type EagleTelemetry } from '../shared/eagleTelemetry.js';
+
 const DEFAULT_INFLUX_URL = 'http://76.187.201.239:8086';
 const DEFAULT_INFLUX_ORG = 'Capgemini';
 const DEFAULT_INFLUX_BUCKET = 'BGW620';
@@ -39,7 +41,7 @@ export interface AnomalyPoint {
   anomalyThreshold?: number;
 }
 
-export interface AnomalyQueryResult {
+export interface AnomalyQueryResult extends EagleTelemetry {
   source: {
     org: string;
     bucket: string;
@@ -325,7 +327,22 @@ union(tables: [flag, values])
   |> keep(columns: ["_time", "_value", "metric"])
   |> group()
   |> sort(columns: ["_time", "metric"])
-  |> yield(name: "anomalies")`;
+  |> yield(name: "anomalies")
+
+from(bucket: ${fluxString(bucket)})
+  |> range(start: time(v: ${fluxString(query.start)}), stop: time(v: ${fluxString(query.stop)}))
+  |> filter(fn: (r) => r["_measurement"] == "hardware_metrics")
+  |> filter(fn: (r) => r["_field"] == "value")
+  |> filter(fn: (r) => r["metric"] == "anomaly_reason_code")
+  |> last()
+  |> yield(name: "reason_codes")
+
+from(bucket: ${fluxString(bucket)})
+  |> range(start: time(v: ${fluxString(query.start)}), stop: time(v: ${fluxString(query.stop)}))
+  |> filter(fn: (r) => ${CONNTRACK_MEASUREMENTS.map((measurement) => `r["_measurement"] == ${fluxString(measurement)}`).join(' or ')})
+  |> filter(fn: (r) => r["_field"] == "value")
+  |> aggregateWindow(every: ${query.window}, fn: mean, createEmpty: false)
+  |> yield(name: "mean")`;
 }
 
 function parseCsvRecords(input: string): string[][] {
@@ -436,6 +453,14 @@ export function parseAnomalyAnnotatedCsv(csv: string): AnomalyPoint[] {
       sawHeader = true;
       continue;
     }
+    // Each yielded result can have a different schema (conntrack has no metric tag).
+    if (nextTimeIndex >= 0 && nextValueIndex >= 0) {
+      timeIndex = -1;
+      valueIndex = -1;
+      metricIndex = -1;
+      sawHeader = true;
+      continue;
+    }
     if (timeIndex < 0 || valueIndex < 0 || metricIndex < 0) continue;
 
     const metric = row[metricIndex];
@@ -461,6 +486,48 @@ export function parseAnomalyAnnotatedCsv(csv: string): AnomalyPoint[] {
   }
 
   return [...points.values()].sort((left, right) => left.time.localeCompare(right.time));
+}
+
+/** Preserve each Influx series and its tags; never merge different devices. */
+export function parseEagleAnnotatedCsv(csv: string): EagleTelemetry {
+  const reasonCodes: EagleTelemetry['reasonCodes'] = [];
+  const conntrack = new Map<string, EagleTelemetry['conntrack'][number]>();
+  let header: string[] = [];
+  const metadata = new Set(['', 'result', 'table', '_start', '_stop', '_time', '_value', '_field', '_measurement', 'metric']);
+  for (const row of parseCsvRecords(csv.replace(/^\uFEFF/, ''))) {
+    if (row[0]?.startsWith('#')) continue;
+    if (row.includes('error') && row.includes('reference')) {
+      throw new InfluxSourceError('response', 'InfluxDB returned an error while executing the query.');
+    }
+    if (row.includes('_time') && row.includes('_value')) { header = row; continue; }
+    const get = (name: string) => row[header.indexOf(name)];
+    const measurement = get('_measurement');
+    const isReason = measurement === 'hardware_metrics' && get('metric') === 'anomaly_reason_code';
+    if (!isReason && !CONNTRACK_MEASUREMENTS.includes(measurement as ConntrackMeasurement)) continue;
+    const timestamp = Date.parse(get('_time'));
+    if (!Number.isFinite(timestamp)) {
+      throw new InfluxSourceError('response', 'InfluxDB returned an invalid telemetry timestamp.');
+    }
+    const time = new Date(timestamp).toISOString();
+    const value = parseMetricNumber(get('_value'));
+    const tags = Object.fromEntries(header.flatMap((name, index) => (
+      !metadata.has(name) && row[index] ? [[name, row[index]]] : []
+    )).sort(([a], [b]) => a.localeCompare(b)));
+    if (isReason) {
+      reasonCodes.push({ time, code: value, tags });
+    } else {
+      const id = JSON.stringify([measurement, tags]);
+      const series = conntrack.get(id) ?? { id, measurement: measurement as ConntrackMeasurement, tags, points: [] };
+      series.points.push({ time, value });
+      conntrack.set(id, series);
+    }
+  }
+  return {
+    reasonCodes: reasonCodes.sort((a, b) => b.time.localeCompare(a.time)),
+    conntrack: [...conntrack.values()].map((series) => ({
+      ...series, points: series.points.sort((a, b) => a.time.localeCompare(b.time)),
+    })),
+  };
 }
 
 async function readLimitedResponse(
@@ -623,6 +690,7 @@ export class InfluxSource {
           anomalyThreshold: query.valueAggregation,
         },
         points: parseAnomalyAnnotatedCsv(csv),
+        ...parseEagleAnnotatedCsv(csv),
       };
     } finally {
       clearTimeout(timeout);

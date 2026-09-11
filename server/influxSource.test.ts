@@ -5,6 +5,7 @@ import {
   InfluxSource,
   InfluxSourceError,
   parseAnomalyAnnotatedCsv,
+  parseEagleAnnotatedCsv,
   resolveAnomalyQuery,
 } from './influxSource.js';
 
@@ -69,6 +70,8 @@ test('queries the fixed Influx endpoint and normalizes annotated CSV', async () 
   assert.doesNotMatch(String(call.init?.body), /v\.timeRange|v\.windowPeriod/);
 
   assert.deepEqual(result, {
+    reasonCodes: [],
+    conntrack: [],
     source: { org: 'Capgemini', bucket: 'BGW620', measurement: 'hardware_metrics' },
     range: {
       start: '2026-08-20T17:00:00.000Z',
@@ -95,6 +98,60 @@ test('queries the fixed Influx endpoint and normalizes annotated CSV', async () 
       },
     ],
   });
+});
+
+const EAGLE_CSV = `${ANNOTATED_CSV}
+,result,table,_time,_value,_measurement,metric,device_serial
+,reason_codes,0,2026-08-20T17:59:00Z,0,hardware_metrics,anomaly_reason_code,gateway-a
+,reason_codes,1,2026-08-20T17:58:00Z,4,hardware_metrics,anomaly_reason_code,gateway-b
+
+,result,table,_time,_value,_measurement,device_serial
+,mean,0,2026-08-20T17:55:00Z,7.5,conntrack_tcp,gateway-a
+,mean,0,2026-08-20T17:50:00Z,0,conntrack_tcp,gateway-a
+,mean,1,2026-08-20T17:55:00Z,19,conntrack_tcp,gateway-b
+,mean,2,2026-08-20T17:55:00Z,2,conntrack_udp,gateway-a
+,mean,3,2026-08-20T17:55:00Z,0,conntrack_icmp,gateway-a
+,mean,4,2026-08-20T17:55:00Z,1,conntrack_other,gateway-a
+,mean,5,2026-08-20T17:55:00Z,10.5,conntrack_total,gateway-a
+`;
+
+test('reads mixed query schemas, preserving zero codes, fractional means and device series', async () => {
+  const source = new InfluxSource({ token: 'test', now: () => NOW, fetchImpl: async () => new Response(EAGLE_CSV) });
+  const result = await source.queryAnomalies();
+  assert.deepEqual(result.points, parseAnomalyAnnotatedCsv(ANNOTATED_CSV));
+  assert.deepEqual(result.reasonCodes, [
+    { time: '2026-08-20T17:59:00.000Z', code: 0, tags: { device_serial: 'gateway-a' } },
+    { time: '2026-08-20T17:58:00.000Z', code: 4, tags: { device_serial: 'gateway-b' } },
+  ]);
+  assert.equal(result.conntrack.length, 6);
+  assert.deepEqual(result.conntrack[0].points, [
+    { time: '2026-08-20T17:50:00.000Z', value: 0 },
+    { time: '2026-08-20T17:55:00.000Z', value: 7.5 },
+  ]);
+  assert.equal(result.conntrack[1].points[0].value, 19);
+  assert.notEqual(result.conntrack[0].id, result.conntrack[1].id);
+});
+
+test('new queries follow supplied last and mean semantics without imposing a serial tag on conntrack', () => {
+  const flux = buildAnomalyFluxQuery('BGW620', resolveAnomalyQuery({ start: '-6h', window: '5m' }, NOW));
+  const extraQueries = flux.slice(flux.indexOf('from(bucket:', flux.indexOf('yield(name: "anomalies")')));
+  assert.match(extraQueries, /"anomaly_reason_code"\)\s+\|> last\(\)/);
+  for (const protocol of ['icmp', 'other', 'tcp', 'total', 'udp']) assert.ok(extraQueries.includes(`"conntrack_${protocol}"`));
+  assert.match(extraQueries, /aggregateWindow\(every: 5m, fn: mean, createEmpty: false\)/);
+  assert.doesNotMatch(extraQueries, /device_serial|v\.timeRange|v\.windowPeriod/);
+});
+
+test('new telemetry rejects invalid values and late errors, and handles empty results', () => {
+  assert.deepEqual(parseEagleAnnotatedCsv(''), { reasonCodes: [], conntrack: [] });
+  assert.throws(() => parseEagleAnnotatedCsv(EAGLE_CSV.replace(',7.5,conntrack_tcp', ',NaN,conntrack_tcp')), InfluxSourceError);
+  assert.throws(() => parseEagleAnnotatedCsv(EAGLE_CSV.replace(',0,hardware_metrics', ',,hardware_metrics')), InfluxSourceError);
+  assert.throws(() => parseEagleAnnotatedCsv(`${EAGLE_CSV}\n,error,reference\n,query failed,123`), InfluxSourceError);
+});
+
+test('connection tracking can be returned when hardware measurements are absent', () => {
+  const csv = ',result,table,_time,_value,_measurement\n,mean,0,2026-08-20T17:55:00Z,12,conntrack_total\n';
+  assert.deepEqual(parseAnomalyAnnotatedCsv(csv), []);
+  assert.equal(parseEagleAnnotatedCsv(csv).conntrack[0].points[0].value, 12);
 });
 
 test('allows only separate, allowlisted selector/aggregate functions', () => {

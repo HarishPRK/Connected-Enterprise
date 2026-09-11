@@ -1,0 +1,23 @@
+export const CONNTRACK_MEASUREMENTS = [
+  'conntrack_total', 'conntrack_tcp', 'conntrack_udp', 'conntrack_icmp', 'conntrack_other',
+] as const;
+
+export type ConntrackMeasurement = (typeof CONNTRACK_MEASUREMENTS)[number];
+
+export interface AnomalyReasonCode {
+  time: string;
+  code: number;
+  tags: Record<string, string>;
+}
+
+export interface ConntrackSeries {
+  id: string;
+  measurement: ConntrackMeasurement;
+  tags: Record<string, string>;
+  points: { time: string; value: number }[];
+}
+
+export interface EagleTelemetry {
+  reasonCodes: AnomalyReasonCode[];
+  conntrack: ConntrackSeries[];
+}
