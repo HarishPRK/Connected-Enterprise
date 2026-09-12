@@ -8,7 +8,6 @@ import { LiveDataProvider } from './ui/LiveData';
 import { OpsIncidentsProvider } from './ui/OpsIncidents';
 import { CommandPalette } from './ui/CommandPalette';
 import { NotificationsDrawer } from './ui/NotificationsDrawer';
-import { requestGatewayTwinAgent } from './ui/gatewayTwinAgent';
 
 /* Route pages are code-split so the initial download is just the app shell +
  * router, not all 17 pages (recharts, the SVG topology, and the 6k-line
@@ -54,16 +53,12 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        if (isGatewayTwin) {
-          requestGatewayTwinAgent();
-        } else {
-          setCmdOpen((o) => !o);
-        }
+        setCmdOpen((o) => !o);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isGatewayTwin]);
+  }, []);
 
   // Close transient overlays whenever the route changes so a drawer opened on
   // one page doesn't hang around obscuring the next page's content.
@@ -95,7 +90,7 @@ export default function App() {
                 <Route path="/"               element={<Overview branchId={branchId} onSelectBranch={setBranchId} />} />
                 <Route path="/fleet"          element={<FleetPage />} />
                 <Route path="/connectivity"   element={<Connectivity />} />
-                <Route path="/gateway-twin"   element={<GatewayTwinPage key={branchId} branchId={branchId} />} />
+                <Route path="/gateway-twin"   element={<GatewayTwinPage />} />
                 <Route path="/hardware-anomalies" element={<HardwareAnomaliesPage />} />
                 <Route path="/it-devices"     element={<DevicesPage domain="IT" branchId={branchId} />} />
                 <Route path="/ot-devices"     element={<DevicesPage domain="OT" branchId={branchId} />} />

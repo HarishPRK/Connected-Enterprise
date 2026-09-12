@@ -2071,6 +2071,17 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
   transition: background 0.18s, border-color 0.18s, transform 0.18s;
   flex-shrink: 0;
 }
+a.gateway-twin-fullscreen-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  color: var(--text);
+  font-weight: 500;
+}
+a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.10); }
 .va-open-btn {
   background: linear-gradient(180deg, rgba(var(--accent-rgb) / 0.10), rgba(var(--accent-rgb) / 0.02));
   color: var(--text);
