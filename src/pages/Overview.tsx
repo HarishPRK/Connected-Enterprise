@@ -2,14 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PageHeader } from '../components/PageHeader';
 import { InsightStrip } from '../components/widgets/InsightStrip';
-import { KeyChallenges } from '../components/widgets/KeyChallenges';
 import { WanWidget, type WidgetDataState } from '../components/widgets/WanWidget';
 import { LanPorts } from '../components/widgets/LanPorts';
 import { BandwidthChart } from '../components/widgets/BandwidthChart';
 import { AppTrafficWidget } from '../components/widgets/AppTrafficWidget';
 import { KpiStrip } from '../components/widgets/KpiStrip';
-import { Topology } from '../components/widgets/Topology';
-import { FailoverTopology } from '../components/widgets/FailoverTopology';
 import { BranchOverviewCard } from '../components/widgets/BranchOverviewCard';
 import {
   branches, BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC,
@@ -175,7 +172,6 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   // McKinney keeps failover/path telemetry on prpl while its headline WAN
   // traffic rate and IT/OT inventory come from prplhome.
   const ipsec = useIpsecMetrics();
-  const branchSource = BRANCH_TO_IPSEC_SOURCE[branchId];
   const failoverTopic = BRANCH_TO_FAILOVER_TOPIC[branchId] ?? null;
   const wanTrafficTopic = BRANCH_TO_WAN_TOPIC[branchId] ?? null;
   const deviceTopic = branchDeviceTopic ?? null;
@@ -310,18 +306,6 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     return failoverState.metrics.tunnels.filter((t) => t.present && !t.reachable).length;
   }, [failoverState]);
 
-  // Auto-scenario for the Topology widget — derived purely from per-underlay
-  // tunnel reachability. The widget honours this as the default "Auto" mode;
-  // a manual scenario chip still overrides.
-  const autoScenarioId = useMemo<string | null>(() => {
-    if (!usingFailover || !failoverState) return null;
-    const tunnels = failoverState.metrics.tunnels;
-    const fiberOk = tunnels.filter((t) => inferUnderlay(t.ifname) === 'fiber').some((t) => t.reachable);
-    const cellOk  = tunnels.filter((t) => inferUnderlay(t.ifname) === '5g').some((t) => t.reachable);
-    if (!fiberOk && cellOk) return '5g-failover';
-    return 'healthy';
-  }, [usingFailover, failoverState]);
-
   // WAN underlay state derived from per-underlay tunnel reachability.
   const liveLinks: WanLink[] | null = useMemo(() => {
     if (!usingFailover || !failoverState) return null;
@@ -398,8 +382,6 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
         }
       />
 
-      <KeyChallenges />
-
       <KpiStrip
         branchId={branchId}
         liveWanTraffic={wanTrafficTopic ? {
@@ -447,17 +429,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
           />
         </div>
 
-        {/* Row 2 — full-width topology. Branches backed by a live MQTT feed
-            (Plano → rdk/ipsec/metrics, McKinney → prpl/ipsec/metrics) render
-            the Dynamic Failover diagram driven by that branch's telemetry;
-            branches without a feed keep the illustrative static Topology. */}
-        <div className="col-12">
-          {branchSource
-            ? <FailoverTopology branchId={branchId} ipsec={ipsec} />
-            : <Topology autoScenarioId={autoScenarioId} />}
-        </div>
-
-        {/* Rows 3–4 are live-only: never substitute demo values when a source
+        {/* WAN, LAN, bandwidth and client traffic are live-only: never substitute demo values when a source
             is warming, stale, missing fields, or unavailable. */}
         <div className="col-6">
           <WanWidget
