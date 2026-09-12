@@ -471,13 +471,14 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
 }
 .gateway-twin-page:fullscreen > .page-header,
 .gateway-twin-page.is-fullscreen > .page-header {
-  position: absolute;
-  top: max(12px, env(safe-area-inset-top));
-  right: max(12px, env(safe-area-inset-right));
+  position: relative;
   z-index: 5;
-  width: auto;
+  width: 100%;
   margin: 0;
-  pointer-events: none;
+  padding: 8px max(12px, env(safe-area-inset-right)) 8px 12px;
+  justify-content: flex-end;
+  align-items: flex-end;
+  background: #070a10;
 }
 .gateway-twin-page:fullscreen > .page-header > div:first-child,
 .gateway-twin-page:fullscreen .gateway-twin-source,
@@ -506,7 +507,7 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
 .gateway-twin-page:fullscreen .gateway-twin-frame,
 .gateway-twin-page.is-fullscreen .gateway-twin-frame {
   width: 100%;
-  height: 100%;
+  height: auto;
   border: 0;
   border-radius: 0;
 }
