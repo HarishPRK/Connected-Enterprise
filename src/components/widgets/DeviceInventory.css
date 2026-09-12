@@ -1,0 +1,21 @@
+.device-domain-inspector { width: min(540px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto 16px auto auto; padding: 0; border: 1px solid var(--border-strong); border-radius: 16px; color: var(--text); background: var(--panel-solid); box-shadow: 0 24px 80px #0006; }
+.device-domain-inspector::backdrop { background: #080b1ba6; }
+.device-domain-inspector-body { display: flex; flex-direction: column; max-height: calc(100dvh - 34px); }
+.device-domain-inspector header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 24px 18px; }
+.device-domain-inspector h2 { margin: 0 0 6px; font-size: 21px; letter-spacing: -.025em; }
+.device-domain-inspector header p { margin: 0; font-size: 12px; color: var(--text-dim); }
+.device-domain-inspector header button { padding: 8px; flex-shrink: 0; }
+.device-domain-search { display: flex; align-items: center; gap: 8px; margin: 0 24px 16px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text-dim); background: var(--panel-2); }
+.device-domain-search input { min-width: 0; width: 100%; height: 42px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; }
+.device-domain-inspector-list { list-style: none; padding: 0 24px; margin: 0; overflow-y: auto; min-height: 0; }
+.device-domain-inspector-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); }
+.device-domain-inspector-list li > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.device-domain-inspector-list strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.device-domain-inspector-list :is(span:not(.badge), code) { font-size: 11px; color: var(--text-dim); }
+.device-domain-inspector-list .badge { flex-shrink: 0; }
+.device-domain-inspector footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 24px; border-top: 1px solid var(--border); font-size: 12px; }
+.device-domain-inspector footer > span { color: var(--text-dim); }
+.device-domain-inspector footer a { display: inline-flex; align-items: center; gap: 5px; }
+.device-domain-inspector .device-domain-empty { margin: 0; padding: 24px; }
+
+.device-domain-inspector :is(button, a, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
