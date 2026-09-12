@@ -373,14 +373,11 @@ export function HardwareAnomaliesPage() {
                 </div>
               </Card>
             </div>
-
-            <div className="col-12">
-              <BreachTable rows={breachRows} total={points.length} />
-            </div>
           </div>
         </>
       )}
       {data && <ConntrackChart series={data.conntrack} range={rangeKey} window={data.window || range.window} />}
+      {points.length > 0 && <BreachTable rows={breachRows} total={points.length} />}
     </div>
   );
 }

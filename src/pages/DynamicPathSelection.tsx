@@ -3050,7 +3050,7 @@ function GatewayBlock({
  * `active_tunnel` value (matched by ifname) gets a pulsing border. */
 /* ───── IPsec topology — physically-accurate horizontal flow ─────
  * IT/OT devices → Gateway → Fiber & 5G underlays → IPsec tunnels (2 per
- * underlay) → WAN egress (erouter0 → SD-WAN) → Internet (destination).
+ * underlay) → WAN egress (erouter0 → SD-WAN) → Internet → Cloud (destination).
  * Mirrors the visual idiom of the Overview page's `Topology` widget. */
 function IpsecFlowSvg({
   m,
@@ -3087,7 +3087,7 @@ function IpsecFlowSvg({
 }) {
   // Keep the canvas tight: less dead space = a larger render scale when the
   // SVG is fit to the card width, i.e. bigger, readable labels.
-  const W = 1612;
+  const W = 1858;
   const H = 480;
 
   // Live IT/OT device inventory (same feed as the Devices page). Show up to 3
@@ -3125,6 +3125,7 @@ function IpsecFlowSvg({
   const COL_MANIFOLD = { x: 772, w: 320 };
   const COL_WAN = { x: 1138, w: 200 };
   const COL_DEST = { x: 1384, w: 200 };
+  const COL_CLOUD = { x: 1630, w: 200 };
 
   const GW_H = 120;
   const UNDERLAY_H = 100;
@@ -3135,7 +3136,7 @@ function IpsecFlowSvg({
 
   const FIBER_Y = 100; // top of fiber underlay box
   const CELL_Y = H - UNDERLAY_H - 100; // top of 5G underlay box
-  // Single destination (Internet) — centred on the SD-WAN egress row.
+  // Internet egress and final Cloud destination share the SD-WAN row.
   const INT_Y = ROW_CENTER - DEST_H / 2;
 
   const FIBER_COLOR = "#5ac8ff"; // sky blue (Overview's fiber)
@@ -3205,6 +3206,8 @@ function IpsecFlowSvg({
   const wanLeft = { x: COL_WAN.x, y: ROW_CENTER };
   const wanRight = { x: COL_WAN.x + COL_WAN.w, y: ROW_CENTER };
   const intLeft = { x: COL_DEST.x, y: INT_Y + DEST_H / 2 };
+  const intRight = { x: COL_DEST.x + COL_DEST.w, y: ROW_CENTER };
+  const cloudLeft = { x: COL_CLOUD.x, y: ROW_CENTER };
 
   const fiberReachable = fiberTunnels.some((t) => t.reachable);
   const cellReachable = cellTunnels.some((t) => t.reachable);
@@ -3535,7 +3538,8 @@ function IpsecFlowSvg({
           { x: COL_UNDERLAY.x + COL_UNDERLAY.w / 2, label: "WAN UNDERLAYS" },
           { x: COL_MANIFOLD.x + COL_MANIFOLD.w / 2, label: "IPSEC TUNNELS" },
           { x: COL_WAN.x + COL_WAN.w / 2, label: "CLOUD TRANSIT" },
-          { x: COL_DEST.x + COL_DEST.w / 2, label: "DESTINATIONS" },
+          { x: COL_DEST.x + COL_DEST.w / 2, label: "PUBLIC EGRESS" },
+          { x: COL_CLOUD.x + COL_CLOUD.w / 2, label: "DESTINATION" },
         ].map((t) => (
           <text
             key={t.label}
@@ -3909,6 +3913,17 @@ function IpsecFlowSvg({
         <NodeConnector
           a={wanRight}
           b={intLeft}
+          state={m.wan.link_up ? "ok" : "err"}
+          c={c}
+          beziD={beziD}
+          accent={INT_COLOR}
+          flowing={m.wan.link_up}
+        />
+
+        {/* Final hop: all traffic ends at the Cloud node. */}
+        <NodeConnector
+          a={intRight}
+          b={cloudLeft}
           state={m.wan.link_up ? "ok" : "err"}
           c={c}
           beziD={beziD}
@@ -4376,8 +4391,21 @@ function IpsecFlowSvg({
           status={m.wan.link_up ? "ok" : "warn"}
           c={c}
           label="Internet"
-          sub="public egress · SaaS"
+          sub="public egress"
           illustration={<InternetIllustration tint={INT_COLOR} />}
+        />
+
+        <SysNodeBox
+          x={COL_CLOUD.x}
+          y={INT_Y}
+          w={COL_CLOUD.w}
+          h={DEST_H}
+          tint={INT_COLOR}
+          status={m.wan.link_up ? "ok" : "warn"}
+          c={c}
+          label="Cloud"
+          sub="applications & services"
+          illustration={<Cloud x={-24} y={-18} width={48} height={36} color={INT_COLOR} strokeWidth={1.5} />}
         />
 
         {/* ─── Failover cinematic overlay — one-shot, on top of everything ─── */}

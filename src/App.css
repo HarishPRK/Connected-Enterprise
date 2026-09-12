@@ -125,8 +125,12 @@
 .topbar .brand {
   display: flex; align-items: center; gap: 12px;
   font-weight: 600; color: var(--text); font-size: 15px; letter-spacing: -0.01em;
-  white-space: nowrap;
+  white-space: normal;
+  flex-shrink: 0;
 }
+.topbar .brand > span:last-child { max-width: 270px; }
+.topbar .search-pill { min-width: 0; flex: 0 1 374px; }
+.topbar .brand .logo { flex-shrink: 0; }
 .topbar .brand .logo {
   width: 32px; height: 32px; border-radius: 10px;
   background: var(--grad-accent);
@@ -4903,4 +4907,29 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 @media (max-width: 900px) {
   .so-stack-row { flex-direction: column; gap: 6px; }
   .so-stack-label { flex: none; }
+}
+
+/* Home introduction: concise challenges leading into the solution catalog. */
+.key-challenges {
+  margin-bottom: 20px;
+  padding: 20px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.key-challenges-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.key-challenges-heading h2 { margin: 0; font-size: 17px; color: var(--text); }
+.key-challenges-heading a { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; text-underline-offset: 4px; }
+.key-challenges-heading a:hover { text-decoration-thickness: 2px; }
+.key-challenges-heading a:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 2px; }
+.key-challenges-list { list-style: none; margin: 16px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.key-challenges-list li { border-top: 1px solid var(--border); padding-top: 12px; }
+.key-challenges-list h3 { margin: 0 0 6px; color: var(--text); font-size: 14px; }
+.key-challenges-list p { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.6; }
+@media (max-width: 1100px) {
+  .key-challenges-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .key-challenges { padding: 16px; }
+  .key-challenges-list { grid-template-columns: 1fr; gap: 12px; }
 }

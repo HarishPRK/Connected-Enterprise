@@ -32,8 +32,8 @@ export function TopBar({
           <img src="/capgemini.jpg" alt="Capgemini" />
         </span>
         <span>
-          Connected Enterprise
-          <small>Cloud operations</small>
+          Small-Medium Enterprise (SME)
+          <small>EDGE Operations</small>
         </span>
       </div>
 

@@ -407,8 +407,21 @@ export const auditEntries: AuditEntry[] = [
 
 export const valueCategories: ValueCategory[] = [
   {
+    id: 'storage',
+    name: 'Data Storage cost',
+    description: 'Telemetry retention + compression policy keeping the time-series DB lean.',
+    monthSavedUsd: 180,
+    yearSavedUsd: 2_160,
+    trendPct: 14.2,
+    details: [
+      'Downsampled metrics older than 30 days — 5.8x compression',
+      'Audit log archived to cold storage after 90d',
+      'Bedrock prompt-cache hit rate: 76%',
+    ],
+  },
+  {
     id: 'efficiency',
-    name: 'IT/OT Operational Costs',
+    name: 'CARE / Truck roll reductions',
     description: 'Hours of NetEng / NOC time reclaimed by the agent and automation.',
     monthSavedUsd: 2_800,
     yearSavedUsd: 33_600,
@@ -421,21 +434,8 @@ export const valueCategories: ValueCategory[] = [
     ],
   },
   {
-    id: 'storage',
-    name: 'Database Storage Cost',
-    description: 'Telemetry retention + compression policy keeping the time-series DB lean.',
-    monthSavedUsd: 180,
-    yearSavedUsd: 2_160,
-    trendPct: 14.2,
-    details: [
-      'Downsampled metrics older than 30 days — 5.8x compression',
-      'Audit log archived to cold storage after 90d',
-      'Bedrock prompt-cache hit rate: 76%',
-    ],
-  },
-  {
     id: 'uptime',
-    name: 'Uninterrupted Service via DPS',
+    name: 'Uninterrupted Network Service',
     description: 'Dynamic Path Selection prevented downtime by failing over before users noticed.',
     monthSavedUsd: 1_820,
     yearSavedUsd: 21_840,
@@ -448,7 +448,7 @@ export const valueCategories: ValueCategory[] = [
   },
   {
     id: 'energy',
-    name: 'Energy & Predictive Maintenance',
+    name: 'Energy & predictive maintenance',
     description: 'HVAC scheduling, smart lighting, idle-PoE shutdown, and ML-driven predictive maintenance of energy appliances.',
     monthSavedUsd: 1_420,
     yearSavedUsd: 17_040,

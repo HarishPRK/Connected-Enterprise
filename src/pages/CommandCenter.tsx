@@ -326,7 +326,7 @@ export function CommandCenterPage() {
 
       {/* Only visible on the printed report */}
       <div className="ecc-print-header">
-        <div style={{ fontSize: 20, fontWeight: 700 }}>Connected Enterprise — Executive Command Center</div>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>Small-Medium Enterprise (SME) — Executive Command Center</div>
         <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>
           Generated {new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} · Comparing {comparedNames}
         </div>

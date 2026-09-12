@@ -356,7 +356,7 @@ export function ControllerManager({ controller, canConfigure, onControllerSaved 
               Save the USP Controller configuration to preview the gateway response structure here.
             </div>
           )}
-          <small>No Connected Enterprise wrapper is added. The device receives compact JSON; revision, checksum, and update metadata remain in the console record. A gateway already applying or applied needs a new Deploy profile generation; the same profile version may be reused.</small>
+          <small>No Small-Medium Enterprise (SME) wrapper is added. The device receives compact JSON; revision, checksum, and update metadata remain in the console record. A gateway already applying or applied needs a new Deploy profile generation; the same profile version may be reused.</small>
         </aside>
       </div>
     </section>

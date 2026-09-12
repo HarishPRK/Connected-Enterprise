@@ -6,11 +6,11 @@ import {
   Radio, Sparkles, Zap,
 } from 'lucide-react';
 
-/* ─────────── Service Offerings
+/* ─────────── Solution Offerings
  * Edge / Industrial Gateway "smart services" — each capability ships as a
  * container (+ libraries) on the gateway's prplLCM container runtime and is
  * exposed northbound through consumer-facing APIs. Content mirrors the
- * "Digital Factory ecosystem readiness" architecture slide. */
+ * "Digital Enterprise ecosystem readiness" architecture slide. */
 
 interface Offering {
   id: string;
@@ -63,8 +63,8 @@ const OFFERINGS: Offering[] = [
     id: 'matter', container: 5, name: 'Matter', ml: true,
     icon: Boxes, accent: 'var(--accent-2)', rgbVar: '--accent-2-rgb',
     capabilities: [
-      'Factory automation',
-      'Factory safety',
+      'Enterprise automation',
+      'Enterprise safety',
       'Remote monitoring & control',
     ],
   },
@@ -73,7 +73,7 @@ const OFFERINGS: Offering[] = [
     icon: Radio, accent: 'var(--accent-2)', rgbVar: '--accent-2-rgb',
     capabilities: [
       'Thread mesh backbone for Matter devices',
-      'Factory automation, safety, and remote monitoring & control',
+      'Enterprise automation, safety, and remote monitoring & control',
     ],
   },
   {
@@ -112,8 +112,8 @@ export function ServiceOfferingsPage() {
   return (
     <>
       <PageHeader
-        title="Service Offerings"
-        subtitle='Edge / industrial gateway "smart services" — containerized capabilities for the Digital Factory ecosystem, delivered through consumer-facing APIs.'
+        title="Solution Offerings"
+        subtitle='Edge / industrial gateway "smart services" — containerized capabilities for the Digital Enterprise ecosystem, delivered through consumer-facing APIs.'
         right={<span className="badge ok"><span className="dot ok" />{OFFERINGS.length}/{OFFERINGS.length} available</span>}
       />
 

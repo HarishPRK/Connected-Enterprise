@@ -81,7 +81,7 @@ export function CostInsightsPage({ branchId }: { branchId: string }) {
   return (
     <>
       <PageHeader
-        title="Cost Insights"
+        title="Cost Savings"
         subtitle={`${branch?.name ?? 'Branch'} · ${scaleLabel} · where you're saving money, and where you're still spending it unnecessarily.`}
         right={
           <div className="toolbar">
@@ -331,10 +331,10 @@ function SavingsTrendChart({
   }));
 
   const allSeries: { key: keyof typeof data[number]; name: string; color: string }[] = [
-    { key: 'efficiency', name: 'IT/OT operational', color: c.accent  },
-    { key: 'storage',    name: 'DB storage',        color: c.accent3 },
-    { key: 'uptime',     name: 'Uptime via DPS',    color: c.ok      },
-    { key: 'energy',     name: 'Energy & predictive', color: c.warn  },
+    { key: 'storage',    name: 'Data Storage cost', color: c.accent3 },
+    { key: 'efficiency', name: 'CARE / Truck roll reductions', color: c.accent },
+    { key: 'uptime',     name: 'Uninterrupted Network Service', color: c.ok },
+    { key: 'energy',     name: 'Energy & predictive maintenance', color: c.warn },
   ];
   // When a category is selected, show only that one series — single-colour
   // bars are much easier to read than a 4-stack.
@@ -373,7 +373,7 @@ function SavingsTrendChart({
             labelStyle={{ color: c.textDim, marginBottom: 4 }}
             formatter={(v: unknown) => fmtUsdFull(typeof v === 'number' ? v : 0)}
           />
-          <Legend wrapperStyle={{ fontSize: 11.5, paddingTop: 8 }} iconType="square" />
+          <Legend itemSorter={null} wrapperStyle={{ fontSize: 11.5, paddingTop: 8 }} iconType="square" />
           {series.map((s, i) => (
             <Bar
               key={String(s.key)}
@@ -482,7 +482,7 @@ function RoiHero({ multiple, roi }: { multiple: number; roi: ROISummary }) {
             WebkitBackgroundClip: 'text', backgroundClip: 'text',
             WebkitTextFillColor: 'transparent', color: 'transparent',
           }}>
-            Connected Enterprise pays for itself {multiple.toFixed(1)}× over
+            Small-Medium Enterprise (SME) pays for itself {multiple.toFixed(1)}× over
           </div>
           <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.55 }}>
             On a <strong style={{ color: 'var(--text)' }}>{fmtUsdFull(roi.appAnnualCostUsd)}</strong>/yr subscription, you're capturing{' '}

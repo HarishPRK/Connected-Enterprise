@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PageHeader } from '../components/PageHeader';
 import { InsightStrip } from '../components/widgets/InsightStrip';
+import { KeyChallenges } from '../components/widgets/KeyChallenges';
 import { WanWidget, type WidgetDataState } from '../components/widgets/WanWidget';
 import { LanPorts } from '../components/widgets/LanPorts';
 import { BandwidthChart } from '../components/widgets/BandwidthChart';
@@ -383,7 +384,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   return (
     <>
       <PageHeader
-        title={`Overview — ${branch.name}`}
+        title={`Home — ${branch.name}`}
         subtitle={
           usingFailover
             ? `Live view of gateway ${failoverState.metrics.gateway.name} at ${branch.location} · streaming via ${failoverTopic}`
@@ -396,6 +397,8 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
           </div>
         }
       />
+
+      <KeyChallenges />
 
       <KpiStrip
         branchId={branchId}
