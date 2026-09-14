@@ -11,8 +11,8 @@ Install `gemtek-studio-agent-origin.conf` in `/etc/nginx/conf.d/`. In the
 proxy_set_header Origin $gemtek_studio_agent_origin;
 ```
 
-The map translates the origin only when the chat path, public Host and browser
-Origin all match Studio. It does not allow wildcard origins, change CORS,
+The map translates the origin only for the chat path when the browser Origin
+matches Studio (the config is installed on the Studio host). It does not allow wildcard origins, change CORS,
 alter device-control endpoints, or remove the upstream request gate.
 Validate with `nginx -t` before reloading nginx.
 
