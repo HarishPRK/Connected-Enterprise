@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, Laptop, Siren, Shuffle,
+  LayoutDashboard, Laptop, Siren,
   PackagePlus, Sparkles, Settings, GitBranch, Layers, AlertOctagon, FileSearch,
   TrendingUp, CloudCog, ShieldCheck, Video, Bot, Box,
   PanelLeftClose, PanelLeftOpen, Activity,
@@ -22,7 +22,6 @@ const nav = [
   { to: '/incidents',        label: 'Incidents',                 icon: AlertOctagon,    section: 'Operate' },
   { to: '/security',         label: 'Security',                  icon: ShieldCheck,     section: 'Operate' },
   { to: '/audit',            label: 'Audit Log',                 icon: FileSearch,      section: 'Operate' },
-  { to: '/traffic-policy',   label: 'Traffic Policy',            icon: Shuffle,         section: 'Manage' },
   { to: '/ask-ai',           label: 'Ask AI',                    icon: Sparkles,        section: 'Assist' },
   { to: '/agentic-ai',       label: 'Agentic AI',                icon: Bot,             section: 'Assist' },
   { to: '/settings',         label: 'Settings',                  icon: Settings,        section: 'Assist' },

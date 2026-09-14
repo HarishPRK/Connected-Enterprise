@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEscape } from './Toast';
 import {
-  LayoutDashboard, Laptop, Siren, Shuffle, PackagePlus,
+  LayoutDashboard, Laptop, Siren, PackagePlus,
   Sparkles, Settings, Search, ArrowRight, MapPin,
   AlertOctagon, FileSearch, GitBranch, Layers, TrendingUp, CloudCog, ShieldCheck, Video, Box, Activity,
 } from 'lucide-react';
@@ -45,7 +45,6 @@ export function CommandPalette({ open, onClose, onBranchChange }: CommandPalette
     { id: 'go-incidents',    group: 'Operate',  label: 'Open Incidents',                 icon: AlertOctagon,    run: () => nav('/incidents') },
     { id: 'go-security',     group: 'Operate',  label: 'Open Security',                  icon: ShieldCheck,     run: () => nav('/security') },
     { id: 'go-audit',        group: 'Operate',  label: 'Open Audit Log',                 icon: FileSearch,      run: () => nav('/audit') },
-    { id: 'go-policy',       group: 'Navigate', label: 'Open Traffic Policy',            icon: Shuffle,         run: () => nav('/traffic-policy') },
     { id: 'go-ai',           group: 'Navigate', label: 'Ask AI',                         icon: Sparkles,        run: () => nav('/ask-ai') },
     { id: 'go-settings',     group: 'Navigate', label: 'Open Settings',                  icon: Settings,        run: () => nav('/settings') },
     ...branches.map((b) => ({

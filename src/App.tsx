@@ -17,7 +17,6 @@ import { NotificationsDrawer } from './ui/NotificationsDrawer';
 const Overview                   = lazy(() => import('./pages/Overview').then((m) => ({ default: m.Overview })));
 const Connectivity               = lazy(() => import('./pages/Connectivity').then((m) => ({ default: m.Connectivity })));
 const DevicesPage                = lazy(() => import('./pages/Devices').then((m) => ({ default: m.DevicesPage })));
-const TrafficPolicyPage          = lazy(() => import('./pages/TrafficPolicy').then((m) => ({ default: m.TrafficPolicyPage })));
 const OnboardingPage             = lazy(() => import('./pages/Onboarding').then((m) => ({ default: m.OnboardingPage })));
 const AskAiPage                  = lazy(() => import('./pages/AskAi').then((m) => ({ default: m.AskAiPage })));
 const SettingsPage               = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })));
@@ -103,7 +102,6 @@ export default function App() {
                 <Route path="/audit"          element={<AuditLogPage />} />
                 <Route path="/path-selection" element={<DynamicPathSelectionPage branchId={branchId} />} />
                 <Route path="/app-routing"    element={<ApplicationAwareRoutingPage branchId={branchId} />} />
-                <Route path="/traffic-policy" element={<TrafficPolicyPage />} />
                 <Route path="/onboarding"     element={<OnboardingPage branchId={branchId} />} />
                 <Route path="/ask-ai"         element={<AskAiPage branchId={branchId} />} />
                 <Route path="/agentic-ai"     element={<AgenticAIPage />} />

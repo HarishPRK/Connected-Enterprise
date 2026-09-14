@@ -4,7 +4,7 @@ import type {
   FiberLinkMetrics, FiveGLinkMetrics, FleetStat, HealthSignal, Incident, LanPort,
   NaasAddOn, NaasService, PathFlipEvent, PathProbe, PathSla, PathThreshold,
   PoePort, PublicNetInfo, ReachabilityProbe, ROISummary, SavingsTrendPoint,
-  SlaItem, ThreatEvent, ThreatSource, ThreatTrendPoint, TrafficPolicy,
+  SlaItem, ThreatEvent, ThreatSource, ThreatTrendPoint,
   ValueCategory, WanLink,
 } from '../types';
 
@@ -190,14 +190,6 @@ export const appPolicies: AppPolicy[] = [
   { id: 'ap8', app: 'OS Updates',        category: 'bulk',     preferredPath: '5G',    backupPath: 'Fiber', match: 'WSUS, *.windowsupdate.com',       hitsPerMin: 8,   throughputMbps: 12, slaClass: 'best-effort', enabled: true },
   { id: 'ap9', app: 'Cloud Backup',      category: 'bulk',     preferredPath: '5G',    backupPath: 'Fiber', match: '*.s3.amazonaws.com',              hitsPerMin: 4,   throughputMbps: 18, slaClass: 'best-effort', enabled: false },
   { id: 'ap10',app: 'OT Telemetry',      category: 'iot',      preferredPath: 'Fiber', backupPath: '5G',    match: 'MQTT · TCP/8883',                 hitsPerMin: 360, throughputMbps: 2,  slaClass: 'business',    enabled: true },
-];
-
-export const trafficPolicies: TrafficPolicy[] = [
-  { id: 't1', app: 'Microsoft Teams', priority: 'high', preferredPath: 'Fiber', enabled: true },
-  { id: 't2', app: 'Google Meet',     priority: 'high', preferredPath: 'Fiber', enabled: true },
-  { id: 't3', app: 'Gmail / Mail',    priority: 'med',  preferredPath: 'Auto',  enabled: true },
-  { id: 't4', app: 'Web Browsing',    priority: 'low',  preferredPath: 'Auto',  enabled: true },
-  { id: 't5', app: 'OT Devices',      priority: 'high', preferredPath: 'Fiber', enabled: true },
 ];
 
 /* ───── Fleet stats (per-branch aggregate) ───── */
