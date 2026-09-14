@@ -46,6 +46,7 @@ const RANGE_OPTIONS = [
   { key: '12h', label: '12 hours', shortLabel: '12h', start: '-12h', window: '5m' },
   { key: '24h', label: '24 hours', shortLabel: '24h', start: '-24h', window: '5m' },
   { key: '7d', label: '7 days', shortLabel: '7d', start: '-7d', window: '30m' },
+  { key: '30d', label: '30 days', shortLabel: '30d', start: '-30d', window: '2h' },
 ] as const;
 
 type RangeKey = (typeof RANGE_OPTIONS)[number]['key'];
@@ -123,9 +124,11 @@ function currentAnomalyStatus(point: HardwareAnomalyPoint | null): {
 }
 
 function formatAxisTime(timestamp: number, range: RangeKey): string {
-  const options: Intl.DateTimeFormatOptions = range === '7d'
-    ? { month: 'short', day: 'numeric', hour: 'numeric' }
-    : { hour: 'numeric', minute: '2-digit' };
+  const options: Intl.DateTimeFormatOptions = range === '30d'
+    ? { month: 'short', day: 'numeric' }
+    : range === '7d'
+      ? { month: 'short', day: 'numeric', hour: 'numeric' }
+      : { hour: 'numeric', minute: '2-digit' };
   return new Intl.DateTimeFormat(undefined, options).format(timestamp);
 }
 
@@ -219,7 +222,7 @@ export function HardwareAnomaliesPage() {
     <div className="anomaly-page">
       <PageHeader
         title="EA:GLE"
-        subtitle="BGW620 · Hardware anomaly detection and connection tracking"
+        subtitle="Hardware anomaly detection and connection tracking"
         right={
           <div className="anomaly-header-tools">
             <SourceStatus
@@ -284,7 +287,7 @@ export function HardwareAnomaliesPage() {
             <dl className="anomaly-reason-list">
               {data.reasonCodes.map((reason, index) => (
                 <div key={`${JSON.stringify(reason.tags)}-${index}`}>
-                  <dt>{Object.values(reason.tags).join(' · ') || 'BGW620'}</dt>
+                  <dt>{Object.values(reason.tags).join(' · ') || 'Series'}</dt>
                   <dd>
                     <strong className="anomaly-reason-value" data-tone={reason.code === 0 ? 'ok' : 'err'}>
                       {reason.code === 0
@@ -407,7 +410,7 @@ function ConntrackChart({ series, range, window }: { series: ConntrackSeries[]; 
   const seriesColor = (item: ConntrackSeries) => palette[CONNTRACK_MEASUREMENTS.indexOf(item.measurement)];
 
   return (
-    <Card className="anomaly-conntrack-card" title="Conntrack (Connection Tracking)" sub={`BGW620 · Mean connection counts · ${window} aggregation window`}>
+    <Card className="anomaly-conntrack-card" title="Conntrack (Connection Tracking)" sub={`Mean connection counts · ${window} aggregation window`}>
       {chartPoints.length === 0 ? (
         <p className="anomaly-panel-empty">No connection-tracking samples in this range. Choose a longer range or refresh.</p>
       ) : (
@@ -462,7 +465,7 @@ function SourceStatus({
     : loading
       ? 'Querying source'
       : 'Snapshot loaded';
-  const sourceLabel = source ? `${source.org} · ${source.bucket}` : 'Capgemini · BGW620';
+  const sourceLabel = source?.org || 'Telemetry source';
   return (
     <div className="anomaly-source" data-tone={tone} title={source?.measurement || 'hardware_metrics'}>
       <span className="anomaly-source-dot" aria-hidden="true" />
@@ -785,7 +788,7 @@ function AnomalyEmptyState({
       <span className="anomaly-state-icon"><Activity size={24} aria-hidden="true" /></span>
       <div>
         <h2>No anomaly samples in the last {rangeLabel}</h2>
-        <p>The query succeeded, but BGW620 returned no hardware anomaly measurements. Choose a longer range or refresh.</p>
+        <p>The selected range returned no hardware anomaly measurements. Choose a longer range or refresh.</p>
       </div>
       <button type="button" onClick={onRefresh} disabled={loading}>
         <RefreshCw size={14} className={loading ? 'is-spinning' : undefined} aria-hidden="true" />
