@@ -4846,6 +4846,27 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 
 /* ─────────────────────────── Service Offerings (so-) ─────────────────────────── */
 
+.so-problem {
+  display: flex; align-items: center; justify-content: space-between; gap: 28px;
+  margin-bottom: 20px; padding: 20px 22px;
+  border: 1px solid rgba(var(--accent-3-rgb) / 0.28); border-radius: 14px;
+  background: linear-gradient(110deg, rgba(var(--accent-3-rgb) / 0.13), rgba(var(--accent-rgb) / 0.04));
+}
+.so-problem-copy { max-width: 620px; }
+.so-eyebrow { display: block; margin-bottom: 7px; color: var(--accent-3); font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.so-problem h2 { margin: 0 0 7px; color: var(--text); font-size: clamp(17px, 1.6vw, 22px); line-height: 1.2; }
+.so-problem p { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+.so-problem-points { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 8px; min-width: min(46%, 430px); }
+.so-problem-points span { padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); color: var(--text-dim); font-size: 11px; line-height: 1.3; }
+.so-problem-points span::before { content: ''; display: inline-block; width: 5px; height: 5px; margin: 0 7px 1px 0; border-radius: 50%; background: var(--accent-3); }
+.so-savings-link { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 18px; border: 1px solid rgba(var(--ok-rgb) / 0.34); border-radius: 12px; background: linear-gradient(100deg, rgba(var(--ok-rgb) / 0.12), rgba(var(--accent-rgb) / 0.05)); color: var(--text); text-decoration: none; transition: border-color .18s ease, transform .18s ease, background .18s ease; }
+.so-savings-link:hover { border-color: rgba(var(--ok-rgb) / 0.7); background: linear-gradient(100deg, rgba(var(--ok-rgb) / 0.18), rgba(var(--accent-rgb) / 0.08)); transform: translateY(-1px); }
+.so-savings-link span { display: flex; flex-direction: column; gap: 3px; }
+.so-savings-link strong { font-size: 13px; }
+.so-savings-link small { color: var(--text-muted); font-size: 11px; }
+.so-savings-link > svg { color: var(--ok); flex: 0 0 auto; }
+@media (max-width: 800px) { .so-problem { flex-direction: column; align-items: stretch; gap: 16px; } .so-problem-points { min-width: 0; } }
+
 /* The architecture "sandwich": consumer APIs above the container grid, the
  * prplLCM runtime band below it — mirrors the source architecture slide. */
 .so-arch-band {

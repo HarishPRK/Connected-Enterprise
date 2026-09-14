@@ -1,8 +1,9 @@
 import type { ComponentType } from 'react';
+import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import {
-  Activity, ArrowLeftRight, Boxes, Cloud, GitBranch, Layers3, Leaf, Package,
+  Activity, ArrowLeftRight, ArrowRight, Boxes, Cloud, GitBranch, Layers3, Leaf, Package,
   Radio, Sparkles, Zap,
 } from 'lucide-react';
 
@@ -117,6 +118,20 @@ export function ServiceOfferingsPage() {
         right={<span className="badge ok"><span className="dot ok" />{OFFERINGS.length}/{OFFERINGS.length} available</span>}
       />
 
+      <section className="so-problem" aria-labelledby="so-problem-title">
+        <div className="so-problem-copy">
+          <span className="so-eyebrow">The problem statement</span>
+          <h2 id="so-problem-title">Enterprise sites need one operational view across every device and service.</h2>
+          <p>Fragmented IT / OT systems, slow incident response, network interruptions, and rising support and energy costs make every site harder to run.</p>
+        </div>
+        <div className="so-problem-points" aria-label="Key operational challenges">
+          <span>Fragmented IT / OT visibility</span>
+          <span>Manual response and truck rolls</span>
+          <span>Unpredictable network continuity</span>
+          <span>Rising energy and operating costs</span>
+        </div>
+      </section>
+
       <div className="kpi-strip" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
         <SoKpi label="Containers available" value={`${OFFERINGS.length} / ${OFFERINGS.length}`}
           sub="ready on the gateway today" icon={Package} accent="var(--ok)" rgbVar="--ok-rgb" />
@@ -142,6 +157,13 @@ export function ServiceOfferingsPage() {
             </div>
             <div className="so-arch-band so-arch-band-bottom">prplLCM · container lifecycle manager</div>
           </Card>
+        </div>
+
+        <div className="col-12">
+          <Link className="so-savings-link" to="/cost-insights">
+            <span><strong>See the outcome: Cost Savings</strong><small>Measure avoided truck rolls, support effort, energy use, and service disruption.</small></span>
+            <ArrowRight size={18} aria-hidden="true" />
+          </Link>
         </div>
 
         <div className="col-12">
