@@ -43,7 +43,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: 9px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .anomaly-source {
@@ -112,7 +112,7 @@
 
 .anomaly-range-control {
   display: inline-grid;
-  grid-template-columns: repeat(5, minmax(36px, 1fr));
+  grid-template-columns: repeat(6, minmax(36px, 1fr));
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--border);
@@ -128,6 +128,7 @@
   border-radius: 8px;
   color: var(--text-dim);
   font-size: 11.5px;
+  white-space: nowrap;
   box-shadow: none;
 }
 
@@ -597,6 +598,7 @@
   .anomaly-header-tools {
     width: 100%;
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .anomaly-summary,
@@ -635,6 +637,13 @@
 
   .anomaly-range-control {
     flex: 1 1 auto;
+    min-width: 0;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .anomaly-range-control button {
+    padding-inline: 5px;
+    font-size: 11px;
   }
 
   .anomaly-refresh {
