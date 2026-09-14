@@ -98,12 +98,12 @@ const OFFERINGS: Offering[] = [
   },
 ];
 
-const STACK: { group: string; items: string[] }[] = [
-  { group: 'Technologies / Protocols', items: ['Edge Analytics', 'AI / ML', 'Generative AI', 'Agentic AI', 'Matter', 'OpenThread', 'MQTT', 'Modbus', 'OPC UA'] },
-  { group: 'Wireless / Wired Connectivity', items: ['Wi-Fi 7', '5G', 'Fiber', 'Thread', 'LoRaWAN', 'Bluetooth'] },
-  { group: 'Standards', items: ['OPC UA', 'BACnet', 'Node-RED', 'PROFINET'] },
-  { group: 'OS Platforms', items: ['Linux', 'OpenWrt'] },
-  { group: 'SoC', items: ['MaxLinear', 'Quectel', 'Silicon Labs'] },
+const STACK: { group: string; note: string; items: string[] }[] = [
+  { group: 'Solution layer', note: 'Consumer-facing capabilities', items: ['Edge Analytics', 'AI / ML', 'Generative AI', 'Agentic AI', 'Matter', 'OpenThread'] },
+  { group: 'Standards & protocols', note: 'Interoperability foundation', items: ['MQTT', 'Modbus', 'OPC UA', 'BACnet', 'PROFINET', 'Node-RED'] },
+  { group: 'Connectivity', note: 'Wireless + wired transport', items: ['Wi-Fi 7', '5G', 'Fiber', 'Thread', 'LoRaWAN', 'Bluetooth'] },
+  { group: 'OS platforms', note: 'Gateway operating environment', items: ['Linux', 'OpenWrt'] },
+  { group: 'Silicon', note: 'Hardware foundation', items: ['MaxLinear', 'Quectel', 'Silicon Labs'] },
 ];
 
 export function ServiceOfferingsPage() {
@@ -149,13 +149,13 @@ export function ServiceOfferingsPage() {
             title="Gateway technology stack"
             sub="What the offerings are built on — protocols, connectivity, standards, platforms and silicon."
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {STACK.map((row) => (
-                <div key={row.group} className="so-stack-row">
-                  <span className="so-stack-label">{row.group}</span>
-                  <span className="so-stack-chips">
+            <div className="so-pyramid" aria-label="Gateway technology hierarchy">
+              {STACK.map((row, index) => (
+                <div key={row.group} className={`so-pyramid-layer so-pyramid-layer-${index + 1}`}>
+                  <div className="so-pyramid-copy"><strong>{row.group}</strong><span>{row.note}</span></div>
+                  <div className="so-stack-chips">
                     {row.items.map((it) => <span key={it} className="so-chip">{it}</span>)}
-                  </span>
+                  </div>
                 </div>
               ))}
             </div>
