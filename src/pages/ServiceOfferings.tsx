@@ -152,10 +152,10 @@ export function ServiceOfferingsPage() {
             <div className="so-pyramid" aria-label="Gateway technology hierarchy">
               <svg className="so-pyramid-guide" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                 <polygon points="50,0 100,100 0,100" />
-                <line x1="40" y1="20" x2="60" y2="20" />
-                <line x1="30" y1="40" x2="70" y2="40" />
-                <line x1="20" y1="60" x2="80" y2="60" />
-                <line x1="10" y1="80" x2="90" y2="80" />
+                <line x1="36" y1="28.3" x2="64" y2="28.3" />
+                <line x1="27" y1="46.2" x2="73" y2="46.2" />
+                <line x1="18" y1="64.1" x2="82" y2="64.1" />
+                <line x1="9" y1="82.1" x2="91" y2="82.1" />
               </svg>
               {STACK.map((row, index) => (
                 <div key={row.group} className={`so-pyramid-layer so-pyramid-layer-${index + 1}`}>
