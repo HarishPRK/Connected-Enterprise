@@ -1,0 +1,1 @@
+{"commands":["grep -n -C 4 -E 'proxy_pass|proxy_set_header Origin|location' /etc/nginx/conf.d/gemtek-http-proxy.conf; cat /etc/nginx/conf.d/gemtek-studio-agent-origin.conf"]}
