@@ -150,7 +150,6 @@ export function ServiceOfferingsPage() {
             sub="What the offerings are built on — protocols, connectivity, standards, platforms and silicon."
           >
             <div className="so-pyramid" aria-label="Gateway technology hierarchy">
-              <div className="so-pyramid-tip" aria-hidden="true" />
               {STACK.map((row, index) => (
                 <div key={row.group} className={`so-pyramid-layer so-pyramid-layer-${index + 1}`}>
                   <div className="so-pyramid-copy"><strong>{row.group}</strong><span>{row.note}</span></div>
