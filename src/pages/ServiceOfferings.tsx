@@ -150,6 +150,13 @@ export function ServiceOfferingsPage() {
             sub="What the offerings are built on — protocols, connectivity, standards, platforms and silicon."
           >
             <div className="so-pyramid" aria-label="Gateway technology hierarchy">
+              <svg className="so-pyramid-guide" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <polygon points="50,0 100,100 0,100" />
+                <line x1="40" y1="20" x2="60" y2="20" />
+                <line x1="30" y1="40" x2="70" y2="40" />
+                <line x1="20" y1="60" x2="80" y2="60" />
+                <line x1="10" y1="80" x2="90" y2="80" />
+              </svg>
               {STACK.map((row, index) => (
                 <div key={row.group} className={`so-pyramid-layer so-pyramid-layer-${index + 1}`}>
                   <div className="so-pyramid-copy"><strong>{row.group}</strong><span>{row.note}</span></div>
