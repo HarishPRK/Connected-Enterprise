@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 
 /* ─────────── Solution Offerings
- * Edge / Industrial Gateway "smart services" — each capability ships as a
+ * Edge / Enterprise Gateway "smart services" — each capability ships as a
  * container (+ libraries) on the gateway's prplLCM container runtime and is
  * exposed northbound through consumer-facing APIs. Content mirrors the
  * "Digital Enterprise ecosystem readiness" architecture slide. */
@@ -114,7 +114,7 @@ export function ServiceOfferingsPage() {
     <>
       <PageHeader
         title="Solution Offerings"
-        subtitle='Edge / industrial gateway "smart services" — containerized capabilities for the Digital Enterprise ecosystem, delivered through consumer-facing APIs.'
+        subtitle='Edge / enterprise gateway "smart services" — containerized capabilities for the Digital Enterprise ecosystem, delivered through consumer-facing APIs.'
         right={<span className="badge ok"><span className="dot ok" />{OFFERINGS.length}/{OFFERINGS.length} available</span>}
       />
 
@@ -146,8 +146,14 @@ export function ServiceOfferingsPage() {
       <div className="grid">
         <div className="col-12">
           <Card
-            title="Smart services on the edge / industrial gateway"
+            title="Smart services on the edge / enterprise gateway"
             sub="Each offering runs as an isolated container with its libraries — consumed from above through APIs, managed below by prplLCM."
+            right={
+              <div className="so-brand-lockup">
+                <img src="/capgemini.jpg" alt="Capgemini" />
+                <span>Capgemini</span>
+              </div>
+            }
           >
             {/* Architecture sandwich mirrors the slide: APIs on top, containers
                 in the middle, the prplLCM runtime underneath. */}
