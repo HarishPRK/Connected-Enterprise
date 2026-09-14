@@ -10,6 +10,8 @@ import {
 const nav = [
   { to: '/',                 label: 'Home',                      icon: LayoutDashboard, section: 'Monitor' },
   { to: '/service-offerings', label: 'Solution Offerings',        icon: CloudCog,        section: 'Monitor' },
+  { to: '/path-selection',   label: 'Dynamic Failover',           icon: GitBranch,       section: 'Monitor' },
+  { to: '/app-routing',      label: 'Application Traffic Routing', icon: Layers,          section: 'Monitor' },
   { to: '/gateway-twin',     label: 'Gateway Twin',              icon: Box,             section: 'Monitor' },
   { to: '/it-devices',       label: 'IT Devices',                icon: Laptop,          section: 'Monitor' },
   { to: '/ot-devices',       label: 'OT Devices',                icon: Siren,           section: 'Monitor' },
@@ -17,8 +19,6 @@ const nav = [
   { to: '/video-analytics',  label: 'Video Analytics',           icon: Video,           section: 'Monitor' },
   { to: '/cost-insights',    label: 'Cost Savings',              icon: TrendingUp,      section: 'Monitor' },
   { to: '/onboarding',       label: 'Gateway Onboarding',        icon: PackagePlus,     section: 'Monitor' },
-  { to: '/path-selection',   label: 'Dynamic Failover',    icon: GitBranch,       section: 'Routing' },
-  { to: '/app-routing',      label: 'Application Traffic Routing', icon: Layers,          section: 'Routing' },
   { to: '/incidents',        label: 'Incidents',                 icon: AlertOctagon,    section: 'Operate' },
   { to: '/security',         label: 'Security',                  icon: ShieldCheck,     section: 'Operate' },
   { to: '/audit',            label: 'Audit Log',                 icon: FileSearch,      section: 'Operate' },

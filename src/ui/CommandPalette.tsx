@@ -33,6 +33,8 @@ export function CommandPalette({ open, onClose, onBranchChange }: CommandPalette
   const items: Item[] = useMemo(() => [
     { id: 'go-overview',     group: 'Navigate', label: 'Open Home',                  icon: LayoutDashboard, run: () => nav('/') },
     { id: 'go-offerings',    group: 'Navigate', label: 'Open Solution Offerings',         icon: CloudCog,        run: () => nav('/service-offerings') },
+    { id: 'go-dps',          group: 'Navigate',  label: 'Open Dynamic Failover',       icon: GitBranch,       run: () => nav('/path-selection') },
+    { id: 'go-aar',          group: 'Navigate',  label: 'Open Application Traffic Routing', icon: Layers,          run: () => nav('/app-routing') },
     { id: 'go-it',           group: 'Navigate', label: 'Open IT Devices',                icon: Laptop,          run: () => nav('/it-devices') },
     { id: 'go-ot',           group: 'Navigate', label: 'Open OT Devices',                icon: Siren,           run: () => nav('/ot-devices') },
     { id: 'go-hardware-anomalies', group: 'Navigate', label: 'Open EA:GLE',  icon: Activity,        run: () => nav('/hardware-anomalies') },
@@ -40,8 +42,6 @@ export function CommandPalette({ open, onClose, onBranchChange }: CommandPalette
     { id: 'go-video',       group: 'Navigate', label: 'Open Video Analytics',            icon: Video,           run: () => nav('/video-analytics') },
     { id: 'go-costinsights', group: 'Navigate', label: 'Open Cost Savings',             icon: TrendingUp,      run: () => nav('/cost-insights') },
     { id: 'go-onboard',      group: 'Navigate', label: 'Open Gateway Onboarding',                icon: PackagePlus,     run: () => nav('/onboarding') },
-    { id: 'go-dps',          group: 'Routing',  label: 'Open Dynamic Path Selection',    icon: GitBranch,       run: () => nav('/path-selection') },
-    { id: 'go-aar',          group: 'Routing',  label: 'Open Application Aware Routing', icon: Layers,          run: () => nav('/app-routing') },
     { id: 'go-incidents',    group: 'Operate',  label: 'Open Incidents',                 icon: AlertOctagon,    run: () => nav('/incidents') },
     { id: 'go-security',     group: 'Operate',  label: 'Open Security',                  icon: ShieldCheck,     run: () => nav('/security') },
     { id: 'go-audit',        group: 'Operate',  label: 'Open Audit Log',                 icon: FileSearch,      run: () => nav('/audit') },
