@@ -10,10 +10,10 @@ import {
 const nav = [
   { to: '/',                 label: 'Home',                      icon: LayoutDashboard, section: 'Monitor' },
   { to: '/service-offerings', label: 'Solution Offerings',        icon: CloudCog,        section: 'Monitor' },
+  { to: '/gateway-twin',     label: 'Gateway Twin',              icon: Box,             section: 'Monitor' },
   { to: '/it-devices',       label: 'IT Devices',                icon: Laptop,          section: 'Monitor' },
   { to: '/ot-devices',       label: 'OT Devices',                icon: Siren,           section: 'Monitor' },
   { to: '/hardware-anomalies', label: 'EA:GLE',                  icon: Activity,        section: 'Monitor' },
-  { to: '/gateway-twin',     label: 'Gateway Twin',              icon: Box,             section: 'Monitor' },
   { to: '/video-analytics',  label: 'Video Analytics',           icon: Video,           section: 'Monitor' },
   { to: '/cost-insights',    label: 'Cost Savings',              icon: TrendingUp,      section: 'Monitor' },
   { to: '/onboarding',       label: 'Gateway Onboarding',        icon: PackagePlus,     section: 'Monitor' },
