@@ -97,7 +97,7 @@ export function BootstrapPackageManager({
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'The package could not be issued. Try again.';
       setError(message.includes('bootstrap private key cannot be downloaded again')
-        ? 'A package already exists for this gateway. Use your downloaded ZIP; its certificate ID is in bootstrap-metadata.json. Continue from the Gateways tab.'
+        ? 'A package already exists for this gateway. Use your downloaded ZIP and continue from the Gateways tab.'
         : message);
     } finally {
       setBusy(false);
@@ -204,8 +204,6 @@ export function BootstrapPackageManager({
             </label>
           </fieldset>
 
-          <p>Already have a package? Open <code>bootstrap-metadata.json</code> inside the ZIP and find <code>certificateId</code>.</p>
-
           <div className="ce-onb-bootstrap-actions">
             <button type="submit" className="primary" disabled={busy || !ready}>
               {busy ? <span className="ce-onb-spinner" aria-hidden="true" /> : <Download size={15} aria-hidden="true" />}
@@ -223,7 +221,6 @@ export function BootstrapPackageManager({
             <li>Amazon Root CA 1</li>
             <li>IoT, credentials-provider, and API endpoints</li>
             <li>Fleet template, role alias, model, site, and profile metadata</li>
-            <li>Certificate ID in <code>bootstrap-metadata.json</code></li>
           </ul>
           <small>No private key is written to DynamoDB, S3, application logs, or source control.</small>
         </aside>
