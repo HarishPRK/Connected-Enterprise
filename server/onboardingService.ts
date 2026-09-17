@@ -720,11 +720,10 @@ export class OnboardingService {
       const ownedByAnotherTenant = Object.values(database.tenants).some((other) =>
         other.tenant.id !== context.tenantId && other.manufacturing.some((candidate) => candidate.serialNumber === serialNumber));
       if (!record && !ownedByAnotherTenant) {
-        const resolvedModelId = modelId || tenant.profiles[0]?.modelId || GATEWAY_MODELS[0].id;
-        if (!GATEWAY_MODELS.some((model) => model.id === resolvedModelId)) {
-          throw new OnboardingError(400, 'INVALID_MODEL', 'Gateway model is unavailable.');
+        if (!GATEWAY_MODELS.some((model) => model.id === modelId)) {
+          throw new OnboardingError(400, 'INVALID_MODEL', 'Choose a gateway model for a new registration.');
         }
-        record = this.seedManufacturing(context.tenantId, serialNumber, resolvedModelId, 'UNKNOWN', 'OPERATOR_REGISTERED', tenant.sites.map((site) => site.id));
+        record = this.seedManufacturing(context.tenantId, serialNumber, modelId, 'UNKNOWN', 'OPERATOR_REGISTERED', tenant.sites.map((site) => site.id));
         tenant.manufacturing.push(record);
       }
       const valid = Boolean(

@@ -95,9 +95,10 @@ export function BootstrapPackageManager({
       beginDownload(downloadUrl, serialNumber);
       await onIssued();
     } catch (cause) {
-      setError(cause instanceof Error
-        ? cause.message
-        : 'The package could not be issued. Check the serial inventory before trying again.');
+      const message = cause instanceof Error ? cause.message : 'The package could not be issued. Try again.';
+      setError(message.includes('bootstrap private key cannot be downloaded again')
+        ? 'A package already exists for this gateway. Use your downloaded ZIP; its certificate ID is in bootstrap-metadata.json. Continue from the Gateways tab.'
+        : message);
     } finally {
       setBusy(false);
     }
@@ -111,8 +112,8 @@ export function BootstrapPackageManager({
           <div>
             <h2 id="bootstrap-package-title">Bootstrap package issued</h2>
             <p>
-              <strong>{issued.serialNumber}</strong> is ready to connect. Enrollment is prepared automatically.
-              Copy the ZIP to the PC, real gateway, or simulator that will use this ID.
+              <strong>{issued.serialNumber}</strong> has a bootstrap package.
+              Copy the complete ZIP to the PC, real gateway, or simulator that will use this ID, then continue to gateway registration.
             </p>
           </div>
         </div>
@@ -125,7 +126,7 @@ export function BootstrapPackageManager({
 
         <div className="ce-onb-alert is-warning">
           <ShieldAlert size={17} aria-hidden="true" />
-          <span>Use the latest package for this gateway. Creating a replacement package retires the previous bootstrap certificate.</span>
+          <span>Keep this ZIP for use on the intended gateway. You can download the same ZIP again while this page is open.</span>
         </div>
 
         <div className="ce-onb-bootstrap-actions">
@@ -145,7 +146,7 @@ export function BootstrapPackageManager({
       <div className="ce-onb-section-heading">
         <div>
           <h2 id="bootstrap-package-title">Issue gateway bootstrap package</h2>
-          <p>Download from any PC. Create or replace a package for your gateway; enrollment is prepared automatically.</p>
+          <p>Download a package for your real or mock gateway, then copy the complete ZIP to the device that will connect.</p>
         </div>
         <span className="ce-onb-security-mark"><FileKey2 size={15} aria-hidden="true" />Administrator only</span>
       </div>
@@ -174,7 +175,7 @@ export function BootstrapPackageManager({
                 maxLength={128}
                 required
               />
-              <small>Use the same ID on the device. An unused package can be replaced for this ID.</small>
+              <small>Use the same ID on the device. If you already downloaded a package for this ID, use that ZIP.</small>
             </label>
 
             <label>
@@ -203,25 +204,26 @@ export function BootstrapPackageManager({
             </label>
           </fieldset>
 
-          <p>For a gateway that has not connected yet, a new download replaces its previous bootstrap package.</p>
+          <p>Already have a package? Open <code>bootstrap-metadata.json</code> inside the ZIP and find <code>certificateId</code>.</p>
 
           <div className="ce-onb-bootstrap-actions">
             <button type="submit" className="primary" disabled={busy || !ready}>
               {busy ? <span className="ce-onb-spinner" aria-hidden="true" /> : <Download size={15} aria-hidden="true" />}
-              {busy ? 'Preparing gateway…' : 'Create or replace package'}
+              {busy ? 'Preparing package…' : 'Create and download package'}
             </button>
           </div>
         </form>
 
         <aside className="ce-onb-bootstrap-contract" aria-label="Package contents and safeguards">
           <span><KeyRound size={22} aria-hidden="true" /></span>
-          <h3>Ready to connect</h3>
-          <p>The package works from any PC for this gateway ID. Connect after downloading; no separate verification step is required.</p>
+          <h3>Use your downloaded package</h3>
+          <p>You can transfer the ZIP between PCs. Complete gateway registration in this app before connecting the device.</p>
           <ul>
             <li>Bootstrap certificate and private key</li>
             <li>Amazon Root CA 1</li>
             <li>IoT, credentials-provider, and API endpoints</li>
             <li>Fleet template, role alias, model, site, and profile metadata</li>
+            <li>Certificate ID in <code>bootstrap-metadata.json</code></li>
           </ul>
           <small>No private key is written to DynamoDB, S3, application logs, or source control.</small>
         </aside>

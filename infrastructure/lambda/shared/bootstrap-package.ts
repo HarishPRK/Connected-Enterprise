@@ -55,17 +55,14 @@ interface ZipEntry {
 
 export function createBootstrapPackageArchive(input: BootstrapPackageInput): Buffer {
   const readme = [
-    'CONNECTED ENTERPRISE — GATEWAY BOOTSTRAP PACKAGE',
+    'CONNECTED ENTERPRISE — ONE-TIME GATEWAY BOOTSTRAP PACKAGE',
     '',
     `Serial: ${input.metadata.serialNumber}`,
     `Initial deployment generation: ${input.metadata.initialGeneration}`,
     `AWS IoT certificate ID: ${input.metadata.certificateId}`,
     '',
-    'Enrollment is prepared automatically when this package is downloaded.',
-    'Copy the complete package to the PC, real gateway, or simulator using the ID above.',
-    'The download PC and network do not restrict where this package can be used.',
-    'A replacement package can be generated before the gateway connects; use the latest package.',
-    'Store the private key in protected storage on the gateway identified above.',
+    'This archive contains the only exported copy of the bootstrap private key.',
+    'Move it directly into protected storage on the gateway identified above.',
     'Do not reuse this credential on another gateway or commit these files to source control.',
     'After permanent identity is finalized, the bootstrap certificate is deactivated automatically.',
     `For the first configuration fetch, request generation=${input.metadata.initialGeneration}.`,

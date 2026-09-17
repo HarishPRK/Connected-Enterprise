@@ -327,20 +327,22 @@ async function createBootstrapPackage(
   ]);
   const unknownKeys = Object.keys(body).filter((key) => !allowedKeys.has(key));
   if (unknownKeys.length > 0) throw new InputError(`Unsupported bootstrap package field: ${unknownKeys[0]}`);
+  if (body.acknowledgeOneTimePrivateKey !== true) {
+    throw new InputError('Confirm that the bootstrap private key can be downloaded only once');
+  }
+
   let serialNumber: string;
   try {
     serialNumber = normalizePresentedSerial(body.serialNumber);
   } catch {
     throw new InputError('Enter a valid factory serial number');
   }
+  const modelId = normalizeIdentifier(body.modelId, 'modelId');
   const siteId = normalizeIdentifier(body.siteId, 'siteId');
   const profileVersionId = normalizeIdentifier(body.profileVersionId, 'profileVersionId');
-  const profileVersion = await profileVersionById(context.tenantId, profileVersionId);
-  if (!profileVersion || profileVersion.tenantId !== context.tenantId) throw new NotFoundError('Profile version not found');
-  const modelId = normalizeIdentifier(profileVersion.modelId, 'modelId');
-  idempotencyKey(event);
+  const requestKey = idempotencyKey(event);
   const tenantKey = tenantPk(context.tenantId);
-  const [existingSerial, tenant, site, model] = await Promise.all([
+  const [existingSerial, tenant, site, model, profileVersion] = await Promise.all([
     ddb.send(new GetCommand({
       TableName: TABLE_NAME,
       Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
@@ -361,16 +363,16 @@ async function createBootstrapPackage(
       Key: { PK: tenantKey, SK: `MODEL#${modelId}` },
       ConsistentRead: true,
     })),
+    profileVersionById(context.tenantId, profileVersionId),
   ]);
 
   const pendingRegistration = existingSerial.Item;
   const canBindRegistration = pendingRegistration
     && pendingRegistration.tenantId === context.tenantId
-    && (isUnboundRegistration(pendingRegistration) || pendingRegistration.claimMechanism === 'PRELOADED_UNIQUE_BOOTSTRAP')
-    && ['AVAILABLE', 'CLAIMABLE', 'RESERVED', 'ENROLLMENT_PENDING'].includes(String(pendingRegistration.state))
-    && pendingRegistration.certificateId === undefined;
+    && isUnboundRegistration(pendingRegistration)
+    && ['RESERVED', 'ENROLLMENT_PENDING'].includes(String(pendingRegistration.state));
   if (pendingRegistration && !canBindRegistration) {
-    throw new ConflictError('This gateway has already connected or is unavailable. Reset its registration before replacing device credentials');
+    throw new ConflictError('This serial is already registered. Its bootstrap private key cannot be downloaded again');
   }
   if (canBindRegistration && (pendingRegistration.modelId !== modelId
     || (pendingRegistration.siteId !== undefined && pendingRegistration.siteId !== siteId)
@@ -398,12 +400,6 @@ async function createBootstrapPackage(
   }
 
   const environment = bootstrapPackageEnvironment();
-  const previousCertificateId = typeof pendingRegistration?.bootstrapCertificateId === 'string'
-    ? pendingRegistration.bootstrapCertificateId
-    : undefined;
-  if (previousCertificateId && !/^[a-f0-9]{64}$/i.test(previousCertificateId)) {
-    throw new ConflictError('The existing bootstrap binding is invalid');
-  }
   const issuedAt = new Date().toISOString();
   const created = await iot.send(new CreateKeysAndCertificateCommand({ setAsActive: true }));
   const certificateId = created.certificateId;
@@ -480,6 +476,7 @@ async function createBootstrapPackage(
   });
   try {
     await ddb.send(new TransactWriteCommand({
+      ClientRequestToken: sha256(`${event.routeKey}:${requestKey}`).slice(0, 36),
       TransactItems: [
         {
           ConditionCheck: {
@@ -546,15 +543,14 @@ async function createBootstrapPackage(
               updatedAt: issuedAt,
             },
             ConditionExpression: canBindRegistration
-              ? `tenantId = :tenant AND claimMechanism = :mechanism AND attribute_not_exists(certificateId) AND #state = :state AND updatedAt = :updated AND ${previousCertificateId ? 'bootstrapCertificateId = :previousCertificate' : 'attribute_not_exists(bootstrapCertificateId)'}`
+              ? 'tenantId = :tenant AND claimMechanism = :unbound AND attribute_not_exists(bootstrapCertificateId) AND attribute_not_exists(bootstrapCertificateStatus) AND #state = :state AND verificationId = :verification AND updatedAt = :updated'
               : 'attribute_not_exists(PK)',
             ...(canBindRegistration ? {
               ExpressionAttributeNames: { '#state': 'state' },
               ExpressionAttributeValues: {
-                ':tenant': context.tenantId, ':mechanism': pendingRegistration.claimMechanism,
-                ':state': pendingRegistration.state,
+                ':tenant': context.tenantId, ':unbound': 'OPERATOR_REGISTERED',
+                ':state': pendingRegistration.state, ':verification': pendingRegistration.verificationId,
                 ':updated': pendingRegistration.updatedAt,
-                ...(previousCertificateId ? { ':previousCertificate': previousCertificateId } : {}),
               },
             } : {}),
           },
@@ -577,19 +573,6 @@ async function createBootstrapPackage(
             ConditionExpression: 'attribute_not_exists(PK)',
           },
         },
-        ...(previousCertificateId ? [{
-          Update: {
-            TableName: TABLE_NAME,
-            Key: { PK: `BOOTSTRAPCERT#${previousCertificateId}`, SK: 'BINDING' },
-            UpdateExpression: 'SET #status = :inactive, replacedByCertificateId = :replacement, updatedAt = :now',
-            ConditionExpression: 'tenantId = :tenant AND serialNumber = :serial',
-            ExpressionAttributeNames: { '#status': 'status' },
-            ExpressionAttributeValues: {
-              ':inactive': 'INACTIVE', ':replacement': certificateId, ':now': issuedAt,
-              ':tenant': context.tenantId, ':serial': serialNumber,
-            },
-          },
-        }] : []),
         {
           Put: {
             TableName: TABLE_NAME,
@@ -619,18 +602,6 @@ async function createBootstrapPackage(
     }
   }
 
-  if (previousCertificateId) {
-    await retireUnboundBootstrapCertificate(
-      previousCertificateId,
-      typeof pendingRegistration?.bootstrapCertificateArn === 'string'
-        ? pendingRegistration.bootstrapCertificateArn
-        : certificateArn.replace(certificateId, previousCertificateId),
-      environment.bootstrapPolicyName,
-      true,
-    );
-  }
-  await prepareBootstrapEnrollment(event, context, serialNumber, siteId, profileVersionId, certificateId);
-
   return {
     statusCode: 201,
     isBase64Encoded: true,
@@ -644,34 +615,6 @@ async function createBootstrapPackage(
     },
     body: archive.toString('base64'),
   };
-}
-
-async function prepareBootstrapEnrollment(
-  event: APIGatewayProxyEventV2WithJWTAuthorizer,
-  context: ReturnType<typeof tenantContext>,
-  serialNumber: string,
-  siteId: string,
-  profileVersionId: string,
-  certificateId: string,
-): Promise<void> {
-  const current = (await ddb.send(new GetCommand({
-    TableName: TABLE_NAME, Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' }, ConsistentRead: true,
-  }))).Item;
-  if (!current || current.tenantId !== context.tenantId || current.bootstrapCertificateId !== certificateId) {
-    throw new ConflictError('A newer bootstrap package was issued for this gateway. Use the latest download');
-  }
-  if (['ENROLLMENT_PENDING', 'PROVISIONING', 'PROVISIONED'].includes(String(current.state))) return;
-  const verificationResponse = await verifyDevice({
-    ...event, routeKey: 'POST /api/onboarding/claims/verify', isBase64Encoded: false,
-    headers: { ...event.headers, 'idempotency-key': `bootstrap-verify-${certificateId}` },
-    body: JSON.stringify({ serialNumber }),
-  }, context);
-  const verification = JSON.parse(verificationResponse.body!) as { verificationId: string };
-  await createOperation({
-    ...event, routeKey: 'POST /api/onboarding/operations', isBase64Encoded: false,
-    headers: { ...event.headers, 'idempotency-key': `bootstrap-activate-${certificateId}` },
-    body: JSON.stringify({ verificationId: verification.verificationId, siteId, profileVersionId }),
-  }, context);
 }
 
 function bootstrapPackageEnvironment() {
@@ -787,25 +730,16 @@ async function verifyDevice(
   const newRegistration = !record;
   const sites = await queryTenantEntityPrefix(context.tenantId, 'SITE#', 'SITE', 250);
   if (!record) {
-    let modelId = requestedModel;
-    if (!modelId) {
-      const [models, profiles] = await Promise.all([
-        queryTenantEntityPrefix(context.tenantId, 'MODEL#', 'GATEWAY_MODEL', 100),
-        queryTenantEntityPrefix(context.tenantId, 'PROFILE_VERSION#', 'PROFILE_VERSION', 500),
-      ]);
-      const availableModel = models.find((item) => profiles.some((profile) => profile.modelId === item.modelId)) ?? models[0];
-      if (!availableModel) throw new ConflictError('No gateway configuration is available for this tenant');
-      modelId = normalizeIdentifier(availableModel.modelId, 'modelId', 80);
-    }
+    if (!requestedModel) throw new InputError('Choose a gateway model for a new registration');
     const model = await ddb.send(new GetCommand({
-      TableName: TABLE_NAME, Key: { PK: tenantPk(context.tenantId), SK: `MODEL#${modelId}` }, ConsistentRead: true,
+      TableName: TABLE_NAME, Key: { PK: tenantPk(context.tenantId), SK: `MODEL#${requestedModel}` }, ConsistentRead: true,
     }));
     if (model.Item?.entityType !== 'GATEWAY_MODEL' || model.Item.tenantId !== context.tenantId) {
       throw new NotFoundError('Gateway model not found');
     }
     record = {
       PK: serialPk(serialNumber), SK: 'MANUFACTURING', entityType: 'MANUFACTURING',
-      serialNumber, tenantId: context.tenantId, modelId,
+      serialNumber, tenantId: context.tenantId, modelId: requestedModel,
       hardwareRevision: 'UNKNOWN', manufacturingBatch: 'OPERATOR_REGISTERED',
       allowedSiteIds: sites.map((site) => String(site.siteId)),
       claimMechanism: 'OPERATOR_REGISTERED', state: 'CLAIMABLE',
@@ -877,9 +811,9 @@ async function verifyDevice(
     ...(newRegistration ? [{
       ConditionCheck: {
         TableName: TABLE_NAME,
-        Key: { PK: tenantPk(context.tenantId), SK: `MODEL#${record.modelId}` },
+        Key: { PK: tenantPk(context.tenantId), SK: `MODEL#${requestedModel}` },
         ConditionExpression: 'entityType = :entity AND tenantId = :tenant AND modelId = :model',
-        ExpressionAttributeValues: { ':entity': 'GATEWAY_MODEL', ':tenant': context.tenantId, ':model': record.modelId },
+        ExpressionAttributeValues: { ':entity': 'GATEWAY_MODEL', ':tenant': context.tenantId, ':model': requestedModel },
       },
     }] : []),
     {

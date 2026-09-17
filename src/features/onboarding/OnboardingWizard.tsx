@@ -100,7 +100,12 @@ export function OnboardingWizard({
     setBusy(true);
     setError(undefined);
     try {
-      const result = await verifyFactorySerial(serial, verifyKey);
+      const result = await verifyFactorySerial(
+        serial,
+        verifyKey,
+        undefined,
+        profiles[0]?.modelId ?? models[0]?.id,
+      );
       const preferred = result.allowedSites.find((site) => site.id === preferredSiteId) ?? result.allowedSites[0];
       const profilesForDevice = compatibleProfiles(profiles, result.identity.modelId);
       setSerialNumber(result.identity.serialNumber);
