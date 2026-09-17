@@ -80,7 +80,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     <div className="ce-onb-page">
       <PageHeader
         title="Gateway Onboarding"
-        subtitle="Verify factory serials, assign immutable profiles, and confirm configuration delivery and reported device health."
+        subtitle="Register real or mock gateways, assign profiles, and track configuration delivery and device health."
         right={snapshot && (
           <div className="ce-onb-page-context">
             <span><ShieldCheck size={13} aria-hidden="true" />{snapshot.tenant.name}</span>
@@ -233,6 +233,11 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                 profiles={snapshot.profiles}
                 sites={snapshot.sites}
                 onVerifySerial={(serialNumber) => {
+                  const operation = snapshot.operations.find((item) => item.serialNumber === serialNumber && item.type === 'ONBOARD');
+                  if (operation) {
+                    openOperation(operation);
+                    return;
+                  }
                   setWizardSerial(serialNumber);
                   setSurface('wizard');
                 }}

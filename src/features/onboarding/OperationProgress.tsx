@@ -34,7 +34,7 @@ interface LifecycleMilestone {
 }
 
 const ONBOARD_MILESTONES: LifecycleMilestone[] = [
-  { state: 'CLAIM_ACCEPTED', label: 'Registration authorized', description: 'The factory serial reservation was accepted for this tenant.' },
+  { state: 'CLAIM_ACCEPTED', label: 'Gateway registered', description: 'The gateway ID and assignment were accepted for this tenant.' },
   { state: 'CSR_VERIFIED', label: 'Certificate request accepted', description: 'The gateway certificate request passed validation.' },
   { state: 'OPERATIONAL_IDENTITY_ISSUED', label: 'Operational identity issued', description: 'A per-device identity was attached to the authoritative Thing.' },
 ];

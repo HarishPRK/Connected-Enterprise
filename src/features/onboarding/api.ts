@@ -104,10 +104,11 @@ export function verifyFactorySerial(
   serialNumber: string,
   idempotencyKey: string,
   signal?: AbortSignal,
+  modelId?: string,
 ): Promise<VerificationResult> {
   return postJson<VerificationResult>(
     '/api/onboarding/claims/verify',
-    { serialNumber },
+    { serialNumber, ...(modelId ? { modelId } : {}) },
     idempotencyKey,
     signal,
   );

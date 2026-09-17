@@ -51,6 +51,7 @@ import { INITIAL_ONBOARDING_GENERATION } from '../../shared/onboarding-policy.js
 import { uiProfileSchemaVersion, validateUiProfileParameters } from './shared/ui-profile.js';
 import { assertProfileCompatibility, assertProfileLineageModel } from './shared/compatibility.js';
 import { normalizePresentedSerial } from './shared/manufacturing-credentials.js';
+import { isUnboundRegistration, registrationCredentialCondition } from './shared/registration.js';
 import {
   createBootstrapPackageArchive,
   type BootstrapPackageMetadata,
@@ -365,8 +366,18 @@ async function createBootstrapPackage(
     profileVersionById(context.tenantId, profileVersionId),
   ]);
 
-  if (existingSerial.Item) {
+  const pendingRegistration = existingSerial.Item;
+  const canBindRegistration = pendingRegistration
+    && pendingRegistration.tenantId === context.tenantId
+    && isUnboundRegistration(pendingRegistration)
+    && ['RESERVED', 'ENROLLMENT_PENDING'].includes(String(pendingRegistration.state));
+  if (pendingRegistration && !canBindRegistration) {
     throw new ConflictError('This serial is already registered. Its bootstrap private key cannot be downloaded again');
+  }
+  if (canBindRegistration && (pendingRegistration.modelId !== modelId
+    || (pendingRegistration.siteId !== undefined && pendingRegistration.siteId !== siteId)
+    || (pendingRegistration.profileVersionId !== undefined && pendingRegistration.profileVersionId !== profileVersionId))) {
+    throw new ConflictError('Use the model, site, and profile selected during gateway registration');
   }
   if (!tenant.Item || tenant.Item.entityType !== 'TENANT' || tenant.Item.tenantId !== context.tenantId) {
     throw new NotFoundError('Tenant manufacturing inventory is unavailable');
@@ -512,13 +523,14 @@ async function createBootstrapPackage(
           Put: {
             TableName: TABLE_NAME,
             Item: {
+              ...pendingRegistration,
               PK: serialPk(serialNumber),
               SK: 'MANUFACTURING',
               entityType: 'MANUFACTURING',
               serialNumber,
               tenantId: context.tenantId,
               modelId,
-              allowedSiteIds: [siteId],
+              allowedSiteIds: pendingRegistration?.allowedSiteIds ?? [siteId],
               demoExpectedProfileVersionId: profileVersionId,
               demoExpectedDeliveryMode: 'SHADOW',
               claimMechanism: 'PRELOADED_UNIQUE_BOOTSTRAP',
@@ -526,11 +538,21 @@ async function createBootstrapPackage(
               bootstrapCertificateArn: certificateArn,
               bootstrapCertificateStatus: 'ACTIVE',
               bootstrapPolicyName: environment.bootstrapPolicyName,
-              state: 'CLAIMABLE',
-              createdAt: issuedAt,
+              state: pendingRegistration?.state === 'ENROLLMENT_PENDING' ? 'ENROLLMENT_PENDING' : 'CLAIMABLE',
+              createdAt: pendingRegistration?.createdAt ?? issuedAt,
               updatedAt: issuedAt,
             },
-            ConditionExpression: 'attribute_not_exists(PK)',
+            ConditionExpression: canBindRegistration
+              ? 'tenantId = :tenant AND claimMechanism = :unbound AND attribute_not_exists(bootstrapCertificateId) AND attribute_not_exists(bootstrapCertificateStatus) AND #state = :state AND verificationId = :verification AND updatedAt = :updated'
+              : 'attribute_not_exists(PK)',
+            ...(canBindRegistration ? {
+              ExpressionAttributeNames: { '#state': 'state' },
+              ExpressionAttributeValues: {
+                ':tenant': context.tenantId, ':unbound': 'OPERATOR_REGISTERED',
+                ':state': pendingRegistration.state, ':verification': pendingRegistration.verificationId,
+                ':updated': pendingRegistration.updatedAt,
+              },
+            } : {}),
           },
         },
         {
@@ -682,9 +704,20 @@ async function verifyDevice(
   context: ReturnType<typeof tenantContext>,
 ) {
   const body = parseJsonBody<Record<string, unknown>>(event, 32 * 1024);
-  const serialNumber = normalizePresentedSerial(body.serialNumber);
   const key = idempotencyKey(event);
-  const requestHash = sha256(canonicalJson({ route: event.routeKey, serialNumber }));
+  let requestedSerial: string;
+  try {
+    requestedSerial = body.serialNumber == null || (typeof body.serialNumber === 'string' && !body.serialNumber.trim())
+      ? ''
+      : normalizePresentedSerial(body.serialNumber);
+  } catch {
+    throw new InputError('Use 3–128 letters, numbers, hyphens, periods, or underscores for the gateway ID');
+  }
+  const requestedModel = body.modelId == null || body.modelId === ''
+    ? undefined
+    : normalizeIdentifier(body.modelId, 'modelId', 80);
+  const serialNumber = requestedSerial || `CE-GW-${sha256(`${context.tenantId}:${key}`).slice(0, 16).toUpperCase()}`;
+  const requestHash = sha256(canonicalJson({ route: event.routeKey, serialNumber: requestedSerial, ...(requestedModel ? { modelId: requestedModel } : {}) }));
   const existing = await existingIdempotency(context.tenantId, event.routeKey, key, requestHash);
   if (existing) return json(existing.statusCode ?? 200, existing.response);
 
@@ -693,21 +726,37 @@ async function verifyDevice(
     Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
     ConsistentRead: true,
   }));
-  const record = manufacturingResult.Item;
-  if (!record) throw new NotFoundError('Gateway identity was not found in manufacturing inventory');
-  const bootstrapCertificateId = requirePreloadedBootstrap(record);
-  if (!['AVAILABLE', 'CLAIMABLE', 'RESERVED'].includes(String(record.state))) throw new ConflictError('Gateway identity is not available for verification');
+  let record = manufacturingResult.Item;
+  const newRegistration = !record;
+  const sites = await queryTenantEntityPrefix(context.tenantId, 'SITE#', 'SITE', 250);
+  if (!record) {
+    if (!requestedModel) throw new InputError('Choose a gateway model for a new registration');
+    const model = await ddb.send(new GetCommand({
+      TableName: TABLE_NAME, Key: { PK: tenantPk(context.tenantId), SK: `MODEL#${requestedModel}` }, ConsistentRead: true,
+    }));
+    if (model.Item?.entityType !== 'GATEWAY_MODEL' || model.Item.tenantId !== context.tenantId) {
+      throw new NotFoundError('Gateway model not found');
+    }
+    record = {
+      PK: serialPk(serialNumber), SK: 'MANUFACTURING', entityType: 'MANUFACTURING',
+      serialNumber, tenantId: context.tenantId, modelId: requestedModel,
+      hardwareRevision: 'UNKNOWN', manufacturingBatch: 'OPERATOR_REGISTERED',
+      allowedSiteIds: sites.map((site) => String(site.siteId)),
+      claimMechanism: 'OPERATOR_REGISTERED', state: 'CLAIMABLE',
+    };
+  }
   const allowedTenantIds = Array.isArray(record.allowedTenantIds) ? record.allowedTenantIds : [];
   const tenantAuthorized = record.tenantId === context.tenantId
     || (record.tenantId === undefined && allowedTenantIds.includes(context.tenantId));
   if (!tenantAuthorized) {
-    throw new NotFoundError('Gateway identity was not found in manufacturing inventory');
+    throw new ConflictError('This gateway ID is unavailable. Choose another ID');
   }
+  const credentialCondition = registrationCredentialCondition(record);
+  if (!['AVAILABLE', 'CLAIMABLE', 'RESERVED'].includes(String(record.state))) throw new ConflictError('This gateway ID is already registered');
   if (record.state === 'RESERVED' && Number(record.verificationExpiresAtEpoch ?? 0) >= Math.floor(Date.now() / 1000)) {
     throw new ConflictError('Gateway identity already has an active one-time reservation');
   }
 
-  const sites = await queryTenantEntityPrefix(context.tenantId, 'SITE#', 'SITE', 250);
   const allowedSiteIds = Array.isArray(record.allowedSiteIds) ? record.allowedSiteIds as string[] : sites.map((site) => String(site.siteId));
   const allowedSites = sites.filter((site) => allowedSiteIds.includes(String(site.siteId))).map(publicSite);
   if (allowedSites.length === 0) throw new ConflictError('No authorized site is available for this gateway');
@@ -729,9 +778,17 @@ async function verifyDevice(
   };
   const idem = idempotencyItem(context.tenantId, event.routeKey, key, requestHash, response, 201);
 
-  await ddb.send(new TransactWriteCommand({ TransactItems: [
+  try {
+    await ddb.send(new TransactWriteCommand({ TransactItems: [
     {
-      Update: {
+      ...(newRegistration ? { Put: {
+        TableName: TABLE_NAME,
+        Item: {
+          ...record, state: 'RESERVED', verificationId, verificationExpiresAtEpoch: expiresAtEpoch,
+          createdAt: now, updatedAt: now,
+        },
+        ConditionExpression: 'attribute_not_exists(PK)',
+      } } : { Update: {
         TableName: TABLE_NAME,
         Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
         UpdateExpression: 'SET #state = :reserved, tenantId = :tenantId, verificationId = :verificationId, verificationExpiresAtEpoch = :expires, updatedAt = :now',
@@ -739,21 +796,26 @@ async function verifyDevice(
           'entityType = :manufacturing',
           'serialNumber = :serialNumber',
           '(tenantId = :tenantId OR (attribute_not_exists(tenantId) AND contains(allowedTenantIds, :tenantId)))',
-          'claimMechanism = :claimMechanism',
-          'bootstrapCertificateId = :bootstrapCertificateId',
-          'bootstrapCertificateStatus = :bootstrapCertificateActive',
+          credentialCondition.expression,
           '(#state = :available OR #state = :claimable OR (#state = :reserved AND tenantId = :tenantId AND verificationExpiresAtEpoch < :nowEpoch))',
         ].join(' AND '),
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':available': 'AVAILABLE', ':claimable': 'CLAIMABLE', ':reserved': 'RESERVED', ':tenantId': context.tenantId,
           ':manufacturing': 'MANUFACTURING', ':serialNumber': serialNumber,
-          ':claimMechanism': 'PRELOADED_UNIQUE_BOOTSTRAP', ':bootstrapCertificateId': bootstrapCertificateId,
-          ':bootstrapCertificateActive': 'ACTIVE',
+          ...credentialCondition.values,
           ':verificationId': verificationId, ':expires': expiresAtEpoch, ':now': now, ':nowEpoch': nowEpoch,
         },
-      },
+      } }),
     },
+    ...(newRegistration ? [{
+      ConditionCheck: {
+        TableName: TABLE_NAME,
+        Key: { PK: tenantPk(context.tenantId), SK: `MODEL#${requestedModel}` },
+        ConditionExpression: 'entityType = :entity AND tenantId = :tenant AND modelId = :model',
+        ExpressionAttributeValues: { ':entity': 'GATEWAY_MODEL', ':tenant': context.tenantId, ':model': requestedModel },
+      },
+    }] : []),
     {
       Put: {
         TableName: TABLE_NAME,
@@ -767,7 +829,13 @@ async function verifyDevice(
     },
     { Put: { TableName: TABLE_NAME, Item: idem, ConditionExpression: 'attribute_not_exists(PK)' } },
     { Put: { TableName: TABLE_NAME, Item: auditItem(context, 'GATEWAY_SERIAL_RESERVED', serialNumber, now), ConditionExpression: 'attribute_not_exists(PK)' } },
-  ] }));
+    ] }));
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== 'TransactionCanceledException') throw error;
+    const replay = await existingIdempotency(context.tenantId, event.routeKey, key, requestHash);
+    if (replay) return json(replay.statusCode ?? 201, replay.response);
+    throw new ConflictError('This gateway ID was reserved or changed by another request. Choose another ID or retry');
+  }
   return json(201, response);
 }
 
@@ -804,7 +872,7 @@ async function createOperation(
     throw new ConflictError('Gateway verification is missing, expired, or belongs to another tenant');
   }
   if ((Number(record.verificationExpiresAtEpoch) || 0) < Math.floor(Date.now() / 1000)) throw new ConflictError('Gateway verification expired');
-  const bootstrapCertificateId = requirePreloadedBootstrap(record);
+  const credentialCondition = registrationCredentialCondition(record);
   if (!site.Item || site.Item.entityType !== 'SITE') throw new NotFoundError('Site not found');
   if (!profileVersion) throw new NotFoundError('Profile version not found');
   const authoritativeModelId = String(record.modelId ?? record.model ?? '');
@@ -838,7 +906,7 @@ async function createOperation(
     PK: tenantPk(context.tenantId), SK: operationSk(operationId), entityType: 'OPERATION', tenantId: context.tenantId,
     operationId, gatewayId, serialNumber, siteId, profileVersionId, deliveryMode,
     type: 'ONBOARD', operationStatus: 'IN_PROGRESS', state: 'CLAIM_ACCEPTED', deploymentGeneration: INITIAL_ONBOARDING_GENERATION,
-    timeline: [{ state: 'CLAIM_ACCEPTED', at: now, detail: 'An authenticated operator reserved the tenant-bound serial inventory record.' }],
+    timeline: [{ state: 'CLAIM_ACCEPTED', at: now, detail: 'An authenticated operator registered this gateway for the selected tenant.' }],
     status: 'WAITING_FOR_DEVICE', steps, createdAt: now, updatedAt: now,
     GSI3PK: `${tenantPk(context.tenantId)}#OPERATION`, GSI3SK: `${now}#${operationId}`,
   };
@@ -859,15 +927,14 @@ async function createOperation(
         TableName: TABLE_NAME,
         Key: { PK: serialPk(serialNumber), SK: 'MANUFACTURING' },
         UpdateExpression: 'SET #state = :enrollmentPending, gatewayId = :gatewayId, operationId = :operationId, siteId = :siteId, profileVersionId = :profileVersionId, deliveryMode = :deliveryMode, thingName = :thingName, signedDescriptor = :descriptor, enrollmentAuthorizedAt = :now, updatedAt = :now REMOVE verificationExpiresAtEpoch',
-        ConditionExpression: '#state = :reserved AND tenantId = :tenantId AND verificationId = :verificationId AND verificationExpiresAtEpoch = :expires AND verificationExpiresAtEpoch >= :nowEpoch AND claimMechanism = :claimMechanism AND bootstrapCertificateId = :bootstrapCertificateId AND bootstrapCertificateStatus = :bootstrapCertificateActive',
+        ConditionExpression: `#state = :reserved AND tenantId = :tenantId AND verificationId = :verificationId AND verificationExpiresAtEpoch = :expires AND verificationExpiresAtEpoch >= :nowEpoch AND ${credentialCondition.expression}`,
         ExpressionAttributeNames: { '#state': 'state' },
         ExpressionAttributeValues: {
           ':reserved': 'RESERVED', ':enrollmentPending': 'ENROLLMENT_PENDING', ':tenantId': context.tenantId,
           ':verificationId': verificationId, ':expires': verificationExpiry, ':gatewayId': gatewayId,
           ':nowEpoch': nowEpoch,
           ':operationId': operationId, ':siteId': siteId, ':profileVersionId': profileVersionId,
-          ':claimMechanism': 'PRELOADED_UNIQUE_BOOTSTRAP', ':bootstrapCertificateId': bootstrapCertificateId,
-          ':bootstrapCertificateActive': 'ACTIVE',
+          ...credentialCondition.values,
           ':deliveryMode': deliveryMode, ':thingName': thingName, ':descriptor': signedDescriptor, ':now': now,
         },
       },
@@ -906,20 +973,6 @@ async function createOperation(
     { Put: { TableName: TABLE_NAME, Item: auditItem(context, 'ONBOARDING_OPERATION_CREATED', operationId, now), ConditionExpression: 'attribute_not_exists(PK)' } },
   ] }));
   return json(202, response);
-}
-
-function requirePreloadedBootstrap(record: Record<string, unknown>): string {
-  if (record.claimMechanism !== 'PRELOADED_UNIQUE_BOOTSTRAP') {
-    throw new ConflictError('Gateway does not have a preloaded unique bootstrap identity');
-  }
-  if (record.bootstrapCertificateStatus !== 'ACTIVE') {
-    throw new ConflictError('Gateway bootstrap certificate is not active');
-  }
-  const certificateId = record.bootstrapCertificateId;
-  if (typeof certificateId !== 'string' || !/^[a-f0-9]{64}$/i.test(certificateId)) {
-    throw new ConflictError('Gateway bootstrap certificate binding is missing or invalid');
-  }
-  return certificateId;
 }
 
 async function getOperation(event: APIGatewayProxyEventV2WithJWTAuthorizer, tenantId: string) {

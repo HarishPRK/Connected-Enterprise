@@ -692,16 +692,18 @@ export class OnboardingService {
 
   async verifyClaim(
     context: OperatorContext,
-    input: { serialNumber: string },
+    input: { serialNumber?: string; modelId?: string },
     idempotencyKey: string,
   ): Promise<VerificationResult> {
     assertIdempotencyKey(idempotencyKey);
-    const serialNumber = String(input.serialNumber ?? '').trim().toUpperCase();
+    const requestedSerial = String(input.serialNumber ?? '').trim().toUpperCase();
+    const modelId = String(input.modelId ?? '').trim();
+    const serialNumber = requestedSerial || `CE-GW-${sha256(`${context.tenantId}:${idempotencyKey}`).slice(0, 16).toUpperCase()}`;
     if (!SERIAL_PATTERN.test(serialNumber)) {
-      throw new OnboardingError(400, 'INVALID_CLAIM_INPUT', 'Enter a valid factory serial number.');
+      throw new OnboardingError(400, 'INVALID_CLAIM_INPUT', 'Use 3–128 letters, numbers, hyphens, periods, or underscores for the gateway ID.');
     }
 
-    const request = { serialNumber };
+    const request = { serialNumber: requestedSerial, ...(modelId ? { modelId } : {}) };
     const outcome = await this.transaction((database) => {
       const tenant = this.ensureTenant(database, context.tenantId);
       const storageKey = `${context.tenantId}:verify-claim:${idempotencyKey}`;
@@ -714,7 +716,16 @@ export class OnboardingService {
         return { denied: false as const, value: clone(replay.response as VerificationResult) };
       }
       this.expireReservations(tenant, this.now());
-      const record = tenant.manufacturing.find((candidate) => candidate.serialNumber === serialNumber);
+      let record = tenant.manufacturing.find((candidate) => candidate.serialNumber === serialNumber);
+      const ownedByAnotherTenant = Object.values(database.tenants).some((other) =>
+        other.tenant.id !== context.tenantId && other.manufacturing.some((candidate) => candidate.serialNumber === serialNumber));
+      if (!record && !ownedByAnotherTenant) {
+        if (!GATEWAY_MODELS.some((model) => model.id === modelId)) {
+          throw new OnboardingError(400, 'INVALID_MODEL', 'Choose a gateway model for a new registration.');
+        }
+        record = this.seedManufacturing(context.tenantId, serialNumber, modelId, 'UNKNOWN', 'OPERATOR_REGISTERED', tenant.sites.map((site) => site.id));
+        tenant.manufacturing.push(record);
+      }
       const valid = Boolean(
         record
           && record.tenantId === context.tenantId
@@ -730,7 +741,7 @@ export class OnboardingService {
           sha256(serialNumber).slice(0, 16),
           'DENIED',
           iso(this.now()),
-          'Factory serial is not registered, available, or authorized for this tenant.',
+          'Gateway ID is unavailable for registration.',
         ));
         return { denied: true as const };
       }
@@ -791,7 +802,7 @@ export class OnboardingService {
       throw new OnboardingError(
         401,
         'CLAIM_NOT_VERIFIED',
-        'Registration is not authorized for this factory serial.',
+        'This gateway ID is unavailable. Choose another ID.',
       );
     }
     this.emit(context.tenantId, 'ClaimVerified', outcome.value.verificationId);

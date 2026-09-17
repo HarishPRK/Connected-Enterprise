@@ -45,6 +45,43 @@ async function verifiedGateway(service: OnboardingService, key = 'verify-key-000
 }
 
 describe('OnboardingService', () => {
+  it('registers a custom mock gateway without factory inventory and completes its simulated lifecycle', async () => {
+    const { service, advance } = await setup({ simulateDevice: true });
+    const verification = await service.verifyClaim(tenantA, {
+      serialNumber: 'ce-gw-mck-001', modelId: 'edge-pro',
+    }, 'register-custom-mock');
+    assert.equal(verification.identity.serialNumber, 'CE-GW-MCK-001');
+    assert.equal(verification.identity.manufacturingBatch, 'OPERATOR_REGISTERED');
+    const profile = (await service.getSnapshot(tenantA)).profiles.find((item) => item.modelId === 'edge-pro')!;
+    const operation = await service.startOnboarding(tenantA, {
+      verificationId: verification.verificationId,
+      siteId: verification.allowedSites[0].id,
+      profileVersionId: profile.id,
+    }, 'activate-custom-mock');
+    advance(10_000);
+    await service.reconcileAll();
+    assert.equal((await service.getOperation(tenantA, operation.id)).state, 'APPLIED_HEALTHY');
+  });
+
+  it('generates an ID once per request and keeps real devices pending until they report', async () => {
+    const { service, advance } = await setup();
+    const verification = await service.verifyClaim(tenantA, { modelId: 'edge-compact' }, 'register-generated-id');
+    assert.match(verification.identity.serialNumber, /^CE-GW-[A-F0-9]{16}$/);
+    assert.deepEqual(await service.verifyClaim(tenantA, { modelId: 'edge-compact' }, 'register-generated-id'), verification);
+    const profile = (await service.getSnapshot(tenantA)).profiles.find((item) => item.modelId === 'edge-compact')!;
+    const operation = await service.startOnboarding(tenantA, {
+      verificationId: verification.verificationId,
+      siteId: verification.allowedSites[0].id,
+      profileVersionId: profile.id,
+    }, 'activate-generated-id');
+    advance(10_000);
+    await service.reconcileAll();
+    assert.equal((await service.getOperation(tenantA, operation.id)).state, 'CLAIM_ACCEPTED');
+    await assert.rejects(service.verifyClaim(tenantB, {
+      serialNumber: verification.identity.serialNumber, modelId: 'edge-compact',
+    }, 'cross-tenant-generated'), (error: unknown) => error instanceof OnboardingError && error.code === 'CLAIM_NOT_VERIFIED');
+  });
+
   it('reserves an authorized factory serial, starts a monotonic deployment, and reaches applied healthy', async () => {
     const { service, advance } = await setup({ simulateDevice: true });
     const verification = await verifiedGateway(service);

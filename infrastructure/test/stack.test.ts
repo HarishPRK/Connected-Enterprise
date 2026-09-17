@@ -404,14 +404,15 @@ test('preloaded unique bootstrap onboarding retains exact certificate, tenant, a
   const config = fs.readFileSync(path.join(process.cwd(), 'lambda', 'iot-config-handler.ts'), 'utf8');
   const outbox = fs.readFileSync(path.join(process.cwd(), 'lambda', 'outbox-handler.ts'), 'utf8');
   const ddb = fs.readFileSync(path.join(process.cwd(), 'lambda', 'shared', 'ddb.ts'), 'utf8');
+  const registration = fs.readFileSync(path.join(process.cwd(), 'lambda', 'shared', 'registration.ts'), 'utf8');
 
   assert.match(api, /requireRole\(context, 'platform_admin', 'tenant_admin', 'operator'\)/);
-  assert.match(api, /canonicalJson\(\{ route: event\.routeKey, serialNumber \}\)/);
+  assert.match(api, /serialNumber: requestedSerial/);
   assert.match(api, /tenantAuthorized/);
   assert.match(api, /#state = :reserved/);
   assert.match(api, /PRELOADED_UNIQUE_BOOTSTRAP/);
-  assert.match(api, /bootstrapCertificateId = :bootstrapCertificateId/);
-  assert.match(api, /bootstrapCertificateStatus = :bootstrapCertificateActive/);
+  assert.match(registration, /bootstrapCertificateId = :bootstrapCertificateId/);
+  assert.match(registration, /bootstrapCertificateStatus = :bootstrapCertificateActive/);
   assert.match(api, /verificationExpiresAtEpoch < :nowEpoch/);
   assert.match(api, /verificationExpiresAtEpoch >= :nowEpoch/);
   assert.match(api, /enrollmentAuthorizedAt = :now/);

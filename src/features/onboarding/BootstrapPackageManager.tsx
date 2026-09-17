@@ -122,7 +122,7 @@ export function BootstrapPackageManager({
         </div>
 
         <dl className="ce-onb-bootstrap-result">
-          <div><dt>Factory serial</dt><dd>{issued.serialNumber}</dd></div>
+          <div><dt>Gateway ID</dt><dd>{issued.serialNumber}</dd></div>
           <div><dt>Certificate ID</dt><dd className="mono">{issued.certificateId}</dd></div>
           <div><dt>Package</dt><dd>{packageFileName(issued.serialNumber)}</dd></div>
         </dl>
@@ -137,7 +137,7 @@ export function BootstrapPackageManager({
             <Download size={15} aria-hidden="true" />Download the same ZIP again
           </button>
           <button type="button" className="primary" onClick={() => onVerifySerial(issued.serialNumber)}>
-            <PackageCheck size={15} aria-hidden="true" />Continue to gateway verification
+            <PackageCheck size={15} aria-hidden="true" />Continue to gateway
           </button>
         </div>
       </section>
@@ -149,7 +149,7 @@ export function BootstrapPackageManager({
       <div className="ce-onb-section-heading">
         <div>
           <h2 id="bootstrap-package-title">Issue gateway bootstrap package</h2>
-          <p>Create one lab bootstrap identity, bind it to a new factory serial, and download the only private-key copy.</p>
+          <p>Connect a real or mock gateway with a unique bootstrap identity. Use a new ID or the ID you registered earlier.</p>
         </div>
         <span className="ce-onb-security-mark"><FileKey2 size={15} aria-hidden="true" />Administrator only</span>
       </div>
@@ -165,7 +165,7 @@ export function BootstrapPackageManager({
           <fieldset disabled={busy}>
             <legend className="ce-onb-sr-only">New gateway identity</legend>
             <label className="is-wide">
-              <span>Factory serial number</span>
+              <span>Gateway ID</span>
               <input
                 value={serialNumber}
                 onChange={(event) => {
@@ -178,7 +178,7 @@ export function BootstrapPackageManager({
                 maxLength={128}
                 required
               />
-              <small>The serial becomes the permanent one-to-one inventory binding.</small>
+              <small>For an existing registration, use the same gateway ID, model, site, and profile.</small>
             </label>
 
             <label>

@@ -118,6 +118,7 @@ export async function createOnboardingRouter(options: RouterOptions = {}): Promi
   router.post('/claims/verify', async (req, res) => {
     const result = await service.verifyClaim(context(req), {
       serialNumber: req.body?.serialNumber,
+      modelId: req.body?.modelId,
     }, idempotencyKey(req));
     res.status(201).json(result);
   });

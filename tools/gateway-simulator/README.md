@@ -4,6 +4,13 @@ This development-only simulator completes the real `ConnectedEnterpriseOnboardin
 device path. It uses the repository's existing `aws-iot-device-sdk-v2` dependency and
 Node's native cryptography; it does not require OpenSSL or add an npm dependency.
 
+For a new mock device, register any unused ID (for example `CE-GW-MCK-001`) in
+Gateway Onboarding, or leave the ID blank to generate one. Choose the model, site,
+and profile and start activation. In **Bootstrap Packages**, use the same ID,
+model, site, and profile, then install the downloaded package in the simulator's
+external state directory. Use that ID as `--serial`. No factory inventory entry is
+needed beforehand. Real devices can follow the same registration/package flow.
+
 It deliberately follows the production contract:
 
 1. Connect to AWS IoT with the gateway's unique pre-flashed bootstrap certificate and a random `claim-*` client ID.

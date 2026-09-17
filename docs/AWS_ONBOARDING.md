@@ -102,6 +102,22 @@ The stack creates an AWS-provided Managed Login v2 branding style for the SPA cl
 
 ## Authoritative bootstrap data
 
+Gateway registration accepts any unused gateway ID (3–128 letters, numbers,
+hyphens, periods, or underscores), or generates one when the field is blank. Choose
+a tenant gateway model for a new ID. Real hardware and mock gateways use the same
+flow; a manufacturing entry and bootstrap certificate are no longer prerequisites
+for registration. Existing entries keep their model, ownership, and certificate
+checks. Duplicate and cross-tenant IDs remain unavailable.
+
+New IDs are recorded as `OPERATOR_REGISTERED`. Registration and profile assignment
+can complete before credential installation, leaving the operation waiting for
+the device. An administrator then uses **Bootstrap Packages** with the same ID,
+model, site, and profile to issue the connection credentials. This preserves the
+pending assignment and changes the credential mechanism to
+`PRELOADED_UNIQUE_BOOTSTRAP`. Install that package on the real gateway or simulator;
+Fleet Provisioning still checks the exact certificate. Registration alone never
+reports the device as healthy.
+
 Before a user can sign in, an administrator must create the Cognito user and an active membership record keyed by that user's Cognito `sub`:
 
 ```text
@@ -114,7 +130,7 @@ status = ACTIVE
 isDefault = true
 ```
 
-The tenant partition must contain authorized `TENANT`, `SITE`, and `GATEWAY_MODEL` records. Before the UI onboarding begins, an authorized operator binds the serial to the exact unique certificate already flashed into that gateway:
+The tenant partition must contain authorized `TENANT`, `SITE`, and `GATEWAY_MODEL` records. The existing factory-preloaded path is also supported: an authorized operator can bind the serial to the exact unique certificate already flashed into that gateway:
 
 ```text
 PK = SERIAL#<normalized-serial>
