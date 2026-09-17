@@ -63,7 +63,6 @@ export function OnboardingWizard({
 }: OnboardingWizardProps) {
   const [step, setStep] = useState(0);
   const [serialNumber, setSerialNumber] = useState(initialSerialNumber);
-  const [registrationModelId, setRegistrationModelId] = useState(models[0]?.id ?? '');
   const [verification, setVerification] = useState<VerificationResult>();
   const [siteId, setSiteId] = useState('');
   const [profileVersionId, setProfileVersionId] = useState('');
@@ -101,7 +100,7 @@ export function OnboardingWizard({
     setBusy(true);
     setError(undefined);
     try {
-      const result = await verifyFactorySerial(serial, verifyKey, undefined, registrationModelId);
+      const result = await verifyFactorySerial(serial, verifyKey);
       const preferred = result.allowedSites.find((site) => site.id === preferredSiteId) ?? result.allowedSites[0];
       const profilesForDevice = compatibleProfiles(profiles, result.identity.modelId);
       setSerialNumber(result.identity.serialNumber);
@@ -111,7 +110,7 @@ export function OnboardingWizard({
       setOperationKey(createIdempotencyKey('activate'));
       setStep(1);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to register this gateway. Check the ID and model.');
+      setError(cause instanceof Error ? cause.message : 'Unable to register this gateway. Check the ID and try again.');
     } finally {
       setBusy(false);
     }
@@ -223,23 +222,6 @@ export function OnboardingWizard({
                     />
                     <small id="serial-help">Use this same ID on your real device or gateway simulator when connecting.</small>
                   </label>
-                  <label>
-                    <span>Gateway model</span>
-                    <select
-                      value={registrationModelId}
-                      onChange={(event) => {
-                        setRegistrationModelId(event.target.value);
-                        setError(undefined);
-                        setVerifyKey(createIdempotencyKey('verify'));
-                      }}
-                      aria-describedby="model-help"
-                      required
-                    >
-                      <option value="" disabled>Choose a model</option>
-                      {models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                    </select>
-                    <small id="model-help">Used for new gateways. Existing gateways keep their registered model.</small>
-                  </label>
                 </fieldset>
               )}
 
@@ -250,7 +232,7 @@ export function OnboardingWizard({
                     Continue <ArrowRight size={14} aria-hidden="true" />
                   </button>
                 ) : (
-                  <button type="submit" className="primary" disabled={busy || !registrationModelId}>
+                  <button type="submit" className="primary" disabled={busy}>
                     {busy ? <span className="ce-onb-spinner" aria-hidden="true" /> : <Fingerprint size={15} aria-hidden="true" />}
                     {busy ? 'Saving…' : 'Continue to site'}
                   </button>

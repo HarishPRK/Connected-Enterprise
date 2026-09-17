@@ -9,12 +9,12 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { createIdempotencyKey, generateBootstrapPackage } from './api';
-import type { GatewayModel, ProfileVersion, Site } from './types';
+import type { ProfileVersion, Site } from './types';
 
 interface BootstrapPackageManagerProps {
-  models: GatewayModel[];
   profiles: ProfileVersion[];
   sites: Site[];
+  onIssued: () => Promise<void>;
   onVerifySerial: (serialNumber: string) => void;
 }
 
@@ -41,34 +41,29 @@ function beginDownload(url: string, serialNumber: string): void {
 }
 
 export function BootstrapPackageManager({
-  models,
   profiles,
   sites,
+  onIssued,
   onVerifySerial,
 }: BootstrapPackageManagerProps) {
-  const initialModelId = models[0]?.id ?? '';
   const [serialNumber, setSerialNumber] = useState('');
-  const [modelId, setModelId] = useState(initialModelId);
   const [siteId, setSiteId] = useState(sites[0]?.id ?? '');
   const [profileVersionId, setProfileVersionId] = useState('');
-  const [acknowledged, setAcknowledged] = useState(false);
   const [requestKey, setRequestKey] = useState(() => createIdempotencyKey('bootstrap-package'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [issued, setIssued] = useState<IssuedPackage>();
 
   const compatibleProfiles = useMemo(
-    () => profiles
-      .filter((profile) => profile.modelId === modelId)
+    () => [...profiles]
       .sort((a, b) => b.version - a.version || a.name.localeCompare(b.name)),
-    [modelId, profiles],
+    [profiles],
   );
   const selectedProfileId = compatibleProfiles.some((profile) => profile.id === profileVersionId)
     ? profileVersionId
     : compatibleProfiles[0]?.id ?? '';
-  const ready = SERIAL_PATTERN.test(serialNumber)
-    && Boolean(modelId && siteId && selectedProfileId)
-    && acknowledged;
+  const modelId = profiles.find((profile) => profile.id === selectedProfileId)?.modelId ?? '';
+  const ready = SERIAL_PATTERN.test(serialNumber) && Boolean(modelId && siteId && selectedProfileId);
 
   useEffect(() => () => {
     if (issued?.downloadUrl) URL.revokeObjectURL(issued.downloadUrl);
@@ -82,7 +77,7 @@ export function BootstrapPackageManager({
   const issue = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!ready) {
-      setError('Complete the serial binding and confirm the one-time private-key requirement.');
+      setError('Enter a gateway ID and choose a site and profile.');
       return;
     }
     setBusy(true);
@@ -98,6 +93,7 @@ export function BootstrapPackageManager({
       const downloadUrl = URL.createObjectURL(result.archive);
       setIssued({ serialNumber, certificateId: result.certificateId, downloadUrl });
       beginDownload(downloadUrl, serialNumber);
+      await onIssued();
     } catch (cause) {
       setError(cause instanceof Error
         ? cause.message
@@ -115,8 +111,8 @@ export function BootstrapPackageManager({
           <div>
             <h2 id="bootstrap-package-title">Bootstrap package issued</h2>
             <p>
-              <strong>{issued.serialNumber}</strong> is now registered and bound to one unique AWS IoT certificate.
-              The private key exists only in the ZIP returned to this browser.
+              <strong>{issued.serialNumber}</strong> is ready to connect. Enrollment is prepared automatically.
+              Copy the ZIP to the PC, real gateway, or simulator that will use this ID.
             </p>
           </div>
         </div>
@@ -129,7 +125,7 @@ export function BootstrapPackageManager({
 
         <div className="ce-onb-alert is-warning">
           <ShieldAlert size={17} aria-hidden="true" />
-          <span>Move the ZIP into protected gateway storage now. Leaving this page removes the browser’s fallback download; AWS cannot recover the private key.</span>
+          <span>Use the latest package for this gateway. Creating a replacement package retires the previous bootstrap certificate.</span>
         </div>
 
         <div className="ce-onb-bootstrap-actions">
@@ -149,7 +145,7 @@ export function BootstrapPackageManager({
       <div className="ce-onb-section-heading">
         <div>
           <h2 id="bootstrap-package-title">Issue gateway bootstrap package</h2>
-          <p>Connect a real or mock gateway with a unique bootstrap identity. Use a new ID or the ID you registered earlier.</p>
+          <p>Download from any PC. Create or replace a package for your gateway; enrollment is prepared automatically.</p>
         </div>
         <span className="ce-onb-security-mark"><FileKey2 size={15} aria-hidden="true" />Administrator only</span>
       </div>
@@ -178,33 +174,18 @@ export function BootstrapPackageManager({
                 maxLength={128}
                 required
               />
-              <small>For an existing registration, use the same gateway ID, model, site, and profile.</small>
+              <small>Use the same ID on the device. An unused package can be replaced for this ID.</small>
             </label>
 
             <label>
-              <span>Gateway model</span>
-              <select
-                value={modelId}
-                onChange={(event) => {
-                  setModelId(event.target.value);
-                  setProfileVersionId('');
-                  changed();
-                }}
-                required
-              >
-                {models.map((model) => <option key={model.id} value={model.id}>{model.vendor} · {model.name}</option>)}
-              </select>
-            </label>
-
-            <label>
-              <span>Authorized site</span>
+              <span>Site</span>
               <select value={siteId} onChange={(event) => { setSiteId(event.target.value); changed(); }} required>
                 {sites.map((site) => <option key={site.id} value={site.id}>{site.name} · {site.location}</option>)}
               </select>
             </label>
 
             <label className="is-wide">
-              <span>Initial profile eligibility</span>
+              <span>Profile</span>
               <select
                 value={selectedProfileId}
                 onChange={(event) => { setProfileVersionId(event.target.value); changed(); }}
@@ -218,35 +199,24 @@ export function BootstrapPackageManager({
                     </option>
                   ))}
               </select>
-              <small>The onboarding wizard may use this model-compatible immutable version.</small>
+              <small>The gateway model is taken from the selected profile. Existing assignments keep their site and profile.</small>
             </label>
           </fieldset>
 
-          <label className="ce-onb-bootstrap-acknowledgement">
-            <input
-              type="checkbox"
-              checked={acknowledged}
-              onChange={(event) => { setAcknowledged(event.target.checked); changed(); }}
-              disabled={busy}
-            />
-            <span>
-              <strong>I understand the private key is available only in this response.</strong>
-              <small>I will place the ZIP in the intended gateway’s protected storage and will not reuse or commit it.</small>
-            </span>
-          </label>
+          <p>For a gateway that has not connected yet, a new download replaces its previous bootstrap package.</p>
 
           <div className="ce-onb-bootstrap-actions">
             <button type="submit" className="primary" disabled={busy || !ready}>
               {busy ? <span className="ce-onb-spinner" aria-hidden="true" /> : <Download size={15} aria-hidden="true" />}
-              {busy ? 'Issuing and binding…' : 'Create and download package'}
+              {busy ? 'Preparing gateway…' : 'Create or replace package'}
             </button>
           </div>
         </form>
 
         <aside className="ce-onb-bootstrap-contract" aria-label="Package contents and safeguards">
           <span><KeyRound size={22} aria-hidden="true" /></span>
-          <h3>One request, one device</h3>
-          <p>The server creates an active certificate, attaches only the bootstrap policy, and atomically binds it to this serial.</p>
+          <h3>Ready to connect</h3>
+          <p>The package works from any PC for this gateway ID. Connect after downloading; no separate verification step is required.</p>
           <ul>
             <li>Bootstrap certificate and private key</li>
             <li>Amazon Root CA 1</li>

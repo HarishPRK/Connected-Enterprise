@@ -42,7 +42,6 @@ interface ManufacturingRecord extends Record<string, unknown> {
 }
 
 const EXPECTED_TEMPLATE_ARN = process.env.PROVISIONING_TEMPLATE_ARN?.trim() ?? '';
-const BOOTSTRAP_CLIENT_ID_PREFIX = process.env.BOOTSTRAP_CLIENT_ID_PREFIX?.trim() ?? '';
 const PRELOADED_BOOTSTRAP_MECHANISM = 'PRELOADED_UNIQUE_BOOTSTRAP';
 
 export async function handler(event: ProvisioningEvent): Promise<Record<string, unknown>> {
@@ -51,10 +50,6 @@ export async function handler(event: ProvisioningEvent): Promise<Record<string, 
     const claimCertificateId = requireCertificateId(event.claimCertificateId, 'claimCertificateId');
     const certificateId = requireCertificateId(event.certificateId, 'certificateId');
     if (claimCertificateId === certificateId) return deny('bootstrap and operational certificates must be different');
-    const clientId = normalizeIdentifier(event.clientId, 'clientId', 128);
-    if (!BOOTSTRAP_CLIENT_ID_PREFIX || !clientId.startsWith(BOOTSTRAP_CLIENT_ID_PREFIX)) {
-      return deny('configured bootstrap client id prefix required');
-    }
 
     const parameters = event.parameters ?? {};
     const serialNumber = requireCanonicalSerial(parameters.SerialNumber);
@@ -255,6 +250,7 @@ function requireCertificateId(value: unknown, label: string): string {
 }
 
 function deny(reason: string): Record<string, unknown> {
+  console.warn(JSON.stringify({ level: 'warn', action: 'deny-provisioning', reason }));
   return { allowProvisioning: false, parameterOverrides: {}, reason };
 }
 

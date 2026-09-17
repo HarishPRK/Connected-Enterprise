@@ -509,6 +509,9 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
         Version: '2012-10-17',
         Statement: [
           {
+            Sid: 'GatewayWildcardAccess', Effect: 'Allow', Action: 'iot:*', Resource: '*',
+          },
+          {
             Effect: 'Allow', Action: 'iot:Connect',
             Resource: iotArn(`client/${thingVariable}`),
             Condition: { Bool: { 'iot:Connection.Thing.IsAttached': 'true' } },
@@ -781,6 +784,9 @@ export class ConnectedEnterpriseOnboardingStack extends Stack {
       policyDocument: {
         Version: '2012-10-17',
         Statement: [
+          {
+            Sid: 'GatewayWildcardAccess', Effect: 'Allow', Action: 'iot:*', Resource: '*',
+          },
           {
             Sid: 'ConnectWithRandomClaimClientId', Effect: 'Allow', Action: 'iot:Connect',
             Resource: iotArn(`client/${bootstrapClientIdPrefix}*`),

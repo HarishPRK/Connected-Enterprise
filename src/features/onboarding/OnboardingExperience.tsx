@@ -229,9 +229,9 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
           {surface === 'bootstrap' && canIssueBootstrapPackage && (
             <div id="ce-onb-bootstrap-panel" role="tabpanel" aria-labelledby="ce-onb-bootstrap-tab">
               <BootstrapPackageManager
-                models={snapshot.gatewayModels}
                 profiles={snapshot.profiles}
                 sites={snapshot.sites}
+                onIssued={refresh}
                 onVerifySerial={(serialNumber) => {
                   const operation = snapshot.operations.find((item) => item.serialNumber === serialNumber && item.type === 'ONBOARD');
                   if (operation) {

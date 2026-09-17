@@ -102,9 +102,23 @@ The stack creates an AWS-provided Managed Login v2 branding style for the SPA cl
 
 ## Authoritative bootstrap data
 
+The dev gateway bootstrap and operational IoT policies now grant `iot:*` on `*`
+at the operator's request. Certificates attached to either policy have broad AWS
+IoT access. API tenant authentication and the Fleet Provisioning certificate
+binding remain enforced.
+
+Bootstrap Packages prepares enrollment automatically when issuing a package.
+Before the gateway connects, an administrator can create a replacement package
+for the same ID; the prior bootstrap certificate is retired. Copy the complete
+ZIP to any PC, real device, or simulator using that gateway ID. The download PC
+is not part of certificate authorization. `bootstrap-metadata.json` contains the
+`certificateId`. The gateway model is inferred from the selected profile.
+Once an operational identity exists, reset registration before issuing a new
+bootstrap identity.
+
 Gateway registration accepts any unused gateway ID (3–128 letters, numbers,
 hyphens, periods, or underscores), or generates one when the field is blank. Choose
-a tenant gateway model for a new ID. Real hardware and mock gateways use the same
+the site and profile; the gateway model is chosen automatically. Real hardware and mock gateways use the same
 flow; a manufacturing entry and bootstrap certificate are no longer prerequisites
 for registration. Existing entries keep their model, ownership, and certificate
 checks. Duplicate and cross-tenant IDs remain unavailable.
