@@ -9,11 +9,14 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { createIdempotencyKey, generateBootstrapPackage } from './api';
+import { ProfilePreview } from './ProfilePreview';
+import { selectableProfiles } from './profileSelection';
 import type { ProfileVersion, Site } from './types';
 
 interface BootstrapPackageManagerProps {
   profiles: ProfileVersion[];
   sites: Site[];
+  preferredSiteId?: string;
   onIssued: () => Promise<void>;
   onVerifySerial: (serialNumber: string) => void;
 }
@@ -43,11 +46,14 @@ function beginDownload(url: string, serialNumber: string): void {
 export function BootstrapPackageManager({
   profiles,
   sites,
+  preferredSiteId,
   onIssued,
   onVerifySerial,
 }: BootstrapPackageManagerProps) {
   const [serialNumber, setSerialNumber] = useState('');
-  const [siteId, setSiteId] = useState(sites[0]?.id ?? '');
+  const [siteId, setSiteId] = useState(
+    () => sites.find((site) => site.id === preferredSiteId)?.id ?? sites[0]?.id ?? '',
+  );
   const [profileVersionId, setProfileVersionId] = useState('');
   const [requestKey, setRequestKey] = useState(() => createIdempotencyKey('bootstrap-package'));
   const [busy, setBusy] = useState(false);
@@ -55,15 +61,15 @@ export function BootstrapPackageManager({
   const [issued, setIssued] = useState<IssuedPackage>();
 
   const compatibleProfiles = useMemo(
-    () => [...profiles]
-      .sort((a, b) => b.version - a.version || a.name.localeCompare(b.name)),
-    [profiles],
+    () => selectableProfiles(profiles, profileVersionId),
+    [profiles, profileVersionId],
   );
   const selectedProfileId = compatibleProfiles.some((profile) => profile.id === profileVersionId)
     ? profileVersionId
     : compatibleProfiles[0]?.id ?? '';
-  const modelId = profiles.find((profile) => profile.id === selectedProfileId)?.modelId ?? '';
-  const ready = SERIAL_PATTERN.test(serialNumber) && Boolean(modelId && siteId && selectedProfileId);
+  const selectedProfile = compatibleProfiles.find((profile) => profile.id === selectedProfileId);
+  const modelId = selectedProfile?.modelId ?? '';
+  const ready = SERIAL_PATTERN.test(serialNumber) && Boolean(modelId && sites.some((site) => site.id === siteId) && selectedProfileId);
 
   useEffect(() => () => {
     if (issued?.downloadUrl) URL.revokeObjectURL(issued.downloadUrl);
@@ -200,9 +206,11 @@ export function BootstrapPackageManager({
                     </option>
                   ))}
               </select>
-              <small>The gateway model is taken from the selected profile. Existing assignments keep their site and profile.</small>
+              <small>The latest configuration is selected by default. Preview its settings below before creating the package.</small>
             </label>
           </fieldset>
+
+          {selectedProfile && <ProfilePreview profile={selectedProfile} />}
 
           <div className="ce-onb-bootstrap-actions">
             <button type="submit" className="primary" disabled={busy || !ready}>

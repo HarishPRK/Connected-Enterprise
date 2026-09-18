@@ -10,6 +10,7 @@ import { ProfileManager } from './ProfileManager';
 import type { OnboardingOperation } from './types';
 import { useOnboardingData } from './useOnboardingData';
 import { useOnboardingAuth } from './onboardingAuthContext';
+import { currentProfiles } from './profileSelection';
 
 type WorkspaceSurface = 'gateways' | 'profiles' | 'controller' | 'bootstrap';
 type Surface = WorkspaceSurface | 'wizard' | 'operation';
@@ -144,7 +145,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                   tabIndex={surface === 'profiles' ? 0 : -1}
                   onClick={() => setSurface('profiles')}
                 >
-                  <FileLock2 size={15} aria-hidden="true" />Profiles <span>{snapshot.profiles.length}</span>
+                  <FileLock2 size={15} aria-hidden="true" />Profiles <span>{currentProfiles(snapshot.profiles).length}</span>
                 </button>
                 <button
                   id="ce-onb-controller-tab"
@@ -231,6 +232,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
               <BootstrapPackageManager
                 profiles={snapshot.profiles}
                 sites={snapshot.sites}
+                preferredSiteId={preferredSiteId}
                 onIssued={refresh}
                 onVerifySerial={(serialNumber) => {
                   const operation = snapshot.operations.find((item) => item.serialNumber === serialNumber && item.type === 'ONBOARD');

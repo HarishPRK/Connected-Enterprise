@@ -1,0 +1,13 @@
+[
+  { "id": "b-dal-hq", "name": "Dallas-HQ", "location": "Dallas, TX" },
+  { "id": "b-pln-01", "name": "Plano-01", "location": "Plano, TX" },
+  { "id": "b-irv-02", "name": "Irving-02", "location": "Irving, TX" },
+  { "id": "b-mck-03", "name": "McKinney-03", "location": "McKinney, TX" },
+  { "id": "b-aus-04", "name": "Austin-04", "location": "Austin, TX" },
+  { "id": "b-sat-05", "name": "San Antonio-05", "location": "San Antonio, TX" },
+  { "id": "b-hou-06", "name": "Houston-06", "location": "Houston, TX" },
+  { "id": "b-sea-01", "name": "Seattle-01", "location": "Seattle, WA" },
+  { "id": "b-bos-02", "name": "Boston-02", "location": "Boston, MA" },
+  { "id": "b-chi-03", "name": "Chicago-03", "location": "Chicago, IL" },
+  { "id": "b-tpa-04", "name": "Tampa-04", "location": "Tampa, FL" }
+]

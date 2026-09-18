@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, CheckCircle2, FileLock2, Plus, Search, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileLock2, Pencil, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useToast } from '../../ui/Toast';
 import { createIdempotencyKey, createProfileVersion } from './api';
 import { defaultProfileParameters, PROFILE_PARAMETERS } from './profileCatalog';
 import { ProfileParameterEditor } from './ProfileParameterEditor';
+import { currentProfiles, newestProfilesFirst } from './profileSelection';
 import type { GatewayModel, ProfileParameterValue, ProfileVersion } from './types';
 
 interface ProfileManagerProps {
@@ -55,7 +56,8 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
   const { push } = useToast();
   const [mode, setMode] = useState<'catalog' | 'create'>('catalog');
   const [query, setQuery] = useState('');
-  const [selectedId, setSelectedId] = useState(profiles[0]?.id ?? '');
+  const [showHistory, setShowHistory] = useState(false);
+  const [selectedId, setSelectedId] = useState('');
   const [baseId, setBaseId] = useState(profiles[0]?.id ?? '');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -66,14 +68,16 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
   const [error, setError] = useState<string>();
   const [idempotencyKey, setIdempotencyKey] = useState(() => createIdempotencyKey('profile'));
 
+  const latestProfiles = useMemo(() => currentProfiles(profiles), [profiles]);
+  const historicalCount = profiles.length - latestProfiles.length;
   const filteredProfiles = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return profiles
-      .filter((profile) => !needle || profileSearchText(profile).includes(needle))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [profiles, query]);
+    return newestProfilesFirst(showHistory ? profiles : latestProfiles)
+      .filter((profile) => !needle || profileSearchText(profile).includes(needle));
+  }, [profiles, latestProfiles, query, showHistory]);
 
-  const selected = profiles.find((profile) => profile.id === selectedId) ?? filteredProfiles[0];
+  const selected = filteredProfiles.find((profile) => profile.id === selectedId) ?? filteredProfiles[0];
+  const selectedIsCurrent = latestProfiles.some((profile) => profile.id === selected?.id);
 
   const beginCreate = (base?: ProfileVersion) => {
     const source = base;
@@ -148,8 +152,8 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
       setMode('catalog');
       push({
         kind: 'success',
-        title: `Published ${profile.name} v${profile.version}`,
-        detail: 'The version is immutable and ready for gateway assignment.',
+        title: `Saved ${profile.name} v${profile.version}`,
+        detail: 'The new version is ready to select. Existing gateway assignments keep their current version.',
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to publish the profile version.');
@@ -166,8 +170,8 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
             <button type="button" className="ce-onb-text-button" onClick={() => setMode('catalog')}>
               <ArrowLeft size={14} aria-hidden="true" />Profile catalog
             </button>
-            <h2>{baseId ? 'Publish a successor profile version' : 'Publish a new immutable profile'}</h2>
-            <p>Only safe configuration and secret references are accepted. Existing versions are never edited in place.</p>
+            <h2>{baseId ? 'Edit profile' : 'Create profile'}</h2>
+            <p>Saving publishes a new version. Gateways already using this profile keep their assigned configuration.</p>
           </div>
           <span className="ce-onb-security-mark"><FileLock2 size={16} aria-hidden="true" />Immutable on publish</span>
         </div>
@@ -219,12 +223,12 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
         />
 
         <div className="ce-onb-sticky-actions">
-          <span>{baseId ? 'Publishing creates the next immutable version in this profile lineage.' : 'Publishing starts a new immutable profile lineage.'}</span>
+          <span>{baseId ? 'Your changes will be saved as the next version of this profile.' : 'Your first profile will be ready to use after saving.'}</span>
           <div>
             <button type="button" onClick={() => setMode('catalog')} disabled={saving}>Cancel</button>
             <button type="submit" className="primary" disabled={saving || models.length === 0}>
               {saving ? <span className="ce-onb-spinner" aria-hidden="true" /> : <FileLock2 size={15} aria-hidden="true" />}
-              {saving ? 'Publishing…' : 'Publish version'}
+              {saving ? 'Saving…' : 'Save profile'}
             </button>
           </div>
         </div>
@@ -236,12 +240,12 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
     <section className="ce-onb-profile-manager" aria-labelledby="profile-catalog-title">
       <div className="ce-onb-section-heading">
         <div>
-          <h2 id="profile-catalog-title">Immutable profile catalog</h2>
-          <p>Review signed configuration versions or publish a successor. Assigned versions never mutate.</p>
+          <h2 id="profile-catalog-title">Profiles</h2>
+          <p>Latest configurations, with duplicate copies hidden. Edit a profile to save its next version.</p>
         </div>
-        {canPublish && (
-          <button type="button" className="primary" onClick={() => beginCreate()} disabled={models.length === 0}>
-            <Plus size={15} aria-hidden="true" />New profile
+        {canPublish && selected && selectedIsCurrent && (
+          <button type="button" className="primary" onClick={() => beginCreate(selected)} disabled={models.length === 0}>
+            <Pencil size={15} aria-hidden="true" />Edit profile
           </button>
         )}
       </div>
@@ -249,23 +253,30 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
       {profiles.length === 0 ? (
         <div className="ce-onb-empty-state">
           <span className="ce-onb-empty-icon"><FileLock2 size={25} aria-hidden="true" /></span>
-          <h3>No immutable profiles yet</h3>
-          <p>Publish a model-compatible baseline before onboarding a gateway.</p>
+          <h3>No profiles yet</h3>
+          <p>Create a configuration for your gateway model before onboarding a device.</p>
           {canPublish && (
             <button type="button" className="primary" onClick={() => beginCreate()} disabled={models.length === 0}>
-              <Plus size={15} aria-hidden="true" />Publish first version
+              <Plus size={15} aria-hidden="true" />Create profile
             </button>
           )}
         </div>
       ) : (
         <div className="ce-onb-profile-layout">
           <div className="ce-onb-profile-catalog">
+            {historicalCount > 0 && (
+              <label className="ce-onb-profile-history-toggle">
+                <input type="checkbox" checked={showHistory}
+                  onChange={(event) => { setShowHistory(event.target.checked); setSelectedId(''); }} />
+                Show profile history ({historicalCount})
+              </label>
+            )}
             <label className="ce-onb-search-field">
               <span className="ce-onb-sr-only">Search profiles</span>
               <Search size={15} aria-hidden="true" />
               <input type="search" value={query} placeholder="Search profiles…" onChange={(event) => setQuery(event.target.value)} />
             </label>
-            <div className="ce-onb-profile-list" aria-label="Profile versions">
+            <div className="ce-onb-profile-list" aria-label={showHistory ? 'Profile history' : 'Latest profiles'}>
               {filteredProfiles.map((profile) => (
                 <button
                   key={profile.id}
@@ -277,7 +288,7 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
                   <span className="ce-onb-profile-lock"><FileLock2 size={16} aria-hidden="true" /></span>
                   <span>
                     <strong>{profile.name}</strong>
-                    <small>{profile.modelId} · version {profile.version}</small>
+                    <small>{profile.modelId} · {latestProfiles.some((current) => current.id === profile.id) ? 'Latest version' : 'Historical version'} {profile.version}</small>
                   </span>
                   <span className="ce-onb-version-chip">v{profile.version}</span>
                 </button>
@@ -292,11 +303,10 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
             <div className="ce-onb-profile-detail">
               <div className="ce-onb-profile-detail-head">
                 <div>
-                  <span className="ce-onb-security-mark"><CheckCircle2 size={14} aria-hidden="true" />Immutable version</span>
+                  <span className="ce-onb-security-mark"><CheckCircle2 size={14} aria-hidden="true" />{selectedIsCurrent ? 'Latest version' : 'Historical version'}</span>
                   <h3>{selected.name} <span>v{selected.version}</span></h3>
                   <p>{selected.description}</p>
                 </div>
-                {canPublish && <button type="button" onClick={() => beginCreate(selected)}><Plus size={14} aria-hidden="true" />New version</button>}
               </div>
               <dl className="ce-onb-profile-facts">
                 <div><dt>Model</dt><dd>{selected.modelId}</dd></div>

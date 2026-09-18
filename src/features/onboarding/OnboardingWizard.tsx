@@ -21,6 +21,7 @@ import type {
   VerificationResult,
 } from './types';
 import { profileVersionLabel, siteLabel } from './types';
+import { currentProfiles, selectableProfiles } from './profileSelection';
 
 interface OnboardingWizardProps {
   profiles: ProfileVersion[];
@@ -46,11 +47,9 @@ function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
-function compatibleProfiles(profiles: ProfileVersion[], modelId?: string): ProfileVersion[] {
+function compatibleProfiles(profiles: ProfileVersion[], modelId?: string, selectedId = ''): ProfileVersion[] {
   if (!modelId) return [];
-  return profiles
-    .filter((profile) => profile.modelId === modelId)
-    .sort((a, b) => b.version - a.version || a.name.localeCompare(b.name));
+  return selectableProfiles(profiles.filter((profile) => profile.modelId === modelId), selectedId);
 }
 
 export function OnboardingWizard({
@@ -74,8 +73,8 @@ export function OnboardingWizard({
   const modelById = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
   const model = verification ? modelById.get(verification.identity.modelId) : undefined;
   const availableProfiles = useMemo(
-    () => compatibleProfiles(profiles, verification?.identity.modelId),
-    [profiles, verification?.identity.modelId],
+    () => compatibleProfiles(profiles, verification?.identity.modelId, profileVersionId),
+    [profiles, verification?.identity.modelId, profileVersionId],
   );
   const selectedSite = verification?.allowedSites.find((site) => site.id === siteId);
   const selectedProfile = availableProfiles.find((profile) => profile.id === profileVersionId);
@@ -104,7 +103,7 @@ export function OnboardingWizard({
         serial,
         verifyKey,
         undefined,
-        profiles[0]?.modelId ?? models[0]?.id,
+        currentProfiles(profiles)[0]?.modelId ?? models[0]?.id,
       );
       const preferred = result.allowedSites.find((site) => site.id === preferredSiteId) ?? result.allowedSites[0];
       const profilesForDevice = compatibleProfiles(profiles, result.identity.modelId);
@@ -309,8 +308,8 @@ export function OnboardingWizard({
           <div className="ce-onb-profile-step">
             <div className="ce-onb-profile-choice-head">
               <div>
-                <h3>Select an immutable profile</h3>
-                <p>Only published versions compatible with {model?.name ?? verification.identity.modelId} are shown.</p>
+                <h3>Select a profile</h3>
+                <p>Latest configurations compatible with {model?.name ?? verification.identity.modelId}. Preview settings before continuing.</p>
               </div>
               <span className="ce-onb-security-mark"><FileLock2 size={15} aria-hidden="true" />Version locked</span>
             </div>
