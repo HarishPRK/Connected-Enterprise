@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   completeBootstrapRegistration, currentBootstrapOperation, registrationFromMetadata, restoreRegistration, serializeRegistration,
+  registrationStorageKey, restoreSavedRegistration,
   type BootstrapRegistration,
 } from '../../src/features/onboarding/bootstrapRegistration';
 import type { Gateway, OnboardingOperation, VerificationResult } from '../../src/features/onboarding/types';
@@ -168,4 +169,40 @@ test('recovery chooses the newest current operation regardless of history orderi
   const failure = { ...latest, state: 'FAILED' as const, status: 'FAILED' as const,
     failure: { code: 'DEVICE_REJECTED', message: 'Device rejected profile', rolledBack: false } };
   assert.equal(currentBootstrapOperation(flow.saved, [failure], [gateway]), failure);
+});
+
+test('old package progress is retired without clearing other users, tenants, or preferences', () => {
+  const flow = setup();
+  const oldKey = 'ce.onboarding.package.v1:tenant-a:user-a';
+  const stored = new Map([
+    [oldKey, serializeRegistration(flow.saved)],
+    ['ce.onboarding.package.v1:tenant-b:user-a', 'other tenant'],
+    ['ce.onboarding.package.v1:tenant-a:user-b', 'other user'],
+    ['theme', 'dark'],
+  ]);
+  const storage = { getItem: (key: string) => stored.get(key) ?? null, removeItem: (key: string) => { stored.delete(key); } };
+  assert.equal(restoreSavedRegistration(storage, 'tenant-a', 'user-a', flow.actions.createKey), undefined);
+  assert.equal(stored.has(oldKey), false);
+  assert.deepEqual([...stored.values()], ['other tenant', 'other user', 'dark']);
+});
+
+test('new packages retain their assignment and activation retry keys across reloads', () => {
+  const flow = setup();
+  const progress = { ...flow.saved, activationAttempted: true,
+    verification: { verificationId: 'ver-1', expiresAt: verified.expiresAt } };
+  const stored = new Map([[registrationStorageKey('tenant-a', 'user/a:b'), serializeRegistration(progress)]]);
+  const storage = { getItem: (key: string) => stored.get(key) ?? null, removeItem: (key: string) => { stored.delete(key); } };
+  assert.deepEqual(restoreSavedRegistration(storage, 'tenant-a', 'user/a:b', flow.actions.createKey), progress);
+  assert.deepEqual(restoreSavedRegistration(storage, 'tenant-a', 'user/a:b', flow.actions.createKey), progress);
+  assert.equal(restoreSavedRegistration(storage, 'tenant-a', 'user/a', flow.actions.createKey), undefined);
+  assert.equal(stored.size, 1);
+});
+
+test('blocked storage still permits a fresh start and readable new progress can resume', () => {
+  const flow = setup();
+  const blocked = () => { throw new Error('Storage disabled'); };
+  assert.equal(restoreSavedRegistration({ getItem: blocked, removeItem: blocked }, 'tenant-a', 'user-a', flow.actions.createKey), undefined);
+  assert.deepEqual(restoreSavedRegistration({
+    getItem: () => serializeRegistration(flow.saved), removeItem: blocked,
+  }, 'tenant-a', 'user-a', flow.actions.createKey), { ...flow.saved, activationAttempted: false });
 });

@@ -108,6 +108,28 @@ export function restoreRegistration(raw: string | null, tenantId: string, create
   }
 }
 
+export function registrationStorageKey(tenantId: string, resumeScope: string): string {
+  return `ce.onboarding.package.v2:${encodeURIComponent(tenantId)}:${encodeURIComponent(resumeScope)}`;
+}
+
+/** Retire cached progress from before the gateway identity cleanup. Keep new
+ * packages resumable and leave other users' and tenants' browser data alone. */
+export function restoreSavedRegistration(
+  storage: Pick<Storage, 'getItem' | 'removeItem'>,
+  tenantId: string,
+  resumeScope: string,
+  createKey: KeyFactory,
+): BootstrapRegistration | undefined {
+  try {
+    storage.removeItem(`ce.onboarding.package.v1:${encodeURIComponent(tenantId)}:${encodeURIComponent(resumeScope)}`);
+  } catch { /* A browser may block writes while still allowing reads. */ }
+  try {
+    return restoreRegistration(storage.getItem(registrationStorageKey(tenantId, resumeScope)), tenantId, createKey);
+  } catch {
+    return undefined;
+  }
+}
+
 interface RegistrationActions {
   verify: (serialNumber: string, key: string, modelId: string) => Promise<VerificationResult>;
   activate: (verificationId: string, siteId: string, profileVersionId: string, key: string) => Promise<OnboardingOperation>;

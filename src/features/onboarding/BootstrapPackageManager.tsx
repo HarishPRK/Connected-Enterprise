@@ -14,7 +14,9 @@ import {
   completeBootstrapRegistration,
   currentBootstrapOperation,
   registrationFromMetadata,
+  registrationStorageKey,
   restoreRegistration,
+  restoreSavedRegistration,
   serializeRegistration,
   type BootstrapRegistration,
 } from './bootstrapRegistration';
@@ -75,9 +77,9 @@ export function BootstrapPackageManager({
   const [requestKey, setRequestKey] = useState(() => createIdempotencyKey('bootstrap-package'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const storageKey = `ce.onboarding.package.v1:${encodeURIComponent(tenantId)}:${encodeURIComponent(resumeScope)}`;
+  const storageKey = registrationStorageKey(tenantId, resumeScope);
   const [issued, setIssued] = useState<IssuedPackage | undefined>(() => {
-    try { return restoreRegistration(localStorage.getItem(storageKey), tenantId, createIdempotencyKey); }
+    try { return restoreSavedRegistration(localStorage, tenantId, resumeScope, createIdempotencyKey); }
     catch { return undefined; }
   });
   const [activating, setActivating] = useState(false);
