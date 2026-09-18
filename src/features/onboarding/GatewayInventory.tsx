@@ -292,11 +292,6 @@ export function GatewayInventory({
             <RefreshCw className={refreshing ? 'ce-onb-spin' : ''} size={14} aria-hidden="true" />
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
-          {canVerifyDevice && (
-            <button type="button" className="primary" onClick={onVerifyDevice}>
-              <PackagePlus size={15} aria-hidden="true" />Verify device
-            </button>
-          )}
         </div>
       </div>
 

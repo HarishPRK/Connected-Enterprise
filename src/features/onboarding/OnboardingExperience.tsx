@@ -167,7 +167,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                     tabIndex={surface === 'bootstrap' ? 0 : -1}
                     onClick={() => setSurface('bootstrap')}
                   >
-                    <FileKey2 size={15} aria-hidden="true" />Bootstrap
+                    <FileKey2 size={15} aria-hidden="true" />Initiate Onboarding
                   </button>
                 )}
               </div>

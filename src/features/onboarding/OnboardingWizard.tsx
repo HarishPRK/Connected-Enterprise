@@ -254,7 +254,7 @@ export function OnboardingWizard({
                 <li>Site and profile selected from your tenant</li>
                 <li>Device health appears after the gateway connects</li>
               </ul>
-              <p>When ready to connect, an administrator can issue a bootstrap package for this ID from Bootstrap Packages. Use it on the real device or simulator.</p>
+              <p>When ready to connect, an administrator can issue a bootstrap package for this ID from the Initiate Onboarding tab. Use it on the real device or simulator.</p>
             </aside>
           </div>
         )}
