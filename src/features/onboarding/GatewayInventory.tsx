@@ -43,12 +43,12 @@ interface GatewayInventoryProps {
   controller: ControllerConfiguration | undefined;
   preferredSiteId?: string;
   refreshing: boolean;
-  canVerifyDevice: boolean;
+  canInitiateOnboarding: boolean;
   canDecommission: boolean;
   canResetRegistration?: boolean;
   canDeployProfile: boolean;
   onRefresh: () => void;
-  onVerifyDevice: () => void;
+  onInitiateOnboarding: () => void;
   onOperation: (operation: OnboardingOperation) => void;
 }
 
@@ -127,12 +127,12 @@ export function GatewayInventory({
   controller,
   preferredSiteId,
   refreshing,
-  canVerifyDevice,
+  canInitiateOnboarding,
   canDecommission,
   canResetRegistration = false,
   canDeployProfile,
   onRefresh,
-  onVerifyDevice,
+  onInitiateOnboarding,
   onOperation,
 }: GatewayInventoryProps) {
   const { push } = useToast();
@@ -299,10 +299,10 @@ export function GatewayInventory({
         <div className="ce-onb-empty-state">
           <span className="ce-onb-empty-icon"><Box size={25} aria-hidden="true" /></span>
           <h3>No gateways assigned {selectedSite ? 'to this site' : 'yet'}</h3>
-          <p>Verify a factory serial, choose an authorized site, and assign an immutable profile.</p>
-          {canVerifyDevice && (
-            <button type="button" className="primary" onClick={onVerifyDevice}>
-              <PackagePlus size={15} aria-hidden="true" />Verify first device
+          <p>Use Initiate Onboarding to set up a gateway and follow its activation progress.</p>
+          {canInitiateOnboarding && (
+            <button type="button" className="primary" onClick={onInitiateOnboarding}>
+              <PackagePlus size={15} aria-hidden="true" />Initiate Onboarding
             </button>
           )}
         </div>
