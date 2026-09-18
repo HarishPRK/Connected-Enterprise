@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  completeBootstrapRegistration, registrationFromMetadata, restoreRegistration, serializeRegistration,
+  completeBootstrapRegistration, currentBootstrapOperation, registrationFromMetadata, restoreRegistration, serializeRegistration,
   type BootstrapRegistration,
 } from '../../src/features/onboarding/bootstrapRegistration';
-import type { OnboardingOperation, VerificationResult } from '../../src/features/onboarding/types';
+import type { Gateway, OnboardingOperation, VerificationResult } from '../../src/features/onboarding/types';
 
 const metadata = {
   formatVersion: 1, tenantId: 'tenant-a', serialNumber: 'GW-001', modelId: 'model-a',
@@ -21,6 +21,12 @@ const operation: OnboardingOperation = {
   gatewayId: 'gateway-1', serialNumber: metadata.serialNumber, siteId: metadata.siteId,
   profileVersionId: metadata.profileVersionId, deploymentGeneration: 1,
   timeline: [], createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(),
+};
+const gateway: Gateway = {
+  id: operation.gatewayId, thingName: 'thing-1', serialNumber: metadata.serialNumber, modelId: metadata.modelId,
+  siteId: metadata.siteId, hardwareRevision: 'UNKNOWN', state: 'PENDING', certificateState: 'PENDING',
+  health: 'UNKNOWN', deploymentGeneration: 1, desiredProfileVersionId: metadata.profileVersionId,
+  createdAt: operation.createdAt, updatedAt: operation.updatedAt,
 };
 
 function setup() {
@@ -118,4 +124,48 @@ test('metadata import and persisted progress exclude secrets and reject another 
   assert.throws(() => registrationFromMetadata({ ...metadata, siteId: '' }, 'tenant-a', createKey));
   assert.throws(() => registrationFromMetadata({ ...metadata, certificateId: '' }, 'tenant-a', createKey));
   assert.throws(() => registrationFromMetadata(metadata, 'tenant-b', createKey));
+});
+
+test('reset history for a reused serial never replaces a newly downloaded package activation', async () => {
+  const flow = setup();
+  const reset: OnboardingOperation = { ...operation, id: 'old-test-lab', siteId: 'lab-01',
+    status: 'FAILED', state: 'FAILED', createdAt: '2026-08-31T23:45:27Z',
+    failure: { code: 'GATEWAY_RESET', message: 'Registration was reset by an operator.', rolledBack: false } };
+  const historical = currentBootstrapOperation(flow.saved, [reset], []);
+  assert.equal(historical, undefined);
+  assert.equal(historical ?? await completeBootstrapRegistration(flow.saved, flow.actions), operation);
+  assert.equal(flow.calls.filter(([kind]) => kind === 'verify').length, 1);
+  assert.equal(flow.calls.filter(([kind]) => kind === 'activate').length, 1);
+});
+
+test('operation recovery requires the current gateway and exact package assignment', () => {
+  const flow = setup();
+  assert.equal(currentBootstrapOperation(flow.saved, [operation], [gateway]), operation);
+  assert.equal(currentBootstrapOperation(flow.saved, [operation], []), undefined);
+  for (const changed of [
+    { siteId: 'other-site' }, { profileVersionId: 'other-profile' }, { serialNumber: 'OTHER-SERIAL' },
+    { gatewayId: 'other-gateway' }, { type: 'DECOMMISSION' as const }, { registrationReleased: true },
+    { resetForOnboarding: true }, { state: 'DECOMMISSIONED' as const },
+    { failure: { code: 'GATEWAY_RESET', message: 'Reset', rolledBack: false } },
+    { createdAt: '2026-09-17T10:00:00Z' },
+  ]) {
+    assert.equal(currentBootstrapOperation(flow.saved, [{ ...operation, ...changed }], [gateway]), undefined);
+  }
+  for (const changed of [
+    { state: 'DECOMMISSIONED' as const }, { state: 'DECOMMISSIONING' as const },
+    { modelId: 'other-model' }, { siteId: 'other-site' }, { createdAt: 'invalid' },
+  ]) {
+    assert.equal(currentBootstrapOperation(flow.saved, [operation], [{ ...gateway, ...changed }]), undefined);
+  }
+});
+
+test('recovery chooses the newest current operation regardless of history ordering', () => {
+  const flow = setup();
+  const latest = { ...operation, id: 'latest', createdAt: '2026-09-18T10:01:00Z' };
+  const operations = [operation, latest];
+  assert.equal(currentBootstrapOperation(flow.saved, operations, [gateway]), latest);
+  assert.deepEqual(operations, [operation, latest]);
+  const failure = { ...latest, state: 'FAILED' as const, status: 'FAILED' as const,
+    failure: { code: 'DEVICE_REJECTED', message: 'Device rejected profile', rolledBack: false } };
+  assert.equal(currentBootstrapOperation(flow.saved, [failure], [gateway]), failure);
 });

@@ -1,4 +1,4 @@
-import type { OnboardingOperation, VerificationResult } from './types';
+import type { Gateway, OnboardingOperation, VerificationResult } from './types';
 
 export interface BootstrapRegistration {
   tenantId: string;
@@ -15,6 +15,28 @@ export interface BootstrapRegistration {
 
 type KeyFactory = (scope: string) => string;
 const identifier = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+/** A serial can be reused after reset. Only the surviving gateway and its
+ * current registration can establish that a package already has an operation. */
+export function currentBootstrapOperation(
+  registration: BootstrapRegistration,
+  operations: readonly OnboardingOperation[],
+  gateways: readonly Gateway[],
+): OnboardingOperation | undefined {
+  const gateway = gateways.find((item) => item.serialNumber === registration.serialNumber
+    && item.modelId === registration.modelId && item.siteId === registration.siteId
+    && !['DECOMMISSIONED', 'DECOMMISSIONING'].includes(item.state));
+  if (!gateway) return undefined;
+  const registeredAt = Date.parse(gateway.createdAt);
+  if (!Number.isFinite(registeredAt)) return undefined;
+  return operations.filter((operation) => operation.type === 'ONBOARD'
+    && operation.gatewayId === gateway.id && operation.serialNumber === registration.serialNumber
+    && operation.siteId === registration.siteId && operation.profileVersionId === registration.profileVersionId
+    && operation.failure?.code !== 'GATEWAY_RESET' && !operation.registrationReleased && !operation.resetForOnboarding
+    && !['DECOMMISSIONED', 'DECOMMISSIONING'].includes(operation.state)
+    && Date.parse(operation.createdAt) >= registeredAt)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+}
 
 /** Extract only assignment metadata. Certificates and private keys are never
  * read, uploaded, or retained by the continuation flow. */

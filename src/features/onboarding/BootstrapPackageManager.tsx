@@ -12,6 +12,7 @@ import {
 import { createIdempotencyKey, generateBootstrapPackage, startOnboardingOperation, verifyFactorySerial } from './api';
 import {
   completeBootstrapRegistration,
+  currentBootstrapOperation,
   registrationFromMetadata,
   restoreRegistration,
   serializeRegistration,
@@ -19,7 +20,7 @@ import {
 } from './bootstrapRegistration';
 import { ProfilePreview } from './ProfilePreview';
 import { selectableProfiles } from './profileSelection';
-import type { OnboardingOperation, ProfileVersion, Site } from './types';
+import type { Gateway, OnboardingOperation, ProfileVersion, Site } from './types';
 
 interface BootstrapPackageManagerProps {
   profiles: ProfileVersion[];
@@ -28,6 +29,7 @@ interface BootstrapPackageManagerProps {
   resumeScope: string;
   canIssue: boolean;
   operations: OnboardingOperation[];
+  gateways: Gateway[];
   preferredSiteId?: string;
   onIssued: () => Promise<void>;
   onOperation: (operation: OnboardingOperation) => void;
@@ -60,6 +62,7 @@ export function BootstrapPackageManager({
   resumeScope,
   canIssue,
   operations,
+  gateways,
   preferredSiteId,
   onIssued,
   onOperation,
@@ -78,6 +81,7 @@ export function BootstrapPackageManager({
     catch { return undefined; }
   });
   const [activating, setActivating] = useState(false);
+  const existingOperation = issued ? currentBootstrapOperation(issued, operations, gateways) : undefined;
 
   const compatibleProfiles = useMemo(
     () => selectableProfiles(profiles, profileVersionId),
@@ -115,14 +119,16 @@ export function BootstrapPackageManager({
     setActivating(true);
     setError(undefined);
     try {
-      const existing = operations.find((operation) => operation.type === 'ONBOARD' && operation.serialNumber === issued.serialNumber);
-      const operation = existing ?? await completeBootstrapRegistration(issued, {
+      const operation = existingOperation ?? await completeBootstrapRegistration(issued, {
         verify: (serial, key, model) => verifyFactorySerial(serial, key, undefined, model),
         activate: startOnboardingOperation,
         save: saveProgress,
         createKey: createIdempotencyKey,
         now: Date.now,
       });
+      if (operation.failure?.code === 'GATEWAY_RESET' || operation.registrationReleased) {
+        throw new Error('This registration was reset. Return to package setup and resume using the current downloaded package.');
+      }
       openOperation(operation);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to start activation. Try again with the same downloaded package.');
@@ -192,7 +198,6 @@ export function BootstrapPackageManager({
   if (issued) {
     const assignedSite = sites.find((site) => site.id === issued.siteId);
     const assignedProfile = profiles.find((profile) => profile.id === issued.profileVersionId);
-    const existingOperation = operations.find((operation) => operation.type === 'ONBOARD' && operation.serialNumber === issued.serialNumber);
     return (
       <section className="ce-onb-bootstrap" aria-labelledby="bootstrap-package-title">
         <button type="button" className="ce-onb-text-button" disabled={activating}

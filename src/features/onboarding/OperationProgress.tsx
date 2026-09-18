@@ -24,6 +24,7 @@ interface OperationProgressProps {
   streamState: OnboardingStreamState;
   onUpdate: (operation: OnboardingOperation) => void;
   onBack: () => void;
+  onContinueOnboarding?: () => void;
 }
 
 interface LifecycleMilestone {
@@ -135,6 +136,7 @@ export function OperationProgress({
   streamState,
   onUpdate,
   onBack,
+  onContinueOnboarding,
 }: OperationProgressProps) {
   useEffect(() => {
     if (isOperationTerminal(operation)) return;
@@ -170,12 +172,15 @@ export function OperationProgress({
   const site = sites.find((candidate) => candidate.id === operation.siteId);
   const healthy = isOperationHealthy(operation);
   const failed = operation.status === 'FAILED';
+  const registrationReset = operation.failure?.code === 'GATEWAY_RESET';
   const rolledBack = operation.state === 'ROLLED_BACK' || operation.failure?.rolledBack;
   const onboardingComplete = operation.type === 'ONBOARD'
     && hasReachedMilestone(operation, 'OPERATIONAL_IDENTITY_ISSUED');
   const profileValidationStarted = operation.type === 'ONBOARD'
     && hasReachedMilestone(operation, 'PROFILE_STAGED');
-  const summaryLabel = pullConfirmed
+  const summaryLabel = registrationReset
+    ? 'Previous registration was reset'
+    : pullConfirmed
     ? 'Controller configuration retrieved'
     : healthy
     ? 'Configuration applied and healthy'
@@ -195,7 +200,9 @@ export function OperationProgress({
             <ArrowLeft size={14} aria-hidden="true" />Gateway inventory
           </button>
           <h2 id="operation-progress-title">
-            {operation.type === 'DECOMMISSION'
+            {registrationReset
+              ? 'Previous gateway onboarding'
+              : operation.type === 'DECOMMISSION'
               ? 'Gateway decommissioning'
               : operation.type === 'PROFILE_DEPLOY'
                 ? pullConfirmed ? 'Controller delivery progress' : 'Profile deployment progress'
@@ -203,15 +210,25 @@ export function OperationProgress({
           </h2>
           <p>{operation.serialNumber} · {site ? `${site.name}, ${site.location}` : operation.siteId}</p>
         </div>
-        <div className="ce-onb-live-state" data-connected={streamState === 'connected'}>
+        <div className="ce-onb-live-state" data-connected={!registrationReset && streamState === 'connected'}>
           <span aria-hidden="true" />
-          {streamState === 'connected'
+          {registrationReset
+            ? 'Previous attempt'
+            : streamState === 'connected'
             ? 'Live events + polling'
             : streamState === 'polling'
               ? 'Secure status polling'
               : 'Polling while stream reconnects'}
         </div>
       </div>
+
+      {registrationReset && (
+        <div className="ce-onb-alert is-warning ce-onb-reset-notice" role="status">
+          <RotateCcw size={17} aria-hidden="true" />
+          <span>This attempt was closed when its registration was reset. Continue onboarding with your current downloaded package.</span>
+          {onContinueOnboarding && <button type="button" onClick={onContinueOnboarding}>Continue onboarding</button>}
+        </div>
+      )}
 
       <div className="ce-onb-operation-layout">
         <div className="ce-onb-progress-rail" aria-live="polite">
@@ -251,7 +268,7 @@ export function OperationProgress({
                   </div>
                   <span className="ce-onb-status" data-tone={onboardingComplete ? 'ok' : failed ? 'err' : 'warn'}>
                     <span aria-hidden="true" />
-                    {onboardingComplete ? 'Complete' : failed ? 'Needs attention' : 'In progress'}
+                    {registrationReset ? 'Reset' : onboardingComplete ? 'Complete' : failed ? 'Needs attention' : 'In progress'}
                   </span>
                 </div>
                 <MilestoneList milestones={ONBOARD_MILESTONES} operation={operation} label="Gateway onboarding milestones" />
@@ -278,7 +295,7 @@ export function OperationProgress({
                     data-tone={healthy ? 'ok' : failed && onboardingComplete ? 'err' : profileValidationStarted ? 'warn' : 'neutral'}
                   >
                     <span aria-hidden="true" />
-                    {healthy ? 'Complete' : failed && onboardingComplete ? 'Needs attention' : profileValidationStarted ? 'In progress' : 'Next'}
+                    {registrationReset ? 'Closed' : healthy ? 'Complete' : failed && onboardingComplete ? 'Needs attention' : profileValidationStarted ? 'In progress' : 'Next'}
                   </span>
                 </div>
                 <MilestoneList milestones={PROFILE_VALIDATION_MILESTONES} operation={operation} label="Profile deployment and validation milestones" />

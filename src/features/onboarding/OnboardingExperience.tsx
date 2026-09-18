@@ -237,6 +237,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                 resumeScope={user?.subject ?? ''}
                 canIssue={canIssueBootstrapPackage}
                 operations={snapshot.operations}
+                gateways={snapshot.gateways}
                 preferredSiteId={preferredSiteId}
                 onIssued={refresh}
                 onOperation={openOperation}
@@ -250,6 +251,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
               sites={snapshot.sites}
               streamState={streamState}
               onUpdate={upsertOperation}
+              onContinueOnboarding={canOperate ? () => setSurface('bootstrap') : undefined}
               onBack={() => {
                 setSurface('gateways');
                 void refresh();
