@@ -1,5 +1,5 @@
 /**
- * In-memory telemetry history — a rolling per-device buffer of timestamped
+ * Persistent telemetry history — a rolling per-device buffer of timestamped
  * samples fed by deviceSource on every live inventory ingest.
  *
  * Two jobs:
@@ -8,11 +8,11 @@
  *   • `historySeries()`  — downsampled per-device series (throughput, RSSI,
  *     power draw) for the dashboard's live charts.
  *
- * Session-scoped by design: it starts empty on server boot and grows as
- * samples arrive. Capacity bounds memory (~8h at a 10s cadence per device).
+ * Retains seven days, with detailed samples for the most recent hour.
  */
 
 import type { DeviceTelemetry } from '../src/types.js';
+import { ChartHistoryStore, sampleHistory } from './chartHistoryStore.js';
 
 interface Sample {
   t: number;
@@ -20,28 +20,38 @@ interface Sample {
   txBytes?: number;
   rssiDbm?: number;
   apowerW?: number;
+  /** Reset-safe running counter, preserved when older samples are compacted. */
+  transferredBytes?: number;
 }
 
-const MAX_SAMPLES = 2880;
 /** Client counters in the current prplhome feed are refreshed about once per
  * minute even though inventory is re-published every ten seconds. Retain the
  * last measured interval through that cadence, then report idle if the counter
  * has not changed for longer than a normal refresh plus jitter. */
 export const CLIENT_RATE_IDLE_AFTER_MS = 90_000;
-const buffers = new Map<string, Sample[]>();
+export const telemetryHistory = new ChartHistoryStore<Sample>();
+const buffers = telemetryHistory.buffers;
 
 export function recordTelemetry(mac: string, t: DeviceTelemetry | undefined, when = Date.now()): void {
   if (!t) return;
   if (t.rxBytes == null && t.txBytes == null && t.rssiDbm == null && t.apowerW == null) return;
-  let buf = buffers.get(mac);
-  if (!buf) {
-    buf = [];
-    buffers.set(mac, buf);
+  const valid = (value: number | undefined) => Number.isFinite(value) ? value : undefined;
+  const prior = buffers.get(mac.toUpperCase());
+  let transferredBytes = prior?.at(-1)?.transferredBytes ?? 0;
+  for (const direction of ['rxBytes', 'txBytes'] as const) {
+    let before: number | undefined;
+    for (let i = (prior?.length ?? 0) - 1; i >= 0; i--) {
+      before = prior![i][direction];
+      if (before != null) break;
+    }
+    const value = t[direction];
+    if (before != null && value != null && Number.isFinite(value) && value >= before) transferredBytes += value - before;
   }
-  const last = buf[buf.length - 1];
-  if (last && when - last.t < 2_000) return; // collapse bursts
-  buf.push({ t: when, rxBytes: t.rxBytes, txBytes: t.txBytes, rssiDbm: t.rssiDbm, apowerW: t.apowerW });
-  if (buf.length > MAX_SAMPLES) buf.splice(0, buf.length - MAX_SAMPLES);
+  telemetryHistory.record(mac.toUpperCase(), {
+    t: when, rxBytes: valid(t.rxBytes), txBytes: valid(t.txBytes),
+    rssiDbm: valid(t.rssiDbm), apowerW: valid(t.apowerW),
+    transferredBytes,
+  });
 }
 
 /** Mbps between two cumulative byte counters; undefined on reset/missing. */
@@ -82,7 +92,7 @@ function latestMeasuredRate(
 /** Latest measured rx/tx rate for a device. Repeated snapshots with unchanged
  * counters do not overwrite a valid interval with an artificial zero. */
 export function currentRates(mac: string): { rxMbps?: number; txMbps?: number } {
-  const buf = buffers.get(mac);
+  const buf = buffers.get(mac.toUpperCase());
   if (!buf) return {};
   return {
     rxMbps: latestMeasuredRate(buf, 'rxBytes'),
@@ -98,16 +108,38 @@ export interface HistoryPoint {
   apowerW?: number;
   rxBytes?: number;
   txBytes?: number;
+  transferredMB?: number;
 }
 
 /** Per-device history with derived rates, downsampled to ≤ maxPoints each. */
-export function historySeries(maxPoints = 240): Record<string, HistoryPoint[]> {
+export function historySeries(maxPoints = 360, since = -Infinity, until = Infinity, macs?: ReadonlySet<string>): Record<string, HistoryPoint[]> {
   const out: Record<string, HistoryPoint[]> = {};
   for (const [mac, buf] of buffers) {
+    if (macs && !macs.has(mac)) continue;
     const points: HistoryPoint[] = [];
     let prevBytes: Sample | undefined;
+    const previous: Partial<Record<'rxBytes' | 'txBytes', number>> = {};
+    let transferredBytes = 0;
+    let previousTransferred: number | undefined;
     for (const s of buf) {
+      if (s.t < since || s.t > until) continue;
       const p: HistoryPoint = { t: s.t, rssiDbm: s.rssiDbm, apowerW: s.apowerW, rxBytes: s.rxBytes, txBytes: s.txBytes };
+      // Accumulate each direction independently. Reboots establish a new
+      // baseline without deleting traffic already measured in this window.
+      for (const direction of ['rxBytes', 'txBytes'] as const) {
+        const value = s[direction];
+        if (value == null || !Number.isFinite(value) || value < 0) continue;
+        const before = previous[direction];
+        if ((previousTransferred == null || s.transferredBytes == null) && before != null && value >= before) {
+          transferredBytes += value - before;
+        }
+        previous[direction] = value;
+      }
+      if (previousTransferred != null && s.transferredBytes != null) {
+        transferredBytes += Math.max(0, s.transferredBytes - previousTransferred);
+      }
+      previousTransferred = s.transferredBytes;
+      if (s.rxBytes != null || s.txBytes != null) p.transferredMB = transferredBytes / 1e6;
       if (s.rxBytes != null || s.txBytes != null) {
         if (prevBytes) {
           const dt = s.t - prevBytes.t;
@@ -118,8 +150,7 @@ export function historySeries(maxPoints = 240): Record<string, HistoryPoint[]> {
       }
       points.push(p);
     }
-    const stride = Math.max(1, Math.ceil(points.length / maxPoints));
-    out[mac] = stride === 1 ? points : points.filter((_, i) => i % stride === 0 || i === points.length - 1);
+    if (points.length) out[mac] = sampleHistory(points, maxPoints);
   }
   return out;
 }

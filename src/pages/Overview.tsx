@@ -13,7 +13,7 @@ import {
   BRANCH_TO_WAN_TOPIC, BRANCH_TO_DEVICE_TOPIC, getDevicesForBranch,
 } from '../data/mock';
 import type {
-  AppTraffic, BandwidthPoint, Device, LanPort, Status, WanLink,
+  AppTraffic, Device, LanPort, Status, WanLink,
 } from '../types';
 import { useIpsecMetrics } from '../ui/useIpsecMetrics';
 import { useDevices } from '../ui/useDevices';
@@ -205,10 +205,8 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
         ? ipsec.connected && rateIsFresh ? 'live' : 'stale'
         : ipsec.connected && gatewayIsFresh ? 'loading' : 'stale';
 
-  // The headline WAN rate is derived and cached by the backend, so mounting
-  // this page does not start a new warm-up period. The local samples below are
-  // retained only for the per-underlay chart and link rows.
-  const [liveBandwidth, setLiveBandwidth] = useState<BandwidthPoint[]>([]);
+  // Chart history is retained by the backend. Local counters below update
+  // the current per-underlay link rows only.
   const [underlayRates, setUnderlayRates] = useState<UnderlayRateSample | null>(null);
   const lastCountersRef = useRef<IpsecCounterSample | null>(null);
 
@@ -217,7 +215,6 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     if (!failoverState) {
       lastCountersRef.current = null;
       setUnderlayRates(null);
-      setLiveBandwidth([]);
       return;
     }
 
@@ -237,14 +234,12 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
 
     if (!previous || previous.key !== key) {
       setUnderlayRates(null);
-      setLiveBandwidth([]);
       return;
     }
 
     const seconds = (ts - previous.ts) / 1_000;
     if (seconds <= 0 || seconds > MAX_RATE_INTERVAL_SECONDS) {
       setUnderlayRates(null);
-      setLiveBandwidth([]);
       return;
     }
 
@@ -252,7 +247,6 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     const wanTx = measuredRate(current.wan.tx, previous.wan.tx, seconds);
     if (wanRx === null || wanTx === null) {
       setUnderlayRates(null);
-      setLiveBandwidth([]);
       return;
     }
 
@@ -286,17 +280,6 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     });
     setUnderlayRates(nextRates);
 
-    const fiberKnown = totals.fiber.expected === 0 || nextRates.fiber !== undefined;
-    const cellKnown = totals['5g'].expected === 0 || nextRates['5g'] !== undefined;
-    if (fiberKnown && cellKnown) {
-      const observed = new Date(ts);
-      const label = `${String(observed.getHours()).padStart(2, '0')}:${String(observed.getMinutes()).padStart(2, '0')}:${String(observed.getSeconds()).padStart(2, '0')}`;
-      setLiveBandwidth((series) => [...series, {
-        t: label,
-        fiber: Number(((nextRates.fiber?.rxMbps ?? 0) + (nextRates.fiber?.txMbps ?? 0)).toFixed(3)),
-        fiveg: Number(((nextRates['5g']?.rxMbps ?? 0) + (nextRates['5g']?.txMbps ?? 0)).toFixed(3)),
-      }].slice(-120));
-    }
   }, [branchId, failoverState]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -450,7 +433,6 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
 
         <div className="col-8">
           <BandwidthChart
-            data={liveBandwidth}
             dataState={overviewWidgetState}
             source={failoverTopic ?? undefined}
             observedAt={failoverState?.receivedAt}

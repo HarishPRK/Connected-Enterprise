@@ -11,7 +11,9 @@ import { runChat, type ChatMessage } from './chat.js';
 import { ipsecSource } from './ipsecSource.js';
 import { decodeAppRouteCommand, type AppRouteCommand } from './appRouteProto.js';
 import { deviceSource } from './deviceSource.js';
-import { historySeries } from './telemetryHistory.js';
+import { historySeries, telemetryHistory } from './telemetryHistory.js';
+import { bandwidthHistory, bandwidthSeries } from './bandwidthHistory.js';
+import { HISTORY_RANGES, historyRangeMs } from '../src/ui/historyRange.js';
 import {
   gatewayTwinSource,
   type GatewayTwinLogBatch,
@@ -39,6 +41,13 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
+
+telemetryHistory.start(path.join(__dirname, '.data', 'device-history.json'));
+bandwidthHistory.start(path.join(__dirname, '.data', 'bandwidth-history.json'));
+process.once('exit', () => { telemetryHistory.close(); bandwidthHistory.close(); });
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(signal, () => process.exit(0));
+}
 
 const app = express();
 app.use(cors(createCorsOptionsDelegate(
@@ -1249,11 +1258,30 @@ app.post('/api/devices/classify', (req, res) => {
   res.json({ ok: true, mac, domain });
 });
 
-/** GET /api/devices/telemetry/history — rolling per-device telemetry series
- *  (real throughput from byte-counter deltas, RSSI, power draw) keyed by MAC.
- *  Session-scoped; powers the live dashboard charts. */
-app.get('/api/devices/telemetry/history', (_req, res) => {
-  res.json({ series: historySeries(), receivedAt: Date.now() });
+/** Shared validation for bounded, trailing historical windows. */
+function chartWindow(query: Record<string, unknown>) {
+  const range = String(query.range ?? '1h');
+  if (!HISTORY_RANGES.some((item) => item.value === range)) return null;
+  const until = Date.now();
+  return { range, since: until - historyRangeMs(range), until };
+}
+
+app.get('/api/devices/telemetry/history', (req, res) => {
+  const window = chartWindow(req.query);
+  if (!window) { res.status(400).json({ error: 'Invalid history range' }); return; }
+  const macs = typeof req.query.macs === 'string'
+    ? new Set(req.query.macs.split(',').slice(0, 500).map((mac) => mac.toUpperCase()))
+    : undefined;
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ series: historySeries(360, window.since, window.until, macs), ...window, receivedAt: window.until });
+});
+
+app.get('/api/ipsec/bandwidth/history', (req, res) => {
+  const window = chartWindow(req.query);
+  const topic = typeof req.query.topic === 'string' ? req.query.topic : '';
+  if (!window || !topic) { res.status(400).json({ error: 'Valid range and topic are required' }); return; }
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ points: bandwidthSeries(topic, window.since, 360, window.until), ...window, receivedAt: window.until });
 });
 
 /** POST /api/devices/matter/refresh — poke the gateway to re-fetch the Matter

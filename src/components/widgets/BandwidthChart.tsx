@@ -1,17 +1,17 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts';
 import { Card } from '../Card';
-import type { BandwidthPoint } from '../../types';
 import { useThemeColors } from '../../ui/Theme';
+import { DEFAULT_HISTORY_RANGE, historyRangeMs, historyTick, type HistoryRange } from '../../ui/historyRange';
+import { useChartHistory } from '../../ui/useChartHistory';
+import { HistoryRangeControl, HistoryStatus } from './HistoryRangeControl';
 import {
   WidgetDataBadge,
-  WidgetDataEmpty,
   WidgetDataNote,
   type WidgetDataMeta,
 } from './WanWidget';
 
 export interface BandwidthChartProps extends WidgetDataMeta {
-  data: readonly BandwidthPoint[] | null;
   /** Explicit SLA/capacity threshold. When omitted, a p95 baseline is derived
    *  from the observed samples once enough of them exist. */
   slaMbps?: number;
@@ -22,15 +22,16 @@ function p95(values: number[]): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
 }
 
+interface BandwidthPoint { t: number; fiber: number; fiveg: number; }
+interface BandwidthHistoryResponse { points: BandwidthPoint[]; since: number; until: number; }
+
 function isValidPoint(point: BandwidthPoint) {
-  return typeof point.t === 'string'
-    && point.t.trim().length > 0
+  return Number.isFinite(point.t)
     && Number.isFinite(point.fiber)
     && Number.isFinite(point.fiveg);
 }
 
 export function BandwidthChart({
-  data,
   dataState = 'unavailable',
   source,
   statusMessage,
@@ -39,48 +40,47 @@ export function BandwidthChart({
 }: BandwidthChartProps) {
   const c = useThemeColors();
   const id = useId().replace(/:/g, '');
-  const canShowObservation = dataState === 'live' || dataState === 'stale';
-  const validData = canShowObservation ? (data ?? []).filter(isValidPoint) : [];
-  const hasChart = validData.length >= 2;
+  const [range, setRange] = useState<HistoryRange>(DEFAULT_HISTORY_RANGE);
+  const history = useChartHistory<BandwidthHistoryResponse>(source
+    ? `/api/ipsec/bandwidth/history?topic=${encodeURIComponent(source)}&range=${range}` : null);
+  const [mountedAt] = useState(Date.now);
+  const until = history.data?.until ?? mountedAt;
+  const since = until - historyRangeMs(range);
+  const validData = (history.data?.points ?? []).filter(isValidPoint);
+  const chartData: { t: number; fiber?: number; fiveg?: number }[] = validData.length
+    ? validData : [{ t: since }, { t: until }];
 
   // SLA line: explicit threshold wins; otherwise derive a p95 baseline once
   // there are enough samples for the percentile to mean something.
   const totals = validData.map((point) => point.fiber + point.fiveg);
   const threshold = slaMbps
-    ?? (totals.length >= 8 ? Number(p95(totals).toFixed(2)) : undefined);
-  const thresholdLabel = slaMbps ? 'SLA' : 'p95';
+    ?? (totals.length >= 8 ? Number(p95(totals).toPrecision(4)) : undefined);
+  const thresholdLabel = slaMbps !== undefined ? 'SLA' : 'p95';
   const latestTotal = totals.length > 0 ? totals[totals.length - 1] : 0;
   const breached = threshold !== undefined && latestTotal > threshold;
 
   return (
     <Card
+      className="chart-history-card"
       title="Bandwidth — 5G vs Fiber"
       sub={(
         <>
-          <div>Observed Mbps, by source timestamp</div>
+          <div>Measured Mbps over the selected range</div>
           <WidgetDataNote
             dataState={dataState}
             source={source}
             statusMessage={statusMessage}
-            observedAt={observedAt}
+            observedAt={validData.at(-1)?.t ?? observedAt}
           />
         </>
       )}
       right={<WidgetDataBadge state={dataState} />}
     >
-      {!hasChart ? (
-        <WidgetDataEmpty
-          state={dataState}
-          liveLabel="bandwidth samples"
-          skeleton={dataState === 'live'}
-          message={validData.length === 1
-            ? 'One source sample received. Waiting for another sample to draw the chart.'
-            : undefined}
-        />
-      ) : (
-        <div style={{ height: 240 }}>
+      <HistoryRangeControl value={range} onChange={setRange} label="Bandwidth" />
+        <div className="chart-history-plot">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={validData} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+            <AreaChart data={chartData}
+              margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
               <defs>
                 <linearGradient id={`fiber-${id}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={c.accent} stopOpacity={0.55} />
@@ -92,10 +92,15 @@ export function BandwidthChart({
                 </linearGradient>
               </defs>
               <CartesianGrid stroke={c.chartGrid} strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="t" stroke={c.textMuted} fontSize={11} tickLine={false} axisLine={false} minTickGap={24} />
+              <XAxis dataKey="t" type="number" scale="time" domain={[since, until]} allowDataOverflow
+                ticks={Array.from({ length: 5 }, (_, i) => since + (until - since) * i / 4)}
+                tickFormatter={(t: number) => historyTick(t, range)}
+                stroke={c.textMuted} fontSize={11} tickLine={false} axisLine={false} minTickGap={32} />
               <YAxis
                 stroke={c.textMuted} fontSize={11} tickLine={false} axisLine={false}
-                tickFormatter={(value: number) => Number(value).toLocaleString()}
+                allowDataOverflow={!validData.length}
+                domain={validData.length ? [0, (max: number) => max || 1] : [0, 1]}
+                tickFormatter={(value: number) => Number(value).toLocaleString(undefined, { maximumSignificantDigits: 3 })}
                 label={{
                   value: 'Mbps', angle: -90, position: 'insideLeft', offset: 14,
                   style: { fontSize: 10, fill: c.textMuted, textAnchor: 'middle' },
@@ -111,8 +116,9 @@ export function BandwidthChart({
                   backdropFilter: 'blur(10px)',
                 }}
                 labelStyle={{ color: c.textDim, marginBottom: 4 }}
+                labelFormatter={(t) => new Date(Number(t)).toLocaleString()}
                 cursor={{ stroke: c.chartCursor, strokeWidth: 1 }}
-                formatter={(value) => [`${Number(value).toLocaleString()} Mbps`]}
+                formatter={(value) => [`${Number(value).toLocaleString(undefined, { maximumSignificantDigits: 4 })} Mbps`]}
               />
               <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="plainline" />
               {threshold !== undefined && (
@@ -131,7 +137,7 @@ export function BandwidthChart({
                     strokeWidth={breached ? 1.6 : 1.2}
                     ifOverflow="extendDomain"
                     label={{
-                      value: `${thresholdLabel} ${threshold.toLocaleString()} Mbps`,
+                      value: `${thresholdLabel} ${threshold.toLocaleString(undefined, { maximumSignificantDigits: 4 })} Mbps`,
                       position: 'insideTopRight',
                       fill: c.warn,
                       fontSize: 10,
@@ -140,12 +146,13 @@ export function BandwidthChart({
                   />
                 </>
               )}
-              <Area type="monotone" dataKey="fiber" name="Fiber" stroke={c.accent} fill={`url(#fiber-${id})`} strokeWidth={2} activeDot={{ r: 4 }} />
-              <Area type="monotone" dataKey="fiveg" name="5G" stroke={c.accent2} fill={`url(#fiveg-${id})`} strokeWidth={2} activeDot={{ r: 4 }} />
+              <Area type="linear" dataKey="fiber" name="Fiber" stroke={c.accent} fill={`url(#fiber-${id})`} strokeWidth={2} activeDot={{ r: 4 }} dot={validData.length === 1 ? { r: 4 } : false} isAnimationActive={false} />
+              <Area type="linear" dataKey="fiveg" name="5G" stroke={c.accent2} fill={`url(#fiveg-${id})`} strokeWidth={2} activeDot={{ r: 4 }} dot={validData.length === 1 ? { r: 4 } : false} isAnimationActive={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
-      )}
+      <HistoryStatus loading={history.loading} error={history.error} empty={!validData.length}
+        observedAt={validData.at(-1)?.t} />
     </Card>
   );
 }

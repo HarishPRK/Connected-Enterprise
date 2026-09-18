@@ -28,6 +28,7 @@ import {
   type WanCounterSample,
 } from './wanTrafficRate.js';
 import { videoAlertSource } from './videoAlertSource.js';
+import { recordBandwidth } from './bandwidthHistory.js';
 
 const ENDPOINT  = process.env.IOT_ENDPOINT ?? 'alht1i2bx8tzt-ats.iot.us-east-1.amazonaws.com';
 const REGION    = process.env.IOT_REGION   ?? process.env.AWS_REGION ?? 'us-east-1';
@@ -901,6 +902,7 @@ export class IpsecSource extends EventEmitter {
         wanRate,
       };
       this.gateways.set(gatewayKey, state);
+      recordBandwidth(topic, { ...metrics, gateway: normalised.gateway }, receivedAt);
       this.emit('update', { gatewayKey, state });
 
       // The per-client Wi-Fi block is a live LAN inventory + link telemetry —
