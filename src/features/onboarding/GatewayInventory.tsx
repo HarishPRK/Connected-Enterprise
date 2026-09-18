@@ -305,7 +305,7 @@ export function GatewayInventory({
       </div>
 
       {visibleGateways.length === 0 ? (
-        <GatewayWelcome site={selectedSite} sites={sites} profiles={profiles} canInitiate={canInitiateOnboarding}
+        <GatewayWelcome site={selectedSite} profiles={profiles} canInitiate={canInitiateOnboarding}
           localSimulator={localSimulator} onInitiate={onInitiateOnboarding} onViewProfiles={onViewProfiles} />
       ) : (
         <ul className="ce-onb-gateway-list">

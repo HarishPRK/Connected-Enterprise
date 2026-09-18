@@ -1,10 +1,9 @@
-import { ArrowRight, Cpu, Download, FileLock2, MapPin, PackageCheck, ShieldCheck } from 'lucide-react';
+import { ArrowRight, ChevronDown, Cpu, FileLock2, MapPin, PackageCheck, ShieldCheck } from 'lucide-react';
 import { currentProfiles } from './profileSelection';
 import type { ProfileVersion, Site } from './types';
 
 interface GatewayWelcomeProps {
   site?: Site;
-  sites: Site[];
   profiles: ProfileVersion[];
   canInitiate: boolean;
   localSimulator: boolean;
@@ -12,7 +11,7 @@ interface GatewayWelcomeProps {
   onViewProfiles: () => void;
 }
 
-export function GatewayWelcome({ site, sites, profiles, canInitiate, localSimulator, onInitiate, onViewProfiles }: GatewayWelcomeProps) {
+export function GatewayWelcome({ site, profiles, canInitiate, localSimulator, onInitiate, onViewProfiles }: GatewayWelcomeProps) {
   const latestProfile = currentProfiles(profiles)[0];
   const steps = localSimulator ? [
     { title: 'Verify the gateway', detail: 'Confirm the device identity in the simulator.' },
@@ -27,54 +26,53 @@ export function GatewayWelcome({ site, sites, profiles, canInitiate, localSimula
     <div className="ce-onb-welcome">
       <div className="ce-onb-welcome-main">
         <div className="ce-onb-welcome-copy">
-          <h3>Your next gateway<br /><em>starts here.</em></h3>
-          <p>No gateways are assigned {site ? `to ${site.name}` : 'yet'}. Bring a device into your network and follow its journey from identity to configuration.</p>
+          <h3>Add your first gateway</h3>
+          <p>{site ? `${site.name} is ready for a gateway.` : 'Your gateway inventory is empty.'} Choose a profile, prepare the device, and follow its activation here.</p>
           <div className="ce-onb-welcome-actions">
             {canInitiate && <button type="button" className="primary" onClick={onInitiate}>
-              Initiate Onboarding<ArrowRight size={18} aria-hidden="true" />
+              Initiate Onboarding<ArrowRight size={16} aria-hidden="true" />
             </button>}
             <button type="button" className="ce-onb-link-button" onClick={onViewProfiles}>
-              Explore profiles<ArrowRight size={15} aria-hidden="true" />
+              Browse profiles<ArrowRight size={14} aria-hidden="true" />
             </button>
           </div>
           {!canInitiate && <p className="ce-onb-welcome-permission">An administrator or operator can start gateway onboarding.</p>}
         </div>
-        <figure className="ce-onb-topology">
-          <svg viewBox="0 0 440 270" fill="none" aria-hidden="true">
-            <path className="ce-onb-topology-track" d="M84 70H130Q148 70 148 88V116Q148 135 169 135H192M84 200H130Q148 200 148 182V154Q148 135 169 135M278 135H356" />
-            <path className="ce-onb-topology-signal" d="M84 70H130Q148 70 148 88V116Q148 135 169 135H192M278 135H356" />
-            <rect className="ce-onb-topology-node" x="28" y="42" width="56" height="56" rx="16" />
-            <MapPin x="45" y="59" width="22" height="22" className="ce-onb-topology-site" />
-            <text x="56" y="122" textAnchor="middle">Site</text>
-            <rect className="ce-onb-topology-node" x="28" y="172" width="56" height="56" rx="16" />
-            <FileLock2 x="45" y="189" width="22" height="22" className="ce-onb-topology-profile" />
-            <text x="56" y="252" textAnchor="middle">Profile</text>
-            <rect className="ce-onb-topology-core" x="192" y="92" width="86" height="86" rx="16" />
+        <figure className="ce-onb-topology" aria-label="The site and profile form a gateway package for activation">
+          <svg viewBox="0 0 340 150" fill="none" aria-hidden="true">
+            <path className="ce-onb-topology-track" d="M56 35H88Q100 35 100 47V61Q100 73 112 73H140M56 111H88Q100 111 100 99V85Q100 73 112 73M198 73H270" />
+            <path className="ce-onb-topology-signal" d="M56 35H88Q100 35 100 47V61Q100 73 112 73H140M198 73H270" />
+            <rect className="ce-onb-topology-node" x="16" y="15" width="40" height="40" rx="12" />
+            <MapPin x="26" y="25" width="20" height="20" className="ce-onb-topology-site" />
+            <text x="36" y="72" textAnchor="middle">Site</text>
+            <rect className="ce-onb-topology-node" x="16" y="91" width="40" height="40" rx="12" />
+            <FileLock2 x="26" y="101" width="20" height="20" className="ce-onb-topology-profile" />
+            <text x="36" y="148" textAnchor="middle">Profile</text>
+            <rect className="ce-onb-topology-core" x="140" y="44" width="58" height="58" rx="14" />
             {localSimulator
-              ? <Cpu x="216" y="116" width="38" height="38" className="ce-onb-topology-package" />
-              : <PackageCheck x="216" y="116" width="38" height="38" className="ce-onb-topology-package" />}
-            <text x="235" y="203" textAnchor="middle">{localSimulator ? 'Gateway' : 'Gateway package'}</text>
-            <rect className="ce-onb-topology-node" x="356" y="107" width="56" height="56" rx="16" />
-            <ShieldCheck x="373" y="124" width="22" height="22" className="ce-onb-topology-site" />
-            <text x="384" y="187" textAnchor="middle">Activation</text>
-            <path className="ce-onb-topology-arrow" d="m345 130 5 5-5 5" />
+              ? <Cpu x="155" y="59" width="28" height="28" className="ce-onb-topology-package" />
+              : <PackageCheck x="155" y="59" width="28" height="28" className="ce-onb-topology-package" />}
+            <text x="169" y="122" textAnchor="middle">{localSimulator ? 'Gateway' : 'Package'}</text>
+            <rect className="ce-onb-topology-node" x="270" y="53" width="40" height="40" rx="12" />
+            <ShieldCheck x="280" y="63" width="20" height="20" className="ce-onb-topology-site" />
+            <text x="290" y="113" textAnchor="middle">Activation</text>
+            <path className="ce-onb-topology-arrow" d="m257 69 4 4-4 4" />
           </svg>
-          <figcaption>{localSimulator ? 'A configured identity for every gateway' : 'One package. Your site, profile, and device identity.'}</figcaption>
         </figure>
       </div>
-      <ol className="ce-onb-welcome-steps" aria-label="Gateway setup steps">
-        {steps.map((step, index) => <li key={step.title}>
-          <span aria-hidden="true">{index + 1}</span>
-          <div><h4>{step.title}</h4><p>{step.detail}</p></div>
-        </li>)}
-      </ol>
-      <div className="ce-onb-welcome-context">
-        <div><MapPin size={18} aria-hidden="true" /><span><small>{site ? 'Current site' : 'Authorized sites'}</small>
-          <strong>{site ? `${site.name} · ${site.location}` : sites.length ? `${sites.length} sites available` : 'No sites available'}</strong></span></div>
-        <div><FileLock2 size={18} aria-hidden="true" /><span><small>Latest profile</small>
-          <strong>{latestProfile ? `${latestProfile.name} · v${latestProfile.version}` : 'Create a profile to get started'}</strong></span></div>
-        <div><Download size={18} aria-hidden="true" /><span><small>{localSimulator ? 'Onboarding mode' : 'Package contents'}</small>
-          <strong>{localSimulator ? 'Local simulator' : 'Certificates + configuration metadata'}</strong></span></div>
+      <div className="ce-onb-welcome-footer">
+        <div className="ce-onb-welcome-profile"><FileLock2 size={16} aria-hidden="true" />
+          <span>Latest profile <strong>{latestProfile ? `${latestProfile.name} · v${latestProfile.version}` : 'No profile available'}</strong></span>
+        </div>
+        <details className="ce-onb-welcome-guide">
+          <summary>How onboarding works<ChevronDown size={14} aria-hidden="true" /></summary>
+          <ol className="ce-onb-welcome-steps" aria-label="Gateway setup steps">
+            {steps.map((step, index) => <li key={step.title}>
+              <span aria-hidden="true">{index + 1}</span>
+              <div><h4>{step.title}</h4><p>{step.detail}</p></div>
+            </li>)}
+          </ol>
+        </details>
       </div>
     </div>
   );

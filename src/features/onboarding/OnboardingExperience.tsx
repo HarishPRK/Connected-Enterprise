@@ -57,7 +57,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     <div className="ce-onb-page">
       <header className="ce-onb-masthead">
         <div className="ce-onb-masthead-title">
-          <span className="ce-onb-masthead-mark"><CloudCog size={27} aria-hidden="true" /></span>
+          <span className="ce-onb-masthead-mark"><CloudCog size={22} aria-hidden="true" /></span>
           <div><h1>Gateway Onboarding</h1><p>Device identity, configuration, and activation. One connected workflow.</p></div>
         </div>
         {snapshot && (
