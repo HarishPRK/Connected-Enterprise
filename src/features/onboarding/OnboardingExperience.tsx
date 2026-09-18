@@ -1,6 +1,5 @@
-import { useState } from 'react';
-import { CloudCog, FileKey2, FileLock2, LogOut, MapPin, Radio, RefreshCw, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { PageHeader } from '../../components/PageHeader';
+import { useRef, useState } from 'react';
+import { CloudCog, LogOut, MapPin, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { BootstrapPackageManager } from './BootstrapPackageManager';
 import { ControllerManager } from './ControllerManager';
 import { GatewayInventory } from './GatewayInventory';
@@ -11,8 +10,8 @@ import type { OnboardingOperation } from './types';
 import { useOnboardingData } from './useOnboardingData';
 import { useOnboardingAuth } from './onboardingAuthContext';
 import { currentProfiles } from './profileSelection';
+import { OnboardingNavigation, type WorkspaceSurface } from './OnboardingNavigation';
 
-type WorkspaceSurface = 'gateways' | 'profiles' | 'controller' | 'bootstrap';
 type Surface = WorkspaceSurface | 'operation';
 
 export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: string }) {
@@ -36,37 +35,15 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     && (tenantRole === 'platform_admin' || tenantRole === 'tenant_admin');
   const [surface, setSurface] = useState<Surface>('gateways');
   const [operationId, setOperationId] = useState<string>();
-  const workspaceSurfaces: WorkspaceSurface[] = canOperate
-    ? ['gateways', 'profiles', 'controller', 'bootstrap']
-    : ['gateways', 'profiles', 'controller'];
-
-  const onWorkspaceTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    const focusedTab = (event.target as HTMLElement).closest<HTMLButtonElement>('[role="tab"]');
-    const focusedSurface = workspaceSurfaces.find((candidate) => focusedTab?.id === `ce-onb-${candidate}-tab`);
-    const currentIndex = focusedSurface ? workspaceSurfaces.indexOf(focusedSurface) : workspaceSurfaces.indexOf(surface as WorkspaceSurface);
-    if (currentIndex < 0) return;
-
-    event.preventDefault();
-    const nextIndex = event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? workspaceSurfaces.length - 1
-        : event.key === 'ArrowRight'
-          ? (currentIndex + 1) % workspaceSurfaces.length
-          : (currentIndex - 1 + workspaceSurfaces.length) % workspaceSurfaces.length;
-    const nextSurface = workspaceSurfaces[nextIndex];
-    setSurface(nextSurface);
-    const tablist = event.currentTarget;
-    window.requestAnimationFrame(() => {
-      tablist.querySelector<HTMLButtonElement>(`#ce-onb-${nextSurface}-tab`)?.focus();
-    });
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const navigate = (next: Surface) => {
+    setSurface(next);
+    window.requestAnimationFrame(() => workspaceRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' }));
   };
-
   const openOperation = (operation: OnboardingOperation) => {
     upsertOperation(operation);
     setOperationId(operation.id);
-    setSurface('operation');
+    navigate('operation');
   };
 
   const activeOperation = operationId
@@ -78,16 +55,15 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
 
   return (
     <div className="ce-onb-page">
-      <PageHeader
-        title="Gateway Onboarding"
-        subtitle="Register real or mock gateways, assign profiles, and track configuration delivery and device health."
-        right={snapshot && (
+      <header className="ce-onb-masthead">
+        <div className="ce-onb-masthead-title">
+          <span className="ce-onb-masthead-mark"><CloudCog size={27} aria-hidden="true" /></span>
+          <div><h1>Gateway Onboarding</h1><p>Device identity, configuration, and activation. One connected workflow.</p></div>
+        </div>
+        {snapshot && (
           <div className="ce-onb-page-context">
             <span><ShieldCheck size={13} aria-hidden="true" />{snapshot.tenant.name}</span>
             {preferredSite && <span><MapPin size={13} aria-hidden="true" />{preferredSite.name}</span>}
-            <span className="ce-onb-connection" data-connected={streamState === 'connected'}>
-              <i aria-hidden="true" />{streamState === 'connected' ? 'Live' : snapshot.mode === 'aws' ? 'Polling' : 'Reconnecting'}
-            </span>
             {user && (
               <button type="button" className="ce-onb-signout" onClick={signOut} title={user.email ?? user.subject}>
                 <LogOut size={13} aria-hidden="true" />Sign out
@@ -95,7 +71,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
             )}
           </div>
         )}
-      />
+      </header>
 
       {loading && !snapshot ? (
         <div className="ce-onb-loading" role="status" aria-live="polite">
@@ -121,152 +97,105 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
             </div>
           )}
 
-          {(surface === 'gateways' || surface === 'profiles' || surface === 'controller' || surface === 'bootstrap') && (
-            <div className="ce-onb-command-bar">
-              <div className="ce-onb-tabs" role="tablist" aria-label="Onboarding workspace" onKeyDown={onWorkspaceTabKeyDown}>
-                <button
-                  id="ce-onb-gateways-tab"
-                  type="button"
-                  role="tab"
-                  aria-selected={surface === 'gateways'}
-                  aria-controls="ce-onb-gateways-panel"
-                  tabIndex={surface === 'gateways' ? 0 : -1}
-                  onClick={() => setSurface('gateways')}
-                >
-                  <CloudCog size={15} aria-hidden="true" />Gateways <span>{snapshot.gateways.length}</span>
-                </button>
-                <button
-                  id="ce-onb-profiles-tab"
-                  type="button"
-                  role="tab"
-                  aria-selected={surface === 'profiles'}
-                  aria-controls="ce-onb-profiles-panel"
-                  tabIndex={surface === 'profiles' ? 0 : -1}
-                  onClick={() => setSurface('profiles')}
-                >
-                  <FileLock2 size={15} aria-hidden="true" />Profiles <span>{currentProfiles(snapshot.profiles).length}</span>
-                </button>
-                <button
-                  id="ce-onb-controller-tab"
-                  type="button"
-                  role="tab"
-                  aria-selected={surface === 'controller'}
-                  aria-controls="ce-onb-controller-panel"
-                  tabIndex={surface === 'controller' ? 0 : -1}
-                  onClick={() => setSurface('controller')}
-                >
-                  <ServerCog size={15} aria-hidden="true" />Controller
-                </button>
-                {canOperate && (
-                  <button
-                    id="ce-onb-bootstrap-tab"
-                    type="button"
-                    role="tab"
-                    aria-selected={surface === 'bootstrap'}
-                    aria-controls="ce-onb-bootstrap-panel"
-                    tabIndex={surface === 'bootstrap' ? 0 : -1}
-                    onClick={() => setSurface('bootstrap')}
-                  >
-                    <FileKey2 size={15} aria-hidden="true" />Initiate Onboarding
-                  </button>
-                )}
-              </div>
-              <div className="ce-onb-command-assurance">
-                <Radio size={14} aria-hidden="true" />
-                <span>{snapshot.mode === 'aws' ? 'AWS control plane' : 'Local simulator'} · generated {new Date(snapshot.generatedAt).toLocaleTimeString()}</span>
-              </div>
+          <div className="ce-onb-workspace" ref={workspaceRef}>
+            <OnboardingNavigation surface={surface} onNavigate={navigate} canOperate={Boolean(canOperate)}
+              gatewayCount={snapshot.gateways.length} profileCount={currentProfiles(snapshot.profiles).length}
+              localSimulator={Boolean(localSimulator)} streamState={streamState} generatedAt={snapshot.generatedAt} />
+            <div className="ce-onb-workspace-content">
+
+              {surface === 'gateways' && (
+                <div id="ce-onb-gateways-panel">
+                  <GatewayInventory
+                    gateways={snapshot.gateways}
+                    sites={snapshot.sites}
+                    models={snapshot.gatewayModels}
+                    profiles={snapshot.profiles}
+                    operations={snapshot.operations}
+                    controller={snapshot.controller}
+                    preferredSiteId={preferredSiteId}
+                    refreshing={refreshing}
+                    canInitiateOnboarding={canOperate}
+                    canDecommission={canAdminister}
+                    canResetRegistration={snapshot.canResetGatewayRegistration}
+                    canDeployProfile={canOperate}
+                    onRefresh={() => void refresh()}
+                    onInitiateOnboarding={() => navigate('bootstrap')}
+                    onViewProfiles={() => navigate('profiles')}
+                    localSimulator={Boolean(localSimulator)}
+                    onOperation={openOperation}
+                  />
+                </div>
+              )}
+
+              {surface === 'profiles' && (
+                <div id="ce-onb-profiles-panel">
+                  <ProfileManager
+                    profiles={snapshot.profiles}
+                    models={snapshot.gatewayModels}
+                    canPublish={canAdminister}
+                    onProfileCreated={upsertProfile}
+                  />
+                </div>
+              )}
+
+              {surface === 'controller' && (
+                <div id="ce-onb-controller-panel">
+                  <ControllerManager
+                    controller={snapshot.controller}
+                    canConfigure={canAdminister}
+                    onControllerSaved={upsertController}
+                  />
+                </div>
+              )}
+
+              {surface === 'bootstrap' && canOperate && (
+                <div id="ce-onb-bootstrap-panel">
+                  {localSimulator ? <OnboardingWizard
+                    profiles={snapshot.profiles}
+                    models={snapshot.gatewayModels}
+                    preferredSiteId={preferredSiteId}
+                    onCancel={() => navigate('gateways')}
+                    onStarted={openOperation}
+                  /> : <BootstrapPackageManager
+                    key={`${snapshot.tenant.id}:${user?.subject ?? ''}`}
+                    profiles={snapshot.profiles}
+                    sites={snapshot.sites}
+                    tenantId={snapshot.tenant.id}
+                    resumeScope={user?.subject ?? ''}
+                    canIssue={canIssueBootstrapPackage}
+                    operations={snapshot.operations}
+                    gateways={snapshot.gateways}
+                    preferredSiteId={preferredSiteId}
+                    onIssued={refresh}
+                    onOperation={openOperation}
+                  />}
+                </div>
+              )}
+
+              {surface === 'operation' && activeOperation && (
+                <OperationProgress
+                  operation={activeOperation}
+                  sites={snapshot.sites}
+                  streamState={streamState}
+                  onUpdate={upsertOperation}
+                  onContinueOnboarding={canOperate ? () => navigate('bootstrap') : undefined}
+                  onBack={() => {
+                    navigate('gateways');
+                    void refresh();
+                  }}
+                />
+              )}
+
+              {surface === 'operation' && !activeOperation && (
+                <section className="ce-onb-load-error" aria-labelledby="operation-missing-title">
+                  <span><TriangleAlert size={24} aria-hidden="true" /></span>
+                  <h2 id="operation-missing-title">Operation details are unavailable</h2>
+                  <p>Refresh the inventory and reopen the operation from its gateway row.</p>
+                  <button type="button" onClick={() => { navigate('gateways'); void refresh(); }}>Return to inventory</button>
+                </section>
+              )}
             </div>
-          )}
-
-          {surface === 'gateways' && (
-            <div id="ce-onb-gateways-panel" role="tabpanel" aria-labelledby="ce-onb-gateways-tab">
-              <GatewayInventory
-                gateways={snapshot.gateways}
-                sites={snapshot.sites}
-                models={snapshot.gatewayModels}
-                profiles={snapshot.profiles}
-                operations={snapshot.operations}
-                controller={snapshot.controller}
-                preferredSiteId={preferredSiteId}
-                refreshing={refreshing}
-                canInitiateOnboarding={canOperate}
-                canDecommission={canAdminister}
-                canResetRegistration={snapshot.canResetGatewayRegistration}
-                canDeployProfile={canOperate}
-                onRefresh={() => void refresh()}
-                onInitiateOnboarding={() => setSurface('bootstrap')}
-                onOperation={openOperation}
-              />
-            </div>
-          )}
-
-          {surface === 'profiles' && (
-            <div id="ce-onb-profiles-panel" role="tabpanel" aria-labelledby="ce-onb-profiles-tab">
-              <ProfileManager
-                profiles={snapshot.profiles}
-                models={snapshot.gatewayModels}
-                canPublish={canAdminister}
-                onProfileCreated={upsertProfile}
-              />
-            </div>
-          )}
-
-          {surface === 'controller' && (
-            <div id="ce-onb-controller-panel" role="tabpanel" aria-labelledby="ce-onb-controller-tab">
-              <ControllerManager
-                controller={snapshot.controller}
-                canConfigure={canAdminister}
-                onControllerSaved={upsertController}
-              />
-            </div>
-          )}
-
-          {surface === 'bootstrap' && canOperate && (
-            <div id="ce-onb-bootstrap-panel" role="tabpanel" aria-labelledby="ce-onb-bootstrap-tab">
-              {localSimulator ? <OnboardingWizard
-                profiles={snapshot.profiles}
-                models={snapshot.gatewayModels}
-                preferredSiteId={preferredSiteId}
-                onCancel={() => setSurface('gateways')}
-                onStarted={openOperation}
-              /> : <BootstrapPackageManager
-                key={`${snapshot.tenant.id}:${user?.subject ?? ''}`}
-                profiles={snapshot.profiles}
-                sites={snapshot.sites}
-                tenantId={snapshot.tenant.id}
-                resumeScope={user?.subject ?? ''}
-                canIssue={canIssueBootstrapPackage}
-                operations={snapshot.operations}
-                gateways={snapshot.gateways}
-                preferredSiteId={preferredSiteId}
-                onIssued={refresh}
-                onOperation={openOperation}
-              />}
-            </div>
-          )}
-
-          {surface === 'operation' && activeOperation && (
-            <OperationProgress
-              operation={activeOperation}
-              sites={snapshot.sites}
-              streamState={streamState}
-              onUpdate={upsertOperation}
-              onContinueOnboarding={canOperate ? () => setSurface('bootstrap') : undefined}
-              onBack={() => {
-                setSurface('gateways');
-                void refresh();
-              }}
-            />
-          )}
-
-          {surface === 'operation' && !activeOperation && (
-            <section className="ce-onb-load-error" aria-labelledby="operation-missing-title">
-              <span><TriangleAlert size={24} aria-hidden="true" /></span>
-              <h2 id="operation-missing-title">Operation details are unavailable</h2>
-              <p>Refresh the inventory and reopen the operation from its gateway row.</p>
-              <button type="button" onClick={() => { setSurface('gateways'); void refresh(); }}>Return to inventory</button>
-            </section>
-          )}
+          </div>
         </>
       )}
     </div>

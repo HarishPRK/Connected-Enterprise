@@ -240,8 +240,8 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
     <section className="ce-onb-profile-manager" aria-labelledby="profile-catalog-title">
       <div className="ce-onb-section-heading">
         <div>
-          <h2 id="profile-catalog-title">Profiles</h2>
-          <p>Latest configurations, with duplicate copies hidden. Edit a profile to save its next version.</p>
+          <h2 id="profile-catalog-title">Configuration profiles</h2>
+          <p>Explore your latest configurations. Review a profile or publish its next version.</p>
         </div>
         {canPublish && selected && selectedIsCurrent && (
           <button type="button" className="primary" onClick={() => beginCreate(selected)} disabled={models.length === 0}>
@@ -303,10 +303,10 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
             <div className="ce-onb-profile-detail">
               <div className="ce-onb-profile-detail-head">
                 <div>
-                  <span className="ce-onb-security-mark"><CheckCircle2 size={14} aria-hidden="true" />{selectedIsCurrent ? 'Latest version' : 'Historical version'}</span>
                   <h3>{selected.name} <span>v{selected.version}</span></h3>
                   <p>{selected.description}</p>
                 </div>
+                <span className="ce-onb-security-mark"><CheckCircle2 size={14} aria-hidden="true" />{selectedIsCurrent ? 'Latest version' : 'Historical version'}</span>
               </div>
               <dl className="ce-onb-profile-facts">
                 <div><dt>Model</dt><dd>{selected.modelId}</dd></div>

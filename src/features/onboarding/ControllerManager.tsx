@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { CheckCircle2, CloudCog, Save, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { ArrowRight, CheckCircle2, CloudCog, Cpu, Pencil, Save, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useToast } from '../../ui/Toast';
 import { createIdempotencyKey, saveControllerConfiguration } from './api';
 import {
@@ -46,6 +46,7 @@ export function ControllerManager({ controller, canConfigure, onControllerSaved 
   const previousPersistedFingerprint = useRef(persistedFingerprint);
   const [draft, setDraft] = useState<ControllerUspDraft>(persistedDraft);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState<FormError>();
   const [idempotencyKey, setIdempotencyKey] = useState(() => createIdempotencyKey('controller'));
 
@@ -102,6 +103,7 @@ export function ControllerManager({ controller, canConfigure, onControllerSaved 
       setDraft(savedDraft);
       previousPersistedFingerprint.current = controllerUspDraftFingerprint(savedDraft);
       onControllerSaved(saved);
+      setEditing(false);
       setIdempotencyKey(createIdempotencyKey('controller'));
       push({
         kind: 'success',
@@ -121,13 +123,14 @@ export function ControllerManager({ controller, canConfigure, onControllerSaved 
 
   const usp = controller?.configuration.usp;
   const savedPayload = controller ? JSON.stringify(controller.configuration, null, 2) : undefined;
+  const showEditor = canConfigure && (editing || !controller);
 
   return (
     <section className="ce-onb-controller" aria-labelledby="controller-configuration-title">
       <div className="ce-onb-section-heading">
         <div>
           <h2 id="controller-configuration-title">Controller configuration</h2>
-          <p>Provision the tenant-wide USP over MQTT payload returned when a gateway requests configuration through API Gateway.</p>
+          <p>Set the USP connection used to deliver configuration to your gateways.</p>
         </div>
         <span className="ce-onb-security-mark"><ShieldCheck size={16} aria-hidden="true" />Tenant configuration</span>
       </div>
@@ -137,7 +140,7 @@ export function ControllerManager({ controller, canConfigure, onControllerSaved 
           <div className="ce-onb-panel-title">
             <span className="ce-onb-panel-icon"><ServerCog size={20} aria-hidden="true" /></span>
             <div>
-              <h3>{controller ? 'Saved USP connection' : 'Configure a USP Controller'}</h3>
+              <h3>{showEditor && controller ? 'Edit USP connection' : controller ? 'Saved USP connection' : 'Configure a USP Controller'}</h3>
               <p>{controller
                 ? 'These are the MQTT connection details currently stored for this tenant.'
                 : 'Enter the Controller identity, MQTT broker, and concrete Controller topic.'}</p>
@@ -147,7 +150,7 @@ export function ControllerManager({ controller, canConfigure, onControllerSaved 
             </span>
           </div>
 
-          {usp && controller && (
+          {usp && controller && !showEditor && (
             <>
               <dl className="ce-onb-controller-facts">
                 <div className="is-full">
@@ -196,7 +199,7 @@ export function ControllerManager({ controller, canConfigure, onControllerSaved 
             </>
           )}
 
-          {canConfigure ? (
+          {showEditor ? (
             <form className="ce-onb-controller-form" onSubmit={submit} noValidate>
               <fieldset disabled={saving}>
                 <legend className="ce-onb-sr-only">USP Controller settings</legend>
@@ -326,12 +329,26 @@ export function ControllerManager({ controller, canConfigure, onControllerSaved 
                 <span>{controller
                   ? 'Saving creates the next tenant-wide Controller revision.'
                   : 'Saving makes this the tenant-wide Controller payload.'}</span>
-                <button type="submit" className="primary" disabled={saving || !requiredFieldsPresent || !changed}>
-                  {saving ? <span className="ce-onb-spinner" aria-hidden="true" /> : <Save size={15} aria-hidden="true" />}
-                  {saving ? 'Saving…' : controller ? 'Update configuration' : 'Save configuration'}
-                </button>
+                <div>
+                  {controller && <button type="button" disabled={saving} onClick={() => {
+                    setDraft(controllerUspDraftFromProvisioning(controller.configuration));
+                    setError(undefined);
+                    setEditing(false);
+                  }}>Cancel</button>}
+                  <button type="submit" className="primary" disabled={saving || !requiredFieldsPresent || !changed}>
+                    {saving ? <span className="ce-onb-spinner" aria-hidden="true" /> : <Save size={15} aria-hidden="true" />}
+                    {saving ? 'Saving…' : controller ? 'Update configuration' : 'Save configuration'}
+                  </button>
+                </div>
               </div>
             </form>
+          ) : canConfigure ? (
+            <div className="ce-onb-controller-actions">
+              <span>Changes are saved as a new Controller revision.</span>
+              <button type="button" className="primary" onClick={() => setEditing(true)}>
+                <Pencil size={15} aria-hidden="true" />Edit connection
+              </button>
+            </div>
           ) : (
             <div className="ce-onb-controller-readonly" role="note">
               {controller ? <CheckCircle2 size={18} aria-hidden="true" /> : <TriangleAlert size={18} aria-hidden="true" />}
@@ -346,7 +363,13 @@ export function ControllerManager({ controller, canConfigure, onControllerSaved 
         </div>
 
         <aside className="ce-onb-controller-contract" aria-label="Gateway Controller response contract">
-          <span><CloudCog size={22} aria-hidden="true" /></span>
+          <div className="ce-onb-delivery-flow" aria-label="Configuration delivery path">
+            <div><ServerCog size={21} aria-hidden="true" /><span>Controller</span></div>
+            <ArrowRight size={14} aria-hidden="true" />
+            <div><CloudCog size={21} aria-hidden="true" /><span>API Gateway</span></div>
+            <ArrowRight size={14} aria-hidden="true" />
+            <div><Cpu size={21} aria-hidden="true" /><span>Gateway</span></div>
+          </div>
           <h3>Gateway curl response</h3>
           <p>API Gateway returns the saved <code>{'{ usp: … }'}</code> object as the top-level JSON response body. This preview is formatted for readability.</p>
           {savedPayload ? (

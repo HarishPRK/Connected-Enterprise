@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
   Activity,
-  Box,
   CheckCircle2,
   Clock3,
   CloudUpload,
@@ -15,6 +14,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { Modal } from '../../ui/Modal';
+import { GatewayWelcome } from './GatewayWelcome';
 import { useToast } from '../../ui/Toast';
 import { createIdempotencyKey, decommissionGateway, deployProfileToGateway } from './api';
 import {
@@ -49,6 +49,8 @@ interface GatewayInventoryProps {
   canDeployProfile: boolean;
   onRefresh: () => void;
   onInitiateOnboarding: () => void;
+  onViewProfiles: () => void;
+  localSimulator: boolean;
   onOperation: (operation: OnboardingOperation) => void;
 }
 
@@ -133,6 +135,8 @@ export function GatewayInventory({
   canDeployProfile,
   onRefresh,
   onInitiateOnboarding,
+  onViewProfiles,
+  localSimulator,
   onOperation,
 }: GatewayInventoryProps) {
   const { push } = useToast();
@@ -292,20 +296,17 @@ export function GatewayInventory({
             <RefreshCw className={refreshing ? 'ce-onb-spin' : ''} size={14} aria-hidden="true" />
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
+          {visibleGateways.length > 0 && canInitiateOnboarding && (
+            <button type="button" className="primary" onClick={onInitiateOnboarding}>
+              <PackagePlus size={15} aria-hidden="true" />Add gateway
+            </button>
+          )}
         </div>
       </div>
 
       {visibleGateways.length === 0 ? (
-        <div className="ce-onb-empty-state">
-          <span className="ce-onb-empty-icon"><Box size={25} aria-hidden="true" /></span>
-          <h3>No gateways assigned {selectedSite ? 'to this site' : 'yet'}</h3>
-          <p>Use Initiate Onboarding to set up a gateway and follow its activation progress.</p>
-          {canInitiateOnboarding && (
-            <button type="button" className="primary" onClick={onInitiateOnboarding}>
-              <PackagePlus size={15} aria-hidden="true" />Initiate Onboarding
-            </button>
-          )}
-        </div>
+        <GatewayWelcome site={selectedSite} sites={sites} profiles={profiles} canInitiate={canInitiateOnboarding}
+          localSimulator={localSimulator} onInitiate={onInitiateOnboarding} onViewProfiles={onViewProfiles} />
       ) : (
         <ul className="ce-onb-gateway-list">
           {visibleGateways.map((gateway) => {

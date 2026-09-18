@@ -206,7 +206,7 @@ export function OperationProgress({
               ? 'Gateway decommissioning'
               : operation.type === 'PROFILE_DEPLOY'
                 ? pullConfirmed ? 'Controller delivery progress' : 'Profile deployment progress'
-                : pullConfirmed ? 'Gateway onboarding and Controller delivery' : 'Gateway onboarding and profile validation'}
+                : pullConfirmed ? 'Gateway onboarding and Controller delivery' : 'Gateway activation progress'}
           </h2>
           <p>{operation.serialNumber} · {site ? `${site.name}, ${site.location}` : operation.siteId}</p>
         </div>
@@ -245,9 +245,9 @@ export function OperationProgress({
                   : <CloudCog size={23} aria-hidden="true" />}
             </span>
             <div>
-              <small>Operation {operation.id}</small>
               <strong>{summaryLabel}</strong>
               <span>{operation.resetForOnboarding ? 'Fresh onboarding will start at generation 5' : `Deployment generation ${operation.deploymentGeneration}`}</span>
+              <small>Operation {operation.id}</small>
             </div>
           </div>
 

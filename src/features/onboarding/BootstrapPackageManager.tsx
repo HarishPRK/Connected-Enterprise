@@ -21,6 +21,7 @@ import {
   type BootstrapRegistration,
 } from './bootstrapRegistration';
 import { ProfilePreview } from './ProfilePreview';
+import { PackageJourney } from './PackageJourney';
 import { selectableProfiles } from './profileSelection';
 import type { Gateway, OnboardingOperation, ProfileVersion, Site } from './types';
 
@@ -206,6 +207,7 @@ export function BootstrapPackageManager({
           onClick={() => { setIssued(undefined); setError(undefined); }}>
           <ArrowLeft size={14} aria-hidden="true" />Back to package setup
         </button>
+        <PackageJourney phase="activate" />
         <div className="ce-onb-bootstrap-success" role="status" aria-live="polite">
           <span className="ce-onb-bootstrap-success-mark"><CheckCircle2 size={26} aria-hidden="true" /></span>
           <div>
@@ -261,6 +263,7 @@ export function BootstrapPackageManager({
         {canIssue && <span className="ce-onb-security-mark"><FileKey2 size={15} aria-hidden="true" />Administrator only</span>}
       </div>
 
+      <PackageJourney phase="prepare" />
       {error && (
         <div className="ce-onb-alert is-error" role="alert">
           <TriangleAlert size={17} aria-hidden="true" /><span>{error}</span>
@@ -295,7 +298,7 @@ export function BootstrapPackageManager({
               </select>
             </label>
 
-            <label className="is-wide">
+            <label>
               <span>Profile</span>
               <select
                 value={selectedProfileId}
