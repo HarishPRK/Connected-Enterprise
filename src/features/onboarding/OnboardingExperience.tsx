@@ -11,6 +11,7 @@ import { useOnboardingData } from './useOnboardingData';
 import { useOnboardingAuth } from './onboardingAuthContext';
 import { currentProfiles } from './profileSelection';
 import { OnboardingNavigation, type WorkspaceSurface } from './OnboardingNavigation';
+import './activation-workspace.css';
 
 type Surface = WorkspaceSurface | 'operation';
 
@@ -54,11 +55,11 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     : undefined;
 
   return (
-    <div className="ce-onb-page">
+    <div className="ce-onb-page ce-onb-activation-workspace">
       <header className="ce-onb-masthead">
         <div className="ce-onb-masthead-title">
           <span className="ce-onb-masthead-mark"><CloudCog size={22} aria-hidden="true" /></span>
-          <div><h1>Gateway Onboarding</h1><p>Device identity, configuration, and activation. One connected workflow.</p></div>
+          <div><h1>Gateway Onboarding</h1><p>From device identity to a healthy gateway.</p></div>
         </div>
         {snapshot && (
           <div className="ce-onb-page-context">

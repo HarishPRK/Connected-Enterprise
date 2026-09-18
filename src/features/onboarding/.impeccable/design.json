@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-18T17:23:59.5432269Z",
+  "title": "Gateway activation workspace",
+  "extensions": {
+    "breakpoints": [
+      {
+        "name": "compact-selector",
+        "value": "1150px"
+      },
+      {
+        "name": "stacked-workspace",
+        "value": "880px"
+      },
+      {
+        "name": "phone",
+        "value": "620px"
+      }
+    ]
+  },
+  "components": [],
+  "narrative": {
+    "scope": "Onboarding route only; preserve the host application chrome.",
+    "rules": [
+      "Lifecycle stages describe the current reported generation.",
+      "Authenticated retrieval does not establish healthy application.",
+      "Configuration previews use stored values and do not issue credentials."
+    ]
+  }
+}

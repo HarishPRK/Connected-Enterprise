@@ -202,7 +202,8 @@ export function ProfileParameterEditor({
 }: ProfileParameterEditorProps) {
   const instanceId = useId().replace(/:/g, '');
   const [query, setQuery] = useState('');
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() =>
+    readOnly && compact ? Object.fromEntries(PROFILE_CATEGORIES.map(category => [category.id, true])) : {});
 
   const visible = useMemo(() => PROFILE_CATEGORIES.map((category) => ({
     category,

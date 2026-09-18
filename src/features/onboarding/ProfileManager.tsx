@@ -4,6 +4,7 @@ import { useToast } from '../../ui/Toast';
 import { createIdempotencyKey, createProfileVersion } from './api';
 import { defaultProfileParameters, PROFILE_PARAMETERS } from './profileCatalog';
 import { ProfileParameterEditor } from './ProfileParameterEditor';
+import { ProfileBlueprint } from './ProfileBlueprint';
 import { currentProfiles, newestProfilesFirst } from './profileSelection';
 import type { GatewayModel, ProfileParameterValue, ProfileVersion } from './types';
 
@@ -315,6 +316,7 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
                 <div><dt>Content hash</dt><dd className="mono" title={selected.contentHash}>{shortHash(selected.contentHash)}</dd></div>
               </dl>
               <div className="ce-onb-profile-change-note"><strong>Change note</strong><span>{selected.changeNote}</span></div>
+              <ProfileBlueprint profile={selected} />
               <ProfileParameterEditor values={selected.parameters} readOnly compact />
             </div>
           )}

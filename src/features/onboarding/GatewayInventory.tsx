@@ -1,20 +1,21 @@
 import { useMemo, useState } from 'react';
 import {
-  Activity,
+  ArrowRight,
   CheckCircle2,
-  Clock3,
   CloudUpload,
   Cpu,
-  MapPin,
   PackagePlus,
   PowerOff,
   RefreshCw,
+  Search,
   ServerCog,
   ShieldCheck,
   TriangleAlert,
 } from 'lucide-react';
 import { Modal } from '../../ui/Modal';
 import { GatewayWelcome } from './GatewayWelcome';
+import { GatewayDetail } from './GatewayDetail';
+import { currentGatewayOperation, gatewayJourney, type GatewayGroup } from './gatewayLifecycle';
 import { useToast } from '../../ui/Toast';
 import { createIdempotencyKey, decommissionGateway, deployProfileToGateway } from './api';
 import {
@@ -83,25 +84,8 @@ function gatewayDisplayState(
   return { label: gateway.state.toLowerCase().replace(/_/g, ' '), tone: 'neutral' };
 }
 
-function certificateLabel(state: Gateway['certificateState']): string {
-  if (state === 'DEACTIVATING') return 'deactivating';
-  return state.toLowerCase();
-}
-
-function formatTimestamp(value?: string): string {
-  if (!value) return 'Not reported';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
-}
-
 function operationFor(gateway: Gateway, operations: OnboardingOperation[]): OnboardingOperation | undefined {
-  const gatewayOperations = operations.filter((operation) => operation.gatewayId === gateway.id);
-  return gatewayOperations.find((operation) => operation.status === 'IN_PROGRESS')
-    ?? gatewayOperations.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
+  return currentGatewayOperation(gateway, operations);
 }
 
 function canMigrateLegacyAssignment(
@@ -153,6 +137,11 @@ export function GatewayInventory({
   const [deployError, setDeployError] = useState<string>();
   const [deployIdempotencyKey, setDeployIdempotencyKey] = useState(() => createIdempotencyKey('profile-deploy'));
 
+  const [selectedGatewayId, setSelectedGatewayId] = useState('');
+  const [gatewayQuery, setGatewayQuery] = useState('');
+  const [gatewayFilter, setGatewayFilter] = useState<GatewayGroup | 'all'>('all');
+
+
   const siteById = useMemo(() => new Map(sites.map((site) => [site.id, site])), [sites]);
   const modelById = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
@@ -160,6 +149,25 @@ export function GatewayInventory({
   const visibleGateways = preferredSiteId && selectedSite
     ? gateways.filter((gateway) => gateway.siteId === preferredSiteId)
     : gateways;
+
+  const entries = visibleGateways.map(gateway => {
+    const operation = operationFor(gateway, operations);
+    return { gateway, operation, journey: gatewayJourney(gateway, operation) };
+  });
+  const filters = [
+    { id: 'all' as const, label: 'All gateways' },
+    { id: 'activating' as const, label: 'Activating' },
+    { id: 'ready' as const, label: 'Ready' },
+    { id: 'attention' as const, label: 'Needs attention' },
+    ...(entries.some(entry => entry.journey.group === 'retired') ? [{ id: 'retired' as const, label: 'Retired' }] : []),
+  ];
+  const filteredEntries = entries.filter(({ gateway, journey }) => {
+    const needle = gatewayQuery.trim().toLowerCase();
+    return (gatewayFilter === 'all' || journey.group === gatewayFilter)
+      && (!needle || `${gateway.serialNumber} ${gateway.modelId} ${gateway.thingName} ${siteById.get(gateway.siteId)?.name ?? ''}`.toLowerCase().includes(needle));
+  });
+  const selectedEntry = filteredEntries.find(entry => entry.gateway.id === selectedGatewayId) ?? filteredEntries[0];
+
 
   const openDecommission = (gateway: Gateway, reset = false) => {
     setResetForOnboarding(reset);
@@ -308,101 +316,87 @@ export function GatewayInventory({
         <GatewayWelcome site={selectedSite} profiles={profiles} canInitiate={canInitiateOnboarding}
           localSimulator={localSimulator} onInitiate={onInitiateOnboarding} onViewProfiles={onViewProfiles} />
       ) : (
-        <ul className="ce-onb-gateway-list">
-          {visibleGateways.map((gateway) => {
-            const site = siteById.get(gateway.siteId);
-            const model = modelById.get(gateway.modelId);
-            const profile = gateway.profileVersionId ? profileById.get(gateway.profileVersionId) : undefined;
-            const desiredProfile = gateway.desiredProfileVersionId ? profileById.get(gateway.desiredProfileVersionId) : undefined;
-            const gatewayOperation = operationFor(gateway, operations);
-            const profileAssignmentOperation = profileAssignmentOperationFor(gateway, operations);
-            const state = gatewayDisplayState(gateway, profileAssignmentOperation);
-            const pullConfirmed = isAuthenticatedPullConfirmedAssignment(gateway, profileAssignmentOperation);
-            const activeOperation = gatewayOperation?.status === 'IN_PROGRESS' ? gatewayOperation : undefined;
-            const legacyAssignmentCanMigrate = canMigrateLegacyAssignment(gateway, activeOperation);
-            const unconfirmedProfileCanSupersede = canSupersedeUnconfirmedProfileAssignment(
-              gateway,
-              profileAssignmentOperation,
-            );
-            const gatewayCanDecommission = gateway.certificateState === 'ACTIVE'
-              && (gateway.state === 'ACTIVE' || gateway.state === 'ROLLED_BACK' || gateway.state === 'FAILED');
-            const gatewayCanDeploy = legacyAssignmentCanMigrate
-              || unconfirmedProfileCanSupersede
-              || pullConfirmed
-              || (gateway.certificateState === 'ACTIVE'
-                && ((gateway.state === 'ACTIVE' && gateway.health === 'HEALTHY') || gateway.state === 'ROLLED_BACK'));
-            return (
-              <li key={gateway.id} className="ce-onb-gateway-row">
-                <span className="ce-onb-gateway-icon"><Cpu size={19} aria-hidden="true" /></span>
-                <div className="ce-onb-gateway-primary">
-                  <div className="ce-onb-gateway-title">
-                    <strong>{gateway.serialNumber}</strong>
-                    <span
-                      className="ce-onb-status"
-                      data-tone={state.tone}
-                      title={state.title}
-                      aria-label={state.title ? `${state.label}. ${state.title}` : undefined}
-                    >
-                      <span aria-hidden="true" />{state.label}
-                    </span>
-                  </div>
-                  <span>{model?.name ?? gateway.modelId} · hardware {gateway.hardwareRevision}</span>
-                  <div className="ce-onb-gateway-facts">
-                    <span><MapPin size={12} aria-hidden="true" />{site ? `${site.name} · ${site.location}` : gateway.siteId}</span>
-                    <span><ShieldCheck size={12} aria-hidden="true" />Certificate {certificateLabel(gateway.certificateState)}</span>
-                    <span><Activity size={12} aria-hidden="true" />Generation {gateway.deploymentGeneration}</span>
-                    <span><Clock3 size={12} aria-hidden="true" />Last seen {formatTimestamp(gateway.lastSeenAt)}</span>
-                  </div>
-                </div>
-                <div className="ce-onb-gateway-profile">
-                  <small>{pullConfirmed ? 'Assigned profile' : 'Applied profile'}</small>
-                  <strong>{profile ? `${profile.name} v${profile.version}` : 'No profile assigned'}</strong>
-                  {desiredProfile && desiredProfile.id !== profile?.id && (
-                    <span>Candidate: {desiredProfile.name} v{desiredProfile.version}</span>
-                  )}
-                  <span className="mono" title={gateway.thingName}>{gateway.thingName}</span>
-                </div>
-                <div className="ce-onb-row-actions">
-                  {gatewayOperation && (
-                    <button type="button" onClick={() => onOperation(gatewayOperation)}>
-                      {activeOperation ? 'View progress' : 'View operation'}
-                    </button>
-                  )}
+        <>
+          <div className="ce-onb-fleet-tools">
+            <div className="ce-onb-fleet-filters" role="group" aria-label="Filter gateways by status">
+              {filters.map(filter => <button type="button" key={filter.id} aria-pressed={gatewayFilter === filter.id}
+                onClick={() => setGatewayFilter(filter.id)}>
+                <i data-group={filter.id} aria-hidden="true" />{filter.label}
+                <span>{filter.id === 'all' ? entries.length : entries.filter(entry => entry.journey.group === filter.id).length}</span>
+              </button>)}
+            </div>
+            <label className="ce-onb-search-field ce-onb-gateway-search">
+              <Search size={14} aria-hidden="true" /><span className="ce-onb-sr-only">Search gateways</span>
+              <input type="search" placeholder="Find a gateway…" value={gatewayQuery} onChange={event => setGatewayQuery(event.target.value)} />
+            </label>
+          </div>
+          <div className="ce-onb-fleet-workspace">
+            <aside className="ce-onb-gateway-picker" aria-label="Select a gateway">
+              <div className="ce-onb-picker-heading"><strong>Gateways</strong><span>{filteredEntries.length}</span></div>
+              <ul>
+                {filteredEntries.map(({ gateway, journey }) => <li key={gateway.id}>
+                  <button type="button" aria-pressed={selectedEntry?.gateway.id === gateway.id}
+                    onClick={() => setSelectedGatewayId(gateway.id)}>
+                    <span className="ce-onb-picker-identity"><Cpu size={17} aria-hidden="true" /><strong>{gateway.serialNumber}</strong><ArrowRight size={14} aria-hidden="true" /></span>
+                    <span className="ce-onb-picker-status" data-group={journey.group}><i aria-hidden="true" />{journey.title}</span>
+                    <span className="ce-onb-picker-stages" aria-hidden="true">{journey.stages.map(stage => <i key={stage.id} data-state={stage.state} />)}</span>
+                    <small>Generation {gateway.deploymentGeneration}</small>
+                  </button>
+                </li>)}
+              </ul>
+              {filteredEntries.length === 0 && <p>No matching gateways.</p>}
+              <span className="ce-onb-picker-note">Status comes from the latest reported generation.</span>
+            </aside>
+            {selectedEntry ? (() => {
+              const { gateway, operation: gatewayOperation, journey } = selectedEntry;
+              const profileAssignmentOperation = profileAssignmentOperationFor(gateway, operations);
+              const state = gatewayDisplayState(gateway, profileAssignmentOperation);
+              const pullConfirmed = isAuthenticatedPullConfirmedAssignment(gateway, profileAssignmentOperation);
+              const activeOperation = gatewayOperation?.status === 'IN_PROGRESS' ? gatewayOperation : undefined;
+              const legacyAssignmentCanMigrate = canMigrateLegacyAssignment(gateway, activeOperation);
+              const unconfirmedProfileCanSupersede = canSupersedeUnconfirmedProfileAssignment(gateway, profileAssignmentOperation);
+              const gatewayCanDecommission = gateway.certificateState === 'ACTIVE'
+                && (gateway.state === 'ACTIVE' || gateway.state === 'ROLLED_BACK' || gateway.state === 'FAILED');
+              const gatewayCanDeploy = legacyAssignmentCanMigrate || unconfirmedProfileCanSupersede || pullConfirmed
+                || (gateway.certificateState === 'ACTIVE' && ((gateway.state === 'ACTIVE' && gateway.health === 'HEALTHY') || gateway.state === 'ROLLED_BACK'));
+              return <GatewayDetail key={gateway.id} gateway={gateway} model={modelById.get(gateway.modelId)}
+                site={siteById.get(gateway.siteId)} profile={profileById.get(gateway.profileVersionId ?? '')}
+                desiredProfile={profileById.get(gateway.desiredProfileVersionId ?? '')}
+                operation={gatewayOperation} journey={journey} status={state} pullConfirmed={pullConfirmed}
+                onViewProfiles={onViewProfiles}
+                actions={<>
+                  {gatewayOperation && <button type="button" className="primary" onClick={() => onOperation(gatewayOperation)}>
+                    {activeOperation ? 'View progress' : 'View operation'}<ArrowRight size={14} aria-hidden="true" />
+                  </button>}
                   {canDeployProfile && gatewayCanDeploy && (!activeOperation || legacyAssignmentCanMigrate || unconfirmedProfileCanSupersede) && (
-                    <button
-                      type="button"
-                      onClick={() => openDeploy(gateway)}
+                    <button type="button" onClick={() => openDeploy(gateway)}
                       title={legacyAssignmentCanMigrate || unconfirmedProfileCanSupersede
-                        ? `Create signed generation ${gateway.deploymentGeneration + 1} and supersede the unconfirmed generation ${gateway.deploymentGeneration}`
-                        : undefined}
-                    >
+                        ? `Create signed generation ${gateway.deploymentGeneration + 1} and supersede the unconfirmed generation ${gateway.deploymentGeneration}` : undefined}>
                       <CloudUpload size={14} aria-hidden="true" />{controller ? 'Deploy Controller' : 'Deploy profile'}
                     </button>
                   )}
-                  {canDecommission && (
-                    <button
-                      type="button"
-                      className="ce-onb-danger-outline"
-                      onClick={() => openDecommission(gateway)}
-                      disabled={!gatewayCanDecommission || Boolean(activeOperation)}
-                    >
-                      <PowerOff size={14} aria-hidden="true" />Decommission
-                    </button>
-                  )}
-                  {canDecommission && canResetRegistration && (
-                    <button type="button" className="ce-onb-danger-outline"
-                      onClick={() => openDecommission(gateway, true)}
-                      disabled={!(gateway.certificateState === 'ACTIVE' || (gateway.certificateState === 'PENDING' && gatewayOperation?.state === 'CLAIM_ACCEPTED') || gateway.state === 'DECOMMISSIONED' || gatewayOperation?.resetError)}>
-                      <PowerOff size={14} aria-hidden="true" />
-                      {gatewayOperation?.resetError ? 'Retry AWS reset' : gateway.certificateState === 'PENDING' ? 'Cancel & reset onboarding' : gateway.state === 'DECOMMISSIONED' ? 'Reset for onboarding' : 'Decommission & reset'}
-                    </button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                </>}
+                management={canDecommission ? <>
+                  <button type="button" className="ce-onb-danger-outline" onClick={() => openDecommission(gateway)}
+                    disabled={!gatewayCanDecommission || Boolean(activeOperation)}>
+                    <PowerOff size={14} aria-hidden="true" />Decommission
+                  </button>
+                  {canResetRegistration && <button type="button" className="ce-onb-danger-outline"
+                    onClick={() => openDecommission(gateway, true)}
+                    disabled={!(gateway.certificateState === 'ACTIVE' || (gateway.certificateState === 'PENDING' && gatewayOperation?.state === 'CLAIM_ACCEPTED') || gateway.state === 'DECOMMISSIONED' || gatewayOperation?.resetError)}>
+                    <PowerOff size={14} aria-hidden="true" />
+                    {gatewayOperation?.resetError ? 'Retry AWS reset' : gateway.certificateState === 'PENDING' ? 'Cancel & reset onboarding' : gateway.state === 'DECOMMISSIONED' ? 'Reset for onboarding' : 'Decommission & reset'}
+                  </button>}
+                </> : undefined} />;
+            })() : <div className="ce-onb-fleet-empty" role="status">
+              <Search size={25} aria-hidden="true" /><h3>No gateways match this view</h3>
+              <p>Try another status or clear the search to return to your gateway inventory.</p>
+              <button type="button" onClick={() => { setGatewayFilter('all'); setGatewayQuery(''); }}>Clear filters</button>
+            </div>}
+          </div>
+        </>
       )}
+
 
       <Modal
         open={Boolean(deployTarget)}

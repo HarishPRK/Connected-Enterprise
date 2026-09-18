@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { ChevronDown, Eye } from 'lucide-react';
 import { ProfileParameterEditor } from './ProfileParameterEditor';
+import { ProfileBlueprint } from './ProfileBlueprint';
 import type { ProfileVersion } from './types';
 
 export function ProfilePreview({ profile }: { profile: ProfileVersion }) {
@@ -21,7 +22,7 @@ export function ProfilePreview({ profile }: { profile: ProfileVersion }) {
         </button>
       </div>
       <div id={panelId} hidden={!expanded} className="ce-onb-inline-preview-settings">
-        {expanded && <ProfileParameterEditor key={profile.id} values={profile.parameters} readOnly compact />}
+        {expanded && <><ProfileBlueprint profile={profile} /><ProfileParameterEditor key={profile.id} values={profile.parameters} readOnly compact /></>}
       </div>
     </section>
   );

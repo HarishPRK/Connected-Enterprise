@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Download,
   FileKey2,
-  KeyRound,
   PackageCheck,
   ShieldAlert,
   TriangleAlert,
@@ -22,6 +21,7 @@ import {
 } from './bootstrapRegistration';
 import { ProfilePreview } from './ProfilePreview';
 import { PackageJourney } from './PackageJourney';
+import { PackageManifest } from './PackageManifest';
 import { selectableProfiles } from './profileSelection';
 import type { Gateway, OnboardingOperation, ProfileVersion, Site } from './types';
 
@@ -327,18 +327,7 @@ export function BootstrapPackageManager({
           </div>
         </form>
 
-        <aside className="ce-onb-bootstrap-contract" aria-label="Package contents and safeguards">
-          <span><KeyRound size={22} aria-hidden="true" /></span>
-          <h3>Use your downloaded package</h3>
-          <p>You can transfer the ZIP between PCs. Complete gateway registration in this app before connecting the device.</p>
-          <ul>
-            <li>Bootstrap certificate and private key</li>
-            <li>Amazon Root CA 1</li>
-            <li>IoT, credentials-provider, and API endpoints</li>
-            <li>Fleet template, role alias, model, site, and profile metadata</li>
-          </ul>
-          <small>No private key is written to DynamoDB, S3, application logs, or source control.</small>
-        </aside>
+        <PackageManifest serialNumber={serialNumber} site={sites.find(site => site.id === siteId)} profile={selectedProfile} ready={ready} />
       </div>}
       <details className="ce-onb-bootstrap-resume" open={!canIssue || undefined}>
         <summary>Resume from a downloaded package</summary>
