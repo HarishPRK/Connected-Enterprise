@@ -2,6 +2,7 @@ import type { ComponentType } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
+import { SolutionShowcase } from '../components/offerings/SolutionShowcase';
 import {
   Activity, ArrowLeftRight, ArrowRight, Boxes, Cloud, GitBranch, Layers3, Leaf, Package,
   Radio, Sparkles, Zap,
@@ -111,28 +112,16 @@ export function ServiceOfferingsPage() {
   const mlCount = OFFERINGS.filter((o) => o.ml).length;
 
   return (
-    <>
+    <div className="service-offerings-page">
       <PageHeader
         title="Solution Offerings"
         subtitle='Edge / enterprise gateway "smart services" — containerized capabilities for the Digital Enterprise ecosystem, delivered through consumer-facing APIs.'
         right={<span className="badge ok"><span className="dot ok" />{OFFERINGS.length}/{OFFERINGS.length} available</span>}
       />
 
-      <section className="so-problem" aria-labelledby="so-problem-title">
-        <div className="so-problem-copy">
-          <span className="so-eyebrow">The problem statement</span>
-          <h2 id="so-problem-title">Enterprise sites need one operational view across every device and service.</h2>
-          <p>Fragmented IT / OT systems, slow incident response, network interruptions, and rising support and energy costs make every site harder to run.</p>
-        </div>
-        <div className="so-problem-points" aria-label="Key operational challenges">
-          <span>Fragmented IT / OT visibility</span>
-          <span>Manual response and truck rolls</span>
-          <span>Unpredictable network continuity</span>
-          <span>Rising energy and operating costs</span>
-        </div>
-      </section>
+      <SolutionShowcase />
 
-      <div className="kpi-strip" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      <div className="kpi-strip service-offerings-kpis">
         <SoKpi label="Containers available" value={`${OFFERINGS.length} / ${OFFERINGS.length}`}
           sub="ready on the gateway today" icon={Package} accent="var(--ok)" rgbVar="--ok-rgb" />
         <SoKpi label="ML-powered services" value={String(mlCount)}
@@ -197,7 +186,7 @@ export function ServiceOfferingsPage() {
           </Card>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -206,7 +195,7 @@ export function ServiceOfferingsPage() {
 function OfferingCard({ o }: { o: Offering }) {
   const Icon = o.icon;
   return (
-    <div className="so-card">
+    <div className="so-card" id={`offering-${o.id}`} tabIndex={-1}>
       <div className="so-card-head">
         <span className="so-icon" style={{ color: o.accent, background: `linear-gradient(135deg, rgba(var(${o.rgbVar}) / 0.16), transparent)` }}>
           <Icon size={16} />
