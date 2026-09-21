@@ -4,8 +4,8 @@ import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { SolutionShowcase } from '../components/offerings/SolutionShowcase';
 import {
-  Activity, ArrowLeftRight, ArrowRight, Cloud, GitBranch, Layers3, Leaf, Package,
-  Sparkles, Zap,
+  Activity, ArrowLeftRight, ArrowRight, Boxes, Cloud, GitBranch, Layers3, Leaf, Package,
+  Radio, Sparkles, Video, Zap,
 } from 'lucide-react';
 
 /* ─────────── Solution Offerings
@@ -26,13 +26,10 @@ interface Offering {
 
 const OFFERINGS: Offering[] = [
   {
-    id: 'matter', name: 'Matter & Interoperability', ml: false,
+    id: 'interoperability', name: 'Interoperability', ml: true,
     icon: ArrowLeftRight, accent: 'var(--accent)', rgbVar: '--accent-rgb',
     capabilities: [
-      'Compatible devices from different manufacturers on one Matter fabric',
-      'A shared application language over IP using Wi-Fi or Thread',
-      'mDNS / DNS-SD discovery and secure device commissioning',
-      'Coordinated occupancy, lighting, climate and shade controls',
+      'Conversion of various industry protocols (OPC-UA, MQTT, Modbus, BACnet)',
     ],
   },
   {
@@ -64,6 +61,23 @@ const OFFERINGS: Offering[] = [
     ],
   },
   {
+    id: 'matter', name: 'Matter', ml: true,
+    icon: Boxes, accent: 'var(--accent-2)', rgbVar: '--accent-2-rgb',
+    capabilities: [
+      'Enterprise automation',
+      'Enterprise safety',
+      'Remote monitoring & control',
+    ],
+  },
+  {
+    id: 'thread-border-router', name: 'Thread Border Router', ml: false,
+    icon: Radio, accent: 'var(--accent-2)', rgbVar: '--accent-2-rgb',
+    capabilities: [
+      'Thread mesh backbone for Matter devices',
+      'Enterprise automation, safety, and remote monitoring & control',
+    ],
+  },
+  {
     id: 'energy-prediction', name: 'Energy Prediction', ml: true,
     icon: Zap, accent: 'var(--warn)', rgbVar: '--warn-rgb',
     capabilities: [
@@ -81,6 +95,17 @@ const OFFERINGS: Offering[] = [
       'Power outlets',
       'Leak detection',
       'Indoor air quality',
+    ],
+  },
+  {
+    id: 'video-analytics', name: 'Video Analytics', ml: true,
+    icon: Video, accent: 'var(--accent-3)', rgbVar: '--accent-3-rgb',
+    capabilities: [
+      'Real-time video inference on edge GPU and NPU pipelines',
+      'Fall, intrusion, fire and weapon detection',
+      'PPE and hairnet compliance monitoring',
+      'Inventory, occupancy and crowd analytics',
+      'Live detection alerts for operators',
     ],
   },
 ];
