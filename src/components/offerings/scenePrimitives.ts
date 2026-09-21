@@ -1,4 +1,4 @@
-export type ScenarioId = 'safety' | 'connectivity' | 'energy' | 'leak' | 'occupancy' | 'protocols' | 'eagle' | 'greengrass' | 'thread';
+export type ScenarioId = 'safety' | 'connectivity' | 'energy' | 'leak' | 'matter' | 'eagle' | 'greengrass';
 export type Point = { x: number; y: number };
 export type WorldPoint = readonly [number, number, number?];
 export type Palette = ReturnType<typeof palette>;
@@ -9,6 +9,26 @@ export const smooth = (value: number) => { const t = clamp(value); return t * t 
 export const progress = (time: number, from: number, to: number) => smooth((time - from) / (to - from));
 export const mix = (a: number, b: number, amount: number) => a + (b - a) * amount;
 export const iso = (x: number, y: number, z = 0): Point => ({ x: 421 + (x - y) * 0.88, y: 165 + (x + y) * 0.44 - z });
+
+export interface ScenePresentation {
+  gateway?: boolean;
+  desk?: boolean;
+  labels?: boolean;
+  routes?: boolean;
+}
+
+const presentations = new WeakMap<CanvasRenderingContext2D, ScenePresentation>();
+export const scenePresentation = (ctx: CanvasRenderingContext2D) => presentations.get(ctx);
+
+/** Reuse the deployed animation rigs without duplicating the store's shared infrastructure. */
+export function withScenePresentation(ctx: CanvasRenderingContext2D, options: ScenePresentation, draw: () => void) {
+  const previous = presentations.get(ctx);
+  presentations.set(ctx, options);
+  try { draw(); } finally {
+    if (previous) presentations.set(ctx, previous);
+    else presentations.delete(ctx);
+  }
+}
 
 export function palette(dark: boolean) {
   return {
@@ -74,12 +94,19 @@ export function ellipse(ctx: CanvasRenderingContext2D, p: Point, rx: number, ry:
 
 export function contactShadow(ctx: CanvasRenderingContext2D, p: Point, rx: number, ry: number, opacity = 0.14) {
   ctx.save();
-  ctx.filter = 'blur(6px)';
-  ellipse(ctx, { x: p.x + 6, y: p.y + 6 }, rx, ry, `rgba(11, 35, 52, ${opacity})`);
+  ctx.translate(p.x + 6, p.y + 6);
+  ctx.scale(rx + 5, ry + 4);
+  const shade = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  shade.addColorStop(0, `rgba(11, 18, 40, ${opacity})`);
+  shade.addColorStop(0.55, `rgba(11, 18, 40, ${opacity * 0.65})`);
+  shade.addColorStop(1, 'rgba(11, 18, 40, 0)');
+  ctx.fillStyle = shade;
+  ctx.beginPath(); ctx.arc(0, 0, 1, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 }
 
 export function label(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, color: string, p: Palette) {
+  if (scenePresentation(ctx)?.labels === false) return;
   ctx.save();
   ctx.font = '600 16px "Space Grotesk", ui-sans-serif, system-ui, sans-serif';
   const width = ctx.measureText(text).width + 32;
@@ -162,6 +189,7 @@ export function room(ctx: CanvasRenderingContext2D, p: Palette, scenario: Scenar
 }
 
 export function desk(ctx: CanvasRenderingContext2D, p: Palette) {
+  if (scenePresentation(ctx)?.desk === false) return;
   [218, 292].forEach(x => [28, 67].forEach(y => box(ctx, x, y, 0, 5, 5, 46, p.hardwareTop, p.hardwareSide, p.hardwareSide)));
   box(ctx, 210, 20, 46, 100, 58, 6, p.hardwareTop, p.hardware, p.hardwareSide);
   box(ctx, 244, 36, 53, 26, 13, 2, p.hardwareSide, p.hardwareSide, p.hardwareSide);
@@ -174,6 +202,7 @@ export function desk(ctx: CanvasRenderingContext2D, p: Palette) {
 }
 
 export function gateway(ctx: CanvasRenderingContext2D, p: Palette, active: number, time: number) {
+  if (scenePresentation(ctx)?.gateway === false) return;
   contactShadow(ctx, iso(364, 106), 29, 12);
   box(ctx, 340, 77, 0, 47, 46, 34, p.hardwareTop, p.hardware, p.hardwareSide);
   box(ctx, 338, 76, 35, 51, 48, 5, p.hardwareTop, p.hardwareSide, p.hardwareSide);
@@ -191,6 +220,7 @@ export function gateway(ctx: CanvasRenderingContext2D, p: Palette, active: numbe
 }
 
 export function route(ctx: CanvasRenderingContext2D, points: WorldPoint[], color: string, opacity: number, time: number, packets = true) {
+  if (scenePresentation(ctx)?.routes === false) return;
   if (opacity <= 0) return;
   const path = points.map(([x, y, z]) => iso(x, y, z ?? 2));
   ctx.save();

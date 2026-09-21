@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, ArrowLeftRight, ArrowRight, Check, ChevronRight, Cloud, Cpu, GitBranch, Leaf, Lightbulb, Pause, Play, Radio, RotateCcw, ShieldCheck, Zap } from 'lucide-react';
+import { Activity, ArrowLeftRight, ArrowRight, Check, ChevronRight, Cloud, Cpu, GitBranch, Leaf, Pause, Play, RotateCcw, ShieldCheck, Zap } from 'lucide-react';
 import { SolutionScene } from './SolutionScene';
 import './solution-showcase.css';
 
@@ -17,102 +17,80 @@ interface StoryBeat {
 
 const SCENARIOS = [
   {
-    id: 'safety' as const, label: 'Fall detection', icon: ShieldCheck, location: 'Workplace corridor',
+    id: 'safety' as const, label: 'Fall detection', icon: ShieldCheck, location: 'Customer aisle',
     service: 'Video Analytics', support: 'Edge inference + operator alerts',
     href: '/video-analytics', cta: 'Explore Video Analytics',
     beats: [
-      { title: 'One small slip. A big blind spot.', description: 'A discarded banana peel turns a routine walk into a slip. Arms flail, footing is lost, and there is no camera to see it happen.', status: 'No camera coverage', signal: 'A slip becomes a fall' },
-      { title: 'An incident becomes a blind spot.', description: 'The person remains unattended. There is no video signal to raise an alert, so the team has no reason to respond.', status: 'Incident unobserved', signal: 'No signal reaches the team' },
-      { title: 'Bring the scene into view.', description: 'Now add a camera and edge video analytics. A possible fall is flagged locally and an alert reaches the operator.', status: 'Possible fall flagged', signal: 'Camera → edge inference → alert' },
-      { title: 'Give the team a way to act.', description: 'An operator checks the incident and requests assistance. A colleague arrives to help the person on the floor.', status: 'Assistance requested', signal: 'Alert → verification → assistance' },
+      { title: 'A routine walk becomes a fall.', description: 'A customer slips on the sales floor. Shopping continues around the store, but the incident needs attention.', status: 'Possible fall on the sales floor', signal: 'Sales floor → customer needs assistance' },
+      { title: 'The store team has no signal.', description: 'Without connected video analytics, the fall does not raise an alert. The customer remains unattended while staff work elsewhere in the store.', status: 'Incident unobserved', signal: 'Sales-floor incident → no operator alert' },
+      { title: 'Bring the incident into view.', description: 'The store camera sends video to the shared gateway. Local analytics flags a possible fall for the operator to review.', status: 'Possible fall flagged', signal: 'Camera → store gateway → alert' },
+      { title: 'Connect detection to assistance.', description: 'The operator verifies the incident and requests assistance. A member of staff arrives to help the customer on the sales floor.', status: 'Assistance requested', signal: 'Alert → verification → staff assistance' },
     ] satisfies StoryBeat[],
   },
   {
-    id: 'connectivity' as const, label: 'Dynamic Failover', icon: GitBranch, location: 'Branch checkout',
+    id: 'connectivity' as const, label: 'Dynamic Failover', icon: GitBranch, location: 'Checkout',
     service: 'Dynamic Failover', support: 'Path health + policy-based routing',
     href: '/path-selection', cta: 'Explore Dynamic Failover',
     beats: [
-      { title: 'A card tap goes nowhere.', description: 'A customer presents their card just as the branch’s primary connection drops. The terminal cannot reach the payment service.', status: 'Primary link interrupted', signal: 'Card tap → connection interrupted' },
-      { title: 'Work waits for the network.', description: 'With no automatic route change, the terminal stays disconnected while the team troubleshoots the connection.', status: 'Checkout interrupted', signal: 'No active alternative path' },
-      { title: 'Let the gateway find a path.', description: 'Dynamic Failover checks link health and selects an available cellular path according to the branch’s routing policy.', status: 'Selecting the cellular path', signal: 'Link health → routing policy → 5G' },
-      { title: 'The receipt finally rolls out.', description: 'Traffic follows the alternate connection. The customer retries, the transaction completes, and checkout gets moving again.', status: 'Alternate connection active', signal: '5G path → checkout reconnected' },
+      { title: 'A card tap goes nowhere.', description: 'A customer presents their card just as the store’s primary connection drops. The checkout terminal cannot reach the payment service.', status: 'Primary link interrupted', signal: 'Card tap → connection interrupted' },
+      { title: 'The queue waits for the network.', description: 'The payment stays on hold while the team investigates. The same gateway connects checkout, store devices and building operations.', status: 'Checkout interrupted', signal: 'Payment request → unavailable uplink' },
+      { title: 'Give checkout another path.', description: 'Dynamic Failover checks link health at the shared gateway and selects the available cellular connection according to routing policy.', status: 'Selecting the cellular path', signal: 'Shared gateway → routing policy → 5G' },
+      { title: 'The receipt finally rolls out.', description: 'The customer retries over the alternate connection. The payment completes, the receipt prints, and checkout gets moving again.', status: 'Alternate connection active', signal: '5G path → payment completed' },
     ] satisfies StoryBeat[],
   },
   {
-    id: 'energy' as const, label: 'Energy Prediction', icon: Zap, location: 'Building plant room',
+    id: 'energy' as const, label: 'Energy Prediction', icon: Zap, location: 'Climate & energy',
     service: 'Energy Prediction', support: 'Edge Analytics + connected controls',
     href: '/cost-insights', cta: 'Explore Cost Savings',
     beats: [
-      { title: 'The equipment keeps running.', description: 'A cooling unit begins drawing more energy than its normal operating pattern calls for. From outside, it still looks fine.', status: 'Abnormal energy use', signal: 'Equipment demand rises' },
+      { title: 'The equipment keeps running.', description: 'The store’s cooling unit begins drawing more energy than its normal operating pattern calls for. From the sales floor, everything still looks fine.', status: 'Abnormal energy use', signal: 'Store cooling → demand rises' },
       { title: 'Hidden waste adds up.', description: 'Without connected readings, the change goes unnoticed. The team has no clear signal that the unit needs attention.', status: 'Anomaly goes unnoticed', signal: 'Consumption without context' },
-      { title: 'Turn readings into a signal.', description: 'Energy Prediction evaluates appliance readings at the edge and flags the unusual pattern for investigation.', status: 'Energy anomaly flagged', signal: 'Sensor → edge model → anomaly' },
+      { title: 'Turn readings into a signal.', description: 'Plant-room readings reach the shared store gateway. Energy Prediction evaluates the pattern locally and flags unusual demand for investigation.', status: 'Energy anomaly flagged', signal: 'Energy meter → shared gateway → anomaly' },
       { title: 'Act before waste becomes routine.', description: 'The team reviews the alert and adjusts the unit’s operation. In this scenario, consumption returns to its usual pattern.', status: 'Operating pattern stabilized', signal: 'Review → adjustment → monitoring' },
     ] satisfies StoryBeat[],
   },
   {
-    id: 'leak' as const, label: 'Sustainability', icon: Leaf, location: 'Utility room',
+    id: 'leak' as const, label: 'Sustainability', icon: Leaf, location: 'Utilities',
     service: 'Sustainability', support: 'Leak detection + connected water controls',
     href: '#offering-sustainability', cta: 'See Sustainability capabilities',
     beats: [
-      { title: 'A drip becomes a puddle.', description: 'A pipe starts leaking beside stored supplies. The water spreads across the floor while the room sits unattended.', status: 'Water escaping', signal: 'Small leak → spreading water' },
+      { title: 'A drip becomes a store problem.', description: 'A pipe leaks beside stored supplies in the utility area. Water spreads across the floor while staff serve customers nearby.', status: 'Water escaping', signal: 'Utility pipe → spreading water' },
       { title: 'Waste does not wait to be noticed.', description: 'The puddle keeps growing. Without a connected leak sensor, no signal reaches the team and the supply stays open.', status: 'Leak unobserved', signal: 'Water loss continues' },
-      { title: 'Let the floor raise the alarm.', description: 'A connected sensor detects water and sends a leak event through the gateway. The affected area is visible to the operator.', status: 'Leak detected', signal: 'Water sensor → gateway → alert' },
+      { title: 'Let the floor raise the alarm.', description: 'A connected water sensor sends a leak event to the shared store gateway. The team sees exactly which utility area needs attention.', status: 'Leak detected', signal: 'Water sensor → shared gateway → alert' },
       { title: 'Contain the leak at its source.', description: 'In this scenario, a configured water control closes the valve. The flow stops; the team can inspect the pipe and clean up the remaining water.', status: 'Water supply isolated', signal: 'Leak event → valve closes → inspection' },
     ] satisfies StoryBeat[],
   },
   {
-    id: 'occupancy' as const, label: 'Matter', icon: Lightbulb, location: 'Meeting room',
-    service: 'Matter', support: 'Occupancy signals + enterprise automation',
-    href: '#offering-matter', cta: 'See Matter capabilities',
+    id: 'matter' as const, label: 'Matter & Interoperability', icon: ArrowLeftRight, location: 'Smart retail zone',
+    service: 'Matter & Interoperability', support: 'Different manufacturers · one Matter fabric · Wi-Fi + Thread',
+    href: '#offering-matter', cta: 'See Matter & Interoperability',
     beats: [
-      { title: 'Everyone leaves. Everything stays on.', description: 'The last person walks out of the meeting room. The lights and climate system keep working for an audience of zero.', status: 'Empty room, active equipment', signal: 'People leave → devices keep running' },
-      { title: 'Each device lives in its own world.', description: 'An empty room means nothing to a light or thermostat that cannot receive occupancy information. Manual checks become the fallback.', status: 'Occupancy is not shared', signal: 'Separate devices, disconnected context' },
-      { title: 'Give devices a shared instruction.', description: 'Matter connects compatible occupancy sensors and controls. The room’s automation can use the same unoccupied state across devices.', status: 'Unoccupied state shared', signal: 'Occupancy → Matter → room controls' },
-      { title: 'An empty room can take a break.', description: 'The configured room policy dims the lights, lowers the shades and sets back climate control. Devices respond together to the room’s state.', status: 'Room policy applied', signal: 'Shared state → coordinated control' },
+      { title: 'One space. Different manufacturers.', description: 'An occupancy sensor, lights, thermostat and shades from four different OEMs share the smart retail zone. The last person leaves, but the devices act independently.', status: 'Multi-OEM devices disconnected', signal: 'OEM A sensor · OEM B lights · OEM C climate · OEM D shades' },
+      { title: 'The devices share a space, not context.', description: 'Separate controls cannot coordinate a response when the retail zone is empty. Simply connecting devices to the store network does not establish a shared automation.', status: 'Occupancy stays in separate systems', signal: 'Zone empty → lights and cooling stay on' },
+      { title: 'Connect through a common language.', description: 'Compatible devices are discovered with mDNS/DNS-SD and commissioned into one Matter fabric. Matter provides a shared application language over IP using Wi-Fi or Thread.', status: 'Multi-OEM Matter fabric connected', signal: 'Discovery → commissioning → shared Matter fabric' },
+      { title: 'Different brands. One coordinated response.', description: 'The gateway’s configured policy uses the occupancy sensor’s state to dim the lights, set back the thermostat and lower the shades. Compatible devices from different OEMs respond together.', status: 'Store policy applied across OEMs', signal: 'Shared occupancy → coordinated lights, climate and shades' },
     ] satisfies StoryBeat[],
   },
   {
-    id: 'protocols' as const, label: 'Interoperability', icon: ArrowLeftRight, location: 'Mixed equipment site',
-    service: 'Interoperability', support: 'Modbus + BACnet + OPC UA protocol conversion',
-    href: '#offering-interoperability', cta: 'See Interoperability capabilities',
-    beats: [
-      { title: 'Three devices. Three languages.', description: 'A meter, building controller and industrial device send readings in different protocols. Their messages arrive in incompatible forms.', status: 'Different device protocols', signal: 'Modbus + BACnet + OPC UA' },
-      { title: 'The data reaches a dead end.', description: 'Each device works, but the systems above cannot consume the readings together. Operators are left piecing together separate views.', status: 'Readings cannot be combined', signal: 'Individual signals → separate systems' },
-      { title: 'Translate where the devices connect.', description: 'The gateway’s Interoperability service converts the supported device protocols into a common interface for applications.', status: 'Protocol conversion active', signal: 'Device protocols → gateway conversion' },
-      { title: 'Bring the readings together.', description: 'Applications can consume the converted readings through the gateway. The team gets a connected view without replacing every device.', status: 'Readings available together', signal: 'Converted data → consumer-facing APIs' },
-    ] satisfies StoryBeat[],
-  },
-  {
-    id: 'eagle' as const, label: 'EA:GLE', icon: Activity, location: 'Branch equipment room',
+    id: 'eagle' as const, label: 'EA:GLE', icon: Activity, location: 'IT & edge',
     service: 'EA:GLE — Edge Analytics', support: 'Local processing + anomaly detection',
     href: '/hardware-anomalies', cta: 'Explore EA:GLE',
     beats: [
-      { title: 'The gateway starts to struggle.', description: 'Work builds up on branch equipment. Resource usage rises and requests queue, while the outside of the device looks unchanged.', status: 'Resource pressure rising', signal: 'Growing load → delayed work' },
+      { title: 'The shared gateway starts to struggle.', description: 'Work builds up on the gateway serving the entire store. Resource usage rises and requests queue, while the outside of the device looks unchanged.', status: 'Resource pressure rising', signal: 'Store gateway → delayed work' },
       { title: 'A warning hides in the readings.', description: 'Raw device measurements keep arriving, but a disconnected view gives the team no clear explanation of what is changing.', status: 'Measurements without context', signal: 'More readings, no clear diagnosis' },
       { title: 'Read the pattern at the edge.', description: 'EA:GLE processes local measurements and surfaces unusual behavior. The gateway’s changing resource pattern becomes an actionable signal.', status: 'Anomaly identified', signal: 'Local telemetry → edge analytics' },
       { title: 'Know where to investigate.', description: 'The affected equipment and the unusual trend are highlighted for the operator. The team can investigate with context instead of guessing.', status: 'Equipment flagged for review', signal: 'Anomaly → equipment context → review' },
     ] satisfies StoryBeat[],
   },
   {
-    id: 'greengrass' as const, label: 'AWS Greengrass', icon: Cloud, location: 'Remote equipment site',
+    id: 'greengrass' as const, label: 'AWS Greengrass', icon: Cloud, location: 'Stockroom',
     service: 'AWS Greengrass', support: 'Local processing + cloud device management',
     href: '#offering-greengrass', cta: 'See AWS Greengrass capabilities',
     beats: [
-      { title: 'The cloud connection drops.', description: 'A remote site loses its uplink while sensors are still producing readings. The equipment has work to do even when the cloud is out of reach.', status: 'Cloud link unavailable', signal: 'Site running → cloud disconnected' },
-      { title: 'Cloud-only work has nowhere to go.', description: 'Readings pile up while the uplink is down. A site that depends on a cloud round trip cannot process its data where it is produced.', status: 'Readings waiting upstream', signal: 'Sensor samples → blocked uplink' },
-      { title: 'Keep processing beside the equipment.', description: 'In this example, AWS Greengrass components process readings on the gateway and buffer results locally while the uplink is unavailable.', status: 'Local processing active', signal: 'Sensor → local component → stored result' },
-      { title: 'Reconnect and bring the cloud up to date.', description: 'The uplink returns. The example’s configured synchronization sends buffered results upstream while local processing continues.', status: 'Buffered results synchronizing', signal: 'Local results → restored cloud link' },
-    ] satisfies StoryBeat[],
-  },
-  {
-    id: 'thread' as const, label: 'Thread Border Router', icon: Radio, location: 'Connected building',
-    service: 'Thread Border Router', support: 'Low-power Thread mesh + enterprise IP network',
-    href: '#offering-thread-border-router', cta: 'See Thread Border Router capabilities',
-    beats: [
-      { title: 'A sensor has news. Who can hear it?', description: 'A door sensor changes state inside the building. Low-power devices need a path from their local mesh to the enterprise network.', status: 'Sensor event waiting', signal: 'Door event → local radio network' },
-      { title: 'The room stops at the network boundary.', description: 'Devices can speak within the Thread mesh, but without a border router their messages cannot reach the applications on the adjacent IP network.', status: 'No route to the enterprise network', signal: 'Local mesh → missing network bridge' },
-      { title: 'Connect the mesh to the rest of the site.', description: 'The Thread Border Router provides the IP connection between the mesh and the enterprise network. Messages can travel through the connected devices to that bridge.', status: 'Mesh route established', signal: 'Thread hops → border router → IP' },
-      { title: 'Small devices become visible.', description: 'The door event and other device readings reach the application. Thread provides the transport for compatible services, including Matter, to use.', status: 'Device readings reach the application', signal: 'Mesh telemetry → connected applications' },
+      { title: 'The cloud connection drops.', description: 'The store loses access to its cloud endpoint while stockroom and sales-floor sensors keep producing readings. Local work still needs to continue.', status: 'Cloud link unavailable', signal: 'Store sensors → cloud unavailable' },
+      { title: 'Cloud-only work has nowhere to go.', description: 'Readings from across the store accumulate while the endpoint is unreachable. Cloud-dependent processing cannot respond to changing conditions.', status: 'Readings waiting upstream', signal: 'Store readings → blocked cloud connection' },
+      { title: 'Keep processing under the same roof.', description: 'Configured AWS Greengrass components process store readings on the shared gateway and buffer results locally while the cloud endpoint is unavailable.', status: 'Local processing active', signal: 'Store devices → local component → stored results' },
+      { title: 'Bring the cloud back into the picture.', description: 'Connectivity returns. Configured synchronization sends the buffered store results upstream while the same gateway continues processing local events.', status: 'Buffered results synchronizing', signal: 'Shared gateway → restored cloud connection' },
     ] satisfies StoryBeat[],
   },
 ];
@@ -126,6 +104,7 @@ export function SolutionShowcase() {
   const [scenarioIndex, setScenarioIndex] = useState(0);
   const [chapter, setChapter] = useState(0);
   const [playing, setPlaying] = useState(true);
+  const [touring, setTouring] = useState(false);
   const [finished, setFinished] = useState(false);
   const [revision, setRevision] = useState(0);
   const [inView, setInView] = useState(false);
@@ -144,7 +123,13 @@ export function SolutionShowcase() {
 
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const onMotion = () => setReducedMotion(query.matches);
+    const onMotion = () => {
+      setReducedMotion(query.matches);
+      if (query.matches) {
+        setTouring(false);
+        setPlaying(false);
+      }
+    };
     const onVisibility = () => setPageVisible(!document.hidden);
     query.addEventListener('change', onMotion);
     document.addEventListener('visibilitychange', onVisibility);
@@ -175,14 +160,28 @@ export function SolutionShowcase() {
         setChapter(nextChapter);
       }
       if (time >= DURATION) {
-        setFinished(true);
+        if (touring && scenarioIndex < SCENARIOS.length - 1) {
+          // Reset the shared clock before switching scenarios. The changed index
+          // starts a fresh RAF effect, so this completed callback cannot advance twice.
+          timeRef.current = 0;
+          chapterRef.current = 0;
+          if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
+          if (rangeRef.current) rangeRef.current.value = '0';
+          setChapter(0);
+          setScenarioIndex(scenarioIndex + 1);
+          setRevision((value) => value + 1);
+        } else {
+          setFinished(true);
+          setPlaying(false);
+          setTouring(false);
+        }
         return;
       }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [running]);
+  }, [running, scenarioIndex, touring]);
 
   const seek = (time: number) => {
     timeRef.current = time;
@@ -195,6 +194,7 @@ export function SolutionShowcase() {
   };
 
   const selectScenario = (index: number) => {
+    setTouring(false);
     if (index === scenarioIndex) return;
     setScenarioIndex(index);
     // A manual pause remains a pause when switching to a different use case.
@@ -205,8 +205,8 @@ export function SolutionShowcase() {
     let next: number;
     if (event.key === 'ArrowRight') next = (index + 1) % SCENARIOS.length;
     else if (event.key === 'ArrowLeft') next = (index + SCENARIOS.length - 1) % SCENARIOS.length;
-    else if (event.key === 'ArrowDown') next = (index + 3) % SCENARIOS.length;
-    else if (event.key === 'ArrowUp') next = (index + SCENARIOS.length - 3) % SCENARIOS.length;
+    else if (event.key === 'ArrowDown') next = (index + 1) % SCENARIOS.length;
+    else if (event.key === 'ArrowUp') next = (index + SCENARIOS.length - 1) % SCENARIOS.length;
     else if (event.key === 'Home') next = 0;
     else if (event.key === 'End') next = SCENARIOS.length - 1;
     else return;
@@ -220,9 +220,22 @@ export function SolutionShowcase() {
     setPlaying(true);
   };
 
+  const toggleTour = () => {
+    if (touring) {
+      setTouring(false);
+      setPlaying(false);
+      return;
+    }
+    setScenarioIndex(0);
+    seek(0);
+    setTouring(true);
+    setPlaying(true);
+  };
+
   const selectChapter = (index: number) => {
     // Land on a settled frame for manual chapter selection, including reduced motion.
-    seek(index === 0 ? 3.9 : CHAPTER_TIMES[index] + (index === 2 ? 4 : index === 3 ? 4 : 2));
+    seek(index === 0 ? 3.9 : index === 3 ? 23 : CHAPTER_TIMES[index] + (index === 2 ? 4 : 2));
+    setTouring(false);
     setPlaying(false);
   };
 
@@ -230,10 +243,20 @@ export function SolutionShowcase() {
     <section className="solution-showcase" aria-labelledby="showcase-title">
       <div className="showcase-heading">
         <div>
-          <h2 id="showcase-title">Real challenges. See the edge respond.</h2>
-          <p>Explore what changes when your site’s devices and services work together.</p>
+          <h2 id="showcase-title">One store. Every system connected.</h2>
+          <p>Explore {SCENARIOS.length} use cases in the same store, from the checkout to the utility room.</p>
         </div>
-        <span className="showcase-disclosure">{SCENARIOS.length} illustrative scenarios</span>
+        <div className="showcase-heading-actions">
+          <span className="showcase-disclosure" aria-live="polite">
+            {touring ? `Tour ${scenarioIndex + 1} / ${SCENARIOS.length}` : `1 store · ${SCENARIOS.length} use cases`}
+          </span>
+          {!reducedMotion && (
+            <button type="button" className="showcase-tour" onClick={toggleTour} aria-pressed={touring}>
+              {touring ? <Pause size={15} aria-hidden="true" /> : <Play size={15} aria-hidden="true" />}
+              {touring ? 'End tour' : 'Play store tour'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="showcase-frame">
@@ -256,7 +279,7 @@ export function SolutionShowcase() {
           aria-labelledby={`showcase-tab-${scenario.id}`} tabIndex={0} data-chapter={chapter}>
           <div className="showcase-visual" ref={visualRef}>
             <div className="showcase-scene-heading">
-              <span>{scenario.location}</span>
+              <span><strong>Enterprise store</strong><span className="showcase-zone">{scenario.location}</span></span>
               <span className="showcase-scene-mode">{chapter < 2 ? 'Without connected services' : 'With connected services'}</span>
             </div>
             <div className="showcase-canvas-wrap">
@@ -265,7 +288,7 @@ export function SolutionShowcase() {
             </div>
             <div className="showcase-scene-caption" aria-hidden="true">
               <span className="showcase-status"><span />{beat.status}</span>
-              <span className="showcase-scene-format">Digital twin illustration</span>
+              <span className="showcase-scene-format">Unified digital twin</span>
             </div>
           </div>
 
@@ -309,7 +332,7 @@ export function SolutionShowcase() {
               <div className="showcase-progress-track"><div ref={progressRef} style={{ transform: `scaleX(${initialTime / DURATION})` }} /></div>
               <input ref={rangeRef} type="range" min="0" max={DURATION} step="0.1" defaultValue={initialTime}
                 aria-label="Scenario progress" aria-valuetext={`Chapter ${chapter + 1}: ${CHAPTERS[chapter]}`}
-                onChange={(event) => { seek(Number(event.target.value)); setPlaying(false); }} />
+                onChange={(event) => { seek(Number(event.target.value)); setTouring(false); setPlaying(false); }} />
               <div className="showcase-chapters" aria-label="Story chapters">
                 {CHAPTERS.map((label, index) => (
                   <button key={label} type="button" aria-current={index === chapter ? 'step' : undefined}
@@ -323,7 +346,7 @@ export function SolutionShowcase() {
           </div>
         </div>
       </div>
-      <p className="showcase-footnote">{reducedMotion ? 'Reduced motion is on. Choose a chapter to explore each scene. ' : 'Select a chapter to inspect a moment. '}
+      <p className="showcase-footnote">{reducedMotion ? 'Reduced motion is on. Choose a chapter to explore the store. ' : 'Select a use case to follow its response in the same store. '}
         Concept demonstration; events and outcomes are illustrative, not live telemetry.</p>
     </section>
   );

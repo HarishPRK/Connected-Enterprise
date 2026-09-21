@@ -1,6 +1,6 @@
 import {
   camera, clamp, contactShadow, desk, detection, ellipse, gateway, iso, label,
-  line, mix, polygon, progress, smooth, type Palette, type Point,
+  line, mix, polygon, progress, scenePresentation, smooth, type Palette, type Point,
 } from './scenePrimitives';
 
 /** Screen-space joint poses make contact, balance and weight readable at small sizes. */
@@ -339,19 +339,21 @@ export function safetyScene(ctx: CanvasRenderingContext2D, p: Palette, time: num
     ctx.globalAlpha = solution * 0.3;
     line(ctx, [lens, pt(356, 383), pt(536, 366), lens], p.blue, 1);
     ctx.restore();
-    // The detected event travels over a real floor conduit to the edge gateway.
-    const routePoints = [pt(493, 355), iso(245, 212, 2), iso(327, 212, 2), iso(327, 109, 2), iso(352, 109, 2)];
-    ctx.save();
-    ctx.globalAlpha = alarm * 0.75;
-    line(ctx, routePoints, assistance > 0.5 ? p.teal : p.blue, 2);
-    for (let n = 0; n < 2; n++) {
-      const t = (time * 0.65 + n * 0.5) % 1;
-      const segment = Math.min(3, Math.floor(t * 4));
-      const start = routePoints[segment];
-      const end = routePoints[segment + 1];
-      ellipse(ctx, pt(mix(start.x, end.x, (t * 4) % 1), mix(start.y, end.y, (t * 4) % 1)), 3.2, 3.2, assistance > 0.5 ? p.teal : p.blue);
+    // In the unified store the shared conduit is drawn by the store renderer.
+    if (scenePresentation(ctx)?.routes !== false) {
+      const routePoints = [pt(493, 355), iso(245, 212, 2), iso(327, 212, 2), iso(327, 109, 2), iso(352, 109, 2)];
+      ctx.save();
+      ctx.globalAlpha = alarm * 0.75;
+      line(ctx, routePoints, assistance > 0.5 ? p.teal : p.blue, 2);
+      for (let n = 0; n < 2; n++) {
+        const t = (time * 0.65 + n * 0.5) % 1;
+        const segment = Math.min(3, Math.floor(t * 4));
+        const start = routePoints[segment];
+        const end = routePoints[segment + 1];
+        ellipse(ctx, pt(mix(start.x, end.x, (t * 4) % 1), mix(start.y, end.y, (t * 4) % 1)), 3.2, 3.2, assistance > 0.5 ? p.teal : p.blue);
+      }
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   bananaPeel(ctx, time);

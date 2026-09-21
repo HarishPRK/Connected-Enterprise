@@ -4,19 +4,18 @@ import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { SolutionShowcase } from '../components/offerings/SolutionShowcase';
 import {
-  Activity, ArrowLeftRight, ArrowRight, Boxes, Cloud, GitBranch, Layers3, Leaf, Package,
-  Radio, Sparkles, Zap,
+  Activity, ArrowLeftRight, ArrowRight, Cloud, GitBranch, Layers3, Leaf, Package,
+  Sparkles, Zap,
 } from 'lucide-react';
 
 /* ─────────── Solution Offerings
  * Edge / Enterprise Gateway "smart services" — each capability ships as a
  * container (+ libraries) on the gateway's prplLCM container runtime and is
- * exposed northbound through consumer-facing APIs. Content mirrors the
- * "Digital Enterprise ecosystem readiness" architecture slide. */
+ * exposed northbound through consumer-facing APIs. These services share the
+ * enterprise store illustrated in the unified digital twin. */
 
 interface Offering {
   id: string;
-  container: number;           // position on the gateway (Container 1..8)
   name: string;
   ml: boolean;                 // ships with ML libraries
   icon: ComponentType<{ size?: number }>;
@@ -27,14 +26,17 @@ interface Offering {
 
 const OFFERINGS: Offering[] = [
   {
-    id: 'interoperability', container: 1, name: 'Interoperability', ml: true,
+    id: 'matter', name: 'Matter & Interoperability', ml: false,
     icon: ArrowLeftRight, accent: 'var(--accent)', rgbVar: '--accent-rgb',
     capabilities: [
-      'Conversion of various industry protocols (OPC-UA, MQTT, Modbus, BACnet)',
+      'Compatible devices from different manufacturers on one Matter fabric',
+      'A shared application language over IP using Wi-Fi or Thread',
+      'mDNS / DNS-SD discovery and secure device commissioning',
+      'Coordinated occupancy, lighting, climate and shade controls',
     ],
   },
   {
-    id: 'eagle', container: 2, name: 'EA:GLE — Edge Analytics', ml: true,
+    id: 'eagle', name: 'EA:GLE — Edge Analytics', ml: true,
     icon: Activity, accent: 'var(--accent-3)', rgbVar: '--accent-3-rgb',
     capabilities: [
       'Real-time data processing on the edge',
@@ -42,7 +44,7 @@ const OFFERINGS: Offering[] = [
     ],
   },
   {
-    id: 'dynamic-failover', container: 3, name: 'Dynamic Failover', ml: true,
+    id: 'dynamic-failover', name: 'Dynamic Failover', ml: true,
     icon: GitBranch, accent: 'var(--ok)', rgbVar: '--ok-rgb',
     capabilities: [
       'Automatic failover',
@@ -53,7 +55,7 @@ const OFFERINGS: Offering[] = [
     ],
   },
   {
-    id: 'greengrass', container: 4, name: 'AWS Greengrass', ml: false,
+    id: 'greengrass', name: 'AWS Greengrass', ml: false,
     icon: Cloud, accent: 'var(--warn)', rgbVar: '--warn-rgb',
     capabilities: [
       'Local edge data processing',
@@ -62,24 +64,7 @@ const OFFERINGS: Offering[] = [
     ],
   },
   {
-    id: 'matter', container: 5, name: 'Matter', ml: true,
-    icon: Boxes, accent: 'var(--accent-2)', rgbVar: '--accent-2-rgb',
-    capabilities: [
-      'Enterprise automation',
-      'Enterprise safety',
-      'Remote monitoring & control',
-    ],
-  },
-  {
-    id: 'thread-border-router', container: 6, name: 'Thread Border Router', ml: false,
-    icon: Radio, accent: 'var(--accent-2)', rgbVar: '--accent-2-rgb',
-    capabilities: [
-      'Thread mesh backbone for Matter devices',
-      'Enterprise automation, safety, and remote monitoring & control',
-    ],
-  },
-  {
-    id: 'energy-prediction', container: 7, name: 'Energy Prediction', ml: true,
+    id: 'energy-prediction', name: 'Energy Prediction', ml: true,
     icon: Zap, accent: 'var(--warn)', rgbVar: '--warn-rgb',
     capabilities: [
       'Monitoring, prediction and preventive maintenance of energy-consuming appliances',
@@ -87,7 +72,7 @@ const OFFERINGS: Offering[] = [
     ],
   },
   {
-    id: 'sustainability', container: 8, name: 'Sustainability', ml: true,
+    id: 'sustainability', name: 'Sustainability', ml: true,
     icon: Leaf, accent: 'var(--ok)', rgbVar: '--ok-rgb',
     capabilities: [
       'Irrigation systems',
@@ -101,8 +86,8 @@ const OFFERINGS: Offering[] = [
 ];
 
 const STACK: { group: string; note: string; items: string[] }[] = [
-  { group: 'Solution layer', note: 'Consumer-facing capabilities', items: ['Edge Analytics', 'AI / ML', 'Generative AI', 'Agentic AI', 'Matter', 'OpenThread'] },
-  { group: 'Standards & protocols', note: 'Interoperability foundation', items: ['MQTT', 'Modbus', 'OPC UA', 'BACnet', 'PROFINET', 'Node-RED'] },
+  { group: 'Solution layer', note: 'Consumer-facing capabilities', items: ['Edge Analytics', 'AI / ML', 'Generative AI', 'Agentic AI', 'Store automation'] },
+  { group: 'Standards & protocols', note: 'Interoperability foundation', items: ['Matter', 'mDNS / DNS-SD', 'MQTT', 'Modbus', 'OPC UA', 'BACnet'] },
   { group: 'Connectivity', note: 'Wireless + wired transport', items: ['Wi-Fi 7', '5G', 'Fiber', 'Thread', 'LoRaWAN', 'Bluetooth'] },
   { group: 'OS platforms', note: 'Gateway operating environment', items: ['Linux', 'OpenWrt'] },
   { group: 'Silicon', note: 'Hardware foundation', items: ['MaxLinear', 'Quectel', 'Silicon Labs'] },
@@ -115,7 +100,7 @@ export function ServiceOfferingsPage() {
     <div className="service-offerings-page">
       <PageHeader
         title="Solution Offerings"
-        subtitle='Edge / enterprise gateway "smart services" — containerized capabilities for the Digital Enterprise ecosystem, delivered through consumer-facing APIs.'
+        subtitle="Connected services for one enterprise store — coordinated through a shared edge gateway and consumer-facing APIs."
         right={<span className="badge ok"><span className="dot ok" />{OFFERINGS.length}/{OFFERINGS.length} available</span>}
       />
 
@@ -144,11 +129,10 @@ export function ServiceOfferingsPage() {
               </div>
             }
           >
-            {/* Architecture sandwich mirrors the slide: APIs on top, containers
-                in the middle, the prplLCM runtime underneath. */}
+            {/* APIs above, service containers in the middle, runtime below. */}
             <div className="so-arch-band">Consumer-facing APIs</div>
             <div className="so-grid">
-              {OFFERINGS.map((o) => <OfferingCard key={o.id} o={o} />)}
+              {OFFERINGS.map((o, index) => <OfferingCard key={o.id} o={o} container={index + 1} />)}
             </div>
             <div className="so-arch-band so-arch-band-bottom">prplLCM · container lifecycle manager</div>
           </Card>
@@ -192,7 +176,7 @@ export function ServiceOfferingsPage() {
 
 /* ─────────── Offering card ─────────── */
 
-function OfferingCard({ o }: { o: Offering }) {
+function OfferingCard({ o, container }: { o: Offering; container: number }) {
   const Icon = o.icon;
   return (
     <div className="so-card" id={`offering-${o.id}`} tabIndex={-1}>
@@ -204,7 +188,7 @@ function OfferingCard({ o }: { o: Offering }) {
         <span className="badge ok" style={{ marginLeft: 'auto' }}>Available</span>
       </div>
       <div className="so-container-tag mono">
-        Container {o.container} · + libraries{o.ml ? ' (ML)' : ''}
+        Container {container} · + libraries{o.ml ? ' (ML)' : ''}
       </div>
       <ul className="so-caps">
         {o.capabilities.map((cap) => (
