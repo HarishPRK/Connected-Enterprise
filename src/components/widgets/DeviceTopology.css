@@ -1,4 +1,4 @@
-.branch-overview-grid:has(.device-fabric) { grid-template-columns: minmax(0, 1.12fr) minmax(490px, 1fr); gap: 24px; }
+.branch-overview-grid:has(.device-fabric) { grid-template-columns: minmax(0, 1.12fr) minmax(490px, 1fr); align-items: start; gap: 24px; }
 .device-fabric { --fabric-it: #80cfff; container-type: inline-size; min-width: 0; padding: 8px 0; }
 .fabric-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .fabric-heading h3 { display: flex; align-items: center; gap: 9px; margin: 0 0 6px; font-size: 18px; font-weight: 650; letter-spacing: -.025em; }
@@ -7,9 +7,9 @@
 .fabric-tools { display: flex; gap: 6px; }
 .fabric-motion { gap: 6px; padding: 7px 9px; font-size: 11px; color: var(--text-dim); background: transparent; box-shadow: none; }
 .fabric-expand { padding: 7px 9px; color: var(--text-dim); background: transparent; box-shadow: none; }
-.spatial-domain-headings { display: grid; grid-template-columns: 1fr 1fr; position: relative; margin: 26px 0 0; }
-.spatial-domain-total { --domain-color: var(--fabric-it); padding-right: 15%; }
-.spatial-domain-total[data-domain='OT'] { --domain-color: var(--accent-2); padding-right: 0; padding-left: 15%; }
+.spatial-domain-headings { display: grid; grid-template-columns: 1fr 1fr; position: relative; margin: 18px 0 0; }
+.spatial-domain-total { --domain-color: var(--fabric-it); padding-right: 26%; }
+.spatial-domain-total[data-domain='OT'] { --domain-color: var(--accent-2); padding-right: 0; padding-left: 26%; }
 .spatial-domain-total a { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--domain-color); font-size: 12px; text-decoration: none; }
 .spatial-domain-total a > strong { color: var(--text); font-size: 30px; font-weight: 600; line-height: 1; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
 .spatial-domain-total a > svg:last-child { width: 12px; color: var(--text-dim); }
@@ -17,7 +17,8 @@
 .spatial-gateway-status { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 5px; font-size: 9px; color: var(--text-dim); white-space: nowrap; }
 .spatial-gateway-status i { width: 4px; height: 4px; background: var(--ok); border-radius: 50%; }
 .spatial-gateway-status[data-online='false'] i { background: var(--err); }
-.spatial-stage { position: relative; width: 100%; aspect-ratio: 9 / 5; isolation: isolate; }
+.spatial-stage { position: relative; width: 100%; aspect-ratio: 9 / 5; isolation: isolate; overflow: hidden; margin: 12px 0 8px; }
+.spatial-scene { position: absolute; left: 0; width: 100%; }
 .spatial-canvas, .spatial-hit-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
 .spatial-canvas { pointer-events: none; }
 .spatial-node-hit, .spatial-gateway-hit { position: absolute; display: block; aspect-ratio: 1; padding: 0; border: 0; border-radius: 8px; background: transparent; color: transparent; box-shadow: none; transform: translate(-50%, -50%); }
@@ -38,7 +39,7 @@
 .spatial-rates span { display: inline-flex; gap: 3px; align-items: center; color: var(--text); }
 .spatial-rates svg { color: var(--fabric-it); }
 .spatial-empty-scene { position: absolute; top: 17%; width: 100%; text-align: center; font-size: 12px; color: var(--text-dim); }
-.fabric-domains { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 26px; margin: 6px 0 20px; }
+.fabric-domains { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 26px; margin: 6px 0 12px; }
 .fabric-domain { --node-color: var(--fabric-it); min-width: 0; }
 .fabric-domain[data-domain='OT'] { --node-color: var(--accent-2); }
 .fabric-health { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; margin: 7px 0 12px; }
@@ -73,7 +74,7 @@
   .fabric-heading { gap: 8px; }
   .fabric-heading h3 { font-size: 16px; }
   .fabric-motion { padding: 7px; }
-  .spatial-domain-headings { margin-top: 22px; }
+  .spatial-domain-headings { margin-top: 18px; }
   .spatial-domain-total a { gap: 5px; font-size: 10px; }
   .spatial-domain-total a > strong { font-size: 24px; }
   .spatial-domain-total a > svg:first-child { width: 13px; }

@@ -90,20 +90,38 @@ function statusColor(theme: Theme, status: Status, domain: Device['domain']) {
   return status === 'err' ? theme.error : status === 'warn' ? theme.warn : status === 'off' ? theme.muted : domain === 'IT' ? theme.cyan : theme.pink;
 }
 
+function deviceMetal(theme: Theme, device: Device) {
+  if (device.status === 'off') return { top: theme.metal, front: theme.metalFront, side: theme.metalSide };
+  if (device.status === 'err') return theme.dark
+    ? { top: '#bd8199', front: '#855166', side: '#553448' }
+    : { top: '#dfa5b5', front: '#b86b83', side: '#87485f' };
+  if (device.status === 'warn') return theme.dark
+    ? { top: '#d8b56f', front: '#a07b3c', side: '#664e30' }
+    : { top: '#edcb87', front: '#b48b48', side: '#826031' };
+  if (device.domain === 'IT') return theme.dark
+    ? { top: '#71cce8', front: '#3e91bc', side: '#285a81' }
+    : { top: '#8fd4e8', front: '#4598ba', side: '#2e6e94' };
+  return theme.dark
+    ? { top: '#e694d2', front: '#b363ad', side: '#703d77' }
+    : { top: '#efb0dc', front: '#c175b8', side: '#92518e' };
+}
+
 /** A physical glyph is drawn once, then reused as a high-DPI sprite. */
 function drawDevice(ctx: CanvasRenderingContext2D, theme: Theme, device: Device) {
   const accent = statusColor(theme, device.status, device.domain);
   const inactive = device.status === 'off' || device.status === 'err';
   const screenAccent = inactive ? theme.muted : accent;
-  const metal = theme.metal, front = theme.metalFront, side = theme.metalSide;
+  const { top: metal, front, side } = deviceMetal(theme, device);
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.save();
   ctx.globalAlpha = .2;
   polygon(ctx, [iso(-18, -9), iso(12, -9), iso(20, 16), iso(-10, 16)], '#060a1e');
   ctx.restore();
-  block(ctx, -15, -10, 0, 30, 20, 2.4, theme.dark ? '#313753' : '#e1e6f2', theme.floorEdge, theme.floorEdge);
-  ctx.save(); ctx.globalAlpha = inactive ? .35 : .75;
-  topLine(ctx, -13, 10, 13, 10, 2.6, accent, 1.1);
+  const plinth = device.status === 'off' ? theme.dark ? '#313753' : '#e1e6f2'
+    : device.domain === 'IT' ? theme.dark ? '#2b4962' : '#d4e8f5' : theme.dark ? '#563755' : '#eed8ec';
+  block(ctx, -15, -10, 0, 30, 20, 2.4, plinth, theme.floorEdge, theme.floorEdge);
+  ctx.save(); ctx.globalAlpha = device.status === 'off' ? .35 : .92;
+  topLine(ctx, -13, 10, 13, 10, 2.6, accent, 1.3);
   ctx.restore();
 
   switch (device.kind) {
@@ -200,7 +218,7 @@ function drawDevice(ctx: CanvasRenderingContext2D, theme: Theme, device: Device)
       break;
     }
     case 'shelly': {
-      block(ctx, -10, -7, 3, 20, 14, 17, theme.dark ? '#75678c' : '#c6b6dd', front, side, theme.white);
+      block(ctx, -10, -7, 3, 20, 14, 17, metal, front, side, theme.white);
       for (let i = 0; i < 3; i++) {
         block(ctx, -8 + i * 5.5, -7, 20, 4, 5, 3.5, metal, front, side);
         const terminal = iso(-6 + i * 5.5, -4.5, 23.6); led(ctx, terminal.x, terminal.y, 1.1, theme.screen);
@@ -260,28 +278,33 @@ function drawPlatform(ctx: CanvasRenderingContext2D, theme: Theme, points: Point
   const top = Math.min(...points.map(point => point.y));
   const bottom = Math.max(...points.map(point => point.y));
   const surface = ctx.createLinearGradient(0, top, 0, bottom);
-  surface.addColorStop(0, theme.dark ? '#303952' : '#f1f5fc');
-  surface.addColorStop(.56, theme.dark ? '#28314a' : '#e7edf7');
-  surface.addColorStop(1, theme.dark ? '#242c43' : '#dce5f2');
+  const finish = accent === theme.cyan
+    ? theme.dark ? ['#2a455b', '#253c52', '#223447'] : ['#edf8fd', '#e0eff8', '#d3e5f2']
+    : accent === theme.pink
+      ? theme.dark ? ['#4c3452', '#422e4b', '#35263f'] : ['#fceffa', '#f2e2f3', '#e9d7ed']
+      : theme.dark ? ['#493864', '#3d3057', '#302643'] : ['#f4edfd', '#eadff7', '#dfd2ef'];
+  surface.addColorStop(0, finish[0]);
+  surface.addColorStop(.56, finish[1]);
+  surface.addColorStop(1, finish[2]);
   ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
   for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
   ctx.closePath(); ctx.fillStyle = surface; ctx.fill();
-  ctx.save(); ctx.globalAlpha = theme.dark ? .35 : .24;
-  line(ctx, [...points, points[0]], accent, .7);
+  ctx.save(); ctx.globalAlpha = theme.dark ? .48 : .32;
+  line(ctx, [...points, points[0]], accent, .85);
   ctx.restore();
-  ctx.save(); ctx.globalAlpha = .68;
-  line(ctx, points.slice(2).map(p => ({ x: p.x, y: p.y + 4 })), accent, 1.4);
+  ctx.save(); ctx.globalAlpha = .86;
+  line(ctx, points.slice(2).map(p => ({ x: p.x, y: p.y + 4 })), accent, 1.8);
   ctx.restore();
 }
 
 function domainPlane(nodes: readonly SpatialNode[], domain: Device['domain']): Point[] | null {
   const members = nodes.filter(node => node.device.domain === domain);
   if (!members.length) return null;
-  const center = domain === 'IT' ? 205 : 695;
+  const center = domain === 'IT' ? 165 : 735;
   const slope = domain === 'IT' ? .12 : -.12;
   const edge = Math.max(...members.map(node => node.size)) * .62 + 13;
-  const left = Math.max(domain === 'IT' ? 22 : 526, Math.min(...members.map(node => node.x)) - edge);
-  const right = Math.min(domain === 'IT' ? 374 : 878, Math.max(...members.map(node => node.x)) + edge);
+  const left = Math.max(domain === 'IT' ? 12 : 562, Math.min(...members.map(node => node.x)) - edge);
+  const right = Math.min(domain === 'IT' ? 338 : 888, Math.max(...members.map(node => node.x)) + edge);
   const depth = Math.max(...members.map(node => node.size)) * .32 + 14;
   const back = Math.min(...members.map(node => node.y + (node.x - center) * slope)) - depth;
   const front = Math.max(...members.map(node => node.y + (node.x - center) * slope)) + depth;
@@ -296,11 +319,11 @@ function domainPlane(nodes: readonly SpatialNode[], domain: Device['domain']): P
 function drawFloor(ctx: CanvasRenderingContext2D, theme: Theme, nodes: readonly SpatialNode[]) {
   ctx.clearRect(0, 0, SPATIAL_WIDTH, SPATIAL_HEIGHT);
   // Fitted workplanes retain the same perspective for sparse and dense inventories.
-  const bridge = [
-    { x: 341, y: 251 }, { x: 451, y: 219 }, { x: 563, y: 251 },
-    { x: 563, y: 310 }, { x: 451, y: 343 }, { x: 341, y: 310 },
+  const gatewayPlinth = [
+    { x: GATEWAY.x, y: GATEWAY.y - 16 }, { x: GATEWAY.x + 80, y: GATEWAY.y + 27 },
+    { x: GATEWAY.x, y: GATEWAY.y + 75 }, { x: GATEWAY.x - 80, y: GATEWAY.y + 27 },
   ];
-  drawPlatform(ctx, theme, bridge, theme.violet);
+  drawPlatform(ctx, theme, gatewayPlinth, theme.violet);
   for (const domain of ['IT', 'OT'] as const) {
     const plane = domainPlane(nodes, domain);
     if (!plane) continue;
@@ -329,14 +352,14 @@ function drawGateway(ctx: CanvasRenderingContext2D, theme: Theme, online: boolea
   ctx.save(); ctx.globalAlpha = .26;
   polygon(ctx, [iso(-44, -33), iso(39, -33), iso(45, 44), iso(-38, 44)], '#030615');
   ctx.restore();
-  block(ctx, -39, -31, 0, 78, 62, 6, theme.dark ? '#3a3454' : '#e3daf6', theme.floorEdge, theme.metalSide);
+  block(ctx, -39, -31, 0, 78, 62, 6, theme.dark ? '#574174' : '#dec8f3', theme.floorEdge, theme.metalSide);
   block(ctx, -35, -28, 6, 70, 56, 3, theme.violet, theme.dark ? '#674798' : '#af81e3', theme.dark ? '#453369' : '#9361c4');
-  block(ctx, -32, -26, 9, 64, 52, 48, theme.dark ? '#6c6e91' : '#c8d1e5', theme.dark ? '#373b59' : '#8f9ebb', theme.dark ? '#252c49' : '#7084a5', theme.dark ? '#a6a7c4' : '#f5f3ff');
-  block(ctx, -27, -22, 57, 54, 44, 3.5, theme.dark ? '#777a9f' : '#dde2ef', theme.dark ? '#545b7c' : '#b4bfd5', theme.dark ? '#515775' : '#aebcd5');
-  for (let i = 0; i < 8; i++) topLine(ctx, -20, -15 + i * 3.1, 2, -15 + i * 3.1, 60.8, theme.dark ? '#414662' : '#8a9bb5', 1.55);
+  block(ctx, -32, -26, 9, 64, 52, 48, theme.dark ? '#9677c5' : '#c8ace7', theme.dark ? '#624d8c' : '#9c7cbe', theme.dark ? '#443360' : '#775791', theme.dark ? '#d0b4ef' : '#fbf4ff');
+  block(ctx, -27, -22, 57, 54, 44, 3.5, theme.dark ? '#b18ddd' : '#e2cbf7', theme.dark ? '#7e61aa' : '#bd9fda', theme.dark ? '#6d5196' : '#ac8cc9');
+  for (let i = 0; i < 8; i++) topLine(ctx, -20, -15 + i * 3.1, 2, -15 + i * 3.1, 60.8, theme.dark ? '#665181' : '#a288bd', 1.55);
 
   const badge = [iso(9, -14, 61), iso(22, -14, 61), iso(22, -1, 61), iso(9, -1, 61)];
-  polygon(ctx, badge, theme.dark ? '#383954' : '#afb4ce');
+  polygon(ctx, badge, theme.dark ? '#59416f' : '#b99bd8');
   const center = iso(15.5, -7.5, 61.1);
   ctx.save(); ctx.translate(center.x, center.y); ctx.transform(.84, .42, -.84, .42, 0, 0);
   ctx.strokeStyle = theme.violet; ctx.lineWidth = 1.2; ctx.strokeRect(-3, -3, 6, 6);
@@ -438,8 +461,8 @@ export function createSpatialRenderer(canvas: HTMLCanvasElement) {
       const color = statusColor(theme, node.device.status, node.device.domain);
       const flow = getDeviceFlow(node.device, options.online);
       backgroundCtx.strokeStyle = color;
-      backgroundCtx.globalAlpha = faded ? .045 : active ? .75 : node.device.status === 'off' ? .1 : .2;
-      backgroundCtx.lineWidth = active ? 1.45 : .75;
+      backgroundCtx.globalAlpha = faded ? .055 : active ? .84 : node.device.status === 'off' ? .1 : .28;
+      backgroundCtx.lineWidth = active ? 1.7 : .95;
       if (node.device.status === 'err' || node.device.status === 'off') backgroundCtx.setLineDash([2, 4]);
       backgroundCtx.stroke(path); backgroundCtx.setLineDash([]);
       if (flow.active && !faded) {
@@ -447,9 +470,9 @@ export function createSpatialRenderer(canvas: HTMLCanvasElement) {
         let group = groups.get(key);
         if (!group) {
           group = {
-            color, opacity: active ? .96 : flow.measured ? .78 : .55,
-            width: active ? 2.1 : 1.35, tail: active ? .095 : .055,
-            headRadius: active ? 1.7 : 1.1, headOpacity: active ? 1 : .85,
+            color, opacity: active ? 1 : flow.measured ? .9 : .7,
+            width: active ? 2.5 : 1.7, tail: active ? .105 : .072,
+            headRadius: active ? 1.9 : 1.3, headOpacity: active ? 1 : .92,
             headColor: theme.dark ? theme.white : color, routes: [],
           };
           groups.set(key, group);

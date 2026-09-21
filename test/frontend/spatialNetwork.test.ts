@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Device } from '../../src/types';
 import {
-  buildSpatialNodes, deviceLabel, getDeviceFlow, GATEWAY, SPATIAL_HEIGHT, SPATIAL_WIDTH,
+  buildSpatialNodes, deviceLabel, getDeviceFlow, spatialViewport, GATEWAY, SPATIAL_HEIGHT, SPATIAL_WIDTH,
 } from '../../src/components/widgets/spatialNetworkModel';
 
 function device(id: string, overrides: Partial<Device> = {}): Device {
@@ -50,8 +50,8 @@ test('every supported inventory size has finite, distinct centers within its dom
       assert.equal(new Set(nodes.map(node => `${node.x},${node.y}`)).size, nodes.length);
       for (const node of nodes) {
         assert.ok(Number.isFinite(node.x) && Number.isFinite(node.y));
-        assert.ok(node.x >= (domain === 'IT' ? 50 : 545));
-        assert.ok(node.x <= (domain === 'IT' ? 355 : 850));
+        assert.ok(node.x >= (domain === 'IT' ? 30 : 580));
+        assert.ok(node.x <= (domain === 'IT' ? 320 : 870));
         assert.ok(node.y >= 90 && node.y <= 398);
         assert.ok(node.phase >= 0 && node.phase < 1);
         assert.ok(node.size >= 26 && node.size <= 56);
@@ -66,6 +66,22 @@ test('every supported inventory size has finite, distinct centers within its dom
   assert.equal(SPATIAL_WIDTH, 900);
   assert.equal(SPATIAL_HEIGHT, 500);
   assert.deepEqual(GATEWAY, { x: 450, y: 255 });
+});
+
+test('fitted scene removes unused height and retains devices, the gateway and hit targets', () => {
+  for (const count of [0, 1, 7, 10, 18, 45, 60]) {
+    const nodes = buildSpatialNodes([...roster(count), ...roster(count, 'OT')]);
+    const viewport = spatialViewport(nodes);
+    assert.ok(viewport.height > 0 && viewport.height < SPATIAL_HEIGHT);
+    assert.ok(viewport.top <= 180);
+    assert.ok(viewport.top + viewport.height >= 380);
+    for (const node of nodes) {
+      assert.ok(node.y - node.size * 1.25 >= viewport.top);
+      assert.ok(node.y + node.size * .5 + 35 < viewport.top + viewport.height);
+      assert.ok(Math.abs(node.x - GATEWAY.x) >= 130, 'keep a clear connection corridor around the gateway');
+    }
+  }
+  assert.ok(spatialViewport(buildSpatialNodes([...roster(7), ...roster(7, 'OT')])).height < 270);
 });
 
 test('capped selection prioritizes exceptions independently in each domain and preserves source totals', () => {

@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpRight, ChevronDown, Clock, Cpu, Laptop, MapP
 import type { Branch, Device, Status } from '../../types';
 import { DomainInventory } from './DeviceInventory';
 import { countStates, kinds, states } from './deviceTopologyModel';
-import { buildSpatialNodes, deviceLabel, getDeviceFlow, SPATIAL_WIDTH, SPATIAL_HEIGHT, type SpatialNode } from './spatialNetworkModel';
+import { buildSpatialNodes, deviceLabel, getDeviceFlow, spatialViewport, SPATIAL_WIDTH, SPATIAL_HEIGHT, type SpatialNode } from './spatialNetworkModel';
 import { createSpatialRenderer } from './spatialNetworkRenderer';
 import './DeviceTopology.css';
 
@@ -24,6 +24,7 @@ function SpatialScene({ nodes, online, moving, hoveredId, highlighted, onHover, 
   const invalidate = useRef<() => void>(() => {});
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focused = nodes.find(node => node.device.id === focusedId)?.device.id ?? nodes[0]?.device.id;
+  const viewport = useMemo(() => spatialViewport(nodes), [nodes]);
 
   useEffect(() => {
     state.current = { nodes, online, moving, hoveredId, highlighted };
@@ -82,7 +83,8 @@ function SpatialScene({ nodes, online, moving, hoveredId, highlighted, onHover, 
     if (next) buttons.current.get(next.device.id)?.focus();
   };
 
-  return <div className="spatial-stage" role="group" aria-label="Spatial device network. Use arrow keys to move between devices, and Enter to inspect.">
+  return <div className="spatial-stage" style={{ aspectRatio: `${SPATIAL_WIDTH} / ${viewport.height}` }} role="group" aria-label="Spatial device network. Use arrow keys to move between devices, and Enter to inspect.">
+    <div className="spatial-scene" style={{ top: `${-viewport.top / viewport.height * 100}%`, height: `${SPATIAL_HEIGHT / viewport.height * 100}%` }}>
     <canvas ref={canvasRef} className="spatial-canvas" aria-hidden="true" />
     <div className="spatial-hit-layer">
       {nodes.map(node => <button key={node.device.id} type="button" className="spatial-node-hit"
@@ -96,6 +98,7 @@ function SpatialScene({ nodes, online, moving, hoveredId, highlighted, onHover, 
       <Link to="/gateway-twin" className="spatial-gateway-hit" aria-label="Open EDGE gateway digital twin" onPointerEnter={() => onHover(null)} />
     </div>
     <span className="spatial-gateway-label"><Router size={12} aria-hidden="true" />Shared gateway</span>
+    </div>
     {nodes.length === 0 && <div className="spatial-empty-scene">Devices appear here as they are discovered.</div>}
   </div>;
 }

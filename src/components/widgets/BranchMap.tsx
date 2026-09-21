@@ -335,7 +335,7 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
   const backLabel = zoom?.metro ? `Back to ${zoom.state}` : 'Back to US';
 
   const mapBody = (
-    <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 }}>
+    <div style={{ position: 'relative', flex: embedded ? '0 0 auto' : 1, display: 'flex', alignItems: embedded ? 'flex-start' : 'center', justifyContent: 'center', minHeight: 0 }}>
         {zoom && (
           <button
             onClick={goBack}
@@ -347,7 +347,7 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
             <ArrowLeft size={13} />{backLabel}
           </button>
         )}
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: 'auto', maxHeight: 420, display: 'block' }}>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio={embedded ? 'xMidYMin meet' : 'xMidYMid meet'} style={{ width: '100%', height: 'auto', maxHeight: embedded ? undefined : 420, display: 'block' }}>
           <defs>
             <radialGradient id="map-bg" cx="50%" cy="50%" r="60%">
               <stop offset="0%"  stopColor={haloFill} stopOpacity={0.18} />

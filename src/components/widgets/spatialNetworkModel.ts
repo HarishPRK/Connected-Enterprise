@@ -45,7 +45,7 @@ export function buildSpatialNodes(devices: readonly Device[]): SpatialNode[] {
 
     const columns = Math.min(6, Math.ceil(Math.sqrt(count * 1.3)));
     const rows = Math.ceil(count / columns);
-    const centerX = domain === 'IT' ? 205 : 695;
+    const centerX = domain === 'IT' ? 165 : 735;
     const towardGateway = domain === 'IT' ? 1 : -1;
     const horizontalGap = count <= 10 ? 80 : columns <= 4 ? 70 : 51;
     const preferredVerticalGap = count <= 10 ? 76 : count <= 18 ? 60 : count <= 36 ? 38 : 34;
@@ -72,6 +72,14 @@ export function buildSpatialNodes(devices: readonly Device[]): SpatialNode[] {
       };
     });
   });
+}
+
+/** Keep the drawing and its native hit targets together while cropping unused rows. */
+export function spatialViewport(nodes: readonly SpatialNode[]): { top: number; height: number } {
+  if (nodes.length === 0) return { top: 110, height: 270 };
+  const top = Math.floor(Math.min(180, ...nodes.map(node => node.y - node.size * 1.25 - 16)));
+  const bottom = Math.ceil(Math.max(380, ...nodes.map(node => node.y + node.size * .5 + 50)));
+  return { top, height: bottom - top };
 }
 
 function measuredRate(value: number | undefined): number | undefined {
