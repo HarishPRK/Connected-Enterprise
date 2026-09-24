@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, ArrowLeftRight, ArrowRight, Check, ChevronRight, Cloud, Cpu, GitBranch, Leaf, Pause, Play, RotateCcw, ShieldCheck, Zap } from 'lucide-react';
+import { ArrowRight, Check, ChevronRight, Cpu, Pause, Play, RotateCcw } from 'lucide-react';
 import { SolutionScene } from './SolutionScene';
+import type { ScenarioId } from './scenePrimitives';
 import './solution-showcase.css';
 
 const CHAPTERS = ['The incident', 'The blind spot', 'Edge response', 'The outcome'] as const;
@@ -17,7 +18,7 @@ interface StoryBeat {
 
 const SCENARIOS = [
   {
-    id: 'safety' as const, label: 'Fall detection', icon: ShieldCheck, location: 'Customer aisle',
+    id: 'safety' as const, label: 'Fall detection', location: 'Customer aisle',
     service: 'Video Analytics', support: 'Edge inference + operator alerts',
     href: '/video-analytics', cta: 'Explore Video Analytics',
     beats: [
@@ -28,7 +29,7 @@ const SCENARIOS = [
     ] satisfies StoryBeat[],
   },
   {
-    id: 'connectivity' as const, label: 'Dynamic Failover', icon: GitBranch, location: 'Checkout',
+    id: 'connectivity' as const, label: 'Dynamic Failover', location: 'Checkout',
     service: 'Dynamic Failover', support: 'Path health + policy-based routing',
     href: '/path-selection', cta: 'Explore Dynamic Failover',
     beats: [
@@ -39,7 +40,7 @@ const SCENARIOS = [
     ] satisfies StoryBeat[],
   },
   {
-    id: 'energy' as const, label: 'Energy Prediction', icon: Zap, location: 'Climate & energy',
+    id: 'energy' as const, label: 'Energy Prediction', location: 'Climate & energy',
     service: 'Energy Prediction', support: 'Edge Analytics + connected controls',
     href: '/cost-insights', cta: 'Explore Cost Savings',
     beats: [
@@ -50,7 +51,7 @@ const SCENARIOS = [
     ] satisfies StoryBeat[],
   },
   {
-    id: 'leak' as const, label: 'Sustainability', icon: Leaf, location: 'Utilities',
+    id: 'leak' as const, label: 'Sustainability', location: 'Utilities',
     service: 'Sustainability', support: 'Leak detection + connected water controls',
     href: '#offering-sustainability', cta: 'See Sustainability capabilities',
     beats: [
@@ -61,7 +62,7 @@ const SCENARIOS = [
     ] satisfies StoryBeat[],
   },
   {
-    id: 'matter' as const, label: 'Matter & Interoperability', icon: ArrowLeftRight, location: 'Smart retail zone',
+    id: 'matter' as const, label: 'Matter & Interoperability', location: 'Smart retail zone',
     service: 'Matter & Interoperability', support: 'Different manufacturers · one Matter fabric · Wi-Fi + Thread',
     href: '#offering-matter', cta: 'See Matter & Interoperability',
     beats: [
@@ -72,7 +73,7 @@ const SCENARIOS = [
     ] satisfies StoryBeat[],
   },
   {
-    id: 'eagle' as const, label: 'EA:GLE', icon: Activity, location: 'IT & edge',
+    id: 'eagle' as const, label: 'EA:GLE', location: 'IT & edge',
     service: 'EA:GLE — Edge Analytics', support: 'Local processing + anomaly detection',
     href: '/hardware-anomalies', cta: 'Explore EA:GLE',
     beats: [
@@ -83,7 +84,7 @@ const SCENARIOS = [
     ] satisfies StoryBeat[],
   },
   {
-    id: 'greengrass' as const, label: 'AWS Greengrass', icon: Cloud, location: 'Stockroom',
+    id: 'greengrass' as const, label: 'AWS Greengrass', location: 'Stockroom',
     service: 'AWS Greengrass', support: 'Local processing + cloud device management',
     href: '#offering-greengrass', cta: 'See AWS Greengrass capabilities',
     beats: [
@@ -116,7 +117,6 @@ export function SolutionShowcase() {
   const chapterRef = useRef(0);
   const progressRef = useRef<HTMLDivElement>(null);
   const rangeRef = useRef<HTMLInputElement>(null);
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const scenario = SCENARIOS[scenarioIndex];
   const beat = scenario.beats[chapter];
   const running = playing && inView && pageVisible && !reducedMotion && !finished;
@@ -195,24 +195,15 @@ export function SolutionShowcase() {
 
   const selectScenario = (index: number) => {
     setTouring(false);
-    if (index === scenarioIndex) return;
     setScenarioIndex(index);
-    // A manual pause remains a pause when switching to a different use case.
     seek(reducedMotion ? 3.9 : 0);
+    setFinished(false);
+    setPlaying(!reducedMotion);
   };
 
-  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    let next: number;
-    if (event.key === 'ArrowRight') next = (index + 1) % SCENARIOS.length;
-    else if (event.key === 'ArrowLeft') next = (index + SCENARIOS.length - 1) % SCENARIOS.length;
-    else if (event.key === 'ArrowDown') next = (index + 1) % SCENARIOS.length;
-    else if (event.key === 'ArrowUp') next = (index + SCENARIOS.length - 1) % SCENARIOS.length;
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = SCENARIOS.length - 1;
-    else return;
-    event.preventDefault();
-    selectScenario(next);
-    tabRefs.current[next]?.focus();
+  const selectSceneScenario = (id: ScenarioId) => {
+    const index = SCENARIOS.findIndex((item) => item.id === id);
+    if (index >= 0) selectScenario(index);
   };
 
   const replay = () => {
@@ -260,31 +251,16 @@ export function SolutionShowcase() {
       </div>
 
       <div className="showcase-frame">
-        <div className="showcase-tabs" role="tablist" aria-label="Solution use cases">
-          {SCENARIOS.map((item, index) => {
-            const Icon = item.icon;
-            return (
-              <button key={item.id} id={`showcase-tab-${item.id}`} type="button" role="tab"
-                aria-selected={index === scenarioIndex} aria-controls="showcase-panel"
-                tabIndex={index === scenarioIndex ? 0 : -1}
-                ref={(element) => { tabRefs.current[index] = element; }}
-                onKeyDown={(event) => onTabKeyDown(event, index)} onClick={() => selectScenario(index)}>
-                <Icon size={17} aria-hidden="true" /><span>{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div id="showcase-panel" className="showcase-panel" role="tabpanel"
-          aria-labelledby={`showcase-tab-${scenario.id}`} tabIndex={0} data-chapter={chapter}>
+        <div id="showcase-panel" className="showcase-panel" role="region"
+          aria-label="Interactive enterprise store" data-chapter={chapter}>
           <div className="showcase-visual" ref={visualRef}>
             <div className="showcase-scene-heading">
-              <span><strong>Enterprise store</strong><span className="showcase-zone">{scenario.location}</span></span>
+              <span><strong>Enterprise store</strong>{scenario.id !== 'matter' && <span className="showcase-zone">{scenario.location}</span>}</span>
               <span className="showcase-scene-mode">{chapter < 2 ? 'Without connected services' : 'With connected services'}</span>
             </div>
             <div className="showcase-canvas-wrap">
               <SolutionScene scenario={scenario.id} timeRef={timeRef} playing={running}
-                reducedMotion={reducedMotion} revision={revision} />
+                reducedMotion={reducedMotion} revision={revision} onScenarioSelect={selectSceneScenario} />
             </div>
             <div className="showcase-scene-caption" aria-hidden="true">
               <span className="showcase-status"><span />{beat.status}</span>
@@ -346,7 +322,7 @@ export function SolutionShowcase() {
           </div>
         </div>
       </div>
-      <p className="showcase-footnote">{reducedMotion ? 'Reduced motion is on. Choose a chapter to explore the store. ' : 'Select a use case to follow its response in the same store. '}
+      <p className="showcase-footnote">{reducedMotion ? 'Reduced motion is on. Select a store area to explore its response. ' : 'Click a labeled store area to start its scenario. '}
         Concept demonstration; events and outcomes are illustrative, not live telemetry.</p>
     </section>
   );

@@ -85,6 +85,8 @@ export interface GatewayTwinEmbedProps {
   onState?: (state: TwinState) => void
   onTwinEvent?: (event: TwinEvent) => void
   onHostBridgeError?: (error: { message: string }) => void
+  onAuthRequired?: () => void
+  onAuthComplete?: () => void
 }
 
 const DEFAULT_SRC = '/widgets/gw-twin/app/index.html'
@@ -95,14 +97,14 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
       src = DEFAULT_SRC, scenario, explode, xray, rings, hosts, flow, still, live,
       hostBridgeSrc,
       nohud, lite, title = 'GW Operational Twin', className, style,
-      onReady, onState, onTwinEvent, onHostBridgeError,
+      onReady, onState, onTwinEvent, onHostBridgeError, onAuthRequired, onAuthComplete,
     } = props
     const iframeRef = useRef<HTMLIFrameElement>(null)
-    const callbacks = useRef({ onReady, onState, onTwinEvent, onHostBridgeError })
+    const callbacks = useRef({ onReady, onState, onTwinEvent, onHostBridgeError, onAuthRequired, onAuthComplete })
     const hostBridgeReady = useRef(false)
     const pendingHostRoster = useRef<GatewayTwinHost[] | null | undefined>(undefined)
     const pendingAgentOpen = useRef(false)
-    callbacks.current = { onReady, onState, onTwinEvent, onHostBridgeError }
+    callbacks.current = { onReady, onState, onTwinEvent, onHostBridgeError, onAuthRequired, onAuthComplete }
 
     // initial state travels in the URL; runtime changes go over postMessage
     const url = useMemo(() => {
@@ -139,6 +141,8 @@ export const GatewayTwinEmbed = forwardRef<GatewayTwinHandle, GatewayTwinEmbedPr
         const m = e.data
         if (!m || typeof m !== 'object' || m.source !== 'gw-twin') return
         if (m.type === 'ready') callbacks.current.onReady?.(m.payload)
+        else if (m.type === 'auth-required') callbacks.current.onAuthRequired?.()
+        else if (m.type === 'auth-complete') callbacks.current.onAuthComplete?.()
         else if (m.type === 'state') callbacks.current.onState?.(m.payload)
         else if (m.type === 'event') callbacks.current.onTwinEvent?.(m.payload)
         else if (m.type === 'host-bridge-ready') {

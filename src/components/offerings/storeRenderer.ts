@@ -2,7 +2,7 @@ import { ellipse, iso, line, palette, polygon, progress, route, withScenePresent
 import { drawStoreArchitecture, STORE_ZONES } from './storeArchitecture';
 import { drawStoreScenario } from './storeAnimations';
 
-export const STORE_BOUNDS = { x: -475, y: -35, width: 2040, height: 1240 };
+export const STORE_BOUNDS = { x: -455, y: -60, width: 2000, height: 1340 };
 export interface StoreCamera { x: number; y: number; zoom: number }
 export const OVERVIEW: StoreCamera = { x: 545, y: 575, zoom: 1 };
 const ORDER = (Object.keys(STORE_ZONES) as ScenarioId[]).sort((a, b) => {
@@ -115,11 +115,38 @@ export function createStoreRenderer(canvas: HTMLCanvasElement) {
     return { x: width / 2 + (point.x - lastCamera.x) * scale, y: height / 2 + (point.y - lastCamera.y) * scale };
   };
 
+  const scenarioLabelPosition = (id: ScenarioId, camera = lastCamera) => {
+    const zone = STORE_ZONES[id];
+    const point = iso(zone.x + 205, zone.y + 286, 1);
+    const scale = baseScale * camera.zoom;
+    const x = width / 2 + (point.x - camera.x) * scale;
+    const y = height / 2 + (point.y - camera.y) * scale + 2;
+    return { x, y, visible: x >= 60 && x <= width - 60 && y >= 24 && y <= height - 42 };
+  };
+
+  const scenarioAtPoint = (screenX: number, screenY: number, camera = lastCamera): ScenarioId | undefined => {
+    const scale = baseScale * camera.zoom;
+    if (!scale) return undefined;
+    const projectedX = (screenX - width / 2) / scale + camera.x;
+    const projectedY = (screenY - height / 2) / scale + camera.y;
+    const u = (projectedX - 421) / 0.88;
+    const v = (projectedY - 165) / 0.44;
+    const storeX = (u + v) / 2;
+    const storeY = (v - u) / 2;
+    return (Object.keys(STORE_ZONES) as ScenarioId[]).find((id) => {
+      const zone = STORE_ZONES[id];
+      return storeX >= zone.x + 10 && storeX <= zone.x + 400
+        && storeY >= zone.y + 10 && storeY <= zone.y + 295;
+    });
+  };
+
   return {
     resize(nextWidth: number, nextHeight: number, dark: boolean, pixelRatio = window.devicePixelRatio || 1) {
       width = nextWidth; height = nextHeight; ratio = Math.min(pixelRatio, 2);
       canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
-      baseScale = Math.min(width / STORE_BOUNDS.width, height / STORE_BOUNDS.height) * .95;
+      const containScale = Math.min(width / STORE_BOUNDS.width, height / STORE_BOUNDS.height);
+      // Keep the full store inside its viewport, with a little breathing room.
+      baseScale = containScale * .9;
       // Rasterize once at focused-view density, rather than rebuilding the store every frame.
       textureScale = Math.min(2, Math.max(.8, baseScale * ratio * 2.15));
       p = storePalette(dark);
@@ -152,20 +179,9 @@ export function createStoreRenderer(canvas: HTMLCanvasElement) {
       ctx.save(); ctx.globalAlpha = .5 + progress(time, 10, 12) * .4;
       ellipse(ctx, hub, 4, 4, p.teal); ctx.restore();
       ctx.restore();
-      for (const key of ORDER) {
-        if ((focused || width < 600) && key !== id) continue;
-        const zone = STORE_ZONES[key];
-        const point = project(iso(zone.x + 205, zone.y + 286, 1));
-        if (point.x < 60 || point.x > width - 60 || point.y < 24 || point.y > height - 42) continue;
-        ctx.font = `${key === id ? 600 : 500} 12px "Space Grotesk", system-ui, sans-serif`;
-        const label = zone.name;
-        const labelWidth = ctx.measureText(label).width + 24;
-        ctx.fillStyle = p.dark ? '#25223f' : '#ffffff';
-        ctx.beginPath(); ctx.roundRect(point.x - labelWidth / 2, point.y - 11, labelWidth, 25, 5); ctx.fill();
-        ctx.fillStyle = key === id ? p.teal : p.muted; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(label, point.x, point.y + 2);
-      }
     },
+    scenarioLabelPosition,
+    scenarioAtPoint,
     dispose() {
       backdrop.width = 0; backdrop.height = 0;
       stationary.width = 0; stationary.height = 0;
