@@ -149,7 +149,10 @@ export function drawStoreScenario(ctx: CanvasRenderingContext2D, p: Palette, id:
 }
 
 /** Status follows the actual original animation beats, including gradual outcomes. */
-export function storeScenarioStatus(id: ScenarioId, time: number): string {
+export function storeScenarioStatus(id: ScenarioId, time: number, sustainability: SustainabilityMode = 'water'): string {
+  if (id === 'leak' && sustainability === 'occupancy') {
+    return time < 3.6 ? 'Last person leaving' : time < 10 ? 'Empty room · demand continues' : time < 17 ? 'Vacancy policy triggered' : time < 20.5 ? 'Lighting and climate adjusting' : 'Idle demand reduced';
+  }
   switch (id) {
     case 'safety':
       return time < 1.8 ? 'Shopper in the aisle' : time < 3.85 ? 'A fall in the aisle' : time < 10.6 ? 'Fall unobserved' : time < 13.2 ? 'Possible fall detected' : time < 20.3 ? 'Assistance requested' : 'Colleague assisting';

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Check, ChevronRight, Cpu, Pause, Play, RotateCcw } from 'lucide-react';
 import { SolutionScene } from './SolutionScene';
 import { TWIN_SCENARIOS, WATER_SENSORS } from './twinScenarioInfo';
-import type { SustainabilityMode } from './storeAnimations';
+import { storeScenarioStatus, type SustainabilityMode } from './storeAnimations';
 import type { ScenarioId } from './scenePrimitives';
 import './solution-showcase.css';
 
@@ -122,6 +122,7 @@ export function SolutionShowcase() {
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [initialTime] = useState(reducedMotion ? 3.9 : 0);
+  const [displayTime, setDisplayTime] = useState(initialTime);
   const visualRef = useRef<HTMLDivElement>(null);
   const timeRef = useRef(initialTime);
   const chapterRef = useRef(0);
@@ -164,6 +165,7 @@ export function SolutionShowcase() {
       const delta = previous === undefined ? 0 : Math.min((now - previous) / 1000, 0.1);
       previous = now;
       const time = Math.min(DURATION, timeRef.current + delta);
+      if (Math.floor(time) !== Math.floor(timeRef.current)) setDisplayTime(time);
       timeRef.current = time;
       if (progressRef.current) progressRef.current.style.transform = `scaleX(${time / DURATION})`;
       if (rangeRef.current) rangeRef.current.value = String(time);
@@ -177,6 +179,7 @@ export function SolutionShowcase() {
           // Reset the shared clock before switching scenarios. The changed index
           // starts a fresh RAF effect, so this completed callback cannot advance twice.
           timeRef.current = 0;
+          setDisplayTime(0);
           chapterRef.current = 0;
           if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
           if (rangeRef.current) rangeRef.current.value = '0';
@@ -198,6 +201,7 @@ export function SolutionShowcase() {
 
   const seek = (time: number) => {
     timeRef.current = time;
+    setDisplayTime(time);
     chapterRef.current = chapterAt(time);
     setChapter(chapterRef.current);
     setFinished(time >= DURATION);
@@ -247,8 +251,7 @@ export function SolutionShowcase() {
     <section className="solution-showcase" data-color={scenarioInfo.color} aria-labelledby="showcase-title">
       <div className="showcase-heading">
         <div>
-          <h2 id="showcase-title">Inside the store</h2>
-          <p>Explore a scenario, rotate the twin and follow the response.</p>
+          <h2 id="showcase-title">Explore the store</h2>
         </div>
         <div className="showcase-heading-actions">
           <span className="showcase-disclosure" aria-live="polite">
@@ -267,20 +270,18 @@ export function SolutionShowcase() {
         <div id="showcase-panel" className="showcase-panel" role="region"
           aria-label="Interactive enterprise store" data-chapter={chapter}>
           <nav className="showcase-scenarios" aria-label="Store scenarios">
-            <h3>Explore scenarios</h3>
             {SCENARIOS.map((item, index) => {
               const info = TWIN_SCENARIOS[item.id];
               const Icon = info.icon;
               return <button type="button" key={item.id} data-color={info.color} aria-pressed={index === scenarioIndex}
                 onClick={() => selectScenario(index)}>
-                <Icon size={19} aria-hidden="true" /><span>{item.label}</span><ChevronRight size={14} aria-hidden="true" />
+                <Icon size={19} aria-hidden="true" /><span>{item.label}</span>
               </button>;
             })}
-            <p>Select a scenario to explore its sensors and edge response.</p>
           </nav>
           <div className="showcase-visual" ref={visualRef}>
             <div className="showcase-scene-heading">
-              <span><strong>{scenario.label}</strong></span>
+              <span><strong>{scenario.label}</strong><span className="showcase-location">{occupancy ? 'Occupancy & energy' : scenario.location}</span></span>
               <span className="showcase-scene-mode">{chapter < 2 ? 'Before response' : 'Connected response'}</span>
             </div>
             <div className="showcase-canvas-wrap">
@@ -288,42 +289,38 @@ export function SolutionShowcase() {
                 reducedMotion={reducedMotion} revision={revision} sustainability={sustainability} onScenarioSelect={selectSceneScenario} />
             </div>
             <div className="showcase-scene-caption" aria-hidden="true">
-              <span className="showcase-status"><span />{beat.status}</span>
+              <span className="showcase-status"><span />{storeScenarioStatus(scenario.id, displayTime, sustainability)}</span>
               <span className="showcase-scene-format">Illustrative scenario</span>
             </div>
           </div>
 
           <aside className="showcase-sensors" aria-label="Scenario sensors">
+            <div className="showcase-narrative" aria-live="polite" aria-atomic="true">
+              <div className="showcase-chapter-label"><span>{chapter + 1}</span>{CHAPTERS[chapter]}</div>
+              <h3>{beat.title}</h3>
+              <p>{beat.description}</p>
+            </div>
+            <div className="showcase-sensor-readings">
             <h3>Sensor activity</h3>
-            <p className="showcase-sensor-context">{occupancy ? 'Occupancy & energy waste' : scenario.location}</p>
             {scenario.id === 'leak' && <div className="showcase-sustainability-modes" aria-label="Sustainability scenario">
               <button type="button" aria-pressed={sustainability === 'occupancy'} onClick={() => { setSustainability('occupancy'); selectScenario(scenarioIndex); }}>Energy waste</button>
               <button type="button" aria-pressed={sustainability === 'water'} onClick={() => { setSustainability('water'); selectScenario(scenarioIndex); }}>Water protection</button>
             </div>}
             <ul>{sensors.map(sensor => <li key={sensor.name}>
               <span className="showcase-sensor-dot" aria-hidden="true" />
-              <div><strong>{sensor.name}</strong><span>{sensor.detail}</span><em>{sensor.states[chapter]}</em></div>
+              <div><strong>{sensor.name}</strong><span>{sensor.detail}</span></div><em>{sensor.states[chapter]}</em>
             </li>)}</ul>
-            <div className="showcase-edge-path"><Cpu size={19} aria-hidden="true" /><div><strong>Shared edge gateway</strong><span>{chapter < 2 ? 'Waiting for a connected response' : 'Local context. Coordinated action.'}</span></div></div>
-          </aside>
-          <div className="showcase-story">
-            <div className="showcase-narrative" aria-live="polite" aria-atomic="true">
-              <div className="showcase-chapter-label"><span>{chapter + 1}</span>{CHAPTERS[chapter]}</div>
-              <h3>{beat.title}</h3>
-              <p>{beat.description}</p>
-              <div className="showcase-signal"><span aria-hidden="true" />{beat.signal}</div>
             </div>
             <div className="showcase-service">
-              <div className="showcase-service-heading"><Cpu size={17} aria-hidden="true" /><span>The service behind the response</span></div>
-              <strong>{scenario.service}</strong>
-              <p>{occupancy ? 'Presence, daylight and power monitoring' : scenario.support}</p>
+              <div className="showcase-service-heading"><Cpu size={17} aria-hidden="true" /><span>Powered by {scenario.service}</span></div>
               {scenario.href.startsWith('#') ? (
                 <a href={scenario.href}>{scenario.cta}<ArrowRight size={16} aria-hidden="true" /></a>
               ) : (
                 <Link to={scenario.href}>{scenario.cta}<ArrowRight size={16} aria-hidden="true" /></Link>
               )}
             </div>
-          </div>
+
+          </aside>
           <div className="showcase-transport">
             <div className="showcase-playback">
               {reducedMotion ? (

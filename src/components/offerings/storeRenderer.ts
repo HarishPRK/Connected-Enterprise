@@ -4,7 +4,7 @@ import { drawStoreScenario, type SustainabilityMode } from './storeAnimations';
 
 export const STORE_BOUNDS = { x: -1000, y: -250, width: 3100, height: 1800 };
 export interface StoreCamera { x: number; y: number; zoom: number; angle?: number }
-export const OVERVIEW: StoreCamera = { x: 540, y: 595, zoom: 1, angle: 0 };
+export const OVERVIEW: StoreCamera = { x: 540, y: 578, zoom: 1, angle: 0 };
 const ORDER = (Object.keys(STORE_ZONES) as ScenarioId[]).sort((a, b) => {
   const left = STORE_ZONES[a]; const right = STORE_ZONES[b];
   return left.x + left.y - right.x - right.y;
@@ -18,14 +18,14 @@ export function cameraForScenario(id: ScenarioId, angle = 0): StoreCamera {
 /** The application's navy surfaces, violet emphasis and cyan signals. */
 export function storePalette(dark: boolean): Palette {
   return { ...palette(dark),
-    floor: dark ? '#24494b' : '#e9edf5',
-    floorSide: dark ? '#17192c' : '#bfc9dc', floorFront: dark ? '#202239' : '#d0d8e7',
-    seam: dark ? '#496871' : '#d3dbea', wall: dark ? '#365c70' : '#f5f6fc',
-    wallSide: dark ? '#294655' : '#dce2ef', wallTop: dark ? '#96b8c3' : '#ffffff',
+    floor: dark ? '#24494b' : '#c0cec9',
+    floorSide: dark ? '#17192c' : '#647c87', floorFront: dark ? '#202239' : '#809aa2',
+    seam: dark ? '#496871' : '#a1b6bb', wall: dark ? '#365c70' : '#6b8999',
+    wallSide: dark ? '#294655' : '#557585', wallTop: dark ? '#96b8c3' : '#b5d2d9',
     ink: dark ? '#f3f1ff' : '#18243a', muted: dark ? '#c4bee0' : '#53627c',
     blue: dark ? '#78cafa' : '#287eaf', teal: dark ? '#5ce0be' : '#087d6c',
-    hardware: dark ? '#718b9b' : '#dbe1ee', hardwareSide: dark ? '#466575' : '#adbdd5',
-    hardwareTop: dark ? '#b8d4dc' : '#f8f9fe', screen: '#1d2948',
+    hardware: dark ? '#718b9b' : '#759ba8', hardwareSide: dark ? '#466575' : '#456977',
+    hardwareTop: dark ? '#b8d4dc' : '#c9e0e3', screen: '#1d2948',
   };
 }
 
@@ -100,7 +100,7 @@ export function createStoreRenderer(canvas: HTMLCanvasElement) {
       canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
       baseScale = Math.min((width - 30) / 2050, (height - 100) / 1240);
       textureScale = Math.min(1.5, Math.max(.75, baseScale * ratio * 2));
-      p = storePalette(dark); surface = dark ? '#111f2d' : '#edf5f7';
+      p = storePalette(dark); surface = dark ? '#111f2d' : '#e6eef0';
       cachedAngle = NaN;
     },
     render(id: ScenarioId, time: number, camera: StoreCamera, _focused: boolean, mode: SustainabilityMode = 'occupancy') {
@@ -108,11 +108,15 @@ export function createStoreRenderer(canvas: HTMLCanvasElement) {
       const angle = camera.angle ?? 0;
       if (cachedAngle !== angle || cachedMode !== mode) rebuild(angle, mode);
       lastCamera = camera;
+      const corners = [[0, 0], [1230, 0], [1230, 960], [0, 960]].map(([x, y]) => projectStorePoint(x, y, 0, angle));
+      const spanX = Math.max(...corners.map(point => point.x)) - Math.min(...corners.map(point => point.x));
+      const spanY = Math.max(...corners.map(point => point.y)) - Math.min(...corners.map(point => point.y)) + 190;
+      baseScale = Math.max(.01, Math.min((width - 36) / (spanX + 36), (height - 38) / spanY));
       const scale = baseScale * camera.zoom;
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.fillStyle = surface; ctx.fillRect(0, 0, width, height);
       ctx.save();
-      ctx.translate(width / 2, height / 2 - 18); ctx.scale(scale, scale); ctx.translate(-camera.x, -camera.y);
+      ctx.translate(width / 2, height / 2 + 4); ctx.scale(scale, scale); ctx.translate(-camera.x, -camera.y);
       ctx.drawImage(backdrop, STORE_BOUNDS.x, STORE_BOUNDS.y, STORE_BOUNDS.width, STORE_BOUNDS.height);
       withSceneProjection({ angle }, () => { network(ctx, p, id, time, true); network(ctx, p, id, time); });
       const sorted = [...ORDER].sort((a, b) => {
@@ -136,7 +140,7 @@ export function createStoreRenderer(canvas: HTMLCanvasElement) {
     scenarioAtPoint(screenX: number, screenY: number, camera = lastCamera): ScenarioId | undefined {
       const scale = baseScale * camera.zoom;
       if (!scale) return undefined;
-      const point = unprojectStorePoint((screenX - width / 2) / scale + camera.x, (screenY - height / 2 + 18) / scale + camera.y, camera.angle ?? 0);
+      const point = unprojectStorePoint((screenX - width / 2) / scale + camera.x, (screenY - height / 2 - 4) / scale + camera.y, camera.angle ?? 0);
       return ORDER.find(id => { const zone = STORE_ZONES[id]; return point.x >= zone.x + 10 && point.x <= zone.x + 400 && point.y >= zone.y + 10 && point.y <= zone.y + 295; });
     },
     dispose() {

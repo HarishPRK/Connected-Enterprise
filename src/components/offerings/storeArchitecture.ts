@@ -28,8 +28,8 @@ function groundText(ctx: CanvasRenderingContext2D, p: Palette, x: number, y: num
 }
 
 function glazing(ctx: CanvasRenderingContext2D, p: Palette, x: number, width: number) {
-  polygon(ctx, [iso(x, 2, 99), iso(x + width, 2, 99), iso(x + width, 2, 37), iso(x, 2, 37)], p.dark ? '#172c45' : '#c7d5e5');
-  polygon(ctx, [iso(x + 5, 3, 95), iso(x + width - 6, 3, 95), iso(x + 5, 3, 42)], p.dark ? '#314664' : '#e8eef5');
+  polygon(ctx, [iso(x, 2, 99), iso(x + width, 2, 99), iso(x + width, 2, 37), iso(x, 2, 37)], p.dark ? '#172c45' : '#365e75');
+  polygon(ctx, [iso(x + 5, 3, 95), iso(x + width - 6, 3, 95), iso(x + 5, 3, 42)], p.dark ? '#314664' : '#74afbd');
   const panes = Math.max(2, Math.round(width / 85));
   for (let index = 0; index <= panes; index++) {
     const location = x + width * index / panes;
@@ -74,8 +74,8 @@ function shelf(ctx: CanvasRenderingContext2D, p: Palette, x: number, y: number, 
 export function drawStoreArchitecture(ctx: CanvasRenderingContext2D, p: Palette) {
   const w = STORE_FLOOR_WIDTH;
   const d = STORE_FLOOR_DEPTH;
-  const circulation = p.dark ? '#40616b' : '#edf0f4';
-  const room = p.dark ? '#294750' : '#e3e9ef';
+  const circulation = p.dark ? '#40616b' : '#d3d1bd';
+  const room = p.dark ? '#294750' : '#a8c4c6';
   const violet = p.dark ? '#414565' : '#c3c3da';
   const cyan = p.blue;
 
@@ -93,7 +93,7 @@ export function drawStoreArchitecture(ctx: CanvasRenderingContext2D, p: Palette)
   polygon(ctx, [iso(392, 0, 0.7), iso(427, 0, 0.7), iso(427, d, 0.7), iso(392, d, 0.7)], circulation);
   polygon(ctx, [iso(802, 0, 0.7), iso(837, 0, 0.7), iso(837, d, 0.7), iso(802, d, 0.7)], circulation);
   // A quiet inset showroom floor changes material without enclosing a room.
-  polygon(ctx, [iso(45, 347, 0.8), iso(385, 347, 0.8), iso(385, 616, 0.8), iso(45, 616, 0.8)], p.dark ? '#395668' : '#e4e4ef');
+  polygon(ctx, [iso(45, 347, 0.8), iso(385, 347, 0.8), iso(385, 616, 0.8), iso(45, 616, 0.8)], p.dark ? '#395668' : '#a8bbd2');
   ctx.save();
   ctx.globalAlpha = 0.5;
   for (let x = 0; x <= w; x += 82) line(ctx, [iso(x, 0, 1), iso(x, d, 1)], p.seam, 0.65);
