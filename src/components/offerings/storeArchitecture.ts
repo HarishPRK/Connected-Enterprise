@@ -1,4 +1,4 @@
-import { box, ellipse, iso, line, polygon, type Palette, type ScenarioId } from './scenePrimitives';
+import { box, ellipse, iso, line, plant, polygon, type Palette, type ScenarioId } from './scenePrimitives';
 
 export const STORE_ZONES = {
   energy: { x: 0, y: 0, name: 'Climate & energy' },
@@ -17,24 +17,12 @@ function groundText(ctx: CanvasRenderingContext2D, p: Palette, x: number, y: num
   const point = iso(x, y, 2);
   ctx.save();
   ctx.translate(point.x, point.y);
-  ctx.transform(0.88, 0.44, -0.88, 0.44, 0, 0);
+  const horizontal = iso(x + 1, y, 2); const vertical = iso(x, y + 1, 2);
+  ctx.transform(horizontal.x - point.x, horizontal.y - point.y, vertical.x - point.x, vertical.y - point.y, 0, 0);
   ctx.font = `600 ${size}px "Space Grotesk", ui-sans-serif, system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = p.muted;
-  ctx.fillText(value, 0, 0);
-  ctx.restore();
-}
-
-function wallText(ctx: CanvasRenderingContext2D, p: Palette, x: number, z: number, value: string, size = 21) {
-  const point = iso(x, 9, z);
-  ctx.save();
-  ctx.translate(point.x, point.y);
-  ctx.transform(0.88, 0.44, 0, 1, 0, 0);
-  ctx.font = `600 ${size}px "Space Grotesk", ui-sans-serif, system-ui, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = p.ink;
   ctx.fillText(value, 0, 0);
   ctx.restore();
 }
@@ -53,10 +41,10 @@ function glazing(ctx: CanvasRenderingContext2D, p: Palette, x: number, width: nu
 }
 
 function shelf(ctx: CanvasRenderingContext2D, p: Palette, x: number, y: number, width: number, depth: number, height: number, facing: 'front' | 'side' = 'front') {
-  const purple = p.dark ? '#827bab' : '#9287ba';
-  const blue = p.dark ? '#628eac' : '#7ba8c2';
-  const pale = p.dark ? '#b2b8d2' : '#e8e6ed';
-  const packing = [blue, purple, pale, p.hardwareTop];
+  const purple = '#ba8ae8';
+  const blue = '#46b5c3';
+  const pale = '#f1ba68';
+  const packing = [blue, purple, pale, '#6ccb96', '#e98579'];
   box(ctx, x, y, 0, width, depth, 6, p.hardwareTop, p.hardware, p.hardwareSide);
   if (facing === 'front') {
     box(ctx, x, y, 6, width, 4, height - 6, p.hardwareTop, p.hardwareSide, p.hardwareSide);
@@ -86,8 +74,8 @@ function shelf(ctx: CanvasRenderingContext2D, p: Palette, x: number, y: number, 
 export function drawStoreArchitecture(ctx: CanvasRenderingContext2D, p: Palette) {
   const w = STORE_FLOOR_WIDTH;
   const d = STORE_FLOOR_DEPTH;
-  const circulation = p.dark ? '#304255' : '#edf0f4';
-  const room = p.dark ? '#293b50' : '#e3e9ef';
+  const circulation = p.dark ? '#40616b' : '#edf0f4';
+  const room = p.dark ? '#294750' : '#e3e9ef';
   const violet = p.dark ? '#414565' : '#c3c3da';
   const cyan = p.blue;
 
@@ -105,7 +93,7 @@ export function drawStoreArchitecture(ctx: CanvasRenderingContext2D, p: Palette)
   polygon(ctx, [iso(392, 0, 0.7), iso(427, 0, 0.7), iso(427, d, 0.7), iso(392, d, 0.7)], circulation);
   polygon(ctx, [iso(802, 0, 0.7), iso(837, 0, 0.7), iso(837, d, 0.7), iso(802, d, 0.7)], circulation);
   // A quiet inset showroom floor changes material without enclosing a room.
-  polygon(ctx, [iso(45, 347, 0.8), iso(385, 347, 0.8), iso(385, 616, 0.8), iso(45, 616, 0.8)], p.dark ? '#303d57' : '#e4e4ef');
+  polygon(ctx, [iso(45, 347, 0.8), iso(385, 347, 0.8), iso(385, 616, 0.8), iso(45, 616, 0.8)], p.dark ? '#395668' : '#e4e4ef');
   ctx.save();
   ctx.globalAlpha = 0.5;
   for (let x = 0; x <= w; x += 82) line(ctx, [iso(x, 0, 1), iso(x, d, 1)], p.seam, 0.65);
@@ -122,10 +110,7 @@ export function drawStoreArchitecture(ctx: CanvasRenderingContext2D, p: Palette)
   line(ctx, [iso(2, 0, 4), iso(2, d, 4)], p.hardwareSide, 5);
   glazing(ctx, p, 47, 302);
   glazing(ctx, p, 877, 302);
-  // Retail identity is architectural lettering, integrated into the rear fascia.
-  box(ctx, 449, 2, 78, 326, 4, 39, violet, violet, p.hardwareSide);
-  wallText(ctx, p, 612, 99, 'CONNECTED ENTERPRISE', 20);
-  wallText(ctx, p, 612, 53, 'ONE CONNECTED STORE', 13);
+  glazing(ctx, p, 454, 315);
   line(ctx, [iso(25, 5, 120), iso(398, 5, 120)], cyan, 2.8);
   line(ctx, [iso(831, 5, 120), iso(1205, 5, 120)], cyan, 2.8);
 
@@ -164,6 +149,7 @@ export function drawStoreArchitecture(ctx: CanvasRenderingContext2D, p: Palette)
   shelf(ctx, p, 7, 555, 29, 117, 73, 'side');
   shelf(ctx, p, 1001, 756, 176, 39, 78);
   shelf(ctx, p, 1001, 851, 176, 39, 78);
+  [[49, 742], [1177, 683], [39, 278], [1180, 279]].forEach(([x, y]) => plant(ctx, x, y, 1.35, p));
   // Endcap display with three physical products, away from the scene actors.
   box(ctx, 98, 797, 0, 112, 59, 24, p.hardwareTop, p.hardware, p.hardwareSide);
   box(ctx, 95, 794, 24, 118, 65, 5, p.hardwareTop, p.hardware, p.hardwareSide);

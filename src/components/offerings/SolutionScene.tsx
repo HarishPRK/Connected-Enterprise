@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { Expand, Focus, Minimize, Store } from 'lucide-react';
+import { Expand, Focus, Minimize, RotateCcw, RotateCw, Scan, Store, ZoomIn, ZoomOut } from 'lucide-react';
 import type { ScenarioId } from './scenePrimitives';
-import { STORE_ZONES } from './storeArchitecture';
+import type { SustainabilityMode } from './storeAnimations';
 import { cameraForScenario, createStoreRenderer, OVERVIEW, type StoreCamera } from './storeRenderer';
 
 export interface SolutionSceneProps {
@@ -10,30 +10,28 @@ export interface SolutionSceneProps {
   playing: boolean;
   reducedMotion: boolean;
   revision: number;
+  sustainability?: SustainabilityMode;
   onScenarioSelect: (id: ScenarioId) => void;
 }
 
-const SCENARIOS = Object.keys(STORE_ZONES) as ScenarioId[];
-const SCENARIO_LABELS: Record<ScenarioId, string> = {
-  safety: 'Fall detection', connectivity: 'Dynamic Failover', energy: 'Energy Prediction',
-  leak: 'Sustainability', matter: 'Matter & Interoperability', eagle: 'EA:GLE', greengrass: 'AWS Greengrass',
-};
-
-export function SolutionScene({ scenario, timeRef, playing, reducedMotion, revision, onScenarioSelect }: SolutionSceneProps) {
+export function SolutionScene({ scenario, timeRef, playing, reducedMotion, revision, sustainability = 'occupancy', onScenarioSelect }: SolutionSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<ReturnType<typeof createStoreRenderer> | null>(null);
-  const hotspotRefs = useRef<Partial<Record<ScenarioId, HTMLButtonElement>>>({});
   const cameraRef = useRef<StoreCamera>({ ...OVERVIEW });
+  const dragRef = useRef<{ pointer: number; start: number; angle: number; moved: boolean } | null>(null);
   const [focused, setFocused] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const stateRef = useRef({ scenario, playing, reducedMotion, focused });
+  const [angle, setAngle] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [fullscreenError, setFullscreenError] = useState('');
+  const stateRef = useRef({ scenario, playing, reducedMotion, focused, angle, zoom, sustainability });
   const invalidateRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    stateRef.current = { scenario, playing, reducedMotion, focused };
+    stateRef.current = { scenario, playing, reducedMotion, focused, angle, zoom, sustainability };
     invalidateRef.current();
-  }, [scenario, playing, reducedMotion, focused, revision]);
+  }, [scenario, playing, reducedMotion, focused, angle, zoom, sustainability, revision]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -45,25 +43,16 @@ export function SolutionScene({ scenario, timeRef, playing, reducedMotion, revis
       frame = 0;
       if (disposed) return;
       const state = stateRef.current;
-      const target = state.focused ? cameraForScenario(state.scenario) : OVERVIEW;
+      const radians = state.angle * Math.PI / 180;
+      const target = state.focused ? cameraForScenario(state.scenario, radians) : OVERVIEW;
       const camera = cameraRef.current;
       const delta = Math.min((now - lastTime) / 1000, .05); lastTime = now;
-      const ease = state.reducedMotion ? 1 : 1 - Math.exp(-10 * delta);
+      const ease = state.reducedMotion || dragRef.current ? 1 : 1 - Math.exp(-10 * delta);
       camera.x += (target.x - camera.x) * ease; camera.y += (target.y - camera.y) * ease;
-      camera.zoom += (target.zoom - camera.zoom) * ease;
-      renderer.render(state.scenario, timeRef.current, camera, state.focused);
-      for (const id of SCENARIOS) {
-        const element = hotspotRefs.current[id];
-        if (!element) continue;
-        const point = renderer.scenarioLabelPosition(id, camera);
-        element.style.left = `${point.x}px`;
-        element.style.top = `${point.y}px`;
-        const inFocusedView = !state.focused || id === state.scenario;
-        element.style.visibility = point.visible && inFocusedView ? 'visible' : 'hidden';
-        element.style.opacity = canvas.clientWidth < 600 && id !== state.scenario ? '0' : '1';
-      }
-      const moving = Math.abs(target.x - camera.x) + Math.abs(target.y - camera.y) + Math.abs(target.zoom - camera.zoom) > .01;
-      // Follow the display's animation cadence without a frame-rate cap, including 120 Hz.
+      camera.zoom += (target.zoom * state.zoom - camera.zoom) * ease;
+      camera.angle = radians;
+      renderer.render(state.scenario, timeRef.current, camera, state.focused, state.sustainability);
+      const moving = Math.abs(target.x - camera.x) + Math.abs(target.y - camera.y) + Math.abs(target.zoom * state.zoom - camera.zoom) > .01;
       if ((state.playing && !state.reducedMotion) || moving) frame = requestAnimationFrame(render);
     };
     const invalidate = () => { if (!frame && !disposed) frame = requestAnimationFrame(render); };
@@ -82,53 +71,70 @@ export function SolutionScene({ scenario, timeRef, playing, reducedMotion, revis
     return () => {
       disposed = true; cancelAnimationFrame(frame); resizeObserver.disconnect(); themeObserver.disconnect();
       document.removeEventListener('fullscreenchange', onFullscreen); renderer.dispose();
-      rendererRef.current = null;
-      invalidateRef.current = () => {};
+      rendererRef.current = null; invalidateRef.current = () => {};
     };
   }, [timeRef]);
 
+  const reset = () => { setAngle(0); setZoom(1); setFocused(false); };
+  const changeZoom = (by: number) => setZoom(value => Math.max(.7, Math.min(1.8, value + by)));
   const toggleExpanded = async () => {
-    if (document.fullscreenElement) await document.exitFullscreen();
-    else await containerRef.current?.requestFullscreen();
-  };
-
-  const selectZone = (id: ScenarioId) => {
-    setFocused(true);
-    onScenarioSelect(id);
+    try {
+      setFullscreenError('');
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await containerRef.current?.requestFullscreen();
+    } catch { setFullscreenError('Fullscreen is unavailable in this browser.'); }
   };
 
   return <div ref={containerRef} className="store-scene-container">
-    <canvas ref={canvasRef} className="store-scene-canvas" aria-hidden="true"
-      onClick={(event) => {
+    <div className="store-orbit-hint"><span>Drag to rotate</span><span>{((angle % 360) + 360) % 360}°</span></div>
+    <canvas ref={canvasRef} className="store-scene-canvas" tabIndex={0} role="group"
+      aria-label="Interactive store twin. Drag or use left and right arrow keys to rotate. Use plus and minus to zoom, Home to reset. Select a scenario from the adjacent list."
+      onKeyDown={event => {
+        if (!['ArrowLeft', 'ArrowRight', '+', '=', '-', 'Home'].includes(event.key)) return;
+        event.preventDefault();
+        if (event.key === 'ArrowLeft') setAngle(value => value - 15);
+        else if (event.key === 'ArrowRight') setAngle(value => value + 15);
+        else if (event.key === 'Home') reset();
+        else changeZoom(event.key === '-' ? -.15 : .15);
+      }}
+      onPointerDown={event => {
+        if (event.button !== 0 || dragRef.current) return;
+        dragRef.current = { pointer: event.pointerId, start: event.clientX, angle, moved: false };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={event => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointer !== event.pointerId) return;
+        const distance = event.clientX - drag.start;
+        if (Math.abs(distance) > 5) drag.moved = true;
+        if (drag.moved) setAngle(Math.round((drag.angle + distance * .3) / 2) * 2);
+      }}
+      onPointerUp={event => {
+        const drag = dragRef.current;
+        dragRef.current = null;
+        if (!drag || drag.pointer !== event.pointerId || drag.moved) return;
         const bounds = event.currentTarget.getBoundingClientRect();
         const id = rendererRef.current?.scenarioAtPoint(event.clientX - bounds.left, event.clientY - bounds.top, cameraRef.current);
-        if (id) selectZone(id);
+        if (id) onScenarioSelect(id);
       }}
-      onPointerMove={(event) => {
-        const bounds = event.currentTarget.getBoundingClientRect();
-        const id = rendererRef.current?.scenarioAtPoint(event.clientX - bounds.left, event.clientY - bounds.top, cameraRef.current);
-        event.currentTarget.style.cursor = id ? 'pointer' : 'default';
-      }}
-      onPointerLeave={(event) => { event.currentTarget.style.cursor = 'default'; }} />
-    <div className="store-zone-hotspots" aria-label="Store scenarios">
-      {SCENARIOS.map((id) => {
-        const zone = STORE_ZONES[id];
-        const hideZoneLabel = id === 'matter';
-        return <button key={id} ref={(element) => { hotspotRefs.current[id] = element ?? undefined; }}
-          type="button" className="store-zone-hotspot" data-hide-label={hideZoneLabel || undefined}
-          aria-label={`Start ${SCENARIO_LABELS[id]} in ${zone.name}`}
-          aria-pressed={scenario === id} title={hideZoneLabel ? SCENARIO_LABELS[id] : `Start ${SCENARIO_LABELS[id]}`}
-          onClick={() => selectZone(id)}>
-          {hideZoneLabel ? null : zone.name}
-        </button>;
-      })}
-    </div>
+      onPointerCancel={() => { dragRef.current = null; }}
+      onLostPointerCapture={() => { dragRef.current = null; }} />
     <div className="store-view-controls" aria-label="Store view">
-      <button type="button" aria-pressed={!focused} onClick={() => setFocused(false)}><Store size={15} aria-hidden="true" />Whole store</button>
-      <button type="button" aria-pressed={focused} onClick={() => setFocused(true)}><Focus size={15} aria-hidden="true" />Focus scenario</button>
-      <button type="button" onClick={() => void toggleExpanded()} aria-label={expanded ? 'Exit expanded store view' : 'Expand store view'} title={expanded ? 'Exit expanded store view' : 'Expand store view'}>
-        {expanded ? <Minimize size={15} aria-hidden="true" /> : <Expand size={15} aria-hidden="true" />}
-      </button>
+      <div className="store-control-group">
+        <button type="button" aria-pressed={!focused} onClick={() => { setFocused(false); setZoom(1); }} title="Whole store"><Store size={16} /><span>Store</span></button>
+        <button type="button" aria-pressed={focused} onClick={() => { setFocused(true); setZoom(1); }} title="Focus selected scenario"><Focus size={16} /><span>Focus</span></button>
+      </div>
+      <div className="store-control-group">
+        <button type="button" aria-label="Rotate left" title="Rotate left" onClick={() => setAngle(value => value - 30)}><RotateCcw size={16} /></button>
+        <button type="button" aria-label="Rotate right" title="Rotate right" onClick={() => setAngle(value => value + 30)}><RotateCw size={16} /></button>
+        <button type="button" aria-label="Zoom out" title="Zoom out" disabled={zoom <= .7} onClick={() => changeZoom(-.15)}><ZoomOut size={16} /></button>
+        <button type="button" aria-label="Zoom in" title="Zoom in" disabled={zoom >= 1.8} onClick={() => changeZoom(.15)}><ZoomIn size={16} /></button>
+      </div>
+      <div className="store-control-group">
+        <button type="button" aria-label="Reset view" title="Reset view" onClick={reset}><Scan size={16} /></button>
+        <button type="button" aria-label={expanded ? 'Exit fullscreen' : 'Expand store'} title={expanded ? 'Exit fullscreen' : 'Expand store'} onClick={toggleExpanded}>{expanded ? <Minimize size={16} /> : <Expand size={16} />}</button>
+      </div>
     </div>
+    {fullscreenError && <p className="store-view-error" role="status">{fullscreenError}</p>}
   </div>;
 }

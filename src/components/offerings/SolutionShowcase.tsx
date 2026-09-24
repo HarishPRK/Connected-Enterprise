@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Check, ChevronRight, Cpu, Pause, Play, RotateCcw } from 'lucide-react';
 import { SolutionScene } from './SolutionScene';
+import { TWIN_SCENARIOS, WATER_SENSORS } from './twinScenarioInfo';
+import type { SustainabilityMode } from './storeAnimations';
 import type { ScenarioId } from './scenePrimitives';
 import './solution-showcase.css';
 
@@ -96,12 +98,20 @@ const SCENARIOS = [
   },
 ];
 
+const OCCUPANCY_BEATS: StoryBeat[] = [
+  { title: 'The last person leaves. The load stays.', description: 'The room is empty, but its lights, plug loads and cooling keep drawing power. Presence, daylight and power readings reveal avoidable consumption.', status: 'Energy use continues', signal: 'Vacant room → lights and cooling still on' },
+  { title: 'An empty room should not run at full load.', description: 'Independent devices do not share occupancy or daylight context. The power monitor sees consumption without a reason to reduce it.', status: 'Idle consumption persists', signal: 'No occupants + daylight → avoidable demand' },
+  { title: 'Let the sensors inform the response.', description: 'The gateway combines presence, daylight and power signals. A configured vacancy policy requests lower lighting and a temperature setback.', status: 'Vacancy policy triggered', signal: 'Presence + daylight + power → local policy' },
+  { title: 'Use energy where people need it.', description: 'Lights dim, the thermostat enters eco mode and shades adjust. In this demonstration, the room reduces idle demand while the sensors continue monitoring.', status: 'Idle demand reduced', signal: 'Lighting reduced → climate setback → monitoring' },
+];
+
 function chapterAt(time: number) {
   return time >= 17 ? 3 : time >= 10 ? 2 : time >= 4 ? 1 : 0;
 }
 
 /** One shared clock drives the scene and progress, without rendering React each frame. */
 export function SolutionShowcase() {
+  const [sustainability, setSustainability] = useState<SustainabilityMode>('occupancy');
   const [scenarioIndex, setScenarioIndex] = useState(0);
   const [chapter, setChapter] = useState(0);
   const [playing, setPlaying] = useState(true);
@@ -118,7 +128,10 @@ export function SolutionShowcase() {
   const progressRef = useRef<HTMLDivElement>(null);
   const rangeRef = useRef<HTMLInputElement>(null);
   const scenario = SCENARIOS[scenarioIndex];
-  const beat = scenario.beats[chapter];
+  const occupancy = scenario.id === 'leak' && sustainability === 'occupancy';
+  const beat = occupancy ? OCCUPANCY_BEATS[chapter] : scenario.beats[chapter];
+  const scenarioInfo = TWIN_SCENARIOS[scenario.id];
+  const sensors = scenario.id === 'leak' && sustainability === 'water' ? WATER_SENSORS : scenarioInfo.sensors;
   const running = playing && inView && pageVisible && !reducedMotion && !finished;
 
   useEffect(() => {
@@ -231,15 +244,15 @@ export function SolutionShowcase() {
   };
 
   return (
-    <section className="solution-showcase" aria-labelledby="showcase-title">
+    <section className="solution-showcase" data-color={scenarioInfo.color} aria-labelledby="showcase-title">
       <div className="showcase-heading">
         <div>
-          <h2 id="showcase-title">One store. Every system connected.</h2>
-          <p>Explore {SCENARIOS.length} use cases in the same store, from the checkout to the utility room.</p>
+          <h2 id="showcase-title">Inside the store</h2>
+          <p>Explore a scenario, rotate the twin and follow the response.</p>
         </div>
         <div className="showcase-heading-actions">
           <span className="showcase-disclosure" aria-live="polite">
-            {touring ? `Tour ${scenarioIndex + 1} / ${SCENARIOS.length}` : `1 store · ${SCENARIOS.length} use cases`}
+            {touring ? `Tour ${scenarioIndex + 1} / ${SCENARIOS.length}` : `${SCENARIOS.length} scenarios`}
           </span>
           {!reducedMotion && (
             <button type="button" className="showcase-tour" onClick={toggleTour} aria-pressed={touring}>
@@ -253,21 +266,46 @@ export function SolutionShowcase() {
       <div className="showcase-frame">
         <div id="showcase-panel" className="showcase-panel" role="region"
           aria-label="Interactive enterprise store" data-chapter={chapter}>
+          <nav className="showcase-scenarios" aria-label="Store scenarios">
+            <h3>Explore scenarios</h3>
+            {SCENARIOS.map((item, index) => {
+              const info = TWIN_SCENARIOS[item.id];
+              const Icon = info.icon;
+              return <button type="button" key={item.id} data-color={info.color} aria-pressed={index === scenarioIndex}
+                onClick={() => selectScenario(index)}>
+                <Icon size={19} aria-hidden="true" /><span>{item.label}</span><ChevronRight size={14} aria-hidden="true" />
+              </button>;
+            })}
+            <p>Select a scenario to explore its sensors and edge response.</p>
+          </nav>
           <div className="showcase-visual" ref={visualRef}>
             <div className="showcase-scene-heading">
-              <span><strong>Enterprise store</strong>{scenario.id !== 'matter' && <span className="showcase-zone">{scenario.location}</span>}</span>
-              <span className="showcase-scene-mode">{chapter < 2 ? 'Without connected services' : 'With connected services'}</span>
+              <span><strong>{scenario.label}</strong></span>
+              <span className="showcase-scene-mode">{chapter < 2 ? 'Before response' : 'Connected response'}</span>
             </div>
             <div className="showcase-canvas-wrap">
               <SolutionScene scenario={scenario.id} timeRef={timeRef} playing={running}
-                reducedMotion={reducedMotion} revision={revision} onScenarioSelect={selectSceneScenario} />
+                reducedMotion={reducedMotion} revision={revision} sustainability={sustainability} onScenarioSelect={selectSceneScenario} />
             </div>
             <div className="showcase-scene-caption" aria-hidden="true">
               <span className="showcase-status"><span />{beat.status}</span>
-              <span className="showcase-scene-format">Unified digital twin</span>
+              <span className="showcase-scene-format">Illustrative scenario</span>
             </div>
           </div>
 
+          <aside className="showcase-sensors" aria-label="Scenario sensors">
+            <h3>Sensor activity</h3>
+            <p className="showcase-sensor-context">{occupancy ? 'Occupancy & energy waste' : scenario.location}</p>
+            {scenario.id === 'leak' && <div className="showcase-sustainability-modes" aria-label="Sustainability scenario">
+              <button type="button" aria-pressed={sustainability === 'occupancy'} onClick={() => { setSustainability('occupancy'); selectScenario(scenarioIndex); }}>Energy waste</button>
+              <button type="button" aria-pressed={sustainability === 'water'} onClick={() => { setSustainability('water'); selectScenario(scenarioIndex); }}>Water protection</button>
+            </div>}
+            <ul>{sensors.map(sensor => <li key={sensor.name}>
+              <span className="showcase-sensor-dot" aria-hidden="true" />
+              <div><strong>{sensor.name}</strong><span>{sensor.detail}</span><em>{sensor.states[chapter]}</em></div>
+            </li>)}</ul>
+            <div className="showcase-edge-path"><Cpu size={19} aria-hidden="true" /><div><strong>Shared edge gateway</strong><span>{chapter < 2 ? 'Waiting for a connected response' : 'Local context. Coordinated action.'}</span></div></div>
+          </aside>
           <div className="showcase-story">
             <div className="showcase-narrative" aria-live="polite" aria-atomic="true">
               <div className="showcase-chapter-label"><span>{chapter + 1}</span>{CHAPTERS[chapter]}</div>
@@ -278,7 +316,7 @@ export function SolutionShowcase() {
             <div className="showcase-service">
               <div className="showcase-service-heading"><Cpu size={17} aria-hidden="true" /><span>The service behind the response</span></div>
               <strong>{scenario.service}</strong>
-              <p>{scenario.support}</p>
+              <p>{occupancy ? 'Presence, daylight and power monitoring' : scenario.support}</p>
               {scenario.href.startsWith('#') ? (
                 <a href={scenario.href}>{scenario.cta}<ArrowRight size={16} aria-hidden="true" /></a>
               ) : (
@@ -322,7 +360,7 @@ export function SolutionShowcase() {
           </div>
         </div>
       </div>
-      <p className="showcase-footnote">{reducedMotion ? 'Reduced motion is on. Select a store area to explore its response. ' : 'Click a labeled store area to start its scenario. '}
+      <p className="showcase-footnote">{reducedMotion ? 'Reduced motion is on. Select a store area to explore its response. ' : 'Drag to rotate. Select a scenario to follow its response. '}
         Concept demonstration; events and outcomes are illustrative, not live telemetry.</p>
     </section>
   );

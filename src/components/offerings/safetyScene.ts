@@ -1,6 +1,6 @@
 import {
   camera, clamp, contactShadow, desk, detection, ellipse, gateway, iso, label,
-  line, mix, polygon, progress, scenePresentation, smooth, type Palette, type Point,
+  line, mix, polygon, progress, scenePoint, scenePresentation, smooth, type Palette, type Point,
 } from './scenePrimitives';
 
 /** Screen-space joint poses make contact, balance and weight readable at small sizes. */
@@ -223,8 +223,7 @@ function character(ctx: CanvasRenderingContext2D, base: Point, pose: Pose, time:
 
 function bananaPeel(ctx: CanvasRenderingContext2D, time: number) {
   const skid = progress(time, 1.94, 2.8);
-  const x = 443 + progress(time, 1.8, 2.12) * 29 + progress(time, 2.12, 2.43) * 12 + progress(time, 2.43, 2.8) * 7;
-  const y = 354 + skid * 8;
+  const { x, y } = scenePoint(443 + progress(time, 1.8, 2.12) * 29 + progress(time, 2.12, 2.43) * 12 + progress(time, 2.43, 2.8) * 7, 354 + skid * 8);
   contactShadow(ctx, pt(x, y), 14, 3, 0.12);
   ctx.save();
   ctx.translate(x, y);
@@ -276,8 +275,9 @@ function droppedFolder(ctx: CanvasRenderingContext2D, time: number, actor: Point
   const release = 2.1;
   for (let n = 0; n < 3; n++) {
     const flight = clamp((time - release) / (1.1 + n * 0.13));
-    const x = mix(459, 508 + n * 13, flight);
-    const y = mix(260, 371 + n * 5, flight) - Math.sin(flight * Math.PI) * (48 + n * 8);
+    const screenX = mix(459, 508 + n * 13, flight);
+    const lift = (1 - flight) * 91 + Math.sin(flight * Math.PI) * (48 + n * 8);
+    const { x, y } = scenePoint(screenX, mix(260, 371 + n * 5, flight) - Math.sin(flight * Math.PI) * (48 + n * 8), lift);
     const rotation = mix(-0.45, 1.1 + n * 1.1, flight) + Math.sin(flight * Math.PI * 3) * 0.2;
     if (flight === 1) contactShadow(ctx, pt(x, y + 7), 12, 3, 0.07);
     loosePaper(ctx, x, y, rotation, n === 0);
@@ -309,7 +309,7 @@ export function safetyScene(ctx: CanvasRenderingContext2D, p: Palette, time: num
   const solution = progress(time, 10, 11.5);
   const alarm = progress(time, 12, 13.2);
   const assistance = progress(time, 19.5, 20.5);
-  const actor = pt(mix(335, 426, progress(time, 0, 1.8)) + progress(time, 1.8, 3.23) * 5, 351);
+  const actor = scenePoint(mix(335, 426, progress(time, 0, 1.8)) + progress(time, 1.8, 3.23) * 5, 351);
   const pose = incidentPose(time);
   // Follow the clear aisle beside the cabinet, then turn toward the person.
   // Sort against the furniture's floor depth so the approach cannot walk over it.
@@ -318,9 +318,10 @@ export function safetyScene(ctx: CanvasRenderingContext2D, p: Palette, time: num
   const turn = clamp((approach - 0.6) / 0.4);
   const door = iso(325, 12);
   const corner = iso(320, 145);
+  const destination = scenePoint(474, 350);
   const helper = approach < 0.6
     ? pt(mix(door.x, corner.x, aisle), mix(door.y, corner.y, aisle))
-    : pt(mix(corner.x, 474, turn), mix(corner.y, 350, turn));
+    : pt(mix(corner.x, destination.x, turn), mix(corner.y, destination.y, turn));
   const helperWorldY = approach < 0.6 ? mix(12, 145, aisle) : mix(145, 180, turn);
   const drawHelper = () => {
     if (time < 17) return;
@@ -335,13 +336,13 @@ export function safetyScene(ctx: CanvasRenderingContext2D, p: Palette, time: num
     ctx.save();
     ctx.globalAlpha = solution * 0.07;
     const lens = iso(51, 38, 99);
-    polygon(ctx, [lens, pt(356, 383), pt(536, 366)], p.blue);
+    polygon(ctx, [lens, scenePoint(356, 383), scenePoint(536, 366)], p.blue);
     ctx.globalAlpha = solution * 0.3;
-    line(ctx, [lens, pt(356, 383), pt(536, 366), lens], p.blue, 1);
+    line(ctx, [lens, scenePoint(356, 383), scenePoint(536, 366), lens], p.blue, 1);
     ctx.restore();
     // In the unified store the shared conduit is drawn by the store renderer.
     if (scenePresentation(ctx)?.routes !== false) {
-      const routePoints = [pt(493, 355), iso(245, 212, 2), iso(327, 212, 2), iso(327, 109, 2), iso(352, 109, 2)];
+      const routePoints = [scenePoint(493, 355), iso(245, 212, 2), iso(327, 212, 2), iso(327, 109, 2), iso(352, 109, 2)];
       ctx.save();
       ctx.globalAlpha = alarm * 0.75;
       line(ctx, routePoints, assistance > 0.5 ? p.teal : p.blue, 2);

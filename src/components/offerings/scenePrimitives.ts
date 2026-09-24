@@ -8,7 +8,32 @@ export const clamp = (value: number) => Math.max(0, Math.min(1, value));
 export const smooth = (value: number) => { const t = clamp(value); return t * t * (3 - 2 * t); };
 export const progress = (time: number, from: number, to: number) => smooth((time - from) / (to - from));
 export const mix = (a: number, b: number, amount: number) => a + (b - a) * amount;
-export const iso = (x: number, y: number, z = 0): Point => ({ x: 421 + (x - y) * 0.88, y: 165 + (x + y) * 0.44 - z });
+export interface SceneProjection { angle: number; x?: number; y?: number }
+let projection: SceneProjection = { angle: 0 };
+export function projectStorePoint(x: number, y: number, z = 0, angle = 0): Point {
+  if (angle === 0) return { x: 421 + (x - y) * .88, y: 165 + (x + y) * .44 - z };
+  const dx = x - 615; const dy = y - 480;
+  const rx = dx * Math.cos(angle) - dy * Math.sin(angle);
+  const ry = dx * Math.sin(angle) + dy * Math.cos(angle);
+  return { x: 539.8 + (rx - ry) * .88, y: 646.8 + (rx + ry) * .44 - z };
+}
+export function unprojectStorePoint(x: number, y: number, angle = 0): Point {
+  const u = (x - 539.8) / .88; const v = (y - 646.8) / .44;
+  const rx = (u + v) / 2; const ry = (v - u) / 2;
+  return { x: 615 + rx * Math.cos(angle) + ry * Math.sin(angle), y: 480 - rx * Math.sin(angle) + ry * Math.cos(angle) };
+}
+export const iso = (x: number, y: number, z = 0): Point => projectStorePoint(x + (projection.x ?? 0), y + (projection.y ?? 0), z, projection.angle);
+/** Anchor existing screen-space actor rigs in their room without changing their poses. */
+export function scenePoint(x: number, y: number, height = 0): Point {
+  if (projection.angle === 0 && !projection.x && !projection.y) return { x, y };
+  const floor = unprojectStorePoint(x, y + height);
+  return iso(floor.x, floor.y, height);
+}
+export function withSceneProjection<T>(next: SceneProjection, draw: () => T): T {
+  const previous = projection;
+  projection = next;
+  try { return draw(); } finally { projection = previous; }
+}
 
 export interface ScenePresentation {
   gateway?: boolean;
@@ -80,8 +105,10 @@ export function line(ctx: CanvasRenderingContext2D, points: Point[], color: stri
 }
 
 export function box(ctx: CanvasRenderingContext2D, x: number, y: number, z: number, w: number, d: number, h: number, top: string, left: string, right: string) {
-  polygon(ctx, [iso(x, y + d, z), iso(x + w, y + d, z), iso(x + w, y + d, z + h), iso(x, y + d, z + h)], left);
-  polygon(ctx, [iso(x + w, y, z), iso(x + w, y + d, z), iso(x + w, y + d, z + h), iso(x + w, y, z + h)], right);
+  const nearY = Math.cos(projection.angle) - Math.sin(projection.angle) >= 0 ? y + d : y;
+  const nearX = Math.cos(projection.angle) + Math.sin(projection.angle) >= 0 ? x + w : x;
+  polygon(ctx, [iso(x, nearY, z), iso(x + w, nearY, z), iso(x + w, nearY, z + h), iso(x, nearY, z + h)], left);
+  polygon(ctx, [iso(nearX, y, z), iso(nearX, y + d, z), iso(nearX, y + d, z + h), iso(nearX, y, z + h)], right);
   polygon(ctx, [iso(x, y, z + h), iso(x + w, y, z + h), iso(x + w, y + d, z + h), iso(x, y + d, z + h)], top);
 }
 

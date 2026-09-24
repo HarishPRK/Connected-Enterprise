@@ -1,6 +1,6 @@
 import {
   box, clamp, contactShadow, detection, ellipse, gateway, iso, label, line, mix,
-  person, polygon, progress, route, type Palette, type Point,
+  person, polygon, progress, route, scenePoint, type Palette, type Point,
 } from './scenePrimitives';
 
 function hardwareText(ctx: CanvasRenderingContext2D, text: string, at: Point, color: string, size = 16) {
@@ -169,15 +169,15 @@ export function greengrassScene(ctx: CanvasRenderingContext2D, p: Palette, time:
   const reconnect = progress(time, 17, 18.5);
   const synced = progress(time, 18.5, 22.5);
   const online = outage < 0.5 || reconnect > 0.5;
-  const cloudAt = { x: 735, y: 98 };
+  const cloudAt = scenePoint(735, 98, 140);
   const gatewayAt = iso(364, 91, 80);
-  const cable = [gatewayAt, { x: gatewayAt.x + 50, y: gatewayAt.y - 24 }, { x: 735, y: 168 }, { x: 735, y: 124 }];
+  const cable = [gatewayAt, { x: gatewayAt.x + 50, y: gatewayAt.y - 24 }, { x: cloudAt.x, y: cloudAt.y + 70 }, { x: cloudAt.x, y: cloudAt.y + 26 }];
   line(ctx, cable, online ? p.blue : p.hardwareSide, 2, online ? [] : [5, 7]);
   if (!online) {
-    const gap = { x: 727, y: 184 };
+    const gap = { x: cloudAt.x - 8, y: cloudAt.y + 86 };
     ellipse(ctx, gap, 10, 11, p.dark ? '#193247' : '#edf5f8');
-    line(ctx, [{ x: 720, y: 177 }, { x: 734, y: 191 }], p.amber, 3);
-    line(ctx, [{ x: 734, y: 177 }, { x: 720, y: 191 }], p.amber, 3);
+    line(ctx, [{ x: gap.x - 7, y: gap.y - 7 }, { x: gap.x + 7, y: gap.y + 7 }], p.amber, 3);
+    line(ctx, [{ x: gap.x + 7, y: gap.y - 7 }, { x: gap.x - 7, y: gap.y + 7 }], p.amber, 3);
   }
   cloud(ctx, p, cloudAt, online);
   label(ctx, 735, 146, online ? 'Cloud connected' : 'Cloud unavailable', online ? p.teal : p.amber, p);

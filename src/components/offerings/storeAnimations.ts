@@ -7,6 +7,8 @@ import {
   type Palette, type Point, type ScenarioId,
 } from './scenePrimitives';
 
+export type SustainabilityMode = 'occupancy' | 'water';
+
 type Scene = (ctx: CanvasRenderingContext2D, p: Palette, time: number) => void;
 
 function devicePlacard(
@@ -131,7 +133,18 @@ const SCENES: Record<ScenarioId, Scene> = {
   greengrass: greengrassScene,
 };
 
-export function drawStoreScenario(ctx: CanvasRenderingContext2D, p: Palette, id: ScenarioId, time: number) {
+export function drawStoreScenario(ctx: CanvasRenderingContext2D, p: Palette, id: ScenarioId, time: number, sustainability: SustainabilityMode = 'water') {
+  if (id === 'leak' && sustainability === 'occupancy') {
+    occupancyScene(ctx, p, time);
+    // Additional presence, daylight and power sensors ground the energy-waste story.
+    box(ctx, 294, 15, 36, 26, 9, 29, p.hardwareTop, p.hardware, p.hardwareSide);
+    const power = iso(307, 25, 51);
+    ellipse(ctx, power, 5, 5, time >= 20.5 ? p.teal : p.amber);
+    const daylight = iso(205, 8, 112);
+    ellipse(ctx, daylight, 8, 8, p.hardwareTop);
+    ellipse(ctx, daylight, 3.5, 3.5, p.amber);
+    return;
+  }
   SCENES[id](ctx, p, time);
 }
 
