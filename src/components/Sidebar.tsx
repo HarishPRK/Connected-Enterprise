@@ -9,7 +9,7 @@ import {
 
 const nav = [
   { to: '/',                 label: 'Home',                      icon: LayoutDashboard, section: 'Monitor' },
-  { to: '/service-offerings', label: 'Solution Offerings',        icon: CloudCog,        section: 'Monitor' },
+  { to: '/service-offerings', label: 'Challenges / Offerings',     icon: CloudCog,        section: 'Monitor' },
   { to: '/path-selection',   label: 'Dynamic Failover',           icon: GitBranch,       section: 'Monitor' },
   { to: '/app-routing',      label: 'Application Traffic Routing', icon: Layers,          section: 'Monitor' },
   { to: '/gateway-twin',     label: 'Gateway Twin',              icon: Box,             section: 'Monitor' },

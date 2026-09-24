@@ -32,7 +32,7 @@ export function CommandPalette({ open, onClose, onBranchChange }: CommandPalette
 
   const items: Item[] = useMemo(() => [
     { id: 'go-overview',     group: 'Navigate', label: 'Open Home',                  icon: LayoutDashboard, run: () => nav('/') },
-    { id: 'go-offerings',    group: 'Navigate', label: 'Open Solution Offerings',         icon: CloudCog,        run: () => nav('/service-offerings') },
+    { id: 'go-offerings',    group: 'Navigate', label: 'Open Challenges / Offerings',      icon: CloudCog,        run: () => nav('/service-offerings') },
     { id: 'go-dps',          group: 'Navigate',  label: 'Open Dynamic Failover',       icon: GitBranch,       run: () => nav('/path-selection') },
     { id: 'go-aar',          group: 'Navigate',  label: 'Open Application Traffic Routing', icon: Layers,          run: () => nav('/app-routing') },
     { id: 'go-it',           group: 'Navigate', label: 'Open IT Devices',                icon: Laptop,          run: () => nav('/it-devices') },

@@ -13,7 +13,7 @@ export function KeyChallenges() {
     <section className="key-challenges" aria-labelledby="key-challenges-title">
       <div className="key-challenges-heading">
         <h2 id="key-challenges-title">Key enterprise challenges</h2>
-        <Link to="/service-offerings">Explore Solution Offerings <ArrowRight size={15} aria-hidden="true" /></Link>
+        <Link to="/service-offerings">Explore Challenges / Offerings <ArrowRight size={15} aria-hidden="true" /></Link>
       </div>
       <ul className="key-challenges-list">
         {challenges.map(({ title, detail }) => (

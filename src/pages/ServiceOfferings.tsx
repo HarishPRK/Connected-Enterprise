@@ -8,7 +8,7 @@ import {
   Radio, Sparkles, Video, Zap,
 } from 'lucide-react';
 
-/* ─────────── Solution Offerings
+/* ─────────── Challenges / Offerings
  * Edge / Enterprise Gateway "smart services" — each capability ships as a
  * container (+ libraries) on the gateway's prplLCM container runtime and is
  * exposed northbound through consumer-facing APIs. These services share the
@@ -124,7 +124,7 @@ export function ServiceOfferingsPage() {
   return (
     <div className="service-offerings-page">
       <PageHeader
-        title="Solution Offerings"
+        title="Challenges / Offerings"
         subtitle="Connected services for one enterprise store — coordinated through a shared edge gateway and consumer-facing APIs."
         right={<span className="badge ok"><span className="dot ok" />{OFFERINGS.length}/{OFFERINGS.length} available</span>}
       />
