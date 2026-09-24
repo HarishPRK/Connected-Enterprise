@@ -107,7 +107,7 @@ export function SolutionScene({ scenario, timeRef, playing, reducedMotion, revis
         if (!drag || drag.pointer !== event.pointerId) return;
         const distance = event.clientX - drag.start;
         if (Math.abs(distance) > 5) drag.moved = true;
-        if (drag.moved) setAngle(Math.round((drag.angle + distance * .3) / 2) * 2);
+        if (drag.moved) setAngle(Math.round((drag.angle - distance * .3) / 2) * 2);
       }}
       onPointerUp={event => {
         const drag = dragRef.current;
