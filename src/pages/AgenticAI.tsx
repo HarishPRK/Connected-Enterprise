@@ -255,6 +255,16 @@ export function AgenticAIPage() {
 
   const stopThoughtsRef = useRef<(() => void) | null>(null);
   const stopResponseRef = useRef<(() => void) | null>(null);
+  const startControllerRef = useRef<AbortController | null>(null);
+  const requestGenerationRef = useRef(0);
+  const sessionsRef = useRef<Partial<Record<AgenticUpstream, string>>>({});
+
+  useEffect(() => () => {
+    requestGenerationRef.current++;
+    startControllerRef.current?.abort();
+    stopThoughtsRef.current?.();
+    stopResponseRef.current?.();
+  }, []);
 
   const chatScrollRef     = useRef<HTMLDivElement | null>(null);
   const thoughtsScrollRef = useRef<HTMLDivElement | null>(null);
@@ -280,11 +290,15 @@ export function AgenticAIPage() {
   }, []);
 
   function stopAll() {
+    requestGenerationRef.current++;
+    startControllerRef.current?.abort();
+    startControllerRef.current = null;
     stopThoughtsRef.current?.();
     stopResponseRef.current?.();
     stopThoughtsRef.current = null;
     stopResponseRef.current = null;
     setRunning(false);
+    setMessages((list) => list.map((message) => message.streaming ? { ...message, text: message.text || '(stopped)', streaming: false } : message));
   }
 
   function newConversation() {
@@ -292,6 +306,7 @@ export function AgenticAIPage() {
     setMessages([messages[0]]);
     setThoughts('');
     setSessionId(undefined);
+    sessionsRef.current = {};
     setRequestId(undefined);
     setTools([]);
     setAgentsUsed([]);
@@ -301,6 +316,10 @@ export function AgenticAIPage() {
   async function send(text: string, upstream: AgenticUpstream = 'network') {
     const t = text.trim();
     if (!t || running) return;
+    const generation = ++requestGenerationRef.current;
+    const controller = new AbortController();
+    startControllerRef.current = controller;
+    const isCurrent = () => generation === requestGenerationRef.current && !controller.signal.aborted;
 
     const userId  = newId();
     const agentId = newId();
@@ -317,8 +336,9 @@ export function AgenticAIPage() {
 
     let chat;
     try {
-      chat = await postChat(t, { sessionId, sync: false, upstream });
+      chat = await postChat(t, { sessionId: sessionsRef.current[upstream], sync: false, upstream, signal: controller.signal });
     } catch (err) {
+      if (!isCurrent()) return;
       const msg = err instanceof Error ? err.message : String(err);
       setMessages((m) => m.map((x) => (
         x.id === agentId ? { ...x, text: `**Error:** ${msg}`, streaming: false } : x
@@ -326,8 +346,13 @@ export function AgenticAIPage() {
       setRunning(false);
       return;
     }
+    if (!isCurrent()) return;
+    startControllerRef.current = null;
 
-    if (typeof chat.session_id === 'string') setSessionId(chat.session_id);
+    if (typeof chat.session_id === 'string') {
+      sessionsRef.current[upstream] = chat.session_id;
+      setSessionId(chat.session_id);
+    }
 
     // ── Sync mode (server returned the full payload up-front) ──
     if (chat.sync) {
@@ -368,12 +393,14 @@ export function AgenticAIPage() {
     // ── Open SSE: agent reasoning (thoughts) ──
     stopThoughtsRef.current = streamThoughts(rid, {
       onEvent: (e) => {
+        if (!isCurrent()) return;
         if (e.type === 'text' && e.body) {
           liveThoughts += e.body;
           setThoughts(liveThoughts);
         }
       },
       onError: (msg) => {
+        if (!isCurrent()) return;
         liveThoughts += `\n\n[trace error] ${msg}`;
         setThoughts(liveThoughts);
       },
@@ -382,6 +409,7 @@ export function AgenticAIPage() {
     // ── Open SSE: assistant response ──
     stopResponseRef.current = streamResponse(rid, {
       onEvent: (e) => {
+        if (!isCurrent()) return;
         if (e.type === 'text' && e.body) {
           replyText += e.body;
           setMessages((m) => m.map((x) => (
@@ -414,6 +442,7 @@ export function AgenticAIPage() {
         }
       },
       onError: (msg) => {
+        if (!isCurrent()) return;
         setMessages((m) => m.map((x) => (
           x.id === agentId
             ? { ...x, text: `**Stream error:** ${msg}`, streaming: false }
@@ -421,8 +450,12 @@ export function AgenticAIPage() {
         )));
       },
       onDone: () => {
-        // Whichever stream finishes last clears the running state.
+        if (!isCurrent()) return;
+        stopThoughtsRef.current?.();
+        stopThoughtsRef.current = null;
+        stopResponseRef.current = null;
         setRunning(false);
+        setMessages((list) => list.map((message) => message.id === agentId && message.streaming ? { ...message, text: message.text || 'The response stream ended without an answer. Please retry.', streaming: false } : message));
       },
     }, upstream);
   }

@@ -1,12 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { ReactNode } from 'react';
+import { PREFERENCES_EVENT, readPreferences } from './preferences';
 
 export type Theme = 'light' | 'dark';
 
 interface ThemeCtx {
   theme: Theme;
+  themeMode: Theme | 'auto';
   setTheme: (t: Theme) => void;
+  setThemeMode: (mode: Theme | 'auto') => void;
   toggle: () => void;
 }
 
@@ -16,18 +19,49 @@ const STORAGE_KEY = 'ce-theme';
 
 function readInitialTheme(): Theme {
   if (typeof window === 'undefined') return 'light';
-  const saved = window.localStorage.getItem(STORAGE_KEY);
-  if (saved === 'light' || saved === 'dark') return saved;
+  try {
+    if (window.localStorage.getItem('ce-theme-mode') === 'auto') return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch { /* private mode can deny browser storage */ }
   return 'light';
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(readInitialTheme);
+  const [themeMode, setModeState] = useState<Theme | 'auto'>(() => readPreferences().theme);
 
   const setTheme = useCallback((t: Theme) => {
+    setModeState(t);
     setThemeState(t);
     document.documentElement.setAttribute('data-theme', t);
-    try { window.localStorage.setItem(STORAGE_KEY, t); } catch { /* ignore */ }
+    try { window.localStorage.setItem(STORAGE_KEY, t); window.localStorage.setItem('ce-theme-mode', t); } catch { /* ignore */ }
+  }, []);
+
+  const setThemeMode = useCallback((mode: Theme | 'auto') => {
+    if (mode !== 'auto') { setTheme(mode); return; }
+    setModeState('auto');
+    const next = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    setThemeState(next);
+    document.documentElement.setAttribute('data-theme', next);
+    try { window.localStorage.setItem('ce-theme-mode', 'auto'); } catch { /* ignore */ }
+  }, [setTheme]);
+
+  useEffect(() => {
+    if (themeMode !== 'auto') return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => setThemeState(media.matches ? 'dark' : 'light');
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [themeMode]);
+
+  useEffect(() => {
+    const apply = () => document.documentElement.setAttribute('data-density', readPreferences().density);
+    apply();
+    window.addEventListener(PREFERENCES_EVENT, apply);
+    window.addEventListener('storage', apply);
+    return () => { window.removeEventListener(PREFERENCES_EVENT, apply); window.removeEventListener('storage', apply); };
   }, []);
 
   const toggle = useCallback(() => {
@@ -49,7 +83,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  const value = useMemo(() => ({ theme, setTheme, toggle }), [theme, setTheme, toggle]);
+  const value = useMemo(() => ({ theme, themeMode, setTheme, setThemeMode, toggle }), [theme, themeMode, setTheme, setThemeMode, toggle]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

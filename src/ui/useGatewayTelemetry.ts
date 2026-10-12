@@ -1243,6 +1243,12 @@ function getSnapshot(): UseGatewayTelemetryResult {
   return currentSnapshot;
 }
 
+/** Reconnect the read-only bridge so it sends its current state and telemetry. */
+export function refreshGatewayTelemetry(): void {
+  stopFeed();
+  if (listeners.size > 0) startFeed();
+}
+
 /**
  * One ref-counted EventSource shared by every mounted consumer. The returned
  * arrays contain live observations only; consumers should render an explicit

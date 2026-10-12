@@ -141,7 +141,7 @@ export function BootstrapPackageManager({
   };
 
   const restorePackage = async (file?: File) => {
-    if (!file) return;
+    if (!file || busy || activating) return;
     setError(undefined);
     try {
       if (file.size > 32 * 1024) throw new Error('Choose bootstrap-metadata.json, not the ZIP or a certificate file.');
@@ -165,6 +165,7 @@ export function BootstrapPackageManager({
 
   const issue = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (busy || activating) return;
     if (!canIssue || !ready) {
       setError('Enter a gateway ID and choose a site and profile.');
       return;
@@ -334,7 +335,7 @@ export function BootstrapPackageManager({
         <p>Select <strong>bootstrap-metadata.json</strong> from your extracted ZIP. The site and profile are filled in from the package; the file stays in this browser.</p>
         <label>
           <span>Package metadata</span>
-          <input type="file" accept=".json,application/json" onChange={(event) => {
+          <input type="file" accept=".json,application/json" disabled={busy || activating} onChange={(event) => {
             void restorePackage(event.target.files?.[0]);
             event.target.value = '';
           }} />

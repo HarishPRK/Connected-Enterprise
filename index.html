@@ -50,7 +50,9 @@
       (function () {
         try {
           var saved = localStorage.getItem('ce-theme');
-          var theme = saved === 'dark' || saved === 'light'
+          var theme = localStorage.getItem('ce-theme-mode') === 'auto'
+            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+            : saved === 'dark' || saved === 'light'
             ? saved
             : 'light';
           document.documentElement.setAttribute('data-theme', theme);

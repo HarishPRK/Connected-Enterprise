@@ -21,6 +21,8 @@ import {
   type GatewayTwinUpstreamState,
 } from './gatewayTwinSource.js';
 import { createOnboardingRouter } from './onboardingRoutes.js';
+import { createRoutingConfigRouter } from './routingConfigRoutes.js';
+import { aiCapabilities, resolveAiPreferences } from './aiPreferences.js';
 import { createCorsOptionsDelegate } from './corsPolicy.js';
 import { runGatewayTwinCopilotTurn, runGatewayTwinDirectTurn } from './gatewayTwinCopilot.js';
 import {
@@ -73,6 +75,7 @@ app.use(compression({
 app.use(express.json({ limit: '256kb' }));
 
 app.use('/api/onboarding', await createOnboardingRouter());
+app.use('/api/routing/config', createRoutingConfigRouter());
 
 const llm = makeLLM();
 
@@ -150,6 +153,11 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
+app.get('/api/ai/capabilities', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(aiCapabilities(llm));
+});
+
 /** Bucket-wide anomaly history for the first hardware-metrics page. */
 app.get('/api/hardware-metrics/anomalies', async (req, res) => {
   res.removeHeader('Access-Control-Allow-Origin');
@@ -221,10 +229,23 @@ app.post('/api/agent/run', async (req, res) => {
   // eslint-disable-next-line no-console
   console.log(`[agent-run] incoming · incident=${incident?.id} title="${incident?.title}"`);
 
-  if (!incident?.id || !incident?.title) {
+  if (!incident || typeof incident.id !== 'string' || !incident.id.trim() || incident.id.length > 128
+    || typeof incident.title !== 'string' || !incident.title.trim() || incident.title.length > 2000
+    || typeof incident.branchId !== 'string' || !/^[a-z0-9-]{1,64}$/.test(incident.branchId)
+    || typeof incident.severity !== 'string' || incident.severity.length > 64
+    || (incident.agentName !== undefined && (typeof incident.agentName !== 'string' || incident.agentName.length > 128))) {
     res.status(400).json({ error: 'Body must include { incident: { id, title, branchId, severity, agentName? } }' });
     return;
   }
+
+  let selection;
+  try { selection = resolveAiPreferences(req.body?.preferences, llm); }
+  catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid AI preferences.' });
+    return;
+  }
+  const controller = new AbortController();
+  req.once('aborted', () => controller.abort());
 
   // SSE setup
   res.setHeader('Content-Type', 'text/event-stream');
@@ -253,11 +274,13 @@ app.post('/api/agent/run', async (req, res) => {
   const hb = setInterval(() => {
     if (res.writable && !res.writableEnded) res.write(': hb\n\n');
   }, 15_000);
-  res.on('close', () => clearInterval(hb));
+  res.on('close', () => { clearInterval(hb); controller.abort(); });
 
   try {
-    await runAgent(llm.client, llm.model, {
+    await runAgent(selection.llm.client, selection.llm.model, {
       incident,
+      preferences: selection.preferences,
+      signal: controller.signal,
       emit: (e, d) => {
         emit(e, d);
         // eslint-disable-next-line no-console
@@ -734,10 +757,22 @@ app.post('/api/ask', async (req, res) => {
 
   const messages = req.body?.messages as ChatMessage[] | undefined;
   const branchId = typeof req.body?.branchId === 'string' ? req.body.branchId.trim() : '';
-  if (!Array.isArray(messages) || messages.length === 0 || !/^[a-z0-9-]{1,64}$/.test(branchId)) {
+  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 100
+    || messages.some(message => !message || !['user', 'assistant'].includes(message.role)
+      || typeof message.content !== 'string' || !message.content.trim() || message.content.length > 32000)
+    || !/^[a-z0-9-]{1,64}$/.test(branchId)) {
     res.status(400).json({ error: 'Body must include { branchId, messages: [{role, content}, ...] }' });
     return;
   }
+
+  let selection;
+  try { selection = resolveAiPreferences(req.body?.preferences, llm); }
+  catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid AI preferences.' });
+    return;
+  }
+  const controller = new AbortController();
+  req.once('aborted', () => controller.abort());
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -755,10 +790,12 @@ app.post('/api/ask', async (req, res) => {
   const hb = setInterval(() => {
     if (res.writable && !res.writableEnded) res.write(': hb\n\n');
   }, 15_000);
-  res.on('close', () => clearInterval(hb));
+  res.on('close', () => { clearInterval(hb); controller.abort(); });
 
   try {
-    await runChat(llm.client, llm.model, { messages, branchId, emit });
+    await runChat(selection.llm.client, selection.llm.model, {
+      messages, branchId, emit, preferences: selection.preferences, signal: controller.signal,
+    });
     // eslint-disable-next-line no-console
     console.log('[ask] done');
   } catch (err) {

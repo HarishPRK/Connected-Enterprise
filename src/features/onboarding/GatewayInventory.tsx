@@ -503,7 +503,7 @@ export function GatewayInventory({
               <>
                 <label>
                   <span>Profile version</span>
-                  <select value={deployProfileId} onChange={(event) => { setDeployProfileId(event.target.value); setDeployError(undefined); }} disabled={deploying}>
+                  <select value={deployProfileId} onChange={(event) => { setDeployProfileId(event.target.value); setDeployError(undefined); setDeployIdempotencyKey(createIdempotencyKey('profile-deploy')); }} disabled={deploying}>
                     {compatibleDeployProfiles.map((profile) => (
                       <option key={profile.id} value={profile.id}>
                         {profile.name} · v{profile.version}{profile.id === deployTarget.profileVersionId ? ' · currently applied' : ''}
@@ -513,7 +513,7 @@ export function GatewayInventory({
                 </label>
                 <label>
                   <span>Gateway retrieval</span>
-                  <select value={deliveryMode} onChange={(event) => setDeliveryMode(event.target.value as 'PULL' | 'SHADOW' | 'JOB')} disabled={deploying}>
+                  <select value={deliveryMode} onChange={(event) => { setDeliveryMode(event.target.value as 'PULL' | 'SHADOW' | 'JOB'); setDeployError(undefined); setDeployIdempotencyKey(createIdempotencyKey('profile-deploy')); }} disabled={deploying}>
                     <option value="PULL">HTTPS polling · API Gateway</option>
                     <option value="SHADOW">Named Shadow · compatibility mode</option>
                     <option value="JOB">IoT Job · compatibility mode</option>

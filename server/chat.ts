@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { askTools, executeTool } from './tools.js';
 import type { AgentClient } from './llm.js';
 import { runLiveTelemetryAnswer } from './askLiveResponse.js';
+import { aiStylePrompt, type AiPreferences } from './aiPreferences.js';
 
 const SYSTEM_PROMPT = `
 You are the Ask-AI assistant inside Connected Enterprise — a cloud dashboard for
@@ -35,6 +36,7 @@ Style:
 `.trim();
 
 const MAX_ITER = 5;
+const askToolNames = new Set(askTools.map(tool => tool.name));
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -46,6 +48,8 @@ export interface ChatRunOptions {
   branchId: string;
   emit: (event: string, data: Record<string, unknown>) => void;
   minimumResponseMs?: number;
+  preferences?: AiPreferences;
+  signal?: AbortSignal;
 }
 
 /** Multi-turn chat loop with tool use, used by /api/ask. Streams chunked text
@@ -53,6 +57,7 @@ export interface ChatRunOptions {
  *  events so the UI can show a status line while we're calling the gateway. */
 export async function runChat(client: AgentClient | null, model: string, opts: ChatRunOptions): Promise<void> {
   const { messages, branchId, emit } = opts;
+  if (opts.signal?.aborted) return;
 
   if (!client) {
     await runLiveTelemetryAnswer(opts);
@@ -66,22 +71,24 @@ export async function runChat(client: AgentClient | null, model: string, opts: C
   }));
 
   for (let iter = 0; iter < MAX_ITER; iter++) {
+    if (opts.signal?.aborted) return;
     let response: Anthropic.Messages.Message;
     try {
       response = await client.messages.create({
         model,
-        max_tokens: 1024,
+        max_tokens: opts.preferences?.tone === 'detailed' ? 2048 : 1024,
         system: [
           {
             type: 'text',
-            text: `${SYSTEM_PROMPT}\n\nSelected Connected Enterprise branch ID: ${branchId}`,
+            text: `${SYSTEM_PROMPT}\n\nSelected Connected Enterprise branch ID: ${branchId}${aiStylePrompt(opts.preferences)}`,
             cache_control: { type: 'ephemeral' },
           },
         ],
         tools: askTools,
         messages: apiMessages,
-      });
+      }, { signal: opts.signal });
     } catch (err) {
+      if (opts.signal?.aborted) return;
       // Keep operational questions useful during a provider outage. The
       // direct response reads the same branch-scoped live tools and never
       // invents values, so the upstream error does not reach the browser.
@@ -111,13 +118,14 @@ export async function runChat(client: AgentClient | null, model: string, opts: C
       const approved = new Set<string>(); // not used in chat — write tools always blocked
 
       for (const t of toolUseBlocks) {
+        if (opts.signal?.aborted) return;
         emit('tool_using', { tool: t.name, args: t.input });
-        const result = await executeTool(
+        const result = askToolNames.has(t.name) ? await executeTool(
           t.name,
           (t.input ?? {}) as Record<string, unknown>,
           approved,
           { branchId },
-        );
+        ) : { error: `Tool ${t.name} is unavailable in this read-only chat.` };
         toolResults.push({
           type: 'tool_result',
           tool_use_id: t.id,

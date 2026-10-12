@@ -1,6 +1,6 @@
 import { Card } from '../Card';
 import type { Alert } from '../../types';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -12,11 +12,12 @@ function timeAgo(iso: string) {
 }
 
 export function AlertsWidget({ alerts }: { alerts: Alert[] }) {
+  const navigate = useNavigate();
   return (
     <Card
       title="Alerts"
       sub={`${alerts.filter((a) => a.level !== 'ok').length} active`}
-      right={<Link to="/ask-ai"><button>Ask AI to triage</button></Link>}
+      right={<button onClick={() => navigate('/ask-ai')}>Ask AI to triage</button>}
     >
       {alerts.slice(0, 5).map((a) => (
         <div key={a.id} className={`alert-row ${a.level}`}>

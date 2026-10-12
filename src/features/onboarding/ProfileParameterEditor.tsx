@@ -159,8 +159,8 @@ function ParameterControl({
             min={parameter.control.min}
             max={parameter.control.max}
             step={parameter.control.step}
-            value={Number(value)}
-            onChange={(event) => onChange?.(Number(event.target.value))}
+            value={value === '' ? '' : Number(value)}
+            onChange={(event) => onChange?.(event.target.value === '' ? '' : Number(event.target.value))}
           />
           {parameter.control.unit && <span>{parameter.control.unit}</span>}
         </span>

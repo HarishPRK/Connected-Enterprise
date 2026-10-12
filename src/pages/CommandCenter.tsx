@@ -119,8 +119,8 @@ function loadKpis(): CustomKpi[] {
         && typeof c.metric === 'string' && c.metric in METRICS
         && typeof c.scope === 'string' && (c.scope === 'fleet' || !!fleetStats[c.scope])
         && (c.label === undefined || typeof c.label === 'string')
-        && (c.warn === undefined || typeof c.warn === 'number')
-        && (c.crit === undefined || typeof c.crit === 'number');
+        && (c.warn === undefined || (typeof c.warn === 'number' && Number.isFinite(c.warn)))
+        && (c.crit === undefined || (typeof c.crit === 'number' && Number.isFinite(c.crit)));
     });
   } catch { return []; }
 }
@@ -130,7 +130,7 @@ function loadCompare(): string[] {
   try {
     const ids: unknown = JSON.parse(localStorage.getItem(COMPARE_KEY) ?? 'null');
     if (Array.isArray(ids)) {
-      const valid = ids.filter((x): x is string => typeof x === 'string' && !!fleetStats[x]);
+      const valid = [...new Set(ids.filter((x): x is string => typeof x === 'string' && !!fleetStats[x]))];
       if (valid.length >= 2 && valid.length <= 5) return valid;
     }
   } catch { /* fall through to default */ }
@@ -154,7 +154,7 @@ const autoLabel = (metric: MetricId, scope: string) => `${METRICS[metric].label}
 
 export function CommandCenterPage() {
   const toast = useToast();
-  const { theme, setTheme } = useTheme();
+  const { theme, themeMode, setTheme, setThemeMode } = useTheme();
   const [compareIds, setCompareIds] = useState<string[]>(loadCompare);
   const [kpis, setKpis] = useState<CustomKpi[]>(loadKpis);
   const [modalOpen, setModalOpen] = useState(false);
@@ -202,13 +202,6 @@ export function CommandCenterPage() {
     );
     return () => window.clearInterval(timer);
   }, [wallMode]);
-
-  useEffect(() => {
-    try { localStorage.setItem(COMPARE_KEY, JSON.stringify(compareIds)); } catch { /* ignore quota */ }
-  }, [compareIds]);
-  useEffect(() => {
-    try { localStorage.setItem(KPI_KEY, JSON.stringify(kpis)); } catch { /* ignore quota */ }
-  }, [kpis]);
 
   const fleet = useMemo(() => {
     const all = branches.map((b) => fleetStats[b.id]).filter(Boolean);
@@ -258,7 +251,10 @@ export function CommandCenterPage() {
       toast.push({ kind: 'warn', title: 'Compare up to 5 branches', detail: 'Remove a branch before adding another.' });
       return;
     }
-    setCompareIds(selected ? compareIds.filter((x) => x !== id) : [...compareIds, id]);
+    const next = selected ? compareIds.filter((x) => x !== id) : [...compareIds, id];
+    try { localStorage.setItem(COMPARE_KEY, JSON.stringify(next)); }
+    catch { toast.push({ kind: 'warn', title: 'Comparison changed for this session', detail: 'Browser storage is unavailable; this selection will not survive a reload.' }); }
+    setCompareIds(next);
   };
 
   /* Print through the browser's PDF path. Dark theme prints poorly (and the
@@ -267,7 +263,7 @@ export function CommandCenterPage() {
   const exportPdf = () => {
     if (theme === 'dark') {
       const restore = () => {
-        setTheme('dark');
+        setThemeMode(themeMode);
         window.removeEventListener('afterprint', restore);
       };
       window.addEventListener('afterprint', restore);
@@ -283,14 +279,20 @@ export function CommandCenterPage() {
 
   const saveKpi = (k: CustomKpi) => {
     const isEdit = kpis.some((x) => x.id === k.id);
-    setKpis(isEdit ? kpis.map((x) => (x.id === k.id ? k : x)) : [...kpis, k]);
+    const next = isEdit ? kpis.map((x) => (x.id === k.id ? k : x)) : [...kpis, k];
+    try { localStorage.setItem(KPI_KEY, JSON.stringify(next)); }
+    catch { toast.push({ kind: 'error', title: 'KPI card could not be saved', detail: 'Browser storage is unavailable. Keep the editor open and retry.' }); return; }
+    setKpis(next);
     setModalOpen(false);
     toast.push({ kind: 'success', title: isEdit ? 'KPI card updated' : 'KPI card added', detail: k.label ?? autoLabel(k.metric, k.scope) });
   };
 
   const removeKpi = (id: string) => {
     const k = kpis.find((x) => x.id === id);
-    setKpis(kpis.filter((x) => x.id !== id));
+    const next = kpis.filter((x) => x.id !== id);
+    try { localStorage.setItem(KPI_KEY, JSON.stringify(next)); }
+    catch { toast.push({ kind: 'error', title: 'KPI card could not be removed', detail: 'Browser storage is unavailable. Please retry.' }); return; }
+    setKpis(next);
     toast.push({ kind: 'info', title: 'KPI card removed', detail: k ? (k.label ?? autoLabel(k.metric, k.scope)) : undefined });
   };
 

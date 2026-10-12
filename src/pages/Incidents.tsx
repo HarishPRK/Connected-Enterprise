@@ -9,6 +9,10 @@ import { useLiveData } from '../ui/LiveData';
 import { useOpsIncidents } from '../ui/OpsIncidents';
 import { runAgentSSE } from '../ui/agentClient';
 import { RichText } from '../ui/markdown';
+import { Modal } from '../ui/Modal';
+import { aiPreferences } from '../ui/preferences';
+import { downloadText } from '../ui/download';
+import { loadIncidentDecisions, loadIncidentFilters, loadRunbooks, saveIncidentDecision, type SavedIncidentFilter, type RunbookDraft } from '../ui/incidentWorkspace';
 import { branches, incidents as seed } from '../data/mock';
 import type { AgentStep, AgentStepKind, Incident, IncidentSeverity, IncidentStatus, PendingAction } from '../types';
 import {
@@ -99,7 +103,7 @@ const liveIncidentTemplate = (): Incident => ({
 });
 
 export function IncidentsPage() {
-  const [list, setList] = useState<Incident[]>(seed);
+  const [list, setList] = useState<Incident[]>(() => loadIncidentDecisions(seed));
   const [selectedId, setSelectedId] = useState<string>(seed[0]?.id ?? '');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | 'all'>('all');
@@ -108,6 +112,15 @@ export function IncidentsPage() {
   const { liveIncidents, patchIncident: patchLive, appendStep: appendLive } = useOpsIncidents();
   const { push } = useToast();
   const lastTriggerRef = useRef(0);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [savedFilters, setSavedFilters] = useState<SavedIncidentFilter[]>(loadIncidentFilters);
+  const [filterName, setFilterName] = useState('');
+  const [runbookOpen, setRunbookOpen] = useState(false);
+  const [runbooks, setRunbooks] = useState<RunbookDraft[]>(loadRunbooks);
+  const [runbookId, setRunbookId] = useState('');
+  const [runbookTitle, setRunbookTitle] = useState('');
+  const [runbookSteps, setRunbookSteps] = useState('');
+  const [reviewAction, setReviewAction] = useState<Incident | null>(null);
 
   // Display set = live-derived incidents (newest, on top) + the scripted/demo
   // seed list. Live ones are owned by the provider; their mutations route there.
@@ -140,7 +153,7 @@ export function IncidentsPage() {
       });
   }, [allList, statusFilter, query]);
 
-  const selected = allList.find((i) => i.id === selectedId);
+  const selected = filtered.find((i) => i.id === selectedId) ?? filtered[0];
 
   // KPI stats
   const stats = useMemo(() => {
@@ -163,6 +176,8 @@ export function IncidentsPage() {
   // additional steps onto the incident in-place.
   const [liveRunningId, setLiveRunningId] = useState<string | null>(null);
   const stopLiveRef = useRef<(() => void) | null>(null);
+  const liveGenerationRef = useRef(0);
+  useEffect(() => () => { liveGenerationRef.current++; stopLiveRef.current?.(); }, []);
 
   // Route mutations: live-derived incidents live in the OpsIncidents provider;
   // seed/demo incidents live in this page's local state.
@@ -187,6 +202,7 @@ export function IncidentsPage() {
 
   function runLiveAgent(inc: Incident) {
     if (liveRunningId) return;
+    const generation = ++liveGenerationRef.current;
     setLiveRunningId(inc.id);
     setIncidentStatus(inc.id, 'investigating');
     appendLiveStep(inc.id, {
@@ -202,10 +218,11 @@ export function IncidentsPage() {
     // Track whether we saw a proposal (= awaiting_approval) during the run, so
     // when the stream closes we can pick the right terminal status.
     let sawProposal = false;
-    let lastThoughtContent: string | undefined;
+    let completed = false;
 
     stopLiveRef.current = runAgentSSE(
       {
+        preferences: aiPreferences(),
         incident: {
           id: inc.id, title: inc.title, branchId: inc.branchId,
           severity: inc.severity, agentName: inc.agentName,
@@ -213,20 +230,27 @@ export function IncidentsPage() {
       },
       {
         onEvent: ({ event, data }) => {
+          if (generation !== liveGenerationRef.current) return;
+          if (event === 'error') {
+            completed = true;
+            const message = String(data.message ?? 'The analysis failed.');
+            appendLiveStep(inc.id, { id: mkId(), ts: 0, kind: 'system', content: `Analysis error: ${message}` });
+            setIncidentStatus(inc.id, 'triaging');
+            push({ kind: 'error', title: 'Live analysis failed', detail: message });
+            return;
+          }
           // ── Terminal events: shape final incident state, don't render as steps ──
           if (event === 'done') {
+            completed = true;
             const reason = (data.reason as string) ?? 'end_turn';
             if (reason === 'analysis_complete') {
-              setIncidentStatus(inc.id, 'triaging');
+              setIncidentStatus(inc.id, inc.status === 'resolved' || inc.status === 'escalated' ? inc.status : 'triaging');
               return;
             }
             if (sawProposal || reason === 'awaiting_approval') {
               setIncidentStatus(inc.id, 'awaiting_approval');
             } else {
-              setIncidentStatus(inc.id, 'resolved', {
-                resolvedISO: new Date().toISOString(),
-                postMortem: lastThoughtContent,
-              });
+              setIncidentStatus(inc.id, inc.status === 'resolved' || inc.status === 'escalated' ? inc.status : 'triaging');
             }
             return;
           }
@@ -270,7 +294,6 @@ export function IncidentsPage() {
             (event === 'tool_call'   ? `Calling ${data.tool}` :
              event === 'tool_result' ? `Result from ${data.tool}` : '');
 
-          if (kind === 'thought') lastThoughtContent = content;
 
           appendLiveStep(inc.id, {
             id: mkId(),
@@ -287,84 +310,93 @@ export function IncidentsPage() {
           });
         },
         onError: (msg) => {
+          if (generation !== liveGenerationRef.current) return;
+          completed = true;
           appendLiveStep(inc.id, {
             id: mkId(), ts: 0, kind: 'system',
             content: `Agent error: ${msg}`,
           });
-          setIncidentStatus(inc.id, 'escalated');
+          setIncidentStatus(inc.id, 'triaging');
           push({ kind: 'error', title: 'Live agent failed', detail: msg });
           setLiveRunningId(null);
         },
         onDone: () => {
+          if (generation !== liveGenerationRef.current) return;
+          if (!completed) {
+            setIncidentStatus(inc.id, 'triaging');
+            appendLiveStep(inc.id, { id: mkId(), ts: 0, kind: 'system', content: 'The analysis stream ended before completion. The incident remains open; retry the analysis.' });
+          }
           setLiveRunningId(null);
+          stopLiveRef.current = null;
         },
       },
     );
   }
 
   function stopLiveAgent() {
+    liveGenerationRef.current++;
     stopLiveRef.current?.();
     stopLiveRef.current = null;
     setLiveRunningId(null);
+    if (liveRunningId) {
+      setIncidentStatus(liveRunningId, 'triaging');
+      appendLiveStep(liveRunningId, { id: `stop-${Date.now()}`, ts: 0, kind: 'system', content: 'Live analysis stopped by the operator. No remediation was executed.' });
+    }
   }
 
   function applyApproval(id: string) {
-    // Live incidents (no scripted post-approval steps) just move resolving→resolved.
-    if (isLive(id)) {
-      patchLive(id, { status: 'resolving', pendingAction: undefined });
-      window.setTimeout(
-        () => patchLive(id, { status: 'resolved', resolvedISO: new Date().toISOString() }),
-        4_000,
-      );
-      return;
-    }
-    setList((prev) =>
-      prev.map((inc) => {
-        if (inc.id !== id || !inc.pendingAction || !inc.postApprovalSteps) return inc;
-        return {
-          ...inc,
-          status: 'resolving' as IncidentStatus,
-          pendingAction: undefined,
-          steps: [...inc.steps, ...inc.postApprovalSteps],
-          postApprovalSteps: undefined,
-        };
-      }),
-    );
-    // Mark resolved a beat after the steps finish playing
-    window.setTimeout(() => {
-      setList((prev) =>
-        prev.map((inc) =>
-          inc.id === id
-            ? { ...inc, status: 'resolved', resolvedISO: new Date().toISOString() }
-            : inc,
-        ),
-      );
-    }, 11_500);
+    setReviewAction(allList.find((incident) => incident.id === id) ?? null);
   }
 
   function escalate(id: string) {
-    if (isLive(id)) {
-      patchLive(id, { status: 'escalated', assignee: 'On-call NetEng' });
-      return;
+    if (liveRunningId === id) stopLiveAgent();
+    if (!isLive(id)) {
+      try { saveIncidentDecision(id, 'On-call NetEng'); }
+      catch { push({ kind: 'warn', title: 'Escalation saved for this session', detail: 'Browser storage is unavailable; the decision will not survive a reload.' }); }
     }
-    setList((prev) =>
-      prev.map((inc) =>
-        inc.id === id
-          ? { ...inc, status: 'escalated', assignee: 'On-call NetEng' }
-          : inc,
-      ),
-    );
+    if (isLive(id)) {
+      patchLive(id, { status: 'escalated', assignee: 'On-call NetEng', pendingAction: undefined });
+    } else {
+      setList((prev) => prev.map((inc) => inc.id === id ? { ...inc, status: 'escalated', assignee: 'On-call NetEng', pendingAction: undefined } : inc));
+    }
+    appendLiveStep(id, { id: `escalate-${Date.now()}`, ts: 0, kind: 'system', content: 'Flagged for On-call NetEng in this browser. Contact the operator through your normal support channel; no external notification was sent.' });
+    setReviewAction(null);
+    push({ kind: 'info', title: 'Flagged for operator review', detail: `${isLive(id) ? 'Recorded for this browser session.' : 'Recorded on this browser.'} Contact On-call NetEng through your support channel.` });
+  }
+
+  function storeFilters(next: SavedIncidentFilter[]) {
+    try {
+      localStorage.setItem('ce-incident-filters-v1', JSON.stringify(next));
+      setSavedFilters(next);
+      return true;
+    } catch {
+      push({ kind: 'error', title: 'Filter could not be saved', detail: 'Browser storage is unavailable.' });
+      return false;
+    }
+  }
+
+  function saveRunbook() {
+    if (!runbookTitle.trim() || !runbookSteps.trim()) return;
+    const id = runbookId || `runbook-${Date.now()}`;
+    const draft: RunbookDraft = { id, title: runbookTitle.trim(), steps: runbookSteps.trim(), updatedAt: new Date().toISOString() };
+    const next = [...runbooks.filter((runbook) => runbook.id !== id), draft];
+    try {
+      localStorage.setItem('ce-runbooks-v1', JSON.stringify(next));
+      setRunbooks(next);
+      setRunbookId(id);
+      push({ kind: 'success', title: 'Runbook saved', detail: 'Saved on this browser for manual operator use.' });
+    } catch { push({ kind: 'error', title: 'Runbook could not be saved', detail: 'Browser storage is unavailable. Download the draft to keep a copy.' }); }
   }
 
   return (
     <>
       <PageHeader
         title="Incidents"
-        subtitle="Anomalies become incidents, receive a live operational analysis, and keep humans in the loop for risky actions."
+        subtitle="Live telemetry incidents and sample case histories · analysis is read-only; operator review flags are local to this browser."
         right={
           <div className="toolbar">
-            <button><Filter size={14} />Saved filters</button>
-            <button className="primary"><Sparkles size={14} />New runbook</button>
+            <button onClick={() => setFiltersOpen(true)}><Filter size={14} />Saved filters</button>
+            <button className="primary" onClick={() => { setRunbookId(''); setRunbookTitle(''); setRunbookSteps(''); setRunbookOpen(true); }}><Sparkles size={14} />New runbook</button>
           </div>
         }
       />
@@ -387,6 +419,7 @@ export function IncidentsPage() {
                 <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                   <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
                   <input
+                    aria-label="Search incidents"
                     placeholder="Search ID or title"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
@@ -397,7 +430,7 @@ export function IncidentsPage() {
             }
           >
             <div className="inc-seg" role="tablist" aria-label="Filter by status">
-              {(['all', 'investigating', 'awaiting_approval', 'resolved', 'escalated'] as const).map((s) => (
+              {(['all', 'triaging', 'investigating', 'awaiting_approval', 'resolving', 'resolved', 'escalated'] as const).map((s) => (
                 <button
                   key={s}
                   role="tab"
@@ -415,7 +448,7 @@ export function IncidentsPage() {
                 <IncidentRow
                   key={inc.id}
                   inc={inc}
-                  selected={inc.id === selectedId}
+                  selected={inc.id === selected?.id}
                   onClick={() => setSelectedId(inc.id)}
                 />
               ))}
@@ -433,12 +466,31 @@ export function IncidentsPage() {
               onApprove={applyApproval}
               onEscalate={escalate}
               liveRunning={liveRunningId === selected.id}
+              analysisBusy={liveRunningId !== null}
               onRunLive={() => runLiveAgent(selected)}
               onStopLive={stopLiveAgent}
             />
           )}
         </div>
       </div>
+      <Modal open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Saved incident filters" footer={<button onClick={() => setFiltersOpen(false)}>Close</button>}>
+        <p>Save the current search and status selection on this browser.</p>
+        <label className="kv"><span>Filter name</span><input value={filterName} maxLength={80} onChange={(e) => setFilterName(e.target.value)} placeholder="e.g. Open payment incidents" /></label>
+        <button className="primary" disabled={!filterName.trim()} onClick={() => { if (storeFilters([...savedFilters.filter((filter) => filter.name !== filterName.trim()), { id: `filter-${Date.now()}`, name: filterName.trim(), query, status: statusFilter }])) setFilterName(''); }}>Save current filter</button>
+        {savedFilters.length === 0 && <p>No saved filters yet.</p>}
+        {savedFilters.map((filter) => <div className="kv" key={filter.id}><button onClick={() => { setQuery(filter.query); setStatusFilter(filter.status); setFiltersOpen(false); }}>{filter.name}</button><button aria-label={`Delete filter ${filter.name}`} onClick={() => storeFilters(savedFilters.filter((item) => item.id !== filter.id))}>Delete</button></div>)}
+      </Modal>
+      <Modal open={runbookOpen} onClose={() => setRunbookOpen(false)} title="Runbook editor" width={600} footer={<><button onClick={() => setRunbookOpen(false)}>Close</button><button disabled={!runbookTitle.trim() || !runbookSteps.trim()} onClick={() => downloadText('incident-runbook.md', `# ${runbookTitle.trim()}\n\n${runbookSteps.trim()}\n`)}>Download draft</button><button className="primary" disabled={!runbookTitle.trim() || !runbookSteps.trim()} onClick={saveRunbook}>Save runbook</button></>}>
+        <p>Write manual operator steps. Runbooks are saved on this browser and do not execute gateway commands.</p>
+        <label className="kv"><span>Open saved runbook</span><select value={runbookId} onChange={(e) => { const book = runbooks.find((runbook) => runbook.id === e.target.value); setRunbookId(book?.id ?? ''); setRunbookTitle(book?.title ?? ''); setRunbookSteps(book?.steps ?? ''); }}><option value="">New draft</option>{runbooks.map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>
+        <label className="kv"><span>Title</span><input value={runbookTitle} maxLength={120} onChange={(e) => setRunbookTitle(e.target.value)} /></label>
+        <label style={{ display: 'grid', gap: 8 }}><span>Operator steps</span><textarea rows={10} maxLength={20000} value={runbookSteps} onChange={(e) => setRunbookSteps(e.target.value)} placeholder="1. Review current telemetry…" style={{ width: '100%', boxSizing: 'border-box' }} /></label>
+      </Modal>
+      <Modal open={!!reviewAction} onClose={() => setReviewAction(null)} title="Review execution options" width={600} footer={<><button onClick={() => setReviewAction(null)}>Keep pending</button><button className="primary" onClick={() => { if (reviewAction) escalate(reviewAction.id); }}>Flag for operator review</button></>}>
+        <p>{reviewAction?.pendingAction?.description}</p>
+        <p>This proposed action has no connected execution integration. No gateway command will be sent, and the incident will remain open until telemetry confirms recovery or an operator handles it.</p>
+        <pre className="step-code">{JSON.stringify({ tool: reviewAction?.pendingAction?.tool, args: reviewAction?.pendingAction?.args }, null, 2)}</pre>
+      </Modal>
     </>
   );
 }
@@ -456,6 +508,7 @@ function IncidentRow({ inc, selected, onClick }: { inc: Incident; selected: bool
     >
       <div className="inc-row-top">
         <span className={`badge ${sevBadge[inc.severity]}`}>{sevLabel[inc.severity]}</span>
+        {!inc.id.startsWith('INC-LIVE-') && <span className="badge">Sample</span>}
         <span className="inc-row-title">{inc.title}</span>
         <span className={`badge ${statusBadge[inc.status]}`}>{statusLabel[inc.status]}</span>
       </div>
@@ -479,17 +532,17 @@ function IncidentRow({ inc, selected, onClick }: { inc: Incident; selected: bool
 /* ─────────────── Detail panel ─────────────── */
 
 function IncidentDetail({
-  incident, onApprove, onEscalate, liveRunning, onRunLive, onStopLive,
+  incident, onApprove, onEscalate, liveRunning, analysisBusy, onRunLive, onStopLive,
 }: {
   incident: Incident;
   onApprove: (id: string) => void;
   onEscalate: (id: string) => void;
   liveRunning: boolean;
+  analysisBusy: boolean;
   onRunLive: () => void;
   onStopLive: () => void;
 }) {
   const branch = branches.find((b) => b.id === incident.branchId);
-  const { push } = useToast();
 
   return (
     <Card
@@ -508,6 +561,8 @@ function IncidentDetail({
             <button onClick={onStopLive} className="danger">
               <span className="dot err" style={{ marginRight: 4 }} />Stop live agent
             </button>
+          ) : analysisBusy ? (
+            <button onClick={onStopLive}>Stop current analysis before starting another</button>
           ) : (
             <button onClick={onRunLive} className="primary" title="Analyze this incident using current telemetry">
               <Sparkles size={14} />Run live analysis
@@ -525,11 +580,9 @@ function IncidentDetail({
           action={incident.pendingAction}
           onApprove={() => {
             onApprove(incident.id);
-            push({ kind: 'success', title: 'Action approved', detail: `${incident.agentName} is executing now.` });
           }}
           onReject={() => {
             onEscalate(incident.id);
-            push({ kind: 'info', title: 'Escalated to human', detail: 'No automated action will run.' });
           }}
         />
       )}
@@ -540,7 +593,7 @@ function IncidentDetail({
 
       {incident.status !== 'resolved' && incident.status !== 'escalated' && (
         <div className="toolbar" style={{ paddingTop: 4 }}>
-          <button onClick={() => onEscalate(incident.id)}>Escalate to human</button>
+          <button onClick={() => onEscalate(incident.id)}>Flag for operator review</button>
         </div>
       )}
     </Card>
@@ -784,8 +837,8 @@ function PendingActionPanel({
       </div>
       <CollapsibleJson label="tool call payload" json={JSON.stringify({ tool: action.tool, args: action.args }, null, 2)} />
       <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
-        <button onClick={onApprove} className="primary"><CheckCircle2 size={14} />Approve & execute</button>
-        <button onClick={onReject}>Reject — escalate to human</button>
+        <button onClick={onApprove} className="primary"><CheckCircle2 size={14} />Review execution options</button>
+        <button onClick={onReject}>Reject — flag for operator review</button>
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useEscape } from './Toast';
 import { X } from 'lucide-react';
+import { useDialogFocus } from './useDialogFocus';
 
 interface ModalProps {
   open: boolean;
@@ -14,11 +15,15 @@ interface ModalProps {
 
 export function Modal({ open, onClose, title, children, footer, width = 460 }: ModalProps) {
   useEscape(onClose, open);
+  const ref = useRef<HTMLDivElement>(null);
+  useDialogFocus(open, ref);
   if (!open) return null;
   return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div
         className="modal"
+        ref={ref}
+        tabIndex={-1}
         style={{ width }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
@@ -27,7 +32,7 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }: M
       >
         <div className="modal-head">
           <div className="card-title">{title}</div>
-          <button className="icon-btn" onClick={onClose} aria-label="close" style={{ border: 'none', background: 'transparent' }}>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label={`Close ${title}`} style={{ border: 'none', background: 'transparent' }}>
             <X size={16} />
           </button>
         </div>

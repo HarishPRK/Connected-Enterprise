@@ -55,6 +55,38 @@ test('Ask chat sends only live read-only tools and the selected branch context',
   assert.deepEqual(events, ['chunk', 'done']);
 });
 
+test('Ask chat applies the saved response style and cancels before calling a provider', async () => {
+  const calls: Request[] = [];
+  const create = (async (request: Request) => { calls.push(request); return endTurn(); }) as AgentClient['messages']['create'];
+  const opts = {
+    branchId: 'b-mck-03', messages: [{ role: 'user' as const, content: 'Explain the gateway.' }], emit: () => {},
+    preferences: { model: 'haiku' as const, tone: 'detailed' as const, timeZone: 'UTC' as const },
+  };
+  await runChat({ messages: { create } }, 'configured-model', opts);
+  assert.equal(calls[0].model, 'configured-model');
+  assert.equal(calls[0].max_tokens, 2048);
+  assert.match((calls[0].system as Anthropic.Messages.TextBlockParam[])[0].text, /detailed explanation/);
+  assert.match((calls[0].system as Anthropic.Messages.TextBlockParam[])[0].text, /Use UTC/);
+  await runChat({ messages: { create } }, 'configured-model', { ...opts, signal: AbortSignal.abort() });
+  assert.equal(calls.length, 1);
+});
+
+test('an unoffered Ask tool cannot fall through to demo diagnostics', async () => {
+  const calls: Request[] = [];
+  const create = (async (request: Request) => {
+    calls.push(request);
+    return calls.length === 1
+      ? { ...endTurn(), content: [{ type: 'tool_use', id: 'unexpected', name: 'get_wan_status', input: {} }], stop_reason: 'tool_use' }
+      : endTurn();
+  }) as AgentClient['messages']['create'];
+  await runChat({ messages: { create } }, 'configured-model', {
+    branchId: 'b-mck-03', messages: [{ role: 'user', content: 'Check WAN.' }], emit: () => {},
+  });
+  const result = calls[1].messages.at(-1)?.content as Anthropic.Messages.ToolResultBlockParam[];
+  assert.match(String(result[0].content), /unavailable in this read-only chat/);
+  assert.doesNotMatch(String(result[0].content), /active.*Fiber/);
+});
+
 test('Ask chat uses a direct live response when the LLM fails', async () => {
   const create = (async () => {
     throw new Error('Bedrock 400 Bad Request: Error 002');

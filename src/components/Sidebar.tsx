@@ -34,7 +34,7 @@ export function Sidebar() {
   // the right state (avoids a width-flash after hydrate).
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof localStorage === 'undefined') return false;
-    return localStorage.getItem(COLLAPSED_KEY) === '1';
+    try { return localStorage.getItem(COLLAPSED_KEY) === '1'; } catch { return false; }
   });
 
   // Reflect the state onto <html> so .app-shell can collapse the grid column

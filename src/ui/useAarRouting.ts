@@ -60,16 +60,28 @@ function emit() {
   for (const l of listeners) l();
 }
 
-function apply(snap: Partial<AarRoutingState> | null | undefined) {
-  if (!snap) return;
-  current = {
-    tunnels: snap.tunnels ?? [],
-    decisions: snap.decisions ?? [],
-    routes: snap.routes ?? [],
-    flows: snap.flows ?? [],
-    connected: typeof snap.connected === 'boolean' ? snap.connected : current.connected,
-    receivedAt: snap.receivedAt ?? current.receivedAt,
+export function mergeAarSnapshot(previous: AarRoutingState, value: unknown): AarRoutingState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return previous;
+  const snap = value as Partial<AarRoutingState>;
+  if (!['tunnels', 'decisions', 'routes', 'flows', 'connected', 'receivedAt'].some((key) => key in snap)) return previous;
+  if (snap.receivedAt !== undefined && (!Number.isFinite(snap.receivedAt) || snap.receivedAt < previous.receivedAt)) return previous;
+  for (const key of ['tunnels', 'decisions', 'routes', 'flows'] as const) {
+    if (snap[key] !== undefined && !Array.isArray(snap[key])) return previous;
+  }
+  return {
+    tunnels: snap.tunnels ?? previous.tunnels,
+    decisions: snap.decisions ?? previous.decisions,
+    routes: snap.routes ?? previous.routes,
+    flows: snap.flows ?? previous.flows,
+    connected: typeof snap.connected === 'boolean' ? snap.connected : previous.connected,
+    receivedAt: snap.receivedAt ?? previous.receivedAt,
   };
+}
+
+function apply(snap: unknown) {
+  const next = mergeAarSnapshot(current, snap);
+  if (next === current) return;
+  current = next;
   emit();
 }
 
@@ -78,7 +90,7 @@ function startFeed() {
 
   snapAbort = new AbortController();
   fetch('/api/aar/snapshot', { signal: snapAbort.signal })
-    .then((r) => r.json() as Promise<AarRoutingState>)
+    .then((r) => { if (!r.ok) throw new Error(`AAR snapshot failed (${r.status})`); return r.json(); })
     .then(apply)
     .catch(() => { /* stream will recover */ });
 

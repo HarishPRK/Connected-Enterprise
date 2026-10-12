@@ -197,12 +197,10 @@ function StreamTile({
     setErrored(false);
     setLoaded(false);
     setIsLive(true);
-    // Request fullscreen after the image element is in the DOM.
-    requestAnimationFrame(() => {
-      containerRef.current?.requestFullscreen?.().catch(() => {
-        // Fullscreen denied (e.g. user gesture lost) — still keep the stream open
-        // inline so the click isn't a no-op.
-      });
+    // The container already exists, so keep this inside the click's activation
+    // window. Waiting for a frame can lose fullscreen permission in browsers.
+    containerRef.current?.requestFullscreen?.().catch(() => {
+      // Keep the feed open inline when fullscreen is unavailable.
     });
   }
 
@@ -273,7 +271,7 @@ function StreamTile({
   return (
     <div ref={containerRef} className={`va-tile ${isFullscreen ? 'is-fullscreen' : ''}`}>
       <div className="va-tile-head">
-        <span className={`dot ${isLive && !errored ? 'ok' : 'warn'}`} />
+        <span className={`dot ${isLive && loaded && !errored ? 'ok' : 'warn'}`} />
         <div className="va-tile-name">
           <div className="va-tile-title">{stream.name}</div>
           <div className="va-tile-desc">{stream.description}</div>

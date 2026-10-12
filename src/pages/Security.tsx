@@ -3,6 +3,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { useThemeColors } from '../ui/Theme';
+import { downloadCsv } from '../ui/download';
 import {
   complianceChecks, dnsBlocks, threatEvents, threatSources, threatTrend,
 } from '../data/mock';
@@ -91,10 +92,10 @@ export function SecurityPage() {
     <>
       <PageHeader
         title="Security & Threats"
-        subtitle="Fleet-wide firewall, IDS, DDoS scrubber, web gateway and DNS security telemetry — last 24 h"
+        subtitle="Sample firewall, IDS, DDoS, web gateway and DNS security report · last 24 h"
         right={
           <div className="toolbar">
-            <button><Download size={14} />Export incident report</button>
+            <button onClick={() => downloadCsv(`security-events-${filter}.csv`, ['ID', 'Time (UTC)', 'Category', 'Severity', 'Action', 'Source IP', 'Destination', 'Rule', 'Details'], filteredEvents.map((event) => [event.id, event.ts, CAT_LABEL[event.category], event.severity, ACTION_LABEL[event.action], event.sourceIp, event.destination, event.rule, event.detail]))}><Download size={14} />Export incident report</button>
           </div>
         }
       />
@@ -112,7 +113,7 @@ export function SecurityPage() {
           <Card
             title="Threats over the last 24 h"
             sub="Stacked by category · bruteforce spikes overnight, recon during business hours"
-            right={<span className="badge ok"><span className="dot ok" /> Streaming</span>}
+            right={<span className="badge">Sample data</span>}
           >
             <ThreatTrendChart />
           </Card>
@@ -121,7 +122,7 @@ export function SecurityPage() {
         {/* Row 2 — Live event feed + Top sources */}
         <div className="col-7">
           <Card
-            title="Live threat feed"
+            title="Threat event feed"
             sub={`${filteredEvents.length} events · ${filter === 'all' ? 'all categories' : CAT_LABEL[filter]}`}
             right={
               <div className="toolbar">

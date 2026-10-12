@@ -31,6 +31,24 @@ const liveWan = {
   }],
 };
 
+test('direct telemetry respects detailed responses and cancellation without emitting stale text', async () => {
+  const controller = new AbortController();
+  const events: { event: string; data: Record<string, unknown> }[] = [];
+  const options = {
+    messages: [{ role: 'user' as const, content: 'Check WAN health' }], branchId: 'b-pln-01',
+    preferences: { model: 'haiku' as const, tone: 'detailed' as const, timeZone: 'UTC' as const },
+    minimumResponseMs: 0,
+    emit: (event: string, data: Record<string, unknown>) => events.push({ event, data }),
+  };
+  await runLiveTelemetryAnswer(options, async () => liveWan);
+  assert.match(String(events.find(item => item.event === 'chunk')?.data.text), /How to interpret this/);
+  events.length = 0;
+  const pending = runLiveTelemetryAnswer({ ...options, minimumResponseMs: 60_000, signal: controller.signal }, async () => liveWan);
+  controller.abort();
+  await pending;
+  assert.equal(events.some(item => item.event === 'chunk' || item.event === 'done'), false);
+});
+
 const liveDevices = {
   availability: 'live',
   live: true,

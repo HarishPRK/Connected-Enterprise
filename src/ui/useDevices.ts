@@ -12,7 +12,7 @@
  * seed for live gateway discovery — same endpoints, same shape.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Device } from '../types';
 
 export type Domain = 'IT' | 'OT';
@@ -53,6 +53,7 @@ export interface UseDevicesResult {
   lastInventoryAt?: number;
   /** Primary inventory topics that have reported, including an empty roster. */
   inventoryTopicsSeen: string[];
+  refresh: () => Promise<void>;
 }
 
 /** Move a device between IT and OT. Resolves on the server's ack; the updated
@@ -142,6 +143,14 @@ export function useDevices(): UseDevicesResult {
   const [lastInventoryAt, setLastInventoryAt] = useState<number | undefined>();
   const [inventoryTopicsSeen, setInventoryTopicsSeen] = useState<string[]>([]);
   const esRef = useRef<EventSource | null>(null);
+  const applyRef = useRef<((snap: DeviceSnapshot) => void) | null>(null);
+
+  const refresh = useCallback(async () => {
+    const response = await fetch('/api/devices/snapshot', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Device snapshot failed (${response.status})`);
+    const snapshot = await response.json() as DeviceSnapshot;
+    applyRef.current?.(snapshot);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +164,7 @@ export function useDevices(): UseDevicesResult {
       setInventoryTopicsSeen(snap.inventoryTopicsSeen ?? []);
       setLoaded(true);
     };
+    applyRef.current = apply;
 
     // Hydrate immediately so the table renders without waiting for the stream.
     fetch('/api/devices/snapshot')
@@ -186,6 +196,7 @@ export function useDevices(): UseDevicesResult {
       cancelled = true;
       es.close();
       esRef.current = null;
+      applyRef.current = null;
     };
   }, []);
 
@@ -198,6 +209,7 @@ export function useDevices(): UseDevicesResult {
       lastReceivedAt,
       lastInventoryAt,
       inventoryTopicsSeen,
+      refresh,
     }),
     [
       devices,
@@ -207,6 +219,7 @@ export function useDevices(): UseDevicesResult {
       lastReceivedAt,
       lastInventoryAt,
       inventoryTopicsSeen,
+      refresh,
     ],
   );
 }

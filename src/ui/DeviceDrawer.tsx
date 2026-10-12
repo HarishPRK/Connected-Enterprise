@@ -80,11 +80,12 @@ export function DeviceDrawer({
 
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         {device.kind === 'door_lock' && (
-          <button className="danger" onClick={() => onAction?.('unlock', device)}>Emergency Unlock</button>
+          <button className="danger" disabled={!onAction} title={!onAction ? 'No door-lock control integration is configured' : undefined} onClick={() => onAction?.('unlock', device)}>Emergency Unlock</button>
         )}
-        <button onClick={() => onAction?.('reboot', device)}>Reboot</button>
-        <button onClick={() => onAction?.('disable', device)}>Disable</button>
+        <button disabled={!onAction} title={!onAction ? 'No remote reboot integration is configured' : undefined} onClick={() => onAction?.('reboot', device)}>Reboot</button>
+        <button disabled={!onAction} title={!onAction ? 'No network access-control integration is configured' : undefined} onClick={() => onAction?.('disable', device)}>Disable</button>
       </div>
+      {!onAction && <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Remote reboot, network disable and door unlock require gateway control integrations that are not configured. Supported Matter and Shelly power controls are available in the inventory table.</p>}
     </Drawer>
   );
 }

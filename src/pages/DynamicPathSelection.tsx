@@ -43,7 +43,6 @@ import {
   Radio,
 } from "lucide-react";
 import {
-  pathThresholds,
   BRANCH_TO_DEVICE_TOPIC,
   BRANCH_TO_FAILOVER_TOPIC,
   BRANCH_TO_WAN_TOPIC,
@@ -56,7 +55,7 @@ import type {
 } from "../types";
 import { useThemeColors } from "../ui/Theme";
 import type { ThemeColors } from "../ui/Theme";
-import { useIpsecMetrics } from "../ui/useIpsecMetrics";
+import { refreshIpsecMetrics, useIpsecMetrics } from "../ui/useIpsecMetrics";
 import { ipsecStateForTopic } from "../ui/ipsecTopicState";
 import { useDevices, type DeviceView } from "../ui/useDevices";
 import { matchesDeviceInventory } from "../ui/deviceInventory";
@@ -64,6 +63,9 @@ import { runIpsecInsightSSE } from "../ui/agentClient";
 import { RichText } from "../ui/markdown";
 import { useToast } from "../ui/Toast";
 import { Modal } from "../ui/Modal";
+import { useRoutingConfig } from "../ui/useRoutingConfig";
+import { DEFAULT_ROUTING_THRESHOLDS, validateRoutingThresholds } from "../../shared/routing-config";
+import type { PathThreshold } from "../types";
 
 type Metric = "latency" | "jitter" | "loss";
 
@@ -516,6 +518,8 @@ function SimulationModal({
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
+                    if (e.target !== e.currentTarget) return;
+                    e.preventDefault();
                     toggleApp(app.id);
                   }
                 }}
@@ -581,6 +585,8 @@ function SimulationModal({
                   <input
                     type="checkbox"
                     checked={app.active}
+                    aria-label={`Simulate ${app.name}`}
+                    onClick={(event) => event.stopPropagation()}
                     onChange={() => toggleApp(app.id)}
                     style={{
                       width: 18,
@@ -709,6 +715,38 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
   const c = useThemeColors();
   const ipsec = useIpsecMetrics();
   const { push } = useToast();
+  const routing = useRoutingConfig(branchId ?? 'all');
+  const [thresholdDraft, setThresholdDraft] = useState<{ branchId: string; values: PathThreshold[] } | null>(null);
+  const [thresholdError, setThresholdError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const thresholdPanelRef = useRef<HTMLDivElement>(null);
+  const savedThresholds = routing.config.branchId === (branchId ?? 'all') ? routing.config.thresholds : DEFAULT_ROUTING_THRESHOLDS;
+  const thresholds = thresholdDraft?.branchId === (branchId ?? 'all') ? thresholdDraft.values : savedThresholds;
+  const thresholdFor = (name: PathThreshold['metric']) => savedThresholds.find((t) => t.metric === name)!;
+  const changeThreshold = (name: PathThreshold['metric'], family: 'fiber' | 'fiveg', level: 'warn' | 'fail', value: string) => {
+    setThresholdError('');
+    setThresholdDraft({ branchId: branchId ?? 'all', values: thresholds.map((t) => t.metric === name
+      ? { ...t, [family]: { ...t[family], [level]: value === '' ? NaN : Number(value) } } : t) });
+  };
+  const saveThresholds = async () => {
+    const validation = validateRoutingThresholds(thresholds);
+    if (validation) { setThresholdError(validation); return; }
+    try {
+      await routing.save({ thresholds });
+      setThresholdDraft(null);
+      push({ kind: 'success', title: 'SLA thresholds saved', detail: 'Dashboard health and chart thresholds updated for this branch.' });
+    } catch (cause) { setThresholdError(cause instanceof Error ? cause.message : String(cause)); }
+  };
+  const refreshTelemetry = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refreshIpsecMetrics();
+      push({ kind: 'success', title: 'Telemetry refreshed', detail: 'Retrieved the latest server snapshot. Gateway probes continue on their existing schedule.' });
+    } catch (cause) {
+      push({ kind: 'error', title: 'Refresh failed', detail: cause instanceof Error ? cause.message : String(cause) });
+    } finally { setRefreshing(false); }
+  };
 
   // Scope the live list to the current branch's MQTT source — Plano sees
   // `rdk/...` gateways, McKinney sees `prpl/...` gateways. Branches without
@@ -812,11 +850,11 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
         subtitle="Real-time SLA-driven failover between Fiber and 5G — sub-second decisions per flow"
         right={
           <div className="toolbar">
-            <button>
+            <button onClick={() => void refreshTelemetry()} disabled={refreshing}>
               <RefreshCcw size={14} />
-              Re-probe
+              {refreshing ? 'Refreshing…' : 'Refresh telemetry'}
             </button>
-            <button className="primary">
+            <button className="primary" onClick={() => { thresholdPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); thresholdPanelRef.current?.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true }); }}>
               <Settings2 size={14} />
               Tune SLA
             </button>
@@ -847,8 +885,8 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           unit="ms"
           fiberVal={fiberLat}
           fivegVal={cellLat}
-          fiberOk={fiberLat > 0 && fiberLat < 80}
-          fivegOk={cellLat > 0 && cellLat < 80}
+          fiberOk={fiberLat > 0 && fiberLat < thresholdFor('latency').fiber.warn}
+          fivegOk={cellLat > 0 && cellLat < thresholdFor('latency').fiveg.warn}
           series={slaSeries.map((h) => h.fiber_latency)}
         />
         <SlaCard
@@ -856,8 +894,8 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           unit="ms"
           fiberVal={fiberJit}
           fivegVal={cellJit}
-          fiberOk={fiberJit < 30}
-          fivegOk={cellJit < 30}
+          fiberOk={fiberJit < thresholdFor('jitter').fiber.warn}
+          fivegOk={cellJit < thresholdFor('jitter').fiveg.warn}
           series={slaSeries.map((h) => h.fiber_jitter)}
           digits={1}
         />
@@ -866,8 +904,8 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           unit="%"
           fiberVal={fiberLoss}
           fivegVal={cellLoss}
-          fiberOk={fiberLoss < 1}
-          fivegOk={cellLoss < 1}
+          fiberOk={fiberLoss < thresholdFor('loss').fiber.warn}
+          fivegOk={cellLoss < thresholdFor('loss').fiveg.warn}
           series={slaSeries.map((h) => h.fiber_loss)}
           digits={2}
         />
@@ -876,8 +914,8 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
           unit=""
           fiberVal={fiberMos}
           fivegVal={cellMos}
-          fiberOk={fiberMos > 3.6}
-          fivegOk={cellMos > 3.6}
+          fiberOk={fiberMos > thresholdFor('mos').fiber.warn}
+          fivegOk={cellMos > thresholdFor('mos').fiveg.warn}
           series={slaSeries.map((h) => h.fiber_mos)}
           digits={1}
         />
@@ -1002,27 +1040,29 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                     iconType="plainline"
                   />
                   <ReferenceLine
-                    y={metricCfg[metric].ref}
+                    y={thresholdFor(metric).fiber.warn}
                     stroke={c.warn}
                     strokeDasharray="4 4"
                     label={{
-                      value: "warn",
+                      value: "Fiber warn",
                       fill: c.warn,
                       fontSize: 10,
                       position: "right",
                     }}
                   />
                   <ReferenceLine
-                    y={metricCfg[metric].ref2}
+                    y={thresholdFor(metric).fiber.fail}
                     stroke={c.err}
                     strokeDasharray="4 4"
                     label={{
-                      value: "fail",
+                      value: "Fiber fail",
                       fill: c.err,
                       fontSize: 10,
                       position: "right",
                     }}
                   />
+                  <ReferenceLine y={thresholdFor(metric).fiveg.warn} stroke={c.accent2} strokeDasharray="2 5" label={{ value: '5G warn', fill: c.accent2, fontSize: 10, position: 'left' }} />
+                  <ReferenceLine y={thresholdFor(metric).fiveg.fail} stroke={c.err} strokeDasharray="2 5" label={{ value: '5G fail', fill: c.err, fontSize: 10, position: 'left' }} />
                   <Line
                     type="monotone"
                     dataKey={`fiber_${metric}`}
@@ -1051,15 +1091,17 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
 
         {/* Thresholds editor — full-width now that the Active probes card has
             been folded into the per-tunnel rows above (Interval + Success). */}
-        <div className="col-12">
+        <div className="col-12" ref={thresholdPanelRef}>
           <Card
             title={
               <span>
                 <Gauge size={13} /> SLA thresholds
               </span>
             }
-            sub="Separate Fiber & 5G bounds — used by the path selector to decide warn / fail"
+            sub="Separate Fiber & 5G bounds for dashboard health and charts · gateway probe configuration is managed on the device"
+            right={<div className="toolbar"><button disabled={routing.loading || routing.saving} onClick={() => { setThresholdDraft({ branchId: branchId ?? 'all', values: structuredClone(DEFAULT_ROUTING_THRESHOLDS) }); setThresholdError(''); }}>Reset defaults</button><button className="primary" disabled={routing.loading || routing.saving || !thresholdDraft || thresholdDraft.branchId !== (branchId ?? 'all')} onClick={() => void saveThresholds()}>{routing.saving ? 'Saving…' : 'Save thresholds'}</button></div>}
           >
+            {(thresholdError || routing.error) && <p role="alert" style={{ color: 'var(--err)' }}>{thresholdError || routing.error} {routing.error && <button disabled={routing.loading || routing.saving} onClick={() => void routing.refresh()}>Retry loading</button>}</p>}
             {/* Compact metric blocks — laid out across the row so the inputs
                 stay small instead of stretching the full card width. */}
             <div
@@ -1069,7 +1111,7 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                 gap: "14px 24px",
               }}
             >
-              {pathThresholds.map((t) => (
+              {thresholds.map((t) => (
                 <div key={t.metric}>
                   <div
                     style={{
@@ -1140,7 +1182,14 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                         {name}
                       </span>
                       <input
-                        defaultValue={`${vals.warn}${t.unit}`}
+                        type="number"
+                        step={t.metric === 'mos' || t.metric === 'loss' ? '0.1' : '1'}
+                        min={0}
+                        max={t.metric === 'mos' ? 5 : t.metric === 'loss' ? 100 : 60000}
+                        disabled={routing.loading || routing.saving}
+                        aria-label={`${name} ${t.metric} warn threshold ${t.unit}`}
+                        value={Number.isFinite(vals.warn) ? vals.warn : ''}
+                        onChange={(event) => changeThreshold(t.metric, name === 'Fiber' ? 'fiber' : 'fiveg', 'warn', event.target.value)}
                         className="mono"
                         style={{
                           padding: "6px 8px",
@@ -1149,7 +1198,14 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
                         }}
                       />
                       <input
-                        defaultValue={`${vals.fail}${t.unit}`}
+                        type="number"
+                        step={t.metric === 'mos' || t.metric === 'loss' ? '0.1' : '1'}
+                        min={0}
+                        max={t.metric === 'mos' ? 5 : t.metric === 'loss' ? 100 : 60000}
+                        disabled={routing.loading || routing.saving}
+                        aria-label={`${name} ${t.metric} fail threshold ${t.unit}`}
+                        value={Number.isFinite(vals.fail) ? vals.fail : ''}
+                        onChange={(event) => changeThreshold(t.metric, name === 'Fiber' ? 'fiber' : 'fiveg', 'fail', event.target.value)}
                         className="mono"
                         style={{
                           padding: "6px 8px",
@@ -1165,9 +1221,9 @@ export function DynamicPathSelectionPage({ branchId }: { branchId?: string }) {
             <div
               style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}
             >
-              Path is marked degraded at{" "}
+              Dashboard health is marked degraded at{" "}
               <strong style={{ color: "var(--warn)" }}>warn</strong> and
-              ineligible at{" "}
+              failing at{" "}
               <strong style={{ color: "var(--err)" }}>fail</strong>.
             </div>
           </Card>
@@ -1904,7 +1960,7 @@ function RssiCard({ clients }: { clients: IpsecWifiClient[] }) {
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
-          if ((e.key === "Enter" || e.key === " ") && count > 0) setOpen(true);
+          if ((e.key === "Enter" || e.key === " ") && count > 0) { e.preventDefault(); setOpen(true); }
         }}
         style={{ cursor: count > 0 ? "pointer" : "default" }}
         title={count > 0 ? "View all connected devices" : undefined}
@@ -2475,6 +2531,7 @@ async function postGatewayPathMode(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode, source }),
+    signal: AbortSignal.timeout(20_000),
   });
   // 202 = published but no ack yet (component may be offline). Treat as a soft
   // success so the UI keeps the optimistic flip but flags it as unconfirmed.
@@ -2497,6 +2554,7 @@ function GatewayBlock({
   c,
   deviceTopic,
   wanState,
+  sample,
 }: {
   g: IpsecGatewayState;
   c: ThemeColors;
@@ -2511,6 +2569,7 @@ function GatewayBlock({
   // steered onto separate tunnels) as a roadmap capability. Default = live.
   const [viewMode, setViewMode] = useState<ViewMode>("live");
   const [pathBusy, setPathBusy] = useState(false);
+  const [pathPending, setPathPending] = useState(false);
   // The specific tunnel ifname the Force button pinned — so the diagram
   // and rows highlight that exact tunnel, not just the first reachable one in
   // the underlay. Null in auto mode (the device decides).
@@ -2547,13 +2606,22 @@ function GatewayBlock({
     tunnelIfname?: string,
   ) => {
     if (pathBusy) return;
+    if (sample) {
+      setForceMode(highlight);
+      setForcedTunnel(highlight === 'auto' ? null : (tunnelIfname ?? null));
+      push({ kind: 'info', title: 'Preview path updated', detail: 'Captured sample only. No gateway command was sent.' });
+      return;
+    }
     const previous = forceMode;
     const previousTunnel = forcedTunnel;
+    const previousPending = pathPending;
     setForceMode(highlight);
     setForcedTunnel(highlight === "auto" ? null : (tunnelIfname ?? null));
     setPathBusy(true);
+    setPathPending(false);
     try {
       const { pending } = await postGatewayPathMode(command, source);
+      setPathPending(pending);
       push(
         pending
           ? {
@@ -2571,6 +2639,7 @@ function GatewayBlock({
     } catch (err) {
       setForceMode(previous);
       setForcedTunnel(previousTunnel);
+      setPathPending(previousPending);
       push({
         kind: "error",
         title: "Path-change failed",
@@ -2713,15 +2782,11 @@ function GatewayBlock({
     return Math.round(Math.max(0, 100 - latPen - lossPen - jitPen));
   };
 
-  // Resolve the "effective" active tunnel: in auto mode, the device decides;
-  // in force mode the UI overrides to the exact tunnel the user pinned via the
-  // picker (so the diagram + rows highlight *that* tunnel — e.g. Tunnel 4, not
-  // just the first reachable one in the underlay). Falls back to the first
-  // reachable tunnel in the forced underlay if no specific pin is set.
-  // (UI-only override — device behaviour unchanged.)
+  // Live view follows gateway telemetry, including while commands await an
+  // acknowledgement. Target/preview views can illustrate the requested path.
   const deviceActive = (m.active_tunnel ?? "").trim();
   const effectiveActiveTunnel = (() => {
-    if (forceMode === "auto") return deviceActive;
+    if ((!sample && viewMode === 'live') || forceMode === "auto") return deviceActive;
     if (forcedTunnel) return forcedTunnel;
     const pool = m.tunnels.filter(
       (t) =>
@@ -2865,6 +2930,7 @@ function GatewayBlock({
           }}
         >
           Path override
+          {pathPending && <span className="badge warn" role="status" style={{ marginLeft: 8 }}>Command sent · awaiting gateway acknowledgement</span>}
           {pathBusy && (
             <span
               className="badge"

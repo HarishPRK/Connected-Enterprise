@@ -11,6 +11,8 @@ export function matchesDeviceInventory(
   locationSource?: 'rdk' | 'prpl',
   inventoryTopic?: string,
 ): boolean {
+  // A branch with no configured live feed must never inherit another site's inventory.
+  if (!locationSource && !inventoryTopic) return false;
   if (locationSource && device.locationSource !== locationSource) return false;
   if (inventoryTopic && device.inventoryTopics?.length) {
     return device.inventoryTopics.includes(inventoryTopic);

@@ -29,7 +29,7 @@ export function makeBedrockBearerClient(opts: {
   const { region, apiKey } = opts;
   const base = `https://bedrock-runtime.${region}.amazonaws.com`;
 
-  const create = (async (params: Anthropic.Messages.MessageCreateParams) => {
+  const create = (async (params: Anthropic.Messages.MessageCreateParams, requestOptions?: { signal?: AbortSignal | null }) => {
     const { model, stream, ...rest } = params as Anthropic.Messages.MessageCreateParams & { stream?: boolean };
     void stream; // we don't expose streaming through this client; agent.ts uses non-streaming Messages API
 
@@ -53,6 +53,7 @@ export function makeBedrockBearerClient(opts: {
           Accept: 'application/json',
         },
         body,
+        signal: requestOptions?.signal,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

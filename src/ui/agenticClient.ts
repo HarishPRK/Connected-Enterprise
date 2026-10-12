@@ -128,7 +128,7 @@ function _readGetSse(url: string, handlers: StreamHandlers): () => void {
       if ((err as { name?: string })?.name !== 'AbortError') {
         handlers.onError?.(err instanceof Error ? err.message : String(err));
       }
-      handlers.onDone?.();
+      if (!ctrl.signal.aborted) handlers.onDone?.();
       return;
     }
 
@@ -165,6 +165,7 @@ function _readGetSse(url: string, handlers: StreamHandlers): () => void {
           } catch {
             continue;
           }
+          if (ctrl.signal.aborted) break;
           handlers.onEvent(evt);
           if (evt.type === 'end' || evt.type === 'done' || evt.type === 'error') {
             stopped = true;
@@ -177,7 +178,8 @@ function _readGetSse(url: string, handlers: StreamHandlers): () => void {
         handlers.onError?.(err instanceof Error ? err.message : String(err));
       }
     } finally {
-      handlers.onDone?.();
+      await reader.cancel().catch(() => {});
+      if (!ctrl.signal.aborted) handlers.onDone?.();
     }
   })();
 

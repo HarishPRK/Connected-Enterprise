@@ -11,10 +11,11 @@ import {
   Search, Download, MapPin,
 } from 'lucide-react';
 import { AiInsightCard } from '../components/widgets/AiInsightCard';
+import { downloadCsv } from '../ui/download';
 
 type SortKey = 'name' | 'health' | 'uptime' | 'devices' | 'alerts' | 'throughput';
 
-export function FleetPage() {
+export function FleetPage({ onSelectBranch }: { onSelectBranch: (id: string) => void }) {
   const nav = useNavigate();
   const c = useThemeColors();
   const [query, setQuery] = useState('');
@@ -71,8 +72,8 @@ export function FleetPage() {
         subtitle={`Multi-branch ops view — ${branches.length} sites under management`}
         right={
           <div className="toolbar">
-            <button><Download size={14} />Export</button>
-            <button className="primary"><Building2 size={14} />Add branch</button>
+            <button onClick={() => downloadCsv('branch-fleet.csv', ['Branch', 'Location', 'Gateway', 'Firmware', 'Status', 'Health', 'Uptime percent', 'Devices online', 'Total devices', 'Alerts', 'Throughput Mbps'], filtered.map((b) => [b.name, b.location, b.gatewayModel, b.firmware, b.stats.status, b.stats.healthScore, b.stats.uptimePct, b.stats.devicesOnline, b.stats.totalDevices, b.stats.openAlerts, b.stats.throughputMbps]))}><Download size={14} />Export</button>
+            <button className="primary" onClick={() => nav('/onboarding')}><Building2 size={14} />Add branch</button>
           </div>
         }
       />
@@ -117,6 +118,7 @@ export function FleetPage() {
             <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
             <input
               placeholder="Search name or city"
+              aria-label="Search branches by name or city"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               style={{ paddingLeft: 30, minWidth: 240 }}
@@ -144,7 +146,7 @@ export function FleetPage() {
               const s = b.stats;
               const healthColor = s.status === 'ok' ? c.ok : s.status === 'warn' ? c.warn : c.err;
               return (
-                <tr key={b.id} style={{ cursor: 'pointer' }} onClick={() => nav('/')}>
+                <tr key={b.id} style={{ cursor: 'pointer' }} onClick={() => { onSelectBranch(b.id); nav('/'); }}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ width: 8, height: 8, borderRadius: 4, background: healthColor, boxShadow: `0 0 10px ${healthColor}80` }} />
@@ -179,10 +181,10 @@ export function FleetPage() {
                     <Sparkline values={s.throughputSeries} width={80} height={26} stroke={c.accent} />
                   </td>
                   <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--text-muted)' }}>
+                    <button aria-label={`Open ${b.name}`} onClick={(event) => { event.stopPropagation(); onSelectBranch(b.id); nav('/'); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--text-muted)' }}>
                       <span style={{ fontSize: 11 }}>Open</span>
                       <ArrowUpRight size={13} />
-                    </span>
+                    </button>
                   </td>
                 </tr>
               );

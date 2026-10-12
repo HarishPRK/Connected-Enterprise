@@ -85,7 +85,7 @@ export function CostInsightsPage({ branchId }: { branchId: string }) {
         subtitle={`${branch?.name ?? 'Branch'} · ${scaleLabel} · where you're saving money, and where you're still spending it unnecessarily.`}
         right={
           <div className="toolbar">
-            <button><Download size={14} />Export PDF report</button>
+            <button onClick={() => window.print()} title="Open the print dialog, then choose Save as PDF"><Download size={14} />Export PDF report</button>
           </div>
         }
       />
@@ -424,6 +424,7 @@ function ValueCategoryMini({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={selected}
       className={className}
       style={{
         borderTopColor: accent,

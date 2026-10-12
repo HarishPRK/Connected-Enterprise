@@ -1,8 +1,10 @@
 import { Bell, Sparkles, User2, Search, Sun, Moon } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { branches } from "../data/mock";
 import { useTheme } from "../ui/Theme";
 import { useLiveData } from "../ui/LiveData";
+import { useState } from "react";
+import { Modal } from "../ui/Modal";
 
 interface TopBarProps {
   branchId: string;
@@ -24,6 +26,9 @@ export function TopBar({
   const { theme, toggle } = useTheme();
   const { isLive } = useLiveData();
   const ThemeIcon = theme === "dark" ? Sun : Moon;
+  const [accountOpen, setAccountOpen] = useState(false);
+  const navigate = useNavigate();
+  const branch = branches.find((item) => item.id === branchId);
 
   return (
     <header className="topbar">
@@ -79,6 +84,7 @@ export function TopBar({
         <button
           className="icon-btn"
           title="Notifications"
+          aria-label={`Notifications, ${alertCount} unread`}
           onClick={onOpenNotifications}
         >
           <Bell size={16} />
@@ -102,16 +108,22 @@ export function TopBar({
             </span>
           )}
         </button>
-        <Link to="/ask-ai">
-          <button className="primary">
+          <button className="primary" onClick={() => navigate('/ask-ai')}>
             <Sparkles size={14} />
             Ask AI
           </button>
-        </Link>
-        <button className="icon-btn" title="Account">
+        <button className="icon-btn" title="Account" aria-label="Account information" onClick={() => setAccountOpen(true)}>
           <User2 size={16} />
         </button>
       </div>
+      <Modal open={accountOpen} onClose={() => setAccountOpen(false)} title="Operator workspace"
+        footer={<Link to="/settings" onClick={() => setAccountOpen(false)}>Open settings</Link>}>
+        <p>Connected Enterprise operations console</p>
+        <div className="kv"><span className="k">Current branch</span><span className="v">{branch?.name ?? branchId}</span></div>
+        <div className="kv"><span className="k">Location</span><span className="v">{branch?.location ?? 'Unspecified'}</span></div>
+        <div className="kv"><span className="k">Theme</span><span className="v">{theme}</span></div>
+        <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>Identity and access are managed by the application deployment. No signed-in user identity is supplied by this console.</p>
+      </Modal>
     </header>
   );
 }

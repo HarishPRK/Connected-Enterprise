@@ -13,6 +13,8 @@ import {
 } from '../data/mock';
 import { ipsecStateForTopic } from '../ui/ipsecTopicState';
 import { useIpsecMetrics } from '../ui/useIpsecMetrics';
+import { aiPreferences } from '../ui/preferences';
+import { useToast } from '../ui/Toast';
 
 interface Msg {
   who: 'me' | 'ai';
@@ -187,6 +189,8 @@ function AskAiBranchPage({ branchId }: { branchId: string }) {
   const [copied, setCopied] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const stopRef = useRef<(() => void) | null>(null);
+  const requestGeneration = useRef(0);
+  const { push } = useToast();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   // Only auto-follow the stream while the user is already near the bottom —
@@ -271,6 +275,8 @@ function AskAiBranchPage({ branchId }: { branchId: string }) {
   function send(text: string) {
     const t = text.trim();
     if (!t || running) return;
+    stopRef.current?.();
+    const generation = ++requestGeneration.current;
 
     const userMsg: Msg = { who: 'me', text: t };
     const aiMsg:   Msg = { who: 'ai', text: '', streaming: true };
@@ -292,9 +298,10 @@ function AskAiBranchPage({ branchId }: { branchId: string }) {
     let aiText = '';
 
     stopRef.current = runAskSSE(
-      { branchId, messages: historyForApi },
+      { branchId, messages: historyForApi, preferences: aiPreferences() },
       {
         onEvent: ({ event, data }) => {
+          if (generation !== requestGeneration.current) return;
           if (event === 'chunk') {
             aiText += String(data.text ?? '');
             setMsgs((m) => {
@@ -335,6 +342,7 @@ function AskAiBranchPage({ branchId }: { branchId: string }) {
           }
         },
         onError: (msg) => {
+          if (generation !== requestGeneration.current) return;
           setMsgs((m) => {
             const copy = [...m];
             copy[copy.length - 1] = { who: 'ai', text: msg, streaming: false, error: true };
@@ -342,12 +350,17 @@ function AskAiBranchPage({ branchId }: { branchId: string }) {
           });
           setRunning(false);
         },
-        onDone: () => setRunning(false),
+        onDone: () => {
+          if (generation !== requestGeneration.current) return;
+          setRunning(false);
+          setMsgs((m) => m.map((message, index) => index === m.length - 1 && message.streaming ? { ...message, text: message.text || 'The response stream ended before an answer was received. Please try again.', streaming: false } : message));
+        },
       },
     );
   }
 
   function stop() {
+    requestGeneration.current++;
     stopRef.current?.();
     stopRef.current = null;
     setRunning(false);
@@ -366,9 +379,10 @@ function AskAiBranchPage({ branchId }: { branchId: string }) {
   }
 
   function newChat() {
-    if (running) stop();
+    stop();
     setMsgs([]);
     setInput('');
+    setCopied(null);
     nearBottomRef.current = true;
     requestAnimationFrame(() => taRef.current?.focus());
   }
@@ -378,7 +392,9 @@ function AskAiBranchPage({ branchId }: { branchId: string }) {
       await navigator.clipboard.writeText(text);
       setCopied(i);
       setTimeout(() => setCopied((c) => (c === i ? null : c)), 1600);
-    } catch { /* clipboard unavailable — ignore */ }
+    } catch {
+      push({ kind: 'error', title: 'Could not copy response', detail: 'Clipboard access is unavailable. Select the response text and copy it manually.' });
+    }
   }
 
   function onComposerKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {

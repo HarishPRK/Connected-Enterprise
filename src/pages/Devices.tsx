@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { StatusBadge } from '../components/StatusBadge';
@@ -22,6 +23,7 @@ import { Modal } from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { DevicesDashboard } from '../components/widgets/DevicesDashboard';
 import { AiInsightCard } from '../components/widgets/AiInsightCard';
+import { downloadCsv } from '../ui/download';
 
 const iconFor: Record<Device['kind'], React.ComponentType<{ size?: number }>> = {
   laptop: Laptop, desktop: Monitor, printer: Printer, payment: CreditCard,
@@ -33,14 +35,21 @@ const iconFor: Record<Device['kind'], React.ComponentType<{ size?: number }>> = 
 const fmtFor = formatConnectedFor;
 
 export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchId: string }) {
-  const [q, setQ] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get('q') ?? '';
+  const setQ = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set('q', value); else next.delete('q');
+    setSearchParams(next, { replace: true });
+  };
   const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'warn' | 'err'>('all');
   const [selected, setSelected] = useState<Device | null>(null);
-  const [unlockTarget, setUnlockTarget] = useState<Device | null>(null);
-  const [reason, setReason] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
   const { push } = useToast();
-  const { devices: liveDevices, loaded, source, connected } = useDevices();
+  const { devices: liveDevices, loaded, source, connected, refresh, inventoryTopicsSeen } = useDevices();
   const [refreshing, setRefreshing] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  const [busyDevices, setBusyDevices] = useState<Set<string>>(new Set());
 
   // Poke the gateway to re-fetch the Matter device list. The fresh inventory
   // arrives over the live SSE stream, so we just confirm the request and keep
@@ -48,12 +57,12 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      await refreshMatterDevices();
-      push({ kind: 'info', title: 'Refresh requested', detail: 'The gateway is re-fetching the Matter device list.' });
+      await refresh();
+      push({ kind: 'success', title: 'Inventory refreshed', detail: 'The latest server inventory has been loaded.' });
     } catch (err) {
       push({ kind: 'error', title: 'Refresh failed', detail: err instanceof Error ? err.message : String(err) });
     } finally {
-      setTimeout(() => setRefreshing(false), 1500);
+      setRefreshing(false);
     }
   }
 
@@ -64,6 +73,16 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
   // from the live view; the branch-specific mock below backs the empty state.
   const branchSource = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
   const branchTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
+  const canDiscoverMatter = branchId === 'b-mck-03' && source === 'gateway' && connected;
+  async function handleDiscover() {
+    setDiscovering(true);
+    try {
+      await refreshMatterDevices();
+      push({ kind: 'info', title: 'Discovery requested', detail: 'The configured Matter gateway will republish its commissioned device list.' });
+    } catch (error) {
+      push({ kind: 'error', title: 'Discovery failed', detail: error instanceof Error ? error.message : String(error) });
+    } finally { setDiscovering(false); }
+  }
   const liveForBranch = useMemo(
     () => liveDevices.filter((device) =>
       matchesDeviceInventory(device, branchSource, branchTopic),
@@ -76,11 +95,12 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
   // live inventory for this location lands or if the server is unreachable, so
   // the page never renders empty — and never borrows another branch's devices.
   const allDevices: DeviceView[] = useMemo(
-    () => (loaded && liveForBranch.length
+    () => (loaded && (liveForBranch.length > 0 || !!branchTopic && inventoryTopicsSeen.includes(branchTopic))
       ? liveForBranch
       : getDevicesForBranch(branchId).map((d) => ({ ...d, autoDomain: d.domain, overridden: false }))),
-    [loaded, liveForBranch, branchId],
+    [loaded, liveForBranch, branchId, branchTopic, inventoryTopicsSeen],
   );
+  const showingLiveInventory = loaded && (liveForBranch.length > 0 || !!branchTopic && inventoryTopicsSeen.includes(branchTopic));
 
   // The drawer is position: fixed at top: 0, so its content sits at the top of
   // the viewport. If the user clicked a row near the bottom of the table, they
@@ -95,14 +115,14 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
     () => allDevices
       .filter((d) => d.domain === domain)
       .filter((d) => statusFilter === 'all' || d.status === statusFilter)
-      .filter((d) => !q || d.name.toLowerCase().includes(q.toLowerCase()) || d.ip.includes(q)),
+      .filter((d) => !q.trim() || `${d.name} ${d.ip} ${d.mac} ${d.kind}`.toLowerCase().includes(q.trim().toLowerCase())),
     [allDevices, domain, q, statusFilter],
   );
 
   const title = domain === 'IT' ? 'IT Devices' : 'OT Devices';
   const subtitle = domain === 'IT'
     ? 'Laptops, desktops, printers, payment machines, conference phones, local servers'
-    : 'Fire & smoke sensors, door locks — remote actions available';
+    : 'Sensors, door locks, Matter and Shelly devices — live relay controls where supported';
 
   const counts = {
     all:  allDevices.filter(d => d.domain === domain).length,
@@ -111,26 +131,16 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
     err:  allDevices.filter(d => d.domain === domain && d.status === 'err').length,
   };
 
-  function handleAction(kind: 'unlock' | 'reboot' | 'disable', d: Device) {
-    if (kind === 'unlock') {
-      setSelected(null);
-      setUnlockTarget(d);
-      return;
-    }
-    push({
-      kind: 'info',
-      title: kind === 'reboot' ? `Reboot queued for ${d.name}` : `${d.name} disabled`,
-      detail: kind === 'reboot' ? 'Device will reconnect within ~60s' : 'Network access revoked',
-    });
-  }
-
   // Move a device between IT and OT. The server persists the override and pushes
   // a fresh snapshot over SSE, so the table re-sorts itself across both pages.
   async function handleReclassify(e: React.MouseEvent, d: DeviceView) {
     e.stopPropagation();
+    if (busyDevices.has(d.id)) return;
+    setBusyDevices((current) => new Set(current).add(d.id));
     const target: 'IT' | 'OT' = d.domain === 'IT' ? 'OT' : 'IT';
     try {
       await classifyDevice(d.mac, target);
+      await refresh();
       push({
         kind: 'success',
         title: `${d.name} moved to ${target}`,
@@ -144,26 +154,12 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
         title: 'Reclassify failed',
         detail: err instanceof Error ? err.message : String(err),
       });
-    }
+    } finally { setBusyDevices((current) => { const next = new Set(current); next.delete(d.id); return next; }); }
   }
 
-  // Optimistic power state per device id — wins over the snapshot until the
-  // live feed reports the same value (then the override is dropped so external
-  // changes show through again).
+  // Show the requested power state only while a command is pending. Once it
+  // settles, the live inventory remains authoritative for external changes.
   const [powerOverrides, setPowerOverrides] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    setPowerOverrides((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      for (const d of allDevices) {
-        if (d.id in next && d.power === next[d.id]) {
-          delete next[d.id];
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [allDevices]);
 
   // Flip a switchable OT device to the opposite of its displayed state.
   // Matter devices go through the gateway's hub (nodeId encoded in the id as
@@ -174,6 +170,8 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
   // real state (or revert if the command fails).
   async function handlePowerToggle(e: React.MouseEvent, d: DeviceView, currentlyOn: boolean) {
     e.stopPropagation();
+    if (busyDevices.has(d.id)) return;
+    setBusyDevices((current) => new Set(current).add(d.id));
     const action: 'On' | 'Off' = currentlyOn ? 'Off' : 'On';
     const desired = !currentlyOn;
     setPowerOverrides((prev) => ({ ...prev, [d.id]: desired }));
@@ -200,18 +198,10 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
         title: `${action} failed for ${d.name}`,
         detail: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      setBusyDevices((current) => { const next = new Set(current); next.delete(d.id); return next; });
+      setPowerOverrides((current) => { const next = { ...current }; delete next[d.id]; return next; });
     }
-  }
-
-  function confirmUnlock() {
-    if (!unlockTarget) return;
-    push({
-      kind: 'success',
-      title: `${unlockTarget.name} unlocked`,
-      detail: `Reason logged: ${reason || 'Emergency unlock'}`,
-    });
-    setUnlockTarget(null);
-    setReason('');
   }
 
   return (
@@ -221,13 +211,13 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
         subtitle={subtitle}
         right={
           <div className="toolbar" style={{ alignItems: 'center' }}>
-            <SourcePill source={source} connected={connected} topic={branchTopic} />
-            <button onClick={handleRefresh} disabled={refreshing} title="Re-fetch the Matter device list from the gateway">
+            <SourcePill source={showingLiveInventory ? source : 'seed'} connected={connected} topic={branchTopic} />
+            <button onClick={handleRefresh} disabled={refreshing} title="Fetch the current inventory from the server">
               <RefreshCw size={14} className={refreshing ? 'spin' : undefined} />
               {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
-            <button><Plus size={14} />Add device</button>
-            <button><Download size={14} />Export</button>
+            <button onClick={() => setAddOpen(true)}><Plus size={14} />Add device</button>
+            <button onClick={() => downloadCsv(`${domain.toLowerCase()}-devices-${branchId}.csv`, ['Name', 'Type', 'Domain', 'IP', 'MAC', 'Connection', 'Status', 'Connected hours', 'Source'], list.map((d) => [d.name, d.kind, d.domain, d.ip, d.mac, d.conn, d.status, d.connectedForHours, showingLiveInventory ? 'gateway' : 'demo']))}><Download size={14} />Export</button>
           </div>
         }
       />
@@ -236,7 +226,8 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
         <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
           <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
           <input
-            placeholder="Search name or IP"
+            placeholder="Search name, IP, MAC or type"
+            aria-label={`Search ${domain} devices`}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             style={{ paddingLeft: 30, minWidth: 260 }}
@@ -249,6 +240,7 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
             style={s === statusFilter
               ? { background: 'var(--grad-accent-soft)', borderColor: 'rgba(var(--accent-rgb) / 0.35)', color: 'var(--text)' }
               : undefined}
+            aria-pressed={s === statusFilter}
           >
             {s === 'all' ? 'All' : s === 'ok' ? 'Healthy' : s === 'warn' ? 'Degraded' : 'Offline'}
             <span style={{ color: 'var(--text-muted)', marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{counts[s]}</span>
@@ -342,15 +334,16 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       {d.kind !== 'matter' && d.kind !== 'shelly' && (
                         <button
-                          title={`Move ${d.name} to ${d.domain === 'IT' ? 'OT' : 'IT'}`}
+                          title={!showingLiveInventory ? 'Reclassification requires this branch’s gateway inventory' : busyDevices.has(d.id) ? 'Reclassification is pending' : `Move ${d.name} to ${d.domain === 'IT' ? 'OT' : 'IT'}`}
                           onClick={(e) => handleReclassify(e, d)}
+                          disabled={!showingLiveInventory || busyDevices.has(d.id)}
                         >
                           <ArrowLeftRight size={12} />
                           {d.domain === 'IT' ? 'To OT' : 'To IT'}
                         </button>
                       )}
                       {d.kind === 'door_lock' && (
-                        <button className="danger" title="Emergency unlock" onClick={() => setUnlockTarget(d)}>
+                        <button className="danger" disabled title="Remote door unlock is unavailable: no lock-control integration is configured">
                           <Lock size={12} />
                           Unlock
                         </button>
@@ -362,6 +355,9 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
                             className={`power-toggle${isOn ? ' on' : ''}`}
                             title={`${d.name} is ${d.power == null && !(d.id in powerOverrides) ? 'in an unknown state' : isOn ? 'on' : 'off'} — click to turn ${isOn ? 'off' : 'on'}`}
                             onClick={(e) => handlePowerToggle(e, d, isOn)}
+                            disabled={!showingLiveInventory || !connected || busyDevices.has(d.id)}
+                            aria-label={`${isOn ? 'Turn off' : 'Turn on'} ${d.name}`}
+                            aria-pressed={isOn}
                           >
                             <Power size={15} />
                           </button>
@@ -384,32 +380,23 @@ export function DevicesPage({ domain, branchId }: { domain: 'IT' | 'OT'; branchI
       <DeviceDrawer
         device={selected ? (allDevices.find((d) => d.id === selected.id) ?? selected) : null}
         onClose={() => setSelected(null)}
-        onAction={handleAction}
       />
 
       <Modal
-        open={unlockTarget != null}
-        onClose={() => { setUnlockTarget(null); setReason(''); }}
-        title={`Emergency unlock — ${unlockTarget?.name ?? ''}`}
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        title={`Add ${domain} device`}
         footer={
           <>
-            <button onClick={() => { setUnlockTarget(null); setReason(''); }}>Cancel</button>
-            <button className="danger" onClick={confirmUnlock}>
-              <Lock size={13} />Confirm unlock
-            </button>
+            <button onClick={() => setAddOpen(false)}>Close</button>
+            <button onClick={handleRefresh} disabled={refreshing}>Refresh inventory</button>
+            {domain === 'OT' && <button className="primary" onClick={handleDiscover} disabled={!canDiscoverMatter || discovering} title={!canDiscoverMatter ? 'Matter discovery requires the connected McKinney gateway' : undefined}>{discovering ? 'Requesting…' : 'Discover Matter devices'}</button>}
           </>
         }
       >
-        <p>This will <strong style={{ color: 'var(--err)' }}>immediately unlock</strong> the door from the cloud. Action will be logged with your operator ID and the reason below.</p>
-        <label style={{ display: 'block', marginTop: 12 }}>
-          <span style={{ display: 'block', fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>Reason</span>
-          <input
-            placeholder="e.g. Fire drill at 16:00"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </label>
+        <p>Connect the device to this branch's gateway network. It will appear automatically when the gateway publishes its next inventory update.</p>
+        {domain === 'OT' && <p>Commission Matter devices through the gateway's Matter hub, then use <strong>Discover Matter devices</strong> to request the current commissioned list. Shelly devices appear when they publish telemetry.</p>}
+        <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>Manual device creation and commissioning are not exposed by the gateway API. This inventory follows devices discovered by the gateway.</p>
       </Modal>
     </>
   );

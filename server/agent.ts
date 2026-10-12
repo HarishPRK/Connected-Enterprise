@@ -1,9 +1,10 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { tools, executeTool } from './tools.js';
+import { askTools, tools, executeTool } from './tools.js';
 import { pickPersona } from './prompts.js';
 import type { AgentClient } from './llm.js';
 import { formatLiveDeviceAnswer, formatLiveWanAnswer } from './askLiveResponse.js';
 import { waitForResponseWindow } from './liveInsights.js';
+import { aiStylePrompt, type AiPreferences } from './aiPreferences.js';
 
 export interface RunOptions {
   incident: {
@@ -17,9 +18,14 @@ export interface RunOptions {
   emit: (event: string, data: Record<string, unknown>) => void;
   /** Test-only override for the direct-response loading window. */
   minimumResponseMs?: number;
+  preferences?: AiPreferences;
+  signal?: AbortSignal;
 }
 
 const MAX_ITER = 8;
+const incidentTools = [...askTools, ...tools.filter(tool => tool.name === 'request_human_approval')];
+const incidentToolNames = new Set(incidentTools.map(tool => tool.name));
+const LIVE_INCIDENT_CONTRACT = `\n\nThis investigation has only live, read-only branch tools and an approval-request tool. Gather current WAN and device evidence using get_live_branch_wan and get_live_branch_devices. No gateway write integration is available here. You may propose remediation for an operator, but never claim it ran, infer a root cause without evidence, or claim an incident is resolved. If telemetry is absent or stale, say so. An approval request is only a proposal for review.`;
 
 async function runDirectIncidentAnalysis(opts: RunOptions, startedAt: number): Promise<void> {
   const { incident, emit } = opts;
@@ -48,6 +54,7 @@ async function runDirectIncidentAnalysis(opts: RunOptions, startedAt: number): P
 export async function runAgent(client: AgentClient | null, model: string, opts: RunOptions): Promise<void> {
   const { incident, emit } = opts;
   const persona = pickPersona(incident.agentName);
+  if (opts.signal?.aborted) return;
   const startedAt = Date.now();
 
   emit('system', { content: `Operational analysis attached · persona "${incident.agentName ?? 'default'}"` });
@@ -57,7 +64,7 @@ export async function runAgent(client: AgentClient | null, model: string, opts: 
     return;
   }
 
-  // Set used to track which write actions have been approved (mock approval flow).
+  // Requests can propose an action, but this analysis has no gateway write tool.
   const approvedActions = new Set<string>();
 
   const messages: Anthropic.Messages.MessageParam[] = [
@@ -79,18 +86,20 @@ export async function runAgent(client: AgentClient | null, model: string, opts: 
   ];
 
   for (let iter = 0; iter < MAX_ITER; iter++) {
+    if (opts.signal?.aborted) return;
     let response: Anthropic.Messages.Message;
     try {
       response = await client.messages.create({
         model,
         max_tokens: 1500,
         system: [
-          { type: 'text', text: persona, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: persona + LIVE_INCIDENT_CONTRACT + aiStylePrompt(opts.preferences), cache_control: { type: 'ephemeral' } },
         ],
-        tools,
+        tools: incidentTools,
         messages,
-      });
+      }, { signal: opts.signal });
     } catch (err) {
+      if (opts.signal?.aborted) return;
       console.warn('[agent] model path failed; using the direct incident analysis:', err instanceof Error ? err.message : err);
       await runDirectIncidentAnalysis(opts, startedAt);
       return;
@@ -116,14 +125,15 @@ export async function runAgent(client: AgentClient | null, model: string, opts: 
       const toolResultsForApi: Anthropic.Messages.ToolResultBlockParam[] = [];
 
       for (const t of toolUseBlocks) {
+        if (opts.signal?.aborted) return;
         emit('tool_call', { id: t.id, tool: t.name, args: t.input });
 
-        const result = await executeTool(
+        const result = incidentToolNames.has(t.name) ? await executeTool(
           t.name,
           (t.input ?? {}) as Record<string, unknown>,
           approvedActions,
           { branchId: incident.branchId },
-        );
+        ) : { error: `Tool ${t.name} is unavailable in this live investigation.` };
 
         const ok = !(typeof result === 'object' && result !== null && 'error' in (result as object));
         emit('tool_result', { id: t.id, tool: t.name, ok, result });

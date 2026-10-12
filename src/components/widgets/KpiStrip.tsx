@@ -283,7 +283,7 @@ export function KpiStrip({
             onClick={k.onClick}
             role={clickable ? 'button' : undefined}
             tabIndex={clickable ? 0 : undefined}
-            onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') k.onClick?.(); } : undefined}
+            onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); k.onClick?.(); } } : undefined}
             style={clickable ? { cursor: 'pointer' } : undefined}
             title={clickable ? 'Click to view connected devices' : undefined}
           >

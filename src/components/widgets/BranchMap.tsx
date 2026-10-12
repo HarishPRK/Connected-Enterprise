@@ -397,6 +397,10 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
                       strokeLinejoin="round"
                       style={{ cursor: isClickable ? 'pointer' : 'default', transition: 'fill 0.18s, stroke 0.18s' }}
                       onClick={() => onStateClick(stateName)}
+                      role={isClickable ? 'button' : undefined}
+                      tabIndex={isClickable ? 0 : undefined}
+                      aria-label={isClickable ? `Explore ${stateName} branches` : undefined}
+                      onKeyDown={isClickable ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onStateClick(stateName); } } : undefined}
                     >
                       <title>
                         {stateName}
@@ -493,6 +497,10 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
                   onMouseEnter={() => setHover(`state:${m.state}`)}
                   onMouseLeave={() => setHover(null)}
                   onClick={() => setZoom({ state: m.state })}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Explore ${m.count} branches in ${m.state}`}
+                  onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setZoom({ state: m.state }); } }}
                 >
                   <circle cx={m.x} cy={m.y} r={36} fill="url(#pin-glow)" />
                   {issueColor && <RadarRipple x={m.x} y={m.y} r={r + 7} color={issueColor} />}
@@ -525,6 +533,10 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
                   onMouseEnter={() => setHover(`metro:${m.metro}`)}
                   onMouseLeave={() => setHover(null)}
                   onClick={() => setZoom({ state: zoom?.state ?? '', metro: m.metro })}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Explore ${m.count} branches in ${m.metro}`}
+                  onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setZoom({ state: zoom?.state ?? '', metro: m.metro }); } }}
                 >
                   <circle cx={m.x} cy={m.y} r={32} fill="url(#pin-glow)" />
                   {issueColor && <RadarRipple x={m.x} y={m.y} r={r + 7} color={issueColor} />}
@@ -565,6 +577,11 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
                 onMouseEnter={() => setHover(b.id)}
                 onMouseLeave={() => setHover(null)}
                 onClick={() => onSelect(b.id)}
+                role="button"
+                tabIndex={0}
+                aria-label={`Select ${b.name}, ${b.location}`}
+                aria-pressed={isSel}
+                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(b.id); } }}
               >
                 <circle cx={m.x} cy={m.y} r={32} fill="url(#pin-glow)" />
                 {rippleColor && <RadarRipple x={m.x} y={m.y} r={r + 5} color={rippleColor} />}
@@ -595,10 +612,4 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
       {mapBody}
     </Card>
   );
-}
-
-/** Subtitle helper for callers that embed the map and want to render their
- *  own header. Mirrors the subtitle logic above. */
-export function getBranchMapSubtitle(_selectedId: string): string {
-  return `${branches.length} sites total`;
 }

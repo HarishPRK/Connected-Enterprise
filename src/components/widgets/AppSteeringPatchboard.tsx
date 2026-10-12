@@ -304,6 +304,8 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const seqRef = useRef(0);
+  const publishingRef = useRef(false);
+  const advisorBusyRef = useRef(false);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<SelectState | null>(null);
   const [pub, setPub] = useState<PubState | null>(null);
@@ -351,8 +353,8 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
     [],
   );
 
-  const aarEligible = source === AAR_BRANCH_SOURCE || source === undefined;
-  const aarLive = aarEligible && aar.receivedAt > 0;
+  const aarEligible = source === AAR_BRANCH_SOURCE;
+  const aarLive = aarEligible && aar.connected && aar.receivedAt > 0;
 
   /* ── Tunnels: AAR → ipsec → sim (sim drifts gently so demos breathe). ── */
   const { tunnels, tunnelSource } = useMemo(() => {
@@ -465,15 +467,18 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
   /* ───────── commit + publish (unchanged pipeline) ───────── */
 
   function commitPatch(client: PatchClient, targetIdx: number) {
+    if (publishingRef.current) { push({ kind: 'info', title: 'A route command is being published', detail: 'Wait for the current command before changing another route.' }); return; }
     if (frozen[client.id]) {
       setShake({ id: client.id, n: (shake?.n ?? 0) + 1 });
       push({ kind: 'warn', title: `${client.name} is frozen`, detail: 'Routing is locked for this application — unfreeze it to re-patch.' });
       return;
     }
     const fromIdx = slotIdxFor(client);
-    if (targetIdx < 0 || targetIdx >= tunnels.length || targetIdx === fromIdx) return;
+    if (fromIdx < 0 || targetIdx < 0 || targetIdx >= tunnels.length || targetIdx === fromIdx) return;
     const from = tunnels[fromIdx];
     const to = tunnels[targetIdx];
+    if (!to.reachable) { push({ kind: 'warn', title: 'Tunnel is unreachable', detail: 'Choose a reachable tunnel before publishing this route.' }); return; }
+    const previousOverride = overrides[client.id];
 
     setOverrides((prev) => ({ ...prev, [client.id]: to.ifname }));
     // A committed move consumes this client's guide + advisor suggestions.
@@ -510,7 +515,13 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
       }],
     },
     `${client.name} · ${client.appLabel} · ${from.ifname} → ${to.ifname}`,
-    `Route published — ${client.appLabel} → ${to.ifname}`);
+    `Route published — ${client.appLabel} → ${to.ifname}`,
+    () => setOverrides((previous) => {
+      const reverted = { ...previous };
+      if (previousOverride) reverted[client.id] = previousOverride;
+      else delete reverted[client.id];
+      return reverted;
+    }));
 
     setLastPatched({ id: client.id, seq, toIdx: targetIdx });
     surgeRef.current = { id: client.id, until: performance.now() / 1000 + 2.4 };
@@ -518,7 +529,7 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
 
   /** Encode + publish an AppRouteCommand on `<source>/approute/control`,
    *  driving the wire-tap console and toasts. Returns the publish seq. */
-  function publishCmd(cmd: AppRouteCommand, label: string, successTitle: string): number {
+  function publishCmd(cmd: AppRouteCommand, label: string, successTitle: string, onFailure?: () => void): number {
     const bytes = encodeAppRouteCommand(cmd);
     const seq = ++seqRef.current;
     const base: Omit<PubState, 'phase'> = {
@@ -529,12 +540,13 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
       topic: `${source ?? 'sim'}/approute/control`,
     };
 
-    if (!source) {
+    if (!source || tunnelSource === 'sim' || clientSource === 'sim') {
       setPub({ ...base, phase: 'nolive' });
-      push({ kind: 'info', title: 'Command encoded (not published)', detail: 'This branch has no live gateway — proto3 payload shown in the wire-tap console.' });
+      push({ kind: 'info', title: 'Preview updated (not published)', detail: 'Live branch clients and tunnels are required to publish. The proto3 payload is shown in the wire-tap console.' });
       return seq;
     }
 
+    publishingRef.current = true;
     setPub({ ...base, phase: 'publishing' });
     void (async () => {
       try {
@@ -547,18 +559,21 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
           setPub({ ...base, phase: 'ok' });
           push({ kind: 'success', title: successTitle, detail: `${bytes.length} B proto3 on ${base.topic} (qos1)` });
         } else if (res.status === 503 && data?.offline) {
+          onFailure?.();
           setPub({ ...base, phase: 'offline', error: data.error });
           push({ kind: 'warn', title: 'Broker offline — command encoded, not delivered', detail: data.error });
         } else {
+          onFailure?.();
           setPub({ ...base, phase: 'error', error: data?.error ?? `HTTP ${res.status}` });
           push({ kind: 'error', title: 'Publish failed', detail: data?.error ?? `HTTP ${res.status}` });
         }
       } catch (err) {
         if (seqRef.current !== seq) return;
+        onFailure?.();
         const msg = err instanceof Error ? err.message : String(err);
         setPub({ ...base, phase: 'error', error: msg });
         push({ kind: 'error', title: 'Publish failed', detail: msg });
-      }
+      } finally { publishingRef.current = false; }
     })();
     return seq;
   }
@@ -566,6 +581,7 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
   /* ───────── freeze + AI advisor ───────── */
 
   function toggleFreeze(id: string) {
+    if (publishingRef.current) { push({ kind: 'info', title: 'A route command is being published', detail: 'Wait for the current command before changing routing locks.' }); return; }
     const client = clients.find((c) => c.id === id);
     const next = !frozen[id];
     setFrozen((f) => ({ ...f, [id]: next }));
@@ -590,12 +606,14 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
       }],
     },
     `${client.name} · ${client.appLabel} · ${next ? 'freeze' : 'unfreeze'} routing`,
-    next ? `Freeze published — ${client.name} routing locked` : `Unfreeze published — ${client.name} routing released`);
+    next ? `Freeze published — ${client.name}` : `Unfreeze published — ${client.name}`,
+    () => setFrozen((current) => ({ ...current, [id]: !next })));
   }
 
   /** One-shot advisor run: snapshot the board (minus frozen clients), let the
    *  server compare tunnels, and render suggestions. */
   async function runAdvisor() {
+    if (advisorBusyRef.current) return;
     const unfrozen = clients.filter((c) => !frozen[c.id]);
     const frozenCount = clients.length - unfrozen.length;
     setGuide(null);
@@ -604,6 +622,7 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
       return;
     }
     setAdvisor((a) => ({ ...a, open: true, loading: true, note: undefined, suggestions: [] }));
+    advisorBusyRef.current = true;
     // Load = sum of app weights per tunnel (frozen clients still occupy their
     // tunnel, so they count toward load even though they can't be moved).
     const counts = new Array(tunnels.length).fill(0) as number[];
@@ -639,7 +658,7 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
       });
     } catch (err) {
       setAdvisor({ open: true, loading: false, mode: 'error', note: err instanceof Error ? err.message : String(err), suggestions: [] });
-    }
+    } finally { advisorBusyRef.current = false; }
   }
 
   function applySuggestion(s: Suggestion) {
@@ -1047,7 +1066,7 @@ export function AppSteeringPatchboard({ branchId, externalAdvisorTrigger = false
           }).join(' ');
           const ripple = lastPatched?.toIdx === idx && pub?.phase === 'ok';
           return (
-            <g key={s.ifname} onClick={() => onTunnelClick(idx)} style={{ cursor: selected ? 'pointer' : 'default' }}>
+            <g key={s.ifname} onClick={() => onTunnelClick(idx)} role="button" tabIndex={selected ? 0 : -1} aria-label={`Route selected application to ${s.ifname}`} aria-disabled={!selected || !s.reachable || pub?.phase === 'publishing'} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onTunnelClick(idx); } }} style={{ cursor: selected ? 'pointer' : 'default' }}>
               <rect x={TUN_X} y={s.y - TUN_H / 2} width={TUN_W} height={TUN_H} rx={14}
                 fill={hot ? `rgba(${hexRgb(s.color)},0.1)` : surface} stroke={s.color}
                 strokeOpacity={s.reachable ? (hot ? 1 : s.active ? 0.9 : 0.5) : 0.25}

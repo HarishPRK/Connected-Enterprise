@@ -25,6 +25,7 @@ import {
 } from 'react';
 import type { ReactNode } from 'react';
 import { useIpsecMetrics } from './useIpsecMetrics';
+import { readPreferences } from './preferences';
 import { BRANCH_TO_IPSEC_SOURCE, BRANCH_TO_FAILOVER_TOPIC, branches } from '../data/mock';
 import type {
   AgentStep,
@@ -171,13 +172,14 @@ function detect(
 }
 
 function makeIncident(id: string, cond: Cond, now: number): Incident {
+  const assignAgent = readPreferences().aiAuto;
   return {
     id,
     title: cond.title,
     branchId: cond.branchId,
     severity: cond.severity,
     status: 'triaging',
-    assignee: 'agent',
+    assignee: assignAgent ? 'agent' : 'Operator review',
     agentName: 'Network Specialist',
     createdISO: new Date(now).toISOString(),
     confidence: 0.82,
@@ -193,7 +195,7 @@ function makeIncident(id: string, cond: Cond, now: number): Incident {
         ts: 1000,
         kind: 'system',
         content:
-          'Raised by the Dynamic Failover monitor. Run the live Claude agent to investigate, or resolve / escalate manually. Auto-resolves when telemetry recovers.',
+          `Raised by the Dynamic Failover monitor. ${assignAgent ? 'Assigned to Network Specialist.' : 'Assigned for operator review by your saved preferences.'} Run live analysis to investigate. Auto-resolves when telemetry recovers.`,
       },
     ],
   };

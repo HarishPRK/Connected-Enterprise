@@ -43,7 +43,18 @@ export default function App() {
   const [branchId, setBranchId] = useState(DEFAULT_BRANCH_ID);
   const [cmdOpen, setCmdOpen]   = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  const activeAlerts = alerts.filter((a) => a.level !== 'ok').length;
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>(() => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem('ce-read-notifications') ?? '[]');
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+    } catch { return []; }
+  });
+  const activeAlerts = alerts.filter((a) => a.level !== 'ok' && !readNotificationIds.includes(a.id)).length;
+  const markNotificationsRead = () => {
+    const ids = alerts.filter((a) => a.level !== 'ok').map((a) => a.id);
+    setReadNotificationIds(ids);
+    try { localStorage.setItem('ce-read-notifications', JSON.stringify(ids)); } catch { /* remains in memory */ }
+  };
   const location = useLocation();
   const isGatewayTwin = location.pathname === '/gateway-twin';
   const isAskAi = location.pathname === '/ask-ai';
@@ -87,12 +98,12 @@ export default function App() {
             <Suspense fallback={<div className="route-loading">Loading…</div>}>
               <Routes location={location}>
                 <Route path="/"               element={<Overview branchId={branchId} onSelectBranch={setBranchId} />} />
-                <Route path="/fleet"          element={<FleetPage />} />
+                <Route path="/fleet"          element={<FleetPage onSelectBranch={setBranchId} />} />
                 <Route path="/connectivity"   element={<Connectivity />} />
                 <Route path="/gateway-twin"   element={<GatewayTwinPage />} />
                 <Route path="/hardware-anomalies" element={<HardwareAnomaliesPage />} />
-                <Route path="/it-devices"     element={<DevicesPage domain="IT" branchId={branchId} />} />
-                <Route path="/ot-devices"     element={<DevicesPage domain="OT" branchId={branchId} />} />
+                <Route path="/it-devices"     element={<DevicesPage key={`IT-${branchId}`} domain="IT" branchId={branchId} />} />
+                <Route path="/ot-devices"     element={<DevicesPage key={`OT-${branchId}`} domain="OT" branchId={branchId} />} />
                 <Route path="/service-offerings" element={<ServiceOfferingsPage />} />
                 <Route path="/cost-insights" element={<CostInsightsPage branchId={branchId} />} />
                 <Route path="/command-center" element={<CommandCenterPage />} />
@@ -100,8 +111,8 @@ export default function App() {
                 <Route path="/security"       element={<SecurityPage />} />
                 <Route path="/video-analytics" element={<VideoAnalyticsPage />} />
                 <Route path="/audit"          element={<AuditLogPage />} />
-                <Route path="/path-selection" element={<DynamicPathSelectionPage branchId={branchId} />} />
-                <Route path="/app-routing"    element={<ApplicationAwareRoutingPage branchId={branchId} />} />
+                <Route path="/path-selection" element={<DynamicPathSelectionPage key={branchId} branchId={branchId} />} />
+                <Route path="/app-routing"    element={<ApplicationAwareRoutingPage key={branchId} branchId={branchId} />} />
                 <Route path="/onboarding"     element={<OnboardingPage branchId={branchId} />} />
                 <Route path="/ask-ai"         element={<AskAiPage branchId={branchId} />} />
                 <Route path="/agentic-ai"     element={<AgenticAIPage />} />
@@ -111,12 +122,12 @@ export default function App() {
           </div>
         </main>
       </div>
-      <CommandPalette
+      {cmdOpen && <CommandPalette
         open={cmdOpen}
         onClose={() => setCmdOpen(false)}
         onBranchChange={setBranchId}
-      />
-      <NotificationsDrawer open={notifOpen} onClose={() => setNotifOpen(false)} />
+      />}
+      <NotificationsDrawer open={notifOpen} onClose={() => setNotifOpen(false)} readIds={readNotificationIds} onMarkRead={markNotificationsRead} />
       </OpsIncidentsProvider>
      </LiveDataProvider>
     </ToastProvider>

@@ -1,6 +1,6 @@
 import { Card } from '../Card';
 import type { Device } from '../../types';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 const labels: Record<Device['kind'], string> = {
   laptop: 'Laptops',
@@ -23,6 +23,7 @@ export function DeviceSummary({
   devices,
   domain,
 }: { devices: Device[]; domain: 'IT' | 'OT' }) {
+  const navigate = useNavigate();
   const filtered = devices.filter((d) => d.domain === domain);
   const groups = new Map<Device['kind'], Device[]>();
   for (const d of filtered) {
@@ -35,7 +36,7 @@ export function DeviceSummary({
     <Card
       title={`${domain} Devices`}
       sub={`${filtered.length} total on this gateway`}
-      right={<Link to={route}><button>View all</button></Link>}
+      right={<button onClick={() => navigate(route)}>View all</button>}
     >
       {[...groups.entries()].map(([kind, arr]) => {
         const ok = arr.filter((d) => d.status === 'ok').length;

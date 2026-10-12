@@ -1,4 +1,5 @@
 import { executeTool } from './tools.js';
+import type { AiPreferences } from './aiPreferences.js';
 
 type LiveResponseIntent = 'wan' | 'devices' | 'both' | 'unsupported';
 type RecordValue = Record<string, unknown>;
@@ -10,6 +11,8 @@ export interface LiveAskOptions {
   /** Test-only override. Production uses an intent-sized minimum so the UI's
    * telemetry-reading state remains visible instead of flashing. */
   minimumResponseMs?: number;
+  preferences?: AiPreferences;
+  signal?: AbortSignal;
 }
 
 export type AskLiveToolRunner = (
@@ -225,6 +228,7 @@ export async function runLiveTelemetryAnswer(
   runTool: AskLiveToolRunner = defaultToolRunner,
 ): Promise<void> {
   const { messages, branchId, emit } = opts;
+  if (opts.signal?.aborted) return;
   const startedAt = Date.now();
   const question = [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
   const intent = classifyLiveIntent(question);
@@ -237,19 +241,33 @@ export async function runLiveTelemetryAnswer(
     sections.push(formatLiveWanAnswer(await runTool('get_live_branch_wan', branchId)));
   }
   if (intent === 'devices' || intent === 'both') {
+    if (opts.signal?.aborted) return;
     emit('tool_using', { tool: 'get_live_branch_devices', args: {} });
     toolsUsed.push('get_live_branch_devices');
     sections.push(formatLiveDeviceAnswer(await runTool('get_live_branch_devices', branchId)));
   }
 
-  const answer = intent === 'unsupported'
+  let answer = intent === 'unsupported'
     ? 'I can answer questions about current WAN links, IPsec tunnels, failover, cellular connectivity, device health, and telemetry freshness. This read-only view does not include broader architecture or historical analysis.'
     : sections.join('\n\n');
+  if (opts.preferences?.tone === 'detailed' && toolsUsed.length) {
+    answer += `\n\n**How to interpret this:** These tools read the current snapshot for branch \`${branchId}\`. Freshness and unavailable fields are reported from that snapshot. This is a read-only review; historical root causes and successful remediation cannot be confirmed from a current sample alone.`;
+  }
 
   const defaultMinimumMs = intent === 'both' ? 1_600 : intent === 'unsupported' ? 800 : 1_100;
   const minimumResponseMs = Math.max(0, opts.minimumResponseMs ?? defaultMinimumMs);
   const remainingMs = minimumResponseMs - (Date.now() - startedAt);
-  if (remainingMs > 0) await new Promise((resolve) => setTimeout(resolve, remainingMs));
+  if (remainingMs > 0) await new Promise<void>((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, remainingMs);
+    opts.signal?.addEventListener('abort', finish, { once: true });
+    if (opts.signal?.aborted) finish();
+  });
+  if (opts.signal?.aborted) return;
 
   emit('chunk', { text: answer });
   emit('done', { mode: 'live-telemetry', tools: toolsUsed });

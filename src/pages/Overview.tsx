@@ -15,10 +15,13 @@ import {
 import type {
   AppTraffic, Device, LanPort, Status, WanLink,
 } from '../types';
-import { useIpsecMetrics } from '../ui/useIpsecMetrics';
+import { useIpsecMetrics, refreshIpsecMetrics } from '../ui/useIpsecMetrics';
 import { useDevices } from '../ui/useDevices';
 import { matchesDeviceInventory } from '../ui/deviceInventory';
-import { useGatewayTelemetry } from '../ui/useGatewayTelemetry';
+import { useGatewayTelemetry, refreshGatewayTelemetry } from '../ui/useGatewayTelemetry';
+import { downloadJson } from '../ui/download';
+import { useToast } from '../ui/Toast';
+import { useDialogFocus } from '../ui/useDialogFocus';
 import {
   Download, RefreshCcw, X, Search, CheckCircle2, AlertCircle, Cpu,
   Laptop, CreditCard, PhoneCall, DoorClosed, Flame, AlertTriangle,
@@ -151,6 +154,8 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     devices: liveDevicesAll,
     loaded: devicesLoaded,
     lastInventoryAt,
+    refresh: refreshDevices,
+    inventoryTopicsSeen,
   } = useDevices();
   const mockDevices = useMemo(() => getDevicesForBranch(branchId), [branchId]);
   // Strictly filter live devices by location source so Plano (rdk) and McKinney
@@ -166,8 +171,25 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     [liveDevicesAll, branchIpsecSource, branchDeviceTopic],
   );
   // Use real devices if loaded, otherwise fall back to mock data
-  const branchDevices = devicesLoaded && liveDevices.length > 0 ? liveDevices : mockDevices;
+  const hasBranchInventory = devicesLoaded && (liveDevices.length > 0 || !!branchDeviceTopic && inventoryTopicsSeen.includes(branchDeviceTopic));
+  const branchDevices = hasBranchInventory ? liveDevices : mockDevices;
   const [devicesModalOpen, setDevicesModalOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const { push } = useToast();
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshDevices(), refreshIpsecMetrics()]);
+      refreshGatewayTelemetry();
+      push({ kind: 'success', title: 'Home refreshed', detail: 'Latest server inventory and gateway snapshots loaded; live telemetry reconnect requested.' });
+    } catch (error) {
+      push({ kind: 'error', title: 'Refresh failed', detail: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   // McKinney keeps failover/path telemetry on prpl while its headline WAN
   // traffic rate and IT/OT inventory come from prplhome.
@@ -359,8 +381,8 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
         }
         right={
           <div className="toolbar">
-            <button><RefreshCcw size={14} />Refresh</button>
-            <button><Download size={14} />Export</button>
+            <button onClick={handleRefresh} disabled={refreshing}><RefreshCcw size={14} className={refreshing ? 'spin' : undefined} />{refreshing ? 'Refreshing…' : 'Refresh'}</button>
+            <button onClick={() => downloadJson(`home-${branch.id}-${new Date().toISOString().slice(0, 10)}.json`, { exportedAt: new Date().toISOString(), branch, devices: branchDevices, failover: failoverState ?? null, wan: wanTrafficState ?? null, lanPorts: liveLanPorts, clientTraffic })}><Download size={14} />Export</button>
           </div>
         }
       />
@@ -509,6 +531,8 @@ function DevicesModal({
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<DeviceFilter>('all');
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(true, dialogRef);
 
   // Counters for the hero stat band
   const itCount     = devices.filter((d) => d.domain === 'IT').length;
@@ -564,6 +588,11 @@ function DevicesModal({
       }}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Devices on ${gatewayName}`}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           background: 'linear-gradient(180deg, rgba(124,140,255,0.04), transparent 200px), var(--panel-1)',
@@ -623,6 +652,7 @@ function DevicesModal({
             <input
               autoFocus
               placeholder="Search by name, IP, MAC, or kind…"
+              aria-label="Search gateway devices"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               style={{ width: '100%', padding: '7px 10px 7px 30px' }}
@@ -633,6 +663,7 @@ function DevicesModal({
               <button
                 key={chip.id}
                 onClick={() => setFilter(chip.id)}
+                aria-pressed={chip.id === filter}
                 style={chip.id === filter
                   ? { background: 'var(--grad-accent-soft)', borderColor: 'rgba(124,140,255,0.35)', color: 'var(--text)' }
                   : undefined}
@@ -664,8 +695,8 @@ function DevicesModal({
 
         {/* ── Footer note ── */}
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.5 }}>
-          Inventory is the branch's configured device list — the IPsec proto
-          carries gateway / WAN / tunnel telemetry only, not per-device status.
+          Inventory reflects this branch's latest gateway discovery when available.
+          The configured demo list is used until its inventory feed publishes.
           Press <kbd style={{ background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 4, padding: '0 4px', fontFamily: 'inherit', fontSize: 10 }}>Esc</kbd> to close.
         </div>
       </div>

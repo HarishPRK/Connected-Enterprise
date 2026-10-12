@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
+import { Modal } from '../ui/Modal';
+import { downloadCsv } from '../ui/download';
+import { formatLocalTime, readPreferences } from '../ui/preferences';
 import { auditEntries, branches } from '../data/mock';
 import type { AuditActionKind, AuditEntry } from '../types';
 import {
@@ -69,8 +72,7 @@ const actionLabel: Record<AuditActionKind, string> = {
 const resultBadge: Record<ResultKind, string> = { success: 'ok', failure: 'err', pending: 'warn' };
 
 function fmtTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
+  return formatLocalTime(iso, {
     month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
 }
@@ -82,22 +84,31 @@ function timeAgo(iso: string) {
   return `${Math.round(h / 24)}d ago`;
 }
 function dateBucket(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  return formatLocalTime(iso, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function dateKey(iso: string) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: readPreferences().timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(iso));
+  return ['year', 'month', 'day'].map((kind) => parts.find((part) => part.type === kind)?.value).join('-');
 }
 
 export function AuditLogPage() {
   const [query, setQuery] = useState('');
   const [actorFilter, setActorFilter] = useState<ActorKind | 'all'>('all');
   const [branchFilter, setBranchFilter] = useState<string>('all');
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
+  const [draftRange, setDraftRange] = useState(dateRange);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const invalidRange = !!draftRange.from && !!draftRange.to && draftRange.from > draftRange.to;
 
   const filtered = useMemo(() => {
     return [...auditEntries]
       .filter((e) => actorFilter === 'all' || e.actor.kind === actorFilter)
       .filter((e) => branchFilter === 'all' || e.branchId === branchFilter)
+      .filter((e) => (!dateRange.from || dateKey(e.ts) >= dateRange.from) && (!dateRange.to || dateKey(e.ts) <= dateRange.to))
       .filter((e) => {
         if (!query) return true;
-        const q = query.toLowerCase();
+        const q = query.trim().toLowerCase();
         return (
           e.actor.name.toLowerCase().includes(q) ||
           actionLabel[e.action].toLowerCase().includes(q) ||
@@ -106,7 +117,7 @@ export function AuditLogPage() {
         );
       })
       .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
-  }, [query, actorFilter, branchFilter]);
+  }, [query, actorFilter, branchFilter, dateRange]);
 
   // Group by day
   const grouped = useMemo(() => {
@@ -131,11 +142,11 @@ export function AuditLogPage() {
     <>
       <PageHeader
         title="Audit Log"
-        subtitle="Immutable record of every action — every door unlock, policy change, firmware push, and agent decision."
+        subtitle="Sample action history · search, filter and export the records shown below."
         right={
           <div className="toolbar">
-            <button><Filter size={14} />Date range</button>
-            <button><Download size={14} />Export CSV</button>
+            <button onClick={() => { setDraftRange(dateRange); setRangeOpen(true); }}><Filter size={14} />{dateRange.from || dateRange.to ? `${dateRange.from || 'Start'} – ${dateRange.to || 'Now'}` : 'Date range'}</button>
+            <button onClick={() => downloadCsv(`audit-log-${new Date().toISOString().slice(0, 10)}.csv`, ['ID', 'Time (UTC)', 'Actor', 'Actor kind', 'Action', 'Branch', 'Target', 'Result', 'Details', 'IP'], filtered.map((e) => [e.id, e.ts, e.actor.name, e.actor.kind, e.action, branches.find((branch) => branch.id === e.branchId)?.name ?? e.branchId, e.target?.label, e.result, e.details, e.ip]))}><Download size={14} />Export CSV</button>
           </div>
         }
       />
@@ -155,19 +166,20 @@ export function AuditLogPage() {
             <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
               <input
+                aria-label="Search audit log"
                 placeholder="Search actor / action / target"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 style={{ paddingLeft: 30, minWidth: 260 }}
               />
             </div>
-            <select value={actorFilter} onChange={(e) => setActorFilter(e.target.value as ActorKind | 'all')}>
+            <select aria-label="Filter by actor" value={actorFilter} onChange={(e) => setActorFilter(e.target.value as ActorKind | 'all')}>
               <option value="all">All actors</option>
               <option value="user">Humans</option>
               <option value="agent">Agents</option>
               <option value="system">System</option>
             </select>
-            <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
+            <select aria-label="Filter by branch" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
               <option value="all">All branches</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
@@ -190,6 +202,12 @@ export function AuditLogPage() {
           <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)' }}>No entries match the current filters.</div>
         )}
       </Card>
+      <Modal open={rangeOpen} onClose={() => setRangeOpen(false)} title="Audit date range" footer={<><button onClick={() => { setDateRange({ from: '', to: '' }); setRangeOpen(false); }}>Clear range</button><button onClick={() => setRangeOpen(false)}>Cancel</button><button className="primary" disabled={invalidRange} onClick={() => { setDateRange(draftRange); setRangeOpen(false); }}>Apply range</button></>}>
+        <p>Dates use {readPreferences().timeZone}. Leave either date empty for an open range.</p>
+        <label className="kv"><span>From</span><input type="date" value={draftRange.from} onChange={(e) => setDraftRange((range) => ({ ...range, from: e.target.value }))} /></label>
+        <label className="kv"><span>Through</span><input type="date" value={draftRange.to} onChange={(e) => setDraftRange((range) => ({ ...range, to: e.target.value }))} /></label>
+        {invalidRange && <p role="alert" style={{ color: 'var(--err)' }}>The start date must be on or before the end date.</p>}
+      </Modal>
     </>
   );
 }

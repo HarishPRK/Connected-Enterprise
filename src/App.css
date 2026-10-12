@@ -603,6 +603,14 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
 }
 
 /* ───── Grid ───── */
+html[data-density="compact"] .main > .page-transition > .grid,
+html[data-density="compact"] .grid { gap: 12px; }
+html[data-density="compact"] .card { padding: 14px; gap: 10px; }
+html[data-density="compact"] th,
+html[data-density="compact"] td { padding: 8px 10px; }
+html[data-density="compact"] .toolbar { gap: 6px; }
+html[data-density="compact"] .sidebar a { padding-top: 7px; padding-bottom: 7px; }
+svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .grid {
   display: grid;
   gap: clamp(14px, 1vw, 22px);

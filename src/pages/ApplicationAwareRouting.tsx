@@ -13,6 +13,8 @@ import type { AppCategory, AppCategoryId, AppPolicy } from '../types';
 import { useTheme, useThemeColors } from '../ui/Theme';
 import { AiInsightCard } from '../components/widgets/AiInsightCard';
 import { AppSteeringPatchboard } from '../components/widgets/AppSteeringPatchboard';
+import { useRoutingConfig } from '../ui/useRoutingConfig';
+import { ROUTING_TEMPLATES, validateRoutingPolicy } from '../../shared/routing-config';
 
 const catIcon: Record<AppCategoryId, React.ComponentType<{ size?: number }>> = {
   voice: Mic, video: Video, business: Briefcase, web: Globe, bulk: Cloud, iot: Cpu,
@@ -27,24 +29,54 @@ const slaBadge = {
 export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<AppPolicy | null>(null);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [formError, setFormError] = useState('');
+  const { config, loading, saving, error, save, refresh } = useRoutingConfig(branchId);
+  const policies = useMemo(() => config.branchId === branchId ? config.policies : [], [branchId, config]);
   const { push } = useToast();
   const chart = useThemeColors();
 
+  const editPolicy = (policy: AppPolicy) => { setEditing({ ...policy }); setFormError(''); };
+  const updateField = <K extends keyof AppPolicy>(key: K, value: AppPolicy[K]) => {
+    setEditing((previous) => previous ? { ...previous, [key]: value } : previous);
+    setFormError('');
+  };
+  const persistPolicies = async (next: AppPolicy[], title: string) => {
+    try {
+      await save({ policies: next });
+      push({ kind: 'success', title, detail: 'Saved for this branch on the application server.' });
+      return true;
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      setFormError(detail);
+      push({ kind: 'error', title: 'Routing configuration was not saved', detail });
+      return false;
+    }
+  };
+  const savePolicy = async () => {
+    if (!editing || saving) return;
+    const next = { ...editing, id: editing.id || `policy-${crypto.randomUUID()}`, app: editing.app.trim(), match: editing.match.trim() };
+    const validation = validateRoutingPolicy(next);
+    if (validation) { setFormError(validation); return; }
+    const updated = editing.id ? policies.map((p) => p.id === next.id ? next : p) : [...policies, next];
+    if (await persistPolicies(updated, editing.id ? 'Policy updated' : 'Policy created')) setEditing(null);
+  };
+
   const list = useMemo(
-    () => appPolicies
+    () => policies
       .filter((p) => !query || p.app.toLowerCase().includes(query.toLowerCase()) || p.match.toLowerCase().includes(query.toLowerCase())),
-    [query],
+    [query, policies],
   );
 
   const totals = {
-    apps: appPolicies.length,
-    enabled: appPolicies.filter((p) => p.enabled).length,
-    realtime: appPolicies.filter((p) => p.slaClass === 'realtime').length,
-    flowsPerMin: appPolicies.reduce((s, p) => s + p.hitsPerMin, 0),
-    throughput: appPolicies.reduce((s, p) => s + p.throughputMbps, 0),
+    apps: policies.length,
+    enabled: policies.filter((p) => p.enabled).length,
+    realtime: policies.filter((p) => p.slaClass === 'realtime').length,
+    flowsPerMin: policies.reduce((s, p) => s + p.hitsPerMin, 0),
+    throughput: policies.reduce((s, p) => s + p.throughputMbps, 0),
   };
 
-  const topApps = [...appPolicies]
+  const topApps = [...policies]
     .sort((a, b) => b.throughputMbps - a.throughputMbps)
     .slice(0, 6)
     .map((p) => ({ name: p.app.length > 14 ? p.app.slice(0, 13) + '…' : p.app, mbps: p.throughputMbps, color: appCategories.find(c => c.id === p.category)!.color }));
@@ -56,8 +88,8 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
         subtitle="Identify each application, then steer it to the WAN path that meets its SLA class"
         right={
           <div className="toolbar">
-            <button><Layers size={14} />Templates</button>
-            <button className="primary" onClick={() => setEditing({
+            <button disabled={loading || saving} onClick={() => setTemplatesOpen(true)}><Layers size={14} />Templates</button>
+            <button className="primary" disabled={loading || saving} onClick={() => editPolicy({
               id: '', app: '', category: 'business', preferredPath: 'Auto', backupPath: 'None',
               match: '', hitsPerMin: 0, throughputMbps: 0, slaClass: 'business', enabled: true,
             })}><Plus size={14} />New policy</button>
@@ -65,10 +97,16 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
         }
       />
 
+      <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+        Policies are saved branch configuration for planning and analysis. Use the live patchboard below to publish individual application routes to the gateway. Policy counters await live telemetry.
+      </p>
+      {loading && <p role="status">Loading routing configuration…</p>}
+      {error && <div role="alert" style={{ color: 'var(--err)', marginBottom: 12 }}>{error} <button onClick={() => void refresh()} disabled={saving || loading}>Retry loading</button></div>}
+
       {/* KPI strip */}
       <div className="kpi-strip" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
         <SmallStat label="Apps tracked" value={String(totals.apps)} sub={`${totals.enabled} enabled`} icon={Layers} color="var(--accent)" />
-        <SmallStat label="Real-time apps" value={String(totals.realtime)} sub="forced to Fiber" icon={Mic} color="var(--err)" />
+        <SmallStat label="Real-time apps" value={String(totals.realtime)} sub="configured SLA class" icon={Mic} color="var(--err)" />
         <SmallStat label="Flows / min" value={totals.flowsPerMin.toLocaleString()} sub="across all policies" icon={Shuffle} color="var(--accent-2)" />
         <SmallStat label="Throughput" value={`${totals.throughput} Mbps`} sub="aggregate now" icon={Cloud} color="var(--ok)" />
       </div>
@@ -93,7 +131,11 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
               </div>
               <button
                 className="primary"
-                onClick={() => document.querySelector<HTMLButtonElement>('[data-route-advisor-trigger]')?.click()}
+                onClick={() => {
+                  const trigger = document.querySelector<HTMLButtonElement>('[data-route-advisor-trigger]');
+                  if (trigger) trigger.click();
+                  else push({ kind: 'error', title: 'Advisor is unavailable', detail: 'Wait for the patchboard to finish loading and try again.' });
+                }}
                 style={{ alignSelf: 'flex-start' }}
               >
                 <Sparkles size={14} /> Run AI advisor
@@ -112,7 +154,7 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
               categories: appCategories.map((c) => ({
                 id: c.id, name: c.name, trafficSharePct: c.trafficSharePct,
               })),
-              policies: appPolicies.map((p) => ({
+              policies: policies.map((p) => ({
                 app: p.app,
                 category: p.category,
                 slaClass: p.slaClass,
@@ -131,12 +173,13 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
         <div className="col-12">
           <Card
             title="Routing policies"
-            sub={`${list.length} shown · drag to reorder priority`}
+            sub={`${list.length} saved policies shown · click a policy to edit`}
             right={
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
                 <input
                   placeholder="Search app or match rule"
+                  aria-label="Search routing policies"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   style={{ paddingLeft: 30, minWidth: 240 }}
@@ -163,7 +206,7 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
                   const cat = appCategories.find((c) => c.id === p.category)!;
                   const Icon = catIcon[p.category];
                   return (
-                    <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => setEditing(p)}>
+                    <tr key={p.id} style={{ cursor: 'pointer' }} tabIndex={0} onClick={() => !saving && editPolicy(p)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); if (!saving) editPolicy(p); } }}>
                       <td className="mono" style={{ color: 'var(--text-muted)', width: 22 }}>{i + 1}</td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -188,11 +231,9 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
                           className="icon-btn"
                           style={{ width: 28, height: 28, color: p.enabled ? 'var(--ok)' : 'var(--text-muted)' }}
                           title={p.enabled ? 'Disable' : 'Enable'}
-                          onClick={() => push({
-                            kind: 'info',
-                            title: `${p.app} ${p.enabled ? 'disabled' : 'enabled'}`,
-                            detail: 'Change applied to gateway in <1s',
-                          })}
+                          aria-label={`${p.enabled ? 'Disable' : 'Enable'} ${p.app} policy`}
+                          disabled={loading || saving}
+                          onClick={() => void persistPolicies(policies.map((policy) => policy.id === p.id ? { ...policy, enabled: !policy.enabled } : policy), `${p.app} ${p.enabled ? 'disabled' : 'enabled'}`)}
                         >
                           <Power size={14} />
                         </button>
@@ -210,7 +251,7 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
 
         {/* Top apps + match rule hits */}
         <div className="col-7">
-          <Card title="Top apps by bandwidth" sub="Snapshot · last 60s">
+          <Card title="Top apps by bandwidth" sub="Saved policies · counters await live telemetry">
             <div style={{ height: 240 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topApps} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
@@ -255,39 +296,39 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
 
       <Modal
         open={editing != null}
-        onClose={() => setEditing(null)}
+        onClose={() => { if (!saving) setEditing(null); }}
         title={editing?.id ? `Edit policy — ${editing.app}` : 'New routing policy'}
         width={520}
         footer={
           <>
-            <button onClick={() => setEditing(null)}>Cancel</button>
+            {editing?.id && <button disabled={saving} style={{ marginRight: 'auto', color: 'var(--err)' }} onClick={async () => { if (await persistPolicies(policies.filter((p) => p.id !== editing.id), 'Policy deleted')) setEditing(null); }}>Delete policy</button>}
+            <button disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
             <button
               className="primary"
-              onClick={() => {
-                push({ kind: 'success', title: editing?.id ? 'Policy updated' : 'Policy created', detail: 'Pushed to all gateways in this branch' });
-                setEditing(null);
-              }}
+              disabled={saving || loading}
+              onClick={() => void savePolicy()}
             >
-              Save policy
+              {saving ? 'Saving…' : 'Save policy'}
             </button>
           </>
         }
       >
         {editing && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {formError && <p role="alert" style={{ color: 'var(--err)', margin: 0 }}>{formError}</p>}
             <FormRow label="Application name">
-              <input defaultValue={editing.app} placeholder="e.g. Salesforce" />
+              <input value={editing.app} onChange={(event) => updateField('app', event.target.value)} maxLength={100} disabled={saving} placeholder="e.g. Salesforce" />
             </FormRow>
             <FormRow label="Match rule">
-              <input defaultValue={editing.match} placeholder="e.g. *.salesforce.com or DSCP EF" />
+              <input value={editing.match} onChange={(event) => updateField('match', event.target.value)} maxLength={500} disabled={saving} placeholder="e.g. *.salesforce.com or DSCP EF" />
             </FormRow>
             <FormRow label="Category">
-              <select defaultValue={editing.category}>
+              <select value={editing.category} disabled={saving} onChange={(event) => updateField('category', event.target.value as AppPolicy['category'])}>
                 {appCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </FormRow>
             <FormRow label="SLA class">
-              <select defaultValue={editing.slaClass}>
+              <select value={editing.slaClass} disabled={saving} onChange={(event) => updateField('slaClass', event.target.value as AppPolicy['slaClass'])}>
                 <option value="realtime">Real-time (voice/video)</option>
                 <option value="business">Business critical</option>
                 <option value="best-effort">Best effort</option>
@@ -295,18 +336,24 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
             </FormRow>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <FormRow label="Preferred path">
-                <select defaultValue={editing.preferredPath}>
+                <select value={editing.preferredPath} disabled={saving} onChange={(event) => updateField('preferredPath', event.target.value as AppPolicy['preferredPath'])}>
                   <option>Auto</option><option>Fiber</option><option>5G</option>
                 </select>
               </FormRow>
               <FormRow label="Backup path">
-                <select defaultValue={editing.backupPath}>
+                <select value={editing.backupPath} disabled={saving} onChange={(event) => updateField('backupPath', event.target.value as AppPolicy['backupPath'])}>
                   <option>None</option><option>Fiber</option><option>5G</option>
                 </select>
               </FormRow>
             </div>
           </div>
         )}
+      </Modal>
+      <Modal open={templatesOpen} onClose={() => setTemplatesOpen(false)} title="Routing policy templates" width={560}>
+        <p style={{ color: 'var(--text-dim)' }}>Choose a starting policy, review its match rule and paths, then save it for this branch.</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {ROUTING_TEMPLATES.map((template) => <button key={template.id} style={{ justifyContent: 'space-between' }} onClick={() => { setTemplatesOpen(false); editPolicy({ ...template, id: '' }); }}><span>{template.app}</span><span style={{ color: 'var(--text-muted)' }}>{template.slaClass} · {template.preferredPath}</span></button>)}
+        </div>
       </Modal>
     </>
   );

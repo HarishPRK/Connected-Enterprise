@@ -25,12 +25,15 @@ interface UseOnboardingDataResult {
   upsertController: (controller: ControllerConfiguration) => void;
 }
 
-function isSnapshot(value: unknown): value is OnboardingSnapshot {
+export function isOnboardingSnapshot(value: unknown): value is OnboardingSnapshot {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<OnboardingSnapshot>;
   return Array.isArray(candidate.gateways)
     && Array.isArray(candidate.profiles)
     && Array.isArray(candidate.sites)
+    && Array.isArray(candidate.operations)
+    && Array.isArray(candidate.gatewayModels)
+    && Boolean(candidate.tenant && typeof candidate.tenant.id === 'string' && typeof candidate.tenant.name === 'string')
     && (candidate.controller === undefined || isControllerConfiguration(candidate.controller));
 }
 
@@ -76,6 +79,7 @@ export function useOnboardingData(): UseOnboardingDataResult {
   ));
 
   const applySnapshot = useCallback((next: OnboardingSnapshot) => {
+    if (!isOnboardingSnapshot(next)) throw new Error('The onboarding service returned an incomplete inventory. Retry loading.');
     setSnapshot(next);
     setLoading(false);
     setRefreshing(false);
@@ -168,7 +172,7 @@ export function useOnboardingData(): UseOnboardingDataResult {
     const applyEvent = (raw: string, kind?: string) => {
       try {
         const parsed = JSON.parse(raw) as OnboardingEventEnvelope | OnboardingSnapshot | OnboardingOperation | Gateway | ProfileVersion | ControllerConfiguration;
-        if (kind === 'snapshot' && isSnapshot(parsed)) {
+        if (kind === 'snapshot' && isOnboardingSnapshot(parsed)) {
           applySnapshot(parsed);
           return;
         }
@@ -190,13 +194,13 @@ export function useOnboardingData(): UseOnboardingDataResult {
         }
 
         const envelope = parsed as OnboardingEventEnvelope;
-        if (envelope.snapshot && isSnapshot(envelope.snapshot)) applySnapshot(envelope.snapshot);
+        if (envelope.snapshot && isOnboardingSnapshot(envelope.snapshot)) applySnapshot(envelope.snapshot);
         if (envelope.operation && isOperation(envelope.operation)) upsertOperation(envelope.operation);
         if (envelope.gateway && isGateway(envelope.gateway)) upsertGateway(envelope.gateway);
         if (envelope.profile && isProfile(envelope.profile)) upsertProfile(envelope.profile);
         if (envelope.controller && isControllerConfiguration(envelope.controller)) upsertController(envelope.controller);
 
-        if (isSnapshot(parsed)) applySnapshot(parsed);
+        if (isOnboardingSnapshot(parsed)) applySnapshot(parsed);
         else if (isOperation(parsed)) upsertOperation(parsed);
       } catch {
         // A malformed event must not tear down the stream; the next snapshot

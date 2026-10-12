@@ -8,6 +8,7 @@
  */
 
 export interface AgentRunRequest {
+  preferences?: { model: 'haiku' | 'sonnet' | 'opus'; tone: 'concise' | 'detailed'; timeZone: string };
   incident: {
     id: string;
     title: string;
@@ -38,6 +39,7 @@ export function runAgentSSE(
 export interface AskRequest {
   branchId: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
+  preferences?: { model: 'haiku' | 'sonnet' | 'opus'; tone: 'concise' | 'detailed'; timeZone: string };
 }
 
 export function runAskSSE(req: AskRequest, handlers: AgentRunHandlers): () => void {
@@ -84,6 +86,7 @@ function _streamSSE(
       if ((err as { name?: string })?.name !== 'AbortError') {
         handlers.onError?.(err instanceof Error ? err.message : String(err));
       }
+      if (!ctrl.signal.aborted) handlers.onDone?.();
       return;
     }
 
@@ -94,6 +97,7 @@ function _streamSSE(
         if (j?.error) msg = j.error;
       } catch { /* ignore */ }
       handlers.onError?.(msg);
+      handlers.onDone?.();
       return;
     }
 
@@ -108,22 +112,23 @@ function _streamSSE(
         buf += decoder.decode(value, { stream: true });
 
         // SSE frames are separated by \n\n
-        let idx: number;
-        while ((idx = buf.indexOf('\n\n')) !== -1) {
+        let separator: RegExpMatchArray | null;
+        while ((separator = buf.match(/\r?\n\r?\n/)) !== null) {
+          const idx = separator.index!;
           const frame = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
+          buf = buf.slice(idx + separator[0].length);
 
           let event = 'message';
           const dataParts: string[] = [];
-          for (const line of frame.split('\n')) {
+          for (const line of frame.split(/\r?\n/)) {
             if (line.startsWith(':')) continue;     // comment/heartbeat
-            if (line.startsWith('event: ')) event = line.slice(7).trim();
-            else if (line.startsWith('data: ')) dataParts.push(line.slice(6));
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataParts.push(line.slice(5).trimStart());
           }
           if (dataParts.length === 0) continue;
           let data: Record<string, unknown> = {};
           try { data = JSON.parse(dataParts.join('\n')); } catch { /* ignore */ }
-          handlers.onEvent({ event, data });
+          if (!ctrl.signal.aborted) handlers.onEvent({ event, data });
         }
       }
     } catch (err) {
@@ -131,7 +136,7 @@ function _streamSSE(
         handlers.onError?.(err instanceof Error ? err.message : String(err));
       }
     } finally {
-      handlers.onDone?.();
+      if (!ctrl.signal.aborted) handlers.onDone?.();
     }
   })();
 

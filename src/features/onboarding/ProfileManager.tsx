@@ -7,6 +7,7 @@ import { ProfileParameterEditor } from './ProfileParameterEditor';
 import { ProfileBlueprint } from './ProfileBlueprint';
 import { currentProfiles, newestProfilesFirst } from './profileSelection';
 import type { GatewayModel, ProfileParameterValue, ProfileVersion } from './types';
+import { validateProfileControls } from './profileFormValidation';
 
 interface ProfileManagerProps {
   profiles: ProfileVersion[];
@@ -68,6 +69,7 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [idempotencyKey, setIdempotencyKey] = useState(() => createIdempotencyKey('profile'));
+  const changed = () => { setError(undefined); setIdempotencyKey(createIdempotencyKey('profile')); };
 
   const latestProfiles = useMemo(() => currentProfiles(profiles), [profiles]);
   const historicalCount = profiles.length - latestProfiles.length;
@@ -98,6 +100,8 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
     if (description.trim().length < 10) return 'Describe when operators should use this profile.';
     if (!models.some((model) => model.id === modelId)) return 'Select a supported gateway model.';
     if (changeNote.trim().length < 3) return 'Summarize what this immutable version changes.';
+    const controlError = validateProfileControls(profileSubmissionParameters(parameters));
+    if (controlError) return controlError;
     if (parameters.wanMode === 'STATIC'
       && (!String(parameters.wanStaticIpAddress ?? '').trim() || !String(parameters.wanStaticGateway ?? '').trim())) {
       return 'Enter the static WAN IP address and gateway before publishing.';
@@ -130,6 +134,7 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!canPublish || saving) return;
     const validationError = validate();
     if (validationError) {
       setError(validationError);
@@ -168,7 +173,7 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
       <form className="ce-onb-profile-create" onSubmit={submit} noValidate>
         <div className="ce-onb-section-heading">
           <div>
-            <button type="button" className="ce-onb-text-button" onClick={() => setMode('catalog')}>
+            <button type="button" className="ce-onb-text-button" disabled={saving} onClick={() => setMode('catalog')}>
               <ArrowLeft size={14} aria-hidden="true" />Profile catalog
             </button>
             <h2>{baseId ? 'Edit profile' : 'Create profile'}</h2>
@@ -183,23 +188,23 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
           <legend className="ce-onb-sr-only">Profile version details</legend>
           <label>
             <span>Profile name</span>
-            <input value={name} onChange={(event) => setName(event.target.value)} required maxLength={80} />
+            <input value={name} onChange={(event) => { setName(event.target.value); changed(); }} required maxLength={80} />
           </label>
           <label>
             <span>Compatible gateway model</span>
-            <select value={modelId} onChange={(event) => setModelId(event.target.value)} required disabled={Boolean(baseId)}>
+            <select value={modelId} onChange={(event) => { setModelId(event.target.value); changed(); }} required disabled={Boolean(baseId)}>
               {models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
             </select>
           </label>
           <label className="is-wide">
             <span>Purpose</span>
-            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} required maxLength={240} />
+            <textarea value={description} onChange={(event) => { setDescription(event.target.value); changed(); }} rows={2} required maxLength={240} />
           </label>
           <label className="is-wide">
             <span>Change note</span>
             <input
               value={changeNote}
-              onChange={(event) => setChangeNote(event.target.value)}
+              onChange={(event) => { setChangeNote(event.target.value); changed(); }}
               placeholder="Example: Require management-loss rollback"
               required
               maxLength={160}
@@ -215,13 +220,15 @@ export function ProfileManager({ profiles, models, canPublish, onProfileCreated 
           </div>
         </div>
 
+        <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <ProfileParameterEditor
           values={parameters}
           onChange={(key, value) => {
             setParameters((current) => ({ ...current, [key]: value }));
-            setError(undefined);
+            changed();
           }}
         />
+        </fieldset>
 
         <div className="ce-onb-sticky-actions">
           <span>{baseId ? 'Your changes will be saved as the next version of this profile.' : 'Your first profile will be ready to use after saving.'}</span>

@@ -97,6 +97,13 @@ function applyStatus(s: StatusPayload) {
   emit();
 }
 
+/** Rehydrate every mounted consumer from the server's current read-only snapshot. */
+export async function refreshIpsecMetrics(): Promise<void> {
+  const response = await fetch('/api/ipsec/snapshot', { cache: 'no-store' });
+  if (!response.ok) throw new Error(`Gateway snapshot failed (${response.status})`);
+  applySnapshot(await response.json() as SnapshotPayload);
+}
+
 function markDisconnected() {
   if (!current.connected) return;
   current = { ...current, connected: false };
