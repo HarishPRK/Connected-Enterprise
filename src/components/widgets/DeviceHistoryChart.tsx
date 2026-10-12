@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  CartesianGrid, Line, LineChart, ReferenceLine, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import type { Device } from '../../types';
 import { useThemeColors } from '../../ui/Theme';
@@ -46,8 +46,7 @@ export function DeviceHistoryChart({ devices, metric }: {
     >
       <HistoryRangeControl value={range} onChange={setRange} label={label} />
       <div className="chart-history-plot">
-        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-          <LineChart data={chart.rows.length ? chart.rows : [{ ts: since }, { ts: until }]}
+          <LineChart responsive width="100%" height="100%" data={chart.rows.length ? chart.rows : [{ ts: since }, { ts: until }]}
             margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
             <CartesianGrid stroke={c.chartGrid} strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="ts" type="number" scale="time" domain={[since, until]} allowDataOverflow
@@ -79,7 +78,6 @@ export function DeviceHistoryChart({ devices, metric }: {
                 connectNulls activeDot={{ r: 4 }} isAnimationActive={false} />
             ))}
           </LineChart>
-        </ResponsiveContainer>
       </div>
       <HistoryStatus loading={history.loading} error={history.error} empty={!chart.rows.length}
         observedAt={chart.rows.at(-1)?.ts} />

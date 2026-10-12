@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell,
-  Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Pie, PieChart, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { Card } from '../Card';
 import { DeviceHistoryChart } from './DeviceHistoryChart';
@@ -181,8 +181,7 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
             {connMix.length === 0 ? (
               <EmptyPanel msg="No devices in the current filter." />
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart responsive width="100%" height="100%">
                   <Pie
                     data={connMix}
                     dataKey="value"
@@ -203,7 +202,6 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
                     formatter={(v: unknown, n: unknown) => [`${v} device${v === 1 ? '' : 's'}`, String(n)]}
                   />
                 </PieChart>
-              </ResponsiveContainer>
             )}
             {/* center label */}
             {connMix.length > 0 && (
@@ -235,8 +233,8 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
             {statusByKind.length === 0 ? (
               <EmptyPanel msg="No devices in the current filter." />
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
                 <BarChart
+                  responsive width="100%" height="100%"
                   layout="vertical"
                   data={statusByKind}
                   margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
@@ -262,7 +260,6 @@ export function DevicesDashboard({ devices }: { devices: Device[] }) {
                   <Bar dataKey="Degraded" stackId="s" fill={c.warn} radius={[0, 0, 0, 0]} />
                   <Bar dataKey="Offline"  stackId="s" fill={c.err}  radius={[0, 3, 3, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
             )}
           </div>
           <LegendStrip items={[
@@ -303,8 +300,7 @@ function StatPanel({
           {big}{unit && typeof big === 'number' ? <span style={{ fontSize: '0.55em', color: 'var(--text-muted)', marginLeft: 4 }}>{unit.trim()}</span> : null}
         </span>
         <div className="dev-stat-spark">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={spark} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+            <AreaChart responsive width="100%" height="100%" data={spark} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id={`sp-${label.replace(/\s+/g, '-')}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={sparkColor} stopOpacity={0.55} />
@@ -313,7 +309,6 @@ function StatPanel({
               </defs>
               <Area type="monotone" dataKey="v" stroke={sparkColor} strokeWidth={1.5} fill={`url(#sp-${label.replace(/\s+/g, '-')})`} isAnimationActive={false} />
             </AreaChart>
-          </ResponsiveContainer>
         </div>
       </div>
       <div className="dev-stat-sub">{sub}</div>

@@ -8,7 +8,7 @@ The recurring Chrome `setInterval` and `requestAnimationFrame` violation message
 - Real branch KPIs do not start simulated four/five-second metric timers. Header status and incident triggers have separate subscriptions.
 - Numeric animation updates its visual text node without a React state update on every frame. The accessible value remains current, and hidden/reduced-motion pages stop the animation.
 - Toast notifications retain a stable context; relative-time formatting is cached. Hidden pages suspend avoidable work and update on return.
-- Bandwidth charts use Recharts' native responsive sizing, avoiding the initial negative-size container warning.
+- Bandwidth and device dashboard charts use Recharts' native responsive sizing, avoiding the initial negative-size container warning while retaining their existing plot heights.
 - Late HTTP snapshots cannot replace newer SSE observations, including equal-timestamp ties. Refresh applies before its promise resolves. Home does not display McKinney LAN measurements for another branch.
 
 ## Measurement and validation
