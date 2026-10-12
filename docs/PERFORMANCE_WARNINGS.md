@@ -20,3 +20,16 @@ The map geometry microbenchmark generated 56 polygons (216,377 path characters).
 Production TypeScript/build and 91 UI tests pass. The tests cover shared connection lifecycle, per-topic batching, packet-rate preservation, freshness boundaries, stale/equal-timestamp hydration, manual refresh, visibility handling and simulated subscriber isolation. Changed-code lint introduces no new findings. Existing mixed provider/hook lint findings remain outside this performance change.
 
 Measurement instrumentation lives only in the local `outputs/performance-warnings` references; it is excluded from the committed application and EC2 build. The release retains production environment files and existing runtime state.
+
+## First paint and initial layout
+
+A follow-up production audit reported a 644 ms text LCP, including 545 ms of render delay, and a 134.8 ms task with 41 ms of layout. The existing Google Fonts query already specified `display=swap`; adding it again would not remove the CSS import's request chain.
+
+- Space Grotesk and JetBrains Mono now use the exact, licensed Latin WOFF2 files served from the application. The body/subtitle face is preloaded, both families retain swap, and their original weight declarations and fallbacks are preserved. The files total 53,720 bytes; sources, hashes and licenses are in `public/fonts`.
+- React, JSX runtime and scheduler have explicit chunk ownership. Geography and shared D3 utilities are separate from Recharts. The app entry no longer preloads or evaluates the chart bundle, and the static chunk graph has no execution cycles.
+- Initial Home visits resolve their route component before the first React commit. This avoids a loading-fallback commit and its Suspense retry delay; other entry routes retain lazy loading. The route wrapper no longer hides text for an entrance animation. Card entry motion retains translation without scaling the dimensions responsive charts measure.
+- The bandwidth card, history state and range controls remain present with the existing 260/240 px plot reservation. Its Recharts plot loads on first viewport intersection and then stays mounted. This keeps below-fold chart DOM measurements out of the initial Home render while preserving chart interaction after scrolling.
+
+The full stylesheet remains an early stylesheet link so the app receives correct theme, grid and responsive styles before painting. This change removes the font import chain and chart/startup rendering work instead of introducing a second, manually maintained critical-CSS override. Production references and their startup measurements are retained under `outputs/startup-performance`; instrumentation is excluded from the released application.
+
+Three runs of each production reference used the same browser viewport and read-only production API proxy. Median LCP decreased from 452 ms to 196 ms; rounded CLS stayed at 0.00. Median FCP changed from 108 ms (the loading shell) to 196 ms (the resolved Home page). Observed maximum startup tasks were 69 ms before and 70 ms after, so this sample does not establish a reduction in the worst long task. It confirms that chart code is absent before scrolling and that the loading-fallback render delay is removed. These local measurements are not directly comparable to the supplied public-host audit or a cold-cache Lighthouse run.

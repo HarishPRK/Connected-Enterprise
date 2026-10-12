@@ -30,21 +30,12 @@
 @keyframes vt-fade-out { to   { opacity: 0; } }
 @keyframes vt-fade-in  { from { opacity: 0; } }
 
-/* ───── Route enter animation — GPU-only (transform + opacity) ─────
- * Slight scale + slide so the page feels like it lifts into place rather
- * than just fading. Uses easeOutExpo so the last frames decelerate nicely. */
-@keyframes page-enter {
-  from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.985); }
-  to   { opacity: 1; transform: translate3d(0, 0, 0)    scale(1); }
-}
+/* The route itself paints immediately: animating its ancestor delays the
+ * text LCP even when opacity stays at 1. Cards retain their entry motion,
+ * without scaling the geometry that responsive charts measure. */
 @keyframes child-enter {
-  from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.98); filter: blur(2px); }
-  to   { opacity: 1; transform: translate3d(0, 0, 0)    scale(1);    filter: blur(0); }
-}
-.page-transition {
-  animation: page-enter 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
-  will-change: opacity, transform;
-  transform: translateZ(0);
+  from { opacity: 0; transform: translate3d(0, 14px, 0); filter: blur(2px); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); filter: blur(0); }
 }
 /* Stagger every grid widget + KPI tile. Each child is a GPU layer so the
    compositor can play them in parallel. */

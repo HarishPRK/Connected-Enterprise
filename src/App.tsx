@@ -39,7 +39,12 @@ const HardwareAnomaliesPage      = lazy(() => import('./pages/HardwareAnomalies'
 // Falls back to the first configured branch if the id ever drifts.
 const DEFAULT_BRANCH_ID = branches.find((b) => b.id === 'b-mck-03')?.id ?? branches[0].id;
 
-export default function App() {
+interface AppProps {
+  initialOverview?: typeof import('./pages/Overview').Overview;
+}
+
+export default function App({ initialOverview }: AppProps = {}) {
+  const OverviewPage = initialOverview ?? Overview;
   const [branchId, setBranchId] = useState(DEFAULT_BRANCH_ID);
   const [cmdOpen, setCmdOpen]   = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -97,7 +102,7 @@ export default function App() {
           >
             <Suspense fallback={<div className="route-loading">Loading…</div>}>
               <Routes location={location}>
-                <Route path="/"               element={<Overview branchId={branchId} onSelectBranch={setBranchId} />} />
+                <Route path="/"               element={<OverviewPage branchId={branchId} onSelectBranch={setBranchId} />} />
                 <Route path="/fleet"          element={<FleetPage onSelectBranch={setBranchId} />} />
                 <Route path="/connectivity"   element={<Connectivity />} />
                 <Route path="/gateway-twin"   element={<GatewayTwinPage />} />

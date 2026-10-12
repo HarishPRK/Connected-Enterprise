@@ -28,17 +28,39 @@ function loopbackOnlyOnboarding(): Plugin {
 export default defineConfig({
   plugins: [loopbackOnlyOnboarding(), react()],
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        // Peel the heavy, rarely-changing libraries into their own long-cached
-        // chunks so (a) they parse/download in parallel with app code, (b) they
-        // survive app deploys in the browser cache, and (c) pages that don't use
-        // charts never pay for recharts + d3. Route pages are split separately
-        // via React.lazy in App.tsx.
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return;
-          if (id.includes('recharts') || id.includes('d3-') || id.includes('victory') || id.includes('topojson')) return 'charts';
-          if (id.includes('react-router') || id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) return 'react-vendor';
+        // Explicit ownership prevents a chart group from recursively capturing
+        // React/JSX and making every route load the chart runtime at startup.
+        // Geography stays independent of Recharts; their small shared D3
+        // utilities have their own chunk. Unmatched modules keep automatic
+        // splitting, including the existing React.lazy route boundaries.
+        codeSplitting: {
+          includeDependenciesRecursively: false,
+          groups: [
+            {
+              // React Router also has dynamic imports. Its Vite helper must
+              // not live in the app entry and create a vendor → entry cycle.
+              name: 'module-preload', priority: 110,
+              test: /\0vite\/preload-helper\.js$/,
+            },
+            {
+              name: 'react-vendor', priority: 100,
+              test: /node_modules[\\/](?:react(?:-dom|-router(?:-dom)?)?|scheduler|use-sync-external-store)[\\/]/,
+            },
+            {
+              name: 'd3-shared', priority: 40,
+              test: /node_modules[\\/](?:d3-array|internmap)[\\/]/,
+            },
+            {
+              name: 'geography', priority: 30,
+              test: /node_modules[\\/](?:d3-geo|topojson(?:-client|-server)?)[\\/]/,
+            },
+            {
+              name: 'charts', priority: 20,
+              test: /node_modules[\\/](?:recharts|victory[^\\/]*|d3-[^\\/]+)[\\/]/,
+            },
+          ],
         },
       },
     },
