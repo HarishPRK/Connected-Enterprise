@@ -26,6 +26,7 @@ export interface OnboardingUser {
 
 export interface TemporaryPublicOnboardingAccess {
   mode: 'temporary-public-aws';
+  simulatorAvailable?: boolean;
   user: OnboardingUser & { tenantId: string; tenantRole: 'tenant_admin' };
   expiresAt: string;
 }
@@ -86,6 +87,7 @@ function parseAccessMode(value: unknown): OnboardingAccessMode {
     mode: 'temporary-public-aws',
     user: { subject: user.subject, tenantId: user.tenantId, tenantRole: 'tenant_admin' },
     expiresAt: new Date(payload.expiresAt).toISOString(),
+    ...(payload.simulatorAvailable === true ? { simulatorAvailable: true } : {}),
   };
 }
 
@@ -184,6 +186,11 @@ export function onboardingApiUrl(path: string): string {
 
 export function onboardingRequestCredentials(): RequestCredentials {
   return temporaryPublicAccess ? 'omit' : 'same-origin';
+}
+
+export function onboardingGatewaySimulatorAvailable(): boolean {
+  return Boolean(temporaryPublicAccess?.simulatorAvailable && !publicAccessFailure
+    && Date.parse(temporaryPublicAccess.expiresAt) > Date.now());
 }
 
 export function onboardingSseEnabled(): boolean {

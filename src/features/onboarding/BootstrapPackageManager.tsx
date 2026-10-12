@@ -9,6 +9,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { createIdempotencyKey, generateBootstrapPackage, startOnboardingOperation, verifyFactorySerial } from './api';
+import { onboardingGatewaySimulatorAvailable } from './auth';
 import {
   completeBootstrapRegistration,
   currentBootstrapOperation,
@@ -290,6 +291,7 @@ export function BootstrapPackageManager({
                 required
               />
               <small>Use the same ID on the device. If you already downloaded a package for this ID, use that ZIP.</small>
+              {onboardingGatewaySimulatorAvailable() && <small>For a simulated gateway, start the ID with <strong>MOCK-</strong>. After Verify &amp; activate, use Connect simulated gateway with your downloaded ZIP.</small>}
             </label>
 
             <label>

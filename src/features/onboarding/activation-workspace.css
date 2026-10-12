@@ -1,5 +1,20 @@
 /* Activation workspace: a gateway selector, an inspectable lifecycle, and
    configuration previews. State colors describe reported evidence only. */
+.ce-onb-activation-workspace .ce-onb-simulator {
+  margin-block: 20px 24px;
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--ce-onb-surface);
+  display: grid;
+  gap: 12px;
+}
+.ce-onb-activation-workspace .ce-onb-simulator h3,
+.ce-onb-activation-workspace .ce-onb-simulator p[role="status"] { display: flex; align-items: center; gap: 8px; margin: 0; }
+.ce-onb-activation-workspace .ce-onb-simulator p { max-width: 75ch; margin: 0; color: var(--text-dim); }
+.ce-onb-activation-workspace .ce-onb-simulator small { color: var(--text-dim); max-width: 75ch; }
+.ce-onb-activation-workspace .ce-onb-simulator input { max-width: 100%; min-width: 0; }
+.ce-onb-activation-workspace .ce-onb-simulator button { justify-self: start; }
 .ce-onb-page.ce-onb-activation-workspace {
   --ce-onb-surface: #fff;
   --ce-onb-raised: #f1f6fa;

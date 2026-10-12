@@ -1,5 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { createOnboardingAwsBridge, OnboardingAwsBridgeError } from './onboardingAwsBridge.js';
+import { createOnboardingSimulator } from './onboardingSimulator.js';
+import type { OnboardingOperation } from '../src/features/onboarding/types.js';
 
 const PUBLIC_ACTOR = 'anonymous-ec2-onboarding-dev';
 const MAX_ACCESS_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -64,6 +66,8 @@ export function createPublicOnboardingRouter(options: RouterOptions = {}): expre
     console.error('[onboarding] temporary AWS access configuration is invalid; access is disabled.');
   }
   const enabled = () => Boolean(config && bridge && config.expiresAt > now());
+  const simulatorEnabled = (options.env ?? process.env).ONBOARDING_AWS_SIMULATOR_ENABLED === 'true' && config?.fixedTenantId === 'ce-test';
+  const simulator = simulatorEnabled ? createOnboardingSimulator() : undefined;
   const noStore = (_req: Request, res: Response, next: NextFunction) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -81,6 +85,7 @@ export function createPublicOnboardingRouter(options: RouterOptions = {}): expre
       mode: 'temporary-public-aws',
       user: { subject: principal.subject, tenantId: principal.tenantId, tenantRole: principal.role },
       expiresAt: new Date(config!.expiresAt).toISOString(),
+      ...(simulatorEnabled ? { simulatorAvailable: true } : {}),
     });
   });
 
@@ -113,6 +118,23 @@ export function createPublicOnboardingRouter(options: RouterOptions = {}): expre
     }
     inFlight += 1;
     try {
+      const simulation = /^\/simulator\/([A-Za-z0-9_-]{1,128})$/.exec(req.path);
+      if (simulation) {
+        if (!simulator) { res.status(404).json({ error: { message: 'The gateway simulator is unavailable.' } }); return; }
+        const operationId = simulation[1];
+        if (req.method === 'GET') { res.json({ job: simulator.status(operationId) ?? null }); return; }
+        const upstream = await bridge!.forward({ method: 'GET', path: `/operations/${operationId}` });
+        if (upstream.statusCode !== 200) { res.status(upstream.statusCode).set(upstream.headers).send(upstream.body); return; }
+        const payload = JSON.parse(upstream.body.toString('utf8'));
+        const operation = (payload.operation ?? payload) as OnboardingOperation;
+        if (operation.id !== operationId) throw new Error('Unexpected operation response');
+        try {
+          res.status(202).json({ job: await simulator.start(operation, config!.fixedTenantId, req.body?.archiveBase64) });
+        } catch {
+          res.status(400).json({ error: { message: 'Cannot start this simulator. Use an activating MOCK- gateway and its original bootstrap ZIP. A gateway already used by the simulator needs a new MOCK- ID for a fresh run.' } });
+        }
+        return;
+      }
       const result = await bridge!.forward({ method: req.method, path: req.path, body: req.body, idempotencyKey: req.header('idempotency-key') });
       res.status(result.statusCode).set(result.headers).send(result.body);
     } catch (error) {

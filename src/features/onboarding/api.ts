@@ -235,3 +235,22 @@ export async function generateBootstrapPackage(
   }
   return { archive, certificateId };
 }
+
+export interface GatewaySimulatorJob {
+  operationId: string;
+  state: 'running' | 'completed' | 'failed';
+  phase: string;
+  startedAt: string;
+}
+
+export function fetchGatewaySimulator(operationId: string, signal?: AbortSignal): Promise<{ job: GatewaySimulatorJob | null }> {
+  return getJson(`/api/onboarding/simulator/${encodeURIComponent(operationId)}`, signal);
+}
+
+export async function startGatewaySimulator(operationId: string, file: File): Promise<{ job: GatewaySimulatorJob }> {
+  if (!file.size || file.size > 64 * 1024) throw new Error('Choose the original bootstrap ZIP (up to 64 KiB).');
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let raw = '';
+  for (const byte of bytes) raw += String.fromCharCode(byte);
+  return postJson(`/api/onboarding/simulator/${encodeURIComponent(operationId)}`, { archiveBase64: btoa(raw) }, createIdempotencyKey('simulator'));
+}

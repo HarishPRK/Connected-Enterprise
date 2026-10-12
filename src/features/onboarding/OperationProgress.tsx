@@ -13,6 +13,8 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { fetchOnboardingOperation } from './api';
+import { onboardingGatewaySimulatorAvailable } from './auth';
+import { GatewaySimulator } from './GatewaySimulator';
 import { isAuthenticatedPullConfirmedOperation } from './gatewayProfileDeploymentEligibility';
 import type { OnboardingOperation, OnboardingState, Site } from './types';
 import { isOperationHealthy, isOperationTerminal } from './types';
@@ -229,6 +231,9 @@ export function OperationProgress({
           {onContinueOnboarding && <button type="button" onClick={onContinueOnboarding}>Continue onboarding</button>}
         </div>
       )}
+
+      {onboardingGatewaySimulatorAvailable() && operation.type === 'ONBOARD' && /^MOCK-/.test(operation.serialNumber)
+        && !registrationReset && <GatewaySimulator key={operation.id} operation={operation} />}
 
       <div className="ce-onb-operation-layout">
         <div className="ce-onb-progress-rail" aria-live="polite">
