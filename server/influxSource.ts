@@ -1,6 +1,6 @@
 import { CONNTRACK_MEASUREMENTS, type ConntrackMeasurement, type EagleTelemetry } from '../shared/eagleTelemetry.js';
 
-const DEFAULT_INFLUX_URL = 'http://76.187.201.239:8086';
+const DEFAULT_INFLUX_URL = 'http://76.187.202.198:8086';
 const DEFAULT_INFLUX_ORG = 'Capgemini';
 const DEFAULT_INFLUX_BUCKET = 'BGW620';
 const ANOMALY_DEVICE_SERIAL = 'R95VA4GP000041';

@@ -52,7 +52,7 @@ test('queries the fixed Influx endpoint and normalizes annotated CSV', async () 
   assert.equal(calls.length, 1);
   const call = calls[0];
   const url = new URL(String(call.input));
-  assert.equal(url.origin, 'http://76.187.201.239:8086');
+  assert.equal(url.origin, 'http://76.187.202.198:8086');
   assert.equal(url.pathname, '/api/v2/query');
   assert.equal(url.searchParams.get('org'), 'Capgemini');
   assert.equal(call.init?.method, 'POST');
