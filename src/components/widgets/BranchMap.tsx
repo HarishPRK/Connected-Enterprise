@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { memo, useEffect, useId, useMemo, useState } from 'react';
 import { geoPath, geoAlbersUsa, geoMercator, geoCentroid, type GeoProjection } from 'd3-geo';
 import { feature } from 'topojson-client';
 import type { Feature, FeatureCollection, Geometry } from 'geojson';
@@ -31,6 +31,20 @@ const cityCoords: Record<string, { lon: number; lat: number; state: string; metr
 };
 
 interface StateProps { name: string }
+
+let stateFeatures: Promise<Feature<Geometry, StateProps>[]> | undefined;
+function loadStateFeatures() {
+  // The detailed atlas is shared across map mounts. Parsing and converting it
+  // again when returning Home otherwise competes with the live dashboard.
+  stateFeatures ??= fetch(TOPO_URL)
+    .then((response) => {
+      if (!response.ok) throw new Error(`Map atlas request failed (${response.status})`);
+      return response.json() as Promise<Topology>;
+    })
+    .then((topology) => (feature(topology, topology.objects.states as GeometryCollection<StateProps>) as FeatureCollection<Geometry, StateProps>).features)
+    .catch((error) => { stateFeatures = undefined; throw error; });
+  return stateFeatures;
+}
 
 interface StateClusterMarker {
   type: 'state-cluster';
@@ -93,7 +107,7 @@ function issueColorFor(list: Branch[], colors: { warn: string; err: string }): s
   return worst === 'err' ? colors.err : worst === 'warn' ? colors.warn : null;
 }
 
-export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapProps) {
+export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapProps) {
   const [states, setStates] = useState<Feature<Geometry, StateProps>[] | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [zoom, setZoom] = useState<ZoomLevel | null>(null);
@@ -103,16 +117,8 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
 
   useEffect(() => {
     let cancelled = false;
-    fetch(TOPO_URL)
-      .then((r) => r.json())
-      .then((topo: Topology) => {
-        if (cancelled) return;
-        const collection = feature(
-          topo,
-          topo.objects.states as GeometryCollection<StateProps>,
-        ) as FeatureCollection<Geometry, StateProps>;
-        setStates(collection.features);
-      })
+    loadStateFeatures()
+      .then((features) => { if (!cancelled) setStates(features); })
       .catch(() => { /* leave null */ });
     return () => { cancelled = true; };
   }, []);
@@ -181,6 +187,10 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
   }, [zoom, states]);
 
   const pathGen = useMemo(() => geoPath(projection), [projection]);
+  const statePaths = useMemo(() => states
+    ?.filter((state) => !zoom || state.properties.name === zoom.state)
+    .map((state) => ({ name: state.properties.name, path: pathGen(state) }))
+    .filter((state): state is { name: string; path: string } => Boolean(state.path)) ?? [], [states, pathGen, zoom]);
 
   // ── Build markers based on current view ──
   const markers = useMemo<Marker[]>(() => {
@@ -367,13 +377,7 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
 
           {states ? (
             <g>
-              {states
-                // At state-zoom or metro-zoom, only render the focused state's polygon.
-                .filter((s) => !zoom || s.properties.name === zoom.state)
-                .map((s, i) => {
-                  const d = pathGen(s);
-                  if (!d) return null;
-                  const stateName = s.properties.name;
+              {statePaths.map(({ name: stateName, path: d }) => {
                   const has = statesWithBranches.has(stateName);
                   const isZoomedState = zoom?.state === stateName;
                   const isClickable = !zoom && has && (branchesByState.get(stateName)?.length ?? 0) > 1;
@@ -389,7 +393,7 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
 
                   return (
                     <path
-                      key={i}
+                      key={stateName}
                       d={d}
                       fill={fill}
                       stroke={stroke}
@@ -612,4 +616,4 @@ export function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapP
       {mapBody}
     </Card>
   );
-}
+});

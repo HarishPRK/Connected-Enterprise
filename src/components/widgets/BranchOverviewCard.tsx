@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Card } from '../Card';
 import { BranchMap } from './BranchMap';
 import { DeviceTopology } from './DeviceTopology';
@@ -24,7 +25,7 @@ interface Props {
   liveGatewayOnline?: boolean;
 }
 
-export function BranchOverviewCard({
+export const BranchOverviewCard = memo(function BranchOverviewCard({
   branchId, branch, devices, onSelectBranch, liveGatewayOnline,
 }: Props) {
   // A branch with a live feed must not claim "Live" while its stream is down —
@@ -51,4 +52,4 @@ export function BranchOverviewCard({
       </div>
     </Card>
   );
-}
+});

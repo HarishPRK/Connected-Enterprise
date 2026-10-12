@@ -209,7 +209,6 @@ export function OpsIncidentsProvider({ children }: { children: ReactNode }) {
     [configuredTopics, ipsec.list],
   );
   const listRef = useRef<IpsecGatewayState[]>(monitoredList);
-  listRef.current = monitoredList;
 
   const lastSeenRef = useRef<Record<string, number>>({}); // gateway → client ts of last fresh payload
   const lastRcvRef = useRef<Record<string, number>>({}); // gateway → last receivedAt value
@@ -222,6 +221,7 @@ export function OpsIncidentsProvider({ children }: { children: ReactNode }) {
   // Stamp the client-side time whenever a gateway's payload advances — this is
   // what staleness is measured against (immune to server/client clock skew).
   useEffect(() => {
+    listRef.current = monitoredList;
     const now = Date.now();
     for (const g of monitoredList) {
       const gname = g.metrics.gateway.name || 'gateway';
@@ -234,9 +234,12 @@ export function OpsIncidentsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const tick = () => {
+      if (document.hidden) return;
       const now = Date.now();
       const conds = detect(listRef.current, lastSeenRef.current, now);
       const active = new Map(conds.map((c) => [c.key, c]));
+      const opened: Incident[] = [];
+      const recovered = new Set<string>();
 
       // Open: debounce so a one-sample blip doesn't spawn an incident.
       for (const [key, cond] of active) {
@@ -246,7 +249,7 @@ export function OpsIncidentsProvider({ children }: { children: ReactNode }) {
         if (upRef.current[key] >= OPEN_AFTER) {
           const id = `INC-LIVE-${String(seqRef.current++).padStart(3, '0')}`;
           openRef.current[key] = id;
-          setIncidents((prev) => [makeIncident(id, cond, now), ...prev]);
+          opened.unshift(makeIncident(id, cond, now));
         }
       }
       // Reset the open-debounce for conditions that aren't currently active.
@@ -262,41 +265,49 @@ export function OpsIncidentsProvider({ children }: { children: ReactNode }) {
           delete openRef.current[key];
           delete upRef.current[key];
           delete downRef.current[key];
-          setIncidents((prev) =>
-            prev.map((i) =>
-              i.id === id && i.status !== 'resolved' && i.status !== 'escalated'
-                ? {
-                    ...i,
-                    status: 'resolved',
-                    resolvedISO: new Date().toISOString(),
-                    steps: [
-                      ...i.steps,
-                      {
-                        id: `auto-resolve-${id}`,
-                        ts: 0,
-                        kind: 'resolution',
-                        content:
-                          'Condition cleared — telemetry recovered within SLA. Incident auto-resolved.',
-                      },
-                    ],
-                  }
-                : i,
-            ),
-          );
+          recovered.add(id);
         }
       }
+      // One state update for all transitions. Unchanged/previously escalated
+      // incidents retain the same array, so consumers do not render on a tick.
+      if (opened.length || recovered.size) setIncidents((prev) => {
+        let changed = opened.length > 0;
+        const next = prev.map((incident): Incident => {
+          if (!recovered.has(incident.id) || incident.status === 'resolved' || incident.status === 'escalated') return incident;
+          changed = true;
+          return {
+            ...incident, status: 'resolved', resolvedISO: new Date(now).toISOString(),
+            steps: [...incident.steps, {
+              id: `auto-resolve-${incident.id}`, ts: 0, kind: 'resolution',
+              content: 'Condition cleared — telemetry recovered within SLA. Incident auto-resolved.',
+            }],
+          };
+        });
+        return changed ? [...opened, ...next] : prev;
+      });
     };
-    tick();
-    const id = window.setInterval(tick, TICK_MS);
-    return () => window.clearInterval(id);
+    let timer: number | undefined;
+    const schedule = () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      timer = undefined;
+      if (document.hidden) return;
+      tick();
+      timer = window.setInterval(tick, TICK_MS);
+    };
+    schedule();
+    document.addEventListener('visibilitychange', schedule);
+    return () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', schedule);
+    };
   }, []);
 
   const patchIncident = useCallback((id: string, patch: Partial<Incident>) => {
-    setIncidents((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+    setIncidents((prev) => prev.some((incident) => incident.id === id) ? prev.map((i) => (i.id === id ? { ...i, ...patch } : i)) : prev);
   }, []);
   const appendStep = useCallback((id: string, step: AgentStep) => {
     setIncidents((prev) =>
-      prev.map((i) => (i.id === id ? { ...i, steps: [...i.steps, step] } : i)),
+      prev.some((incident) => incident.id === id) ? prev.map((i) => (i.id === id ? { ...i, steps: [...i.steps, step] } : i)) : prev,
     );
   }, []);
 

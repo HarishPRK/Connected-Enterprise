@@ -1,5 +1,5 @@
-import { useId, useState } from 'react';
-import { Area, AreaChart, CartesianGrid, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts';
+import { memo, useId, useMemo, useState } from 'react';
+import { Area, AreaChart, CartesianGrid, ReferenceArea, ReferenceLine, Tooltip, XAxis, YAxis, Legend } from 'recharts';
 import { Card } from '../Card';
 import { useThemeColors } from '../../ui/Theme';
 import { DEFAULT_HISTORY_RANGE, historyRangeMs, historyTick, type HistoryRange } from '../../ui/historyRange';
@@ -31,7 +31,7 @@ function isValidPoint(point: BandwidthPoint) {
     && Number.isFinite(point.fiveg);
 }
 
-export function BandwidthChart({
+export const BandwidthChart = memo(function BandwidthChart({
   dataState = 'unavailable',
   source,
   statusMessage,
@@ -46,40 +46,24 @@ export function BandwidthChart({
   const [mountedAt] = useState(Date.now);
   const until = history.data?.until ?? mountedAt;
   const since = until - historyRangeMs(range);
-  const validData = (history.data?.points ?? []).filter(isValidPoint);
-  const chartData: { t: number; fiber?: number; fiveg?: number }[] = validData.length
-    ? validData : [{ t: since }, { t: until }];
+  const validData = useMemo(() => (history.data?.points ?? []).filter(isValidPoint), [history.data?.points]);
+  const chartData = useMemo<{ t: number; fiber?: number; fiveg?: number }[]>(() => validData.length
+    ? validData : [{ t: since }, { t: until }], [validData, since, until]);
 
   // SLA line: explicit threshold wins; otherwise derive a p95 baseline once
   // there are enough samples for the percentile to mean something.
-  const totals = validData.map((point) => point.fiber + point.fiveg);
+  const totals = useMemo(() => validData.map((point) => point.fiber + point.fiveg), [validData]);
+  const baseline = useMemo(() => totals.length >= 8 ? Number(p95(totals).toPrecision(4)) : undefined, [totals]);
   const threshold = slaMbps
-    ?? (totals.length >= 8 ? Number(p95(totals).toPrecision(4)) : undefined);
+    ?? baseline;
   const thresholdLabel = slaMbps !== undefined ? 'SLA' : 'p95';
   const latestTotal = totals.length > 0 ? totals[totals.length - 1] : 0;
   const breached = threshold !== undefined && latestTotal > threshold;
 
-  return (
-    <Card
-      className="chart-history-card"
-      title="Bandwidth — 5G vs Fiber"
-      sub={(
-        <>
-          <div>Measured Mbps over the selected range</div>
-          <WidgetDataNote
-            dataState={dataState}
-            source={source}
-            statusMessage={statusMessage}
-            observedAt={validData.at(-1)?.t ?? observedAt}
-          />
-        </>
-      )}
-      right={<WidgetDataBadge state={dataState} />}
-    >
-      <HistoryRangeControl value={range} onChange={setRange} label="Bandwidth" />
+  // Keep Recharts outside freshness/loading-only card updates.
+  const plot = useMemo(() => (
         <div className="chart-history-plot">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData}
+            <AreaChart responsive width="100%" height="100%" data={chartData}
               margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
               <defs>
                 <linearGradient id={`fiber-${id}`} x1="0" y1="0" x2="0" y2="1">
@@ -149,10 +133,30 @@ export function BandwidthChart({
               <Area type="linear" dataKey="fiber" name="Fiber" stroke={c.accent} fill={`url(#fiber-${id})`} strokeWidth={2} activeDot={{ r: 4 }} dot={validData.length === 1 ? { r: 4 } : false} isAnimationActive={false} />
               <Area type="linear" dataKey="fiveg" name="5G" stroke={c.accent2} fill={`url(#fiveg-${id})`} strokeWidth={2} activeDot={{ r: 4 }} dot={validData.length === 1 ? { r: 4 } : false} isAnimationActive={false} />
             </AreaChart>
-          </ResponsiveContainer>
         </div>
+  ), [chartData, c, id, range, since, until, threshold, thresholdLabel, breached, validData.length]);
+
+  return (
+    <Card
+      className="chart-history-card"
+      title="Bandwidth — 5G vs Fiber"
+      sub={(
+        <>
+          <div>Measured Mbps over the selected range</div>
+          <WidgetDataNote
+            dataState={dataState}
+            source={source}
+            statusMessage={statusMessage}
+            observedAt={validData.at(-1)?.t ?? observedAt}
+          />
+        </>
+      )}
+      right={<WidgetDataBadge state={dataState} />}
+    >
+      <HistoryRangeControl value={range} onChange={setRange} label="Bandwidth" />
+      {plot}
       <HistoryStatus loading={history.loading} error={history.error} empty={!validData.length}
         observedAt={validData.at(-1)?.t} />
     </Card>
   );
-}
+});

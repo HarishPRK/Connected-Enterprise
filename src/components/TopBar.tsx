@@ -2,7 +2,7 @@ import { Bell, Sparkles, User2, Search, Sun, Moon } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { branches } from "../data/mock";
 import { useTheme } from "../ui/Theme";
-import { useLiveData } from "../ui/LiveData";
+import { useLiveStatus } from "../ui/useLiveData";
 import { useState } from "react";
 import { Modal } from "../ui/Modal";
 
@@ -24,7 +24,7 @@ export function TopBar({
   const isMac =
     typeof navigator !== "undefined" && /Mac/i.test(navigator.platform);
   const { theme, toggle } = useTheme();
-  const { isLive } = useLiveData();
+  const isLive = useLiveStatus();
   const ThemeIcon = theme === "dark" ? Sun : Moon;
   const [accountOpen, setAccountOpen] = useState(false);
   const navigate = useNavigate();

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, X, Search } from 'lucide-react';
@@ -21,7 +21,11 @@ export function DomainInventory({ domain, label, devices, route, onClose }: { do
       if (trigger?.isConnected) trigger.focus({ preventScroll: true });
     };
   }, []);
-  const filtered = devices.filter((device) => `${device.name} ${device.ip} ${device.mac}`.toLowerCase().includes(query.toLowerCase().trim()));
+  const searchable = useMemo(() => devices.map((device) => ({ device, search: `${device.name} ${device.ip} ${device.mac}`.toLowerCase() })), [devices]);
+  const filtered = useMemo(() => {
+    const needle = query.toLowerCase().trim();
+    return searchable.filter((item) => item.search.includes(needle)).map((item) => item.device);
+  }, [searchable, query]);
   return createPortal(
     <dialog ref={dialog} className="device-domain-inspector" aria-labelledby={titleId} onCancel={onClose} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="device-domain-inspector-body">

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, ChevronDown, Cpu, Laptop, Network, Pause, Play, Router, MapPin, Clock } from 'lucide-react';
 import type { Branch, Device, Status } from '../../types';
@@ -24,12 +24,16 @@ function nodePositions(count: number) {
   return points;
 }
 
-export function DeviceTopology({ branch, devices, online }: { branch: Branch; devices: Device[]; online: boolean }) {
+export const DeviceTopology = memo(function DeviceTopology({ branch, devices, online }: { branch: Branch; devices: Device[]; online: boolean }) {
   const root = useRef<HTMLElement>(null);
   const [paused, setPaused] = useState(false);
   const [visible, setVisible] = useState(false);
   const [foreground, setForeground] = useState(!document.hidden);
   const titleId = useId();
+  const domainDevices = useMemo(() => ({
+    IT: devices.filter((device) => device.domain === 'IT'),
+    OT: devices.filter((device) => device.domain === 'OT'),
+  }), [devices]);
   useEffect(() => {
     const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { threshold: 0.05 });
     if (root.current) observer.observe(root.current);
@@ -44,7 +48,7 @@ export function DeviceTopology({ branch, devices, online }: { branch: Branch; de
         <button className="fabric-motion" type="button" aria-label={paused ? 'Resume topology animation' : 'Pause topology animation'} aria-pressed={paused} onClick={() => setPaused(!paused)}>{paused ? <Play size={15} /> : <Pause size={15} />}<span>{paused ? 'Resume' : 'Pause'}</span></button>
       </header>
       <div className="fabric-network">
-        <DeviceCluster domain="IT" devices={devices.filter((device) => device.domain === 'IT')} />
+        <DeviceCluster domain="IT" devices={domainDevices.IT} />
         <div className="fabric-gateway" data-online={online}>
           <svg className="fabric-bridge" viewBox="0 0 160 100" aria-hidden="true">
             <path d="M0 50H160 M0 38H45L60 50 M160 62H115L100 50" />
@@ -63,35 +67,35 @@ export function DeviceTopology({ branch, devices, online }: { branch: Branch; de
           </Link>
           <strong>Gateway</strong><span className={online ? 'fabric-gateway-online' : 'fabric-gateway-offline'}><i />{online ? 'Online' : 'Offline'}</span>
         </div>
-        <DeviceCluster domain="OT" devices={devices.filter((device) => device.domain === 'OT')} />
+        <DeviceCluster domain="OT" devices={domainDevices.OT} />
       </div>
       <div className="fabric-caption"><span className="fabric-node-key" />One node = one device<span>Schematic links · inventory health</span></div>
       <footer className="fabric-meta"><span><MapPin size={13} />{branch.location}</span><span><Clock size={13} />{Math.floor(branch.uptimeHours / 24)}d {branch.uptimeHours % 24}h uptime</span><span>FW {branch.firmware}</span></footer>
     </section>
   );
-}
+});
 
-function DeviceCluster({ domain, devices }: { domain: 'IT' | 'OT'; devices: Device[] }) {
+const DeviceCluster = memo(function DeviceCluster({ domain, devices }: { domain: 'IT' | 'OT'; devices: Device[] }) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [hoveredKind, setHoveredKind] = useState<Device['kind'] | null>(null);
   const [hoveredDevice, setHoveredDevice] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const inspectNode = useCallback((deviceId: string) => setSelection({ deviceId }), []);
   const titleId = useId();
   const listId = useId();
   const glowId = useId().replace(/:/g, '');
-  const counts = countStates(devices);
-  const sorted = [...devices].sort((a, b) => priority[a.status] - priority[b.status] || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
-  const rendered = sorted.slice(0, 60);
-  const positions = nodePositions(rendered.length);
-  const groups = Object.entries(kinds).flatMap(([kind, info]) => {
+  const counts = useMemo(() => countStates(devices), [devices]);
+  const rendered = useMemo(() => [...devices].sort((a, b) => priority[a.status] - priority[b.status] || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id)).slice(0, 60), [devices]);
+  const positions = useMemo(() => nodePositions(rendered.length), [rendered.length]);
+  const groups = useMemo(() => Object.entries(kinds).flatMap(([kind, info]) => {
     const members = devices.filter((device) => device.kind === kind);
     return members.length ? [{ kind: kind as Device['kind'], ...info, members }] : [];
-  }).sort((a, b) => b.members.length - a.members.length || a.label.localeCompare(b.label));
+  }).sort((a, b) => b.members.length - a.members.length || a.label.localeCompare(b.label)), [devices]);
   const activeDevice = devices.find((device) => device.id === hoveredDevice);
   const activeGroup = groups.find((group) => group.kind === hoveredKind);
   const CoreIcon = activeDevice ? kinds[activeDevice.kind].icon : activeGroup ? activeGroup.icon : domain === 'IT' ? Laptop : Cpu;
   const route = domain === 'IT' ? '/it-devices' : '/ot-devices';
-  const selected = selection ? devices.filter((device) => 'kind' in selection ? device.kind === selection.kind : 'status' in selection ? device.status === selection.status : device.id === selection.deviceId) : [];
+  const selected = useMemo(() => selection ? devices.filter((device) => 'kind' in selection ? device.kind === selection.kind : 'status' in selection ? device.status === selection.status : device.id === selection.deviceId) : [], [selection, devices]);
   const selectedLabel = selection ? 'kind' in selection ? kinds[selection.kind].label : 'status' in selection ? states.find((state) => state.id === selection.status)!.label : 'Device details' : '';
   return (
     <section className="fabric-domain" data-domain={domain} aria-labelledby={titleId}>
@@ -106,9 +110,7 @@ function DeviceCluster({ domain, devices }: { domain: 'IT' | 'OT'; devices: Devi
         <g aria-hidden="true" className="fabric-core-content"><CoreIcon x="111" y="96" width="18" height="18" strokeWidth={1.6} /><text className="fabric-core-count" x="120" y="139" textAnchor="middle">{activeDevice ? '1' : activeGroup ? activeGroup.members.length : devices.length}</text></g>
         {rendered.map((device, index) => {
           const dimmed = hoveredDevice ? device.id !== hoveredDevice : hoveredKind ? device.kind !== hoveredKind : false;
-          return <g key={device.id} className="fabric-node" data-status={device.status} data-dimmed={dimmed} data-active={device.id === hoveredDevice} transform={`translate(${positions[index].x} ${positions[index].y})`} role="button" tabIndex={0} aria-label={`Inspect ${device.name || device.mac}, ${states.find((state) => state.id === device.status)!.label}`} onPointerEnter={() => setHoveredDevice(device.id)} onPointerLeave={() => setHoveredDevice(null)} onFocus={() => setHoveredDevice(device.id)} onBlur={() => setHoveredDevice(null)} onClick={() => setSelection({ deviceId: device.id })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelection({ deviceId: device.id }); } }}>
-            <circle className="fabric-node-hit" r="11" /><circle className="fabric-node-halo" r="9" /><rect className="fabric-node-body" x="-5.5" y="-5.5" width="11" height="11" rx="3" /><path className="fabric-node-mark" d={device.status === 'err' ? 'M-2-2L2 2M2-2L-2 2' : device.status === 'warn' ? 'M0-3V0M0 2V3' : device.status === 'off' ? 'M-2 0H2' : 'M-2 0L-.5 1.5L2-1.5'} />
-          </g>;
+          return <DeviceNode key={device.id} id={device.id} label={device.name || device.mac} status={device.status} dimmed={dimmed} active={device.id === hoveredDevice} x={positions[index].x} y={positions[index].y} onHover={setHoveredDevice} onInspect={inspectNode} />;
         })}
       </svg>
       <div className="fabric-readout" data-status={activeDevice?.status}><strong>{activeDevice ? activeDevice.name || activeDevice.mac : activeGroup ? activeGroup.label : `${counts.ok} of ${devices.length} healthy`}</strong><span>{activeDevice ? `${activeDevice.ip || 'No IP'} · ${states.find((state) => state.id === activeDevice.status)!.label}` : activeGroup ? `${activeGroup.members.length} ${activeGroup.members.length === 1 ? 'device' : 'devices'} highlighted` : devices.length > 60 ? `60 of ${devices.length} nodes shown · issues first` : devices.length ? 'Select a node to inspect' : 'Waiting for device discovery'}</span></div>
@@ -118,4 +120,15 @@ function DeviceCluster({ domain, devices }: { domain: 'IT' | 'OT'; devices: Devi
       {selection && <DomainInventory domain={domain} label={selectedLabel} devices={selected} route={route} onClose={() => setSelection(null)} />}
     </section>
   );
-}
+});
+
+// Only the glyph's displayed fields cross this boundary. The full, current
+// inventory continues through DeviceCluster to readouts and the inspector.
+const DeviceNode = memo(function DeviceNode({ id, label, status, dimmed, active, x, y, onHover, onInspect }: {
+  id: string; label: string; status: Status; dimmed: boolean; active: boolean; x: number; y: number;
+  onHover: (id: string | null) => void; onInspect: (id: string) => void;
+}) {
+  return <g className="fabric-node" data-status={status} data-dimmed={dimmed} data-active={active} transform={`translate(${x} ${y})`} role="button" tabIndex={0} aria-label={`Inspect ${label}, ${states.find((state) => state.id === status)!.label}`} onPointerEnter={() => onHover(id)} onPointerLeave={() => onHover(null)} onFocus={() => onHover(id)} onBlur={() => onHover(null)} onClick={() => onInspect(id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onInspect(id); } }}>
+    <circle className="fabric-node-hit" r="11" /><circle className="fabric-node-halo" r="9" /><rect className="fabric-node-body" x="-5.5" y="-5.5" width="11" height="11" rx="3" /><path className="fabric-node-mark" d={status === 'err' ? 'M-2-2L2 2M2-2L-2 2' : status === 'warn' ? 'M0-3V0M0 2V3' : status === 'off' ? 'M-2 0H2' : 'M-2 0L-.5 1.5L2-1.5'} />
+  </g>;
+});

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle2, AlertTriangle, XCircle, Info, Siren, X } from 'lucide-react';
@@ -63,6 +63,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const durationMs = t.durationMs ?? (t.kind === 'critical' ? 10_000 : 4_200);
     setTimeout(() => setItems((items) => items.filter((item) => item.id !== id)), durationMs);
   }, []);
+  const context = useMemo(() => ({ push }), [push]);
 
   const toastStack = (
     <div className="toast-stack" aria-live="polite">
@@ -99,7 +100,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <Ctx.Provider value={{ push }}>
+    <Ctx.Provider value={context}>
       {children}
       {fullscreenHost ? createPortal(toastStack, fullscreenHost) : toastStack}
     </Ctx.Provider>

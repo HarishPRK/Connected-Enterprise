@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import {
   Activity, ArrowDown, ArrowUp, Building2, CheckCircle2, Cpu, ShieldAlert,
   TrendingUp, TrendingDown, WifiOff,
@@ -6,7 +6,7 @@ import {
 import { Sparkline } from './Sparkline';
 import { branches, fleetStats } from '../../data/mock';
 import { useThemeColors } from '../../ui/Theme';
-import { useLiveData } from '../../ui/LiveData';
+import { useSimulatedThroughput } from '../../ui/useLiveData';
 import { AnimatedNumber } from '../../ui/AnimatedNumber';
 import type { WidgetDataState } from './WanWidget';
 import type { WanDirectionalRate } from '../../types';
@@ -52,7 +52,7 @@ function uptimeDaily(pct: number, seed: number, days = 30): number[] {
 }
 
 /** GitHub-style heat strip: 15×2 grid, one cell per day, newest last. */
-function UptimeHeatStrip({ values, width = 88, height = 32 }: {
+const UptimeHeatStrip = memo(function UptimeHeatStrip({ values, width = 88, height = 32 }: {
   values: number[]; width?: number; height?: number;
 }) {
   const cols = 15;
@@ -91,7 +91,8 @@ function UptimeHeatStrip({ values, width = 88, height = 32 }: {
       })}
     </svg>
   );
-}
+});
+const KpiSparkline = memo(Sparkline);
 
 const sineSeries = (n: number, base: number, noise: number, seed = 0) =>
   Array.from({ length: n }, (_, i) => {
@@ -136,19 +137,20 @@ export function KpiStrip({
   };
 }) {
   const c = useThemeColors();
-  const { throughputMbps: liveThroughput } = useLiveData();
 
   // When a branch is selected, every KPI is scoped to that branch (devices,
   // alerts, uptime, throughput). Otherwise fall back to fleet-wide stats.
   const stats = branchId ? fleetStats[branchId] : undefined;
+  const hasLiveWanTraffic = !!liveWanTraffic;
+  const liveThroughput = useSimulatedThroughput(!stats && !hasLiveWanTraffic);
   const seed = branchId ? hashSeed(branchId) : 0;
 
   // Legacy fallback is used only for branches with no configured live WAN
   // source. A configured live source never falls back to synthetic traffic.
   const throughputValue = stats ? stats.throughputMbps : liveThroughput;
-  const throughputSeries = stats
+  const throughputSeries = useMemo(() => stats
     ? stats.throughputSeries
-    : sineSeries(12, 400, 80, seed);
+    : sineSeries(12, 400, 80, seed), [stats, seed]);
 
   // Live alerts override (e.g. count of unreachable tunnels for Plano).
   const alertsValue =
@@ -172,7 +174,7 @@ export function KpiStrip({
   const throughputDelta = 8.4;
 
   const total = stats?.totalDevices ?? 0;
-  const kpis: Kpi[] = [
+  const kpis: Kpi[] = useMemo(() => [
     livePlanoMode
       ? {
           // Only one branch has live telemetry, so the fleet "11 / 11" is
@@ -245,7 +247,7 @@ export function KpiStrip({
       trendSub: 'vs prior 30d',
       trendTone: uptimeDelta >= 0 ? 'ok' as const : 'err' as const,
     },
-    ...(!liveWanTraffic ? [{
+    ...(!hasLiveWanTraffic ? [{
       label: 'Throughput',
       num: throughputValue,
       format: (n: number) => {
@@ -259,7 +261,7 @@ export function KpiStrip({
       series: throughputSeries,
       accentKey: 'accent3' as const,
     }] : []),
-  ];
+  ], [livePlanoMode, onlineBranches, stats, total, devicesDelta, seed, alertsValue, alertsDelta, uptimeDelta, hasLiveWanTraffic, throughputValue, throughputSeries]);
   return (
     <div className="kpi-strip">
       {kpis.map((k) => {
@@ -300,7 +302,7 @@ export function KpiStrip({
               <div className="kpi-spark">
                 {k.sparkKind === 'heat'
                   ? <UptimeHeatStrip values={k.series} width={88} height={32} />
-                  : <Sparkline values={k.series} stroke={accent} fill={hexAlpha(accent, 0.18)} width={88} height={32} />}
+                  : <KpiSparkline values={k.series} stroke={accent} fill={hexAlpha(accent, 0.18)} width={88} height={32} />}
               </div>
             </div>
             <div className="kpi-trend" style={{ color: trendColor }}>
@@ -358,8 +360,18 @@ function WanTrafficKpi({
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!isStale) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 5_000);
-    return () => window.clearInterval(timer);
+    let timer: number | undefined;
+    const tick = () => { if (!document.hidden) setNow(Date.now()); };
+    const schedule = () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      timer = document.hidden ? undefined : window.setInterval(tick, 5_000);
+    };
+    schedule();
+    document.addEventListener('visibilitychange', schedule);
+    return () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', schedule);
+    };
   }, [isStale]);
 
   const staleAge = isStale && rate ? formatAge(now - rate.observedAt) : null;

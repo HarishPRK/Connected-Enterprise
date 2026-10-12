@@ -1,55 +1,61 @@
-import { useEffect, useRef, useState } from 'react';
-
-/* ─────────── AnimatedNumber
- * Smoothly tweens between numeric values using requestAnimationFrame and
- * easeOutCubic. On mount, animates from 0 → value (gives KPI cards a
- * "rolling up" effect). On value change, animates from the previously
- * displayed value → new value — so switching branches makes the metrics
- * visibly transition rather than snap.
- *
- * Pass a `format` function for non-integer or composite values:
- *   <AnimatedNumber value={99.92} format={n => `${n.toFixed(2)}%`} />
- *   <AnimatedNumber value={13}    format={n => `${Math.round(n)}/15`} />               */
+import { memo, useLayoutEffect, useRef } from 'react';
 
 interface Props {
   value: number;
   format?: (n: number) => string;
-  /** Duration in ms (default 800). */
   durationMs?: number;
 }
+const defaultFormat = (n: number) => String(Math.round(n));
+const hiddenText = { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 } as const;
 
-const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
-
-export function AnimatedNumber({
-  value,
-  format = (n) => String(Math.round(n)),
-  durationMs = 800,
-}: Props) {
-  const [display, setDisplay] = useState<number>(0);
-  // Keep the latest displayed value in a ref so the next animation starts
-  // from where the previous one ended (rather than jumping to a stale closure).
+/** Tween only the visual text node. Accessible text immediately reflects the
+ * actual value, without announcing every intermediate animation frame. */
+export const AnimatedNumber = memo(function AnimatedNumber({ value, format = defaultFormat, durationMs = 800 }: Props) {
+  const visualRef = useRef<HTMLSpanElement>(null);
   const displayRef = useRef(0);
-  displayRef.current = display;
-
-  useEffect(() => {
-    const startFrom = displayRef.current;
-    const target = value;
-    if (Math.abs(target - startFrom) < 0.01) {
-      // No-op for tiny changes — avoid wasted RAF frames.
-      setDisplay(target);
+  const targetText = format(value);
+  useLayoutEffect(() => {
+    const node = visualRef.current;
+    if (!node) return;
+    let frame = 0;
+    let stopped = false;
+    const from = displayRef.current;
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const write = (number: number) => {
+      displayRef.current = number;
+      const text = format(number);
+      if (node.textContent !== text) node.textContent = text;
+    };
+    const finish = () => {
+      stopped = true;
+      cancelAnimationFrame(frame);
+      write(value);
+    };
+    if (!Number.isFinite(value) || !Number.isFinite(durationMs) || durationMs <= 0 || Math.abs(value - from) < 0.01 || motion.matches || document.hidden) {
+      finish();
       return;
     }
-    const startAt = performance.now();
-    let raf = 0;
+    write(from);
+    const start = performance.now();
     const tick = (now: number) => {
-      const t = Math.min(1, (now - startAt) / durationMs);
-      const eased = easeOutCubic(t);
-      setDisplay(startFrom + (target - startFrom) * eased);
-      if (t < 1) raf = requestAnimationFrame(tick);
+      if (stopped) return;
+      const t = Math.max(0, Math.min(1, (now - start) / durationMs));
+      write(from + (value - from) * (1 - (1 - t) ** 3));
+      if (t < 1) frame = requestAnimationFrame(tick);
+      else stopped = true;
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [value, durationMs]);
-
-  return <>{format(display)}</>;
-}
+    const checkVisibility = () => { if (document.hidden || motion.matches) finish(); };
+    document.addEventListener('visibilitychange', checkVisibility);
+    motion.addEventListener('change', checkVisibility);
+    frame = requestAnimationFrame(tick);
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(frame);
+      document.removeEventListener('visibilitychange', checkVisibility);
+      motion.removeEventListener('change', checkVisibility);
+    };
+  }, [value, durationMs, format]);
+  return <><span ref={visualRef} aria-hidden="true">{targetText}</span><span style={hiddenText}>{targetText}</span></>;
+}, (previous, next) => previous.value === next.value
+  && previous.durationMs === next.durationMs
+  && (previous.format ?? defaultFormat)(previous.value) === (next.format ?? defaultFormat)(next.value));

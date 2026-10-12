@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, startTransition, useEffect, useMemo, useState } from 'react';
 import { Radio, Cable } from 'lucide-react';
 import { Card } from '../Card';
 import { StatusBadge } from '../StatusBadge';
@@ -9,8 +9,12 @@ function useNow(intervalMs: number, enabled: boolean) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!enabled) return;
-    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
-    return () => window.clearInterval(timer);
+    const tick = () => {
+      if (!document.hidden) startTransition(() => setNow(Date.now()));
+    };
+    const timer = window.setInterval(tick, intervalMs);
+    document.addEventListener('visibilitychange', tick);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
   }, [intervalMs, enabled]);
   return now;
 }
@@ -65,18 +69,16 @@ const STATE_DOT: Record<WidgetDataState, string> = {
   unavailable: 'err',
 };
 
+const observedTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit',
+});
+
 function formatObservedAt(value: WidgetDataMeta['observedAt']) {
   if (value == null) return null;
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
 
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(date);
+  return observedTimeFormatter.format(date);
 }
 
 export function WidgetDataBadge({ state }: { state: WidgetDataState }) {
@@ -88,7 +90,7 @@ export function WidgetDataBadge({ state }: { state: WidgetDataState }) {
   );
 }
 
-export function WidgetDataNote({
+export const WidgetDataNote = memo(function WidgetDataNote({
   dataState = 'unavailable',
   source,
   statusMessage,
@@ -100,7 +102,7 @@ export function WidgetDataNote({
   const validDate = date && !Number.isNaN(date.getTime()) ? date : null;
   const now = useNow(5_000, validDate !== null);
   const relative = validDate ? formatRelativeAge(now - validDate.getTime()) : null;
-  const observed = formatObservedAt(observedAt);
+  const observed = useMemo(() => formatObservedAt(observedAt), [observedAt]);
   const details = [
     statusMessage,
     source ? `Source: ${source}` : null,
@@ -128,7 +130,7 @@ export function WidgetDataNote({
       {details.join(' · ')}
     </div>
   );
-}
+});
 
 export function WidgetDataEmpty({
   state,

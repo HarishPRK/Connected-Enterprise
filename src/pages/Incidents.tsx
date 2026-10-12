@@ -5,7 +5,7 @@ import { Card } from '../components/Card';
 import { Sparkline } from '../components/widgets/Sparkline';
 import { useToast } from '../ui/Toast';
 import { useThemeColors } from '../ui/Theme';
-import { useLiveData } from '../ui/LiveData';
+import { useLiveIncidentTrigger } from '../ui/useLiveData';
 import { useOpsIncidents } from '../ui/OpsIncidents';
 import { runAgentSSE } from '../ui/agentClient';
 import { RichText } from '../ui/markdown';
@@ -107,7 +107,7 @@ export function IncidentsPage() {
   const [selectedId, setSelectedId] = useState<string>(seed[0]?.id ?? '');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | 'all'>('all');
-  const { newIncidentTrigger } = useLiveData();
+  const newIncidentTrigger = useLiveIncidentTrigger();
   // Real incidents derived from the live failover telemetry (auto-resolve etc).
   const { liveIncidents, patchIncident: patchLive, appendStep: appendLive } = useOpsIncidents();
   const { push } = useToast();

@@ -12,8 +12,9 @@
  * seed for live gateway discovery — same endpoints, same shape.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { Device } from '../types';
+import { createTelemetryPublisher, sameTelemetryValue, shareTelemetryRows } from './telemetryPublisher';
 
 export type Domain = 'IT' | 'OT';
 
@@ -29,7 +30,7 @@ export interface DeviceView extends Device {
   inventoryTopics?: string[];
 }
 
-interface DeviceSnapshot {
+export interface DeviceSnapshot {
   devices: DeviceView[];
   receivedAt: number;
   source: 'seed' | 'gateway';
@@ -134,92 +135,103 @@ export async function refreshMatterDevices(): Promise<void> {
   }
 }
 
+const inventory = createTelemetryPublisher<UseDevicesResult>({
+  devices: [], loaded: false, connected: false, source: 'seed',
+  inventoryTopicsSeen: [], refresh: refreshDeviceInventory,
+});
+let eventSource: EventSource | null = null;
+let hydrationAbort: AbortController | null = null;
+let transportRevision = 0;
+let snapshotRevision = 0;
+
+export function mergeDeviceInventorySnapshot(previous: UseDevicesResult, snapshot: DeviceSnapshot): UseDevicesResult {
+  // A slow hydration/refresh response must not resurrect devices removed by a newer SSE roster.
+  if (previous.lastReceivedAt !== undefined && snapshot.receivedAt < previous.lastReceivedAt) return previous;
+  const topics = snapshot.inventoryTopicsSeen ?? [];
+  const next: UseDevicesResult = {
+    devices: shareTelemetryRows(previous.devices, snapshot.devices ?? []),
+    loaded: true,
+    connected: typeof snapshot.connected === 'boolean' ? snapshot.connected : previous.connected,
+    source: snapshot.source ?? previous.source,
+    lastReceivedAt: snapshot.receivedAt,
+    lastInventoryAt: snapshot.lastInventoryAt,
+    inventoryTopicsSeen: sameTelemetryValue(previous.inventoryTopicsSeen, topics) ? previous.inventoryTopicsSeen : topics,
+    refresh: refreshDeviceInventory,
+  };
+  return sameTelemetryValue(previous, next) ? previous : next;
+}
+
+function applySnapshot(snapshot: DeviceSnapshot, preserveConnection = false, fetchStartRevision?: number): void {
+  if (!Array.isArray(snapshot.devices) || !Number.isFinite(snapshot.receivedAt)) throw new Error('Invalid device inventory snapshot');
+  inventory.update((previous) => {
+    // Millisecond timestamps can collide. A stream roster delivered during an
+    // HTTP request wins a tie; a genuinely newer HTTP roster can still apply.
+    if (fetchStartRevision !== undefined && fetchStartRevision !== snapshotRevision
+      && snapshot.receivedAt <= (previous.lastReceivedAt ?? -Infinity)) return previous;
+    return mergeDeviceInventorySnapshot(previous, preserveConnection ? { ...snapshot, connected: previous.connected } : snapshot);
+  });
+}
+
+/** Manual refresh applies to all consumers and is visible before the promise resolves. */
+export async function refreshDeviceInventory(): Promise<void> {
+  const revision = transportRevision;
+  const inventoryRevision = snapshotRevision;
+  const response = await fetch('/api/devices/snapshot', { cache: 'no-store' });
+  if (!response.ok) throw new Error(`Device snapshot failed (${response.status})`);
+  applySnapshot(await response.json() as DeviceSnapshot, revision !== transportRevision, inventoryRevision);
+  inventory.flush();
+}
+
+function startFeed(): void {
+  if (eventSource) return;
+  hydrationAbort = new AbortController();
+  const controller = hydrationAbort;
+  const revision = transportRevision;
+  const inventoryRevision = snapshotRevision;
+  fetch('/api/devices/snapshot', { signal: controller.signal, cache: 'no-store' })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`Device snapshot failed (${response.status})`);
+      const snapshot = await response.json() as DeviceSnapshot;
+      if (!controller.signal.aborted) applySnapshot(snapshot, revision !== transportRevision, inventoryRevision);
+    })
+    .catch(() => { /* SSE can hydrate after a transient snapshot error. */ });
+
+  const source = new EventSource('/api/devices/stream');
+  eventSource = source;
+  source.addEventListener('snapshot', (event) => {
+    if (eventSource !== source) return;
+    try {
+      const snapshot = JSON.parse((event as MessageEvent).data) as DeviceSnapshot;
+      if (!Array.isArray(snapshot.devices) || !Number.isFinite(snapshot.receivedAt)) return;
+      if (snapshot.receivedAt < (inventory.getLatest().lastReceivedAt ?? -Infinity)) return;
+      snapshotRevision++;
+      applySnapshot(snapshot);
+    } catch { /* keep last valid roster */ }
+  });
+  source.onerror = () => {
+    if (eventSource !== source) return;
+    transportRevision++;
+    inventory.update((previous) => previous.connected ? { ...previous, connected: false } : previous);
+  };
+}
+
+function stopFeed(): void {
+  hydrationAbort?.abort();
+  hydrationAbort = null;
+  eventSource?.close();
+  eventSource = null;
+  inventory.flush();
+}
+
+export function subscribeDeviceInventory(onChange: () => void): () => void {
+  const off = inventory.subscribe(onChange);
+  if (inventory.size() === 1) startFeed();
+  return () => { off(); if (inventory.size() === 0) stopFeed(); };
+}
+
+export const getDeviceInventorySnapshot = inventory.getSnapshot;
+
+/** One snapshot and SSE connection for the entire app, regardless of consumer count. */
 export function useDevices(): UseDevicesResult {
-  const [devices, setDevices] = useState<DeviceView[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [source, setSource] = useState<'seed' | 'gateway'>('seed');
-  const [lastReceivedAt, setLastReceivedAt] = useState<number | undefined>();
-  const [lastInventoryAt, setLastInventoryAt] = useState<number | undefined>();
-  const [inventoryTopicsSeen, setInventoryTopicsSeen] = useState<string[]>([]);
-  const esRef = useRef<EventSource | null>(null);
-  const applyRef = useRef<((snap: DeviceSnapshot) => void) | null>(null);
-
-  const refresh = useCallback(async () => {
-    const response = await fetch('/api/devices/snapshot', { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Device snapshot failed (${response.status})`);
-    const snapshot = await response.json() as DeviceSnapshot;
-    applyRef.current?.(snapshot);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const apply = (snap: DeviceSnapshot) => {
-      setDevices(snap.devices ?? []);
-      if (typeof snap.connected === 'boolean') setConnected(snap.connected);
-      if (snap.source) setSource(snap.source);
-      setLastReceivedAt(snap.receivedAt);
-      setLastInventoryAt(snap.lastInventoryAt);
-      setInventoryTopicsSeen(snap.inventoryTopicsSeen ?? []);
-      setLoaded(true);
-    };
-    applyRef.current = apply;
-
-    // Hydrate immediately so the table renders without waiting for the stream.
-    fetch('/api/devices/snapshot')
-      .then((r) => r.json() as Promise<DeviceSnapshot>)
-      .then((snap) => {
-        if (!cancelled) apply(snap);
-      })
-      .catch(() => {
-        /* swallow — the stream will hydrate us, and the page has a fallback */
-      });
-
-    const es = new EventSource('/api/devices/stream');
-    esRef.current = es;
-
-    es.addEventListener('snapshot', (e) => {
-      try {
-        apply(JSON.parse((e as MessageEvent).data) as DeviceSnapshot);
-      } catch {
-        /* ignore */
-      }
-    });
-
-    es.onerror = () => {
-      // EventSource auto-reconnects; mark the feed down until it recovers.
-      setConnected(false);
-    };
-
-    return () => {
-      cancelled = true;
-      es.close();
-      esRef.current = null;
-      applyRef.current = null;
-    };
-  }, []);
-
-  return useMemo(
-    () => ({
-      devices,
-      loaded,
-      connected,
-      source,
-      lastReceivedAt,
-      lastInventoryAt,
-      inventoryTopicsSeen,
-      refresh,
-    }),
-    [
-      devices,
-      loaded,
-      connected,
-      source,
-      lastReceivedAt,
-      lastInventoryAt,
-      inventoryTopicsSeen,
-      refresh,
-    ],
-  );
+  return useSyncExternalStore(subscribeDeviceInventory, getDeviceInventorySnapshot, getDeviceInventorySnapshot);
 }

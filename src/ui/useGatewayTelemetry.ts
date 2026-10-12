@@ -9,6 +9,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
+import { createTelemetryPublisher } from './telemetryPublisher';
 
 export const GATEWAY_LOG_STREAM_URL = '/api/gateway-logs/stream' as const;
 export const GATEWAY_TELEMETRY_STALE_AFTER_MS = 150_000;
@@ -1017,7 +1018,9 @@ const internal: InternalGatewayTelemetryState = {
 
 const listeners = new Set<() => void>();
 let eventSource: EventSource | null = null;
-let freshnessTimer: ReturnType<typeof setInterval> | null = null;
+let freshnessTimer: ReturnType<typeof setTimeout> | null = null;
+let previousSnapshot: UseGatewayTelemetryResult | undefined;
+let publishedPortInputs = internal.parsedByInterface;
 
 function newestPortTimestamp(): number | undefined {
   const timestamps = Object.values(internal.parsedByInterface).map((port) => port.receivedAt);
@@ -1025,20 +1028,29 @@ function newestPortTimestamp(): number | undefined {
 }
 
 function buildSnapshot(now: number): UseGatewayTelemetryResult {
-  const ports = GATEWAY_LAN_TOPICS.flatMap((topic) => {
+  const nextPorts = GATEWAY_LAN_TOPICS.flatMap((topic) => {
     const meta = LAN_TOPIC_META[topic];
     const port = internal.parsedByInterface[meta.interfaceName];
-    return port
-      ? [{ ...port, freshness: gatewayFreshness(port.receivedAt, now) }]
-      : [];
+    if (!port) return [];
+    const freshness = gatewayFreshness(port.receivedAt, now);
+    const previous = previousSnapshot?.portsByInterface[meta.interfaceName];
+    return [previous && publishedPortInputs[meta.interfaceName] === port && previous.freshness.state === freshness.state
+      ? previous : { ...port, freshness }];
   });
-  const portsByInterface: Partial<Record<GatewayLanInterfaceName, GatewayLiveLanPort>> = {};
-  for (const port of ports) portsByInterface[port.interfaceName] = port;
-  const poePorts = ports.filter(
+  const ports = previousSnapshot?.ports.length === nextPorts.length && nextPorts.every((port, index) => port === previousSnapshot?.ports[index])
+    ? previousSnapshot.ports : nextPorts;
+  const portsByInterface: Partial<Record<GatewayLanInterfaceName, GatewayLiveLanPort>> = ports === previousSnapshot?.ports
+    ? previousSnapshot.portsByInterface : Object.fromEntries(ports.map((port) => [port.interfaceName, port]));
+  const nextPoePorts = ports.filter(
     (port): port is GatewayLivePoePort => port.poe !== undefined,
   );
+  const poePorts = previousSnapshot?.poePorts.length === nextPoePorts.length && nextPoePorts.every((port, index) => port === previousSnapshot?.poePorts[index])
+    ? previousSnapshot.poePorts : nextPoePorts;
   const bridge = internal.bridgeState;
   const newest = newestPortTimestamp();
+  const nextFreshness = gatewayFreshness(newest, now);
+  const freshness = previousSnapshot && previousSnapshot.freshness.receivedAt === newest && previousSnapshot.freshness.state === nextFreshness.state
+    ? previousSnapshot.freshness : nextFreshness;
   return {
     ports,
     portsByInterface,
@@ -1070,15 +1082,43 @@ function buildSnapshot(now: number): UseGatewayTelemetryResult {
       clientDecodeErrors: internal.clientDecodeErrors,
       ...(internal.lastClientError ? { lastClientError: internal.lastClientError } : null),
     },
-    freshness: gatewayFreshness(newest, now),
+    freshness,
   };
 }
 
 let currentSnapshot = buildSnapshot(Date.now());
+previousSnapshot = currentSnapshot;
+const notifications = createTelemetryPublisher(0);
+let revision = 0;
 
-function publish(now = Date.now()): void {
-  currentSnapshot = buildSnapshot(now);
+/** No one-second heartbeat renders: wake only when a real freshness class changes. */
+export function nextGatewayFreshnessDelay(timestamps: readonly number[], now = Date.now()): number | undefined {
+  const boundaries = timestamps.flatMap((receivedAt) => {
+    if (now < receivedAt - CLOCK_SKEW_TOLERANCE_MS) return [receivedAt - CLOCK_SKEW_TOLERANCE_MS];
+    if (now <= receivedAt + GATEWAY_TELEMETRY_STALE_AFTER_MS) return [receivedAt + GATEWAY_TELEMETRY_STALE_AFTER_MS + 1];
+    return [];
+  });
+  return boundaries.length ? Math.min(2_147_483_647, Math.max(1, Math.min(...boundaries) - now)) : undefined;
+}
+
+function scheduleFreshness(): void {
+  if (freshnessTimer) clearTimeout(freshnessTimer);
+  freshnessTimer = null;
+  if (!eventSource) return;
+  const delay = nextGatewayFreshnessDelay(Object.values(internal.parsedByInterface).map((port) => port.receivedAt));
+  if (delay !== undefined) freshnessTimer = setTimeout(() => publish(), delay);
+}
+
+notifications.subscribe(() => {
+  currentSnapshot = buildSnapshot(Date.now());
+  previousSnapshot = currentSnapshot;
+  publishedPortInputs = internal.parsedByInterface;
+  scheduleFreshness();
   for (const listener of listeners) listener();
+});
+
+function publish(): void {
+  notifications.publish(++revision);
 }
 
 function eventData(event: Event): string {
@@ -1112,9 +1152,8 @@ function ingestTelemetryEvent(event: Event): void {
     noteClientError('telemetry-event', error);
     return;
   }
-  internal.lastEventAt = Date.now();
   if (!isGatewayEthernetTopic(delivery.topic)) {
-    publish();
+    // Other MQTT namespaces are consumed by the twin, not by LAN subscribers.
     return;
   }
 
@@ -1125,9 +1164,9 @@ function ingestTelemetryEvent(event: Event): void {
   const previousDelivery = internal.latestByTopic[ethernetDelivery.topic];
   if (previousDelivery && previousDelivery.receivedAt >= ethernetDelivery.receivedAt) {
     // A reconnect snapshot or delayed packet must not replace a newer value.
-    publish();
     return;
   }
+  internal.lastEventAt = Date.now();
   internal.latestByTopic = {
     ...internal.latestByTopic,
     [ethernetDelivery.topic]: ethernetDelivery,
@@ -1217,20 +1256,20 @@ function startFeed(): void {
     publish();
   };
 
-  freshnessTimer = setInterval(() => publish(), 1_000);
 }
 
 function stopFeed(): void {
   eventSource?.close();
   eventSource = null;
-  if (freshnessTimer) clearInterval(freshnessTimer);
+  if (freshnessTimer) clearTimeout(freshnessTimer);
   freshnessTimer = null;
   internal.transport = 'idle';
   internal.transportError = undefined;
-  currentSnapshot = buildSnapshot(Date.now());
+  publish();
+  notifications.flush();
 }
 
-function subscribe(onChange: () => void): () => void {
+export function subscribeGatewayTelemetry(onChange: () => void): () => void {
   listeners.add(onChange);
   if (listeners.size === 1) startFeed();
   return () => {
@@ -1239,7 +1278,7 @@ function subscribe(onChange: () => void): () => void {
   };
 }
 
-function getSnapshot(): UseGatewayTelemetryResult {
+export function getGatewayTelemetrySnapshot(): UseGatewayTelemetryResult {
   return currentSnapshot;
 }
 
@@ -1256,5 +1295,14 @@ export function refreshGatewayTelemetry(): void {
  * the dashboard's mock LAN or PoE arrays.
  */
 export function useGatewayTelemetry(): UseGatewayTelemetryResult {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useSyncExternalStore(subscribeGatewayTelemetry, getGatewayTelemetrySnapshot, getGatewayTelemetrySnapshot);
+}
+
+const getLanPorts = () => currentSnapshot.ports;
+const getFreshness = () => currentSnapshot.freshness;
+export function useGatewayLanPorts(): GatewayLiveLanPort[] {
+  return useSyncExternalStore(subscribeGatewayTelemetry, getLanPorts, getLanPorts);
+}
+export function useGatewayFreshness(): GatewayFreshness {
+  return useSyncExternalStore(subscribeGatewayTelemetry, getFreshness, getFreshness);
 }

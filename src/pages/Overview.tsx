@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PageHeader } from '../components/PageHeader';
 import { InsightStrip } from '../components/widgets/InsightStrip';
@@ -15,10 +15,10 @@ import {
 import type {
   AppTraffic, Device, LanPort, Status, WanLink,
 } from '../types';
-import { useIpsecMetrics, refreshIpsecMetrics } from '../ui/useIpsecMetrics';
+import { useIpsecGateway, useIpsecConnected, useIpsecError, refreshIpsecMetrics } from '../ui/useIpsecMetrics';
 import { useDevices } from '../ui/useDevices';
 import { matchesDeviceInventory } from '../ui/deviceInventory';
-import { useGatewayTelemetry, refreshGatewayTelemetry } from '../ui/useGatewayTelemetry';
+import { useGatewayLanPorts, useGatewayFreshness, refreshGatewayTelemetry } from '../ui/useGatewayTelemetry';
 import { downloadJson } from '../ui/download';
 import { useToast } from '../ui/Toast';
 import { useDialogFocus } from '../ui/useDialogFocus';
@@ -32,6 +32,11 @@ interface OverviewProps {
   branchId: string;
   onSelectBranch: (id: string) => void;
 }
+
+// A freshness clock or one feed must not redraw widgets backed by another feed.
+const OverviewWan = memo(WanWidget);
+const OverviewLan = memo(LanPorts);
+const OverviewTraffic = memo(AppTrafficWidget);
 
 function inferUnderlay(ifname: string): 'fiber' | '5g' {
   const n = (ifname || '').toLowerCase();
@@ -177,7 +182,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const [refreshing, setRefreshing] = useState(false);
   const { push } = useToast();
 
-  async function handleRefresh() {
+  const handleRefresh = useCallback(async () => {
     if (refreshing) return;
     setRefreshing(true);
     try {
@@ -189,27 +194,29 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     } finally {
       setRefreshing(false);
     }
-  }
+  }, [refreshing, refreshDevices, push]);
 
   // McKinney keeps failover/path telemetry on prpl while its headline WAN
   // traffic rate and IT/OT inventory come from prplhome.
-  const ipsec = useIpsecMetrics();
   const failoverTopic = BRANCH_TO_FAILOVER_TOPIC[branchId] ?? null;
   const wanTrafficTopic = BRANCH_TO_WAN_TOPIC[branchId] ?? null;
   const deviceTopic = branchDeviceTopic ?? null;
-  const failoverState = failoverTopic
-    ? ipsec.list.find((gateway) => gateway.topic === failoverTopic)
-    : undefined;
-  const wanTrafficState = wanTrafficTopic
-    ? ipsec.list.find((gateway) => gateway.topic === wanTrafficTopic)
-    : undefined;
+  const failoverState = useIpsecGateway(failoverTopic);
+  const wanTrafficState = useIpsecGateway(wanTrafficTopic);
+  const ipsecConnected = useIpsecConnected();
+  const ipsecError = useIpsecError();
   const usingFailover = !!failoverState;
-  const gatewayTelemetry = useGatewayTelemetry();
+  const gatewayPorts = useGatewayLanPorts();
+  const gatewayFreshness = useGatewayFreshness();
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNowMs(Date.now()), 5_000);
-    return () => window.clearInterval(timer);
+    const tick = () => {
+      if (!document.hidden) startTransition(() => setNowMs(Date.now()));
+    };
+    const timer = window.setInterval(tick, 5_000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', tick); };
   }, []);
 
   const liveWanRate = wanTrafficState?.wanRate ?? null;
@@ -222,10 +229,10 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const liveWanState: WidgetDataState = !wanTrafficTopic
     ? 'unavailable'
     : !wanTrafficState
-      ? ipsec.lastError ? 'unavailable' : 'loading'
+      ? ipsecError ? 'unavailable' : 'loading'
       : liveWanRate
-        ? ipsec.connected && rateIsFresh ? 'live' : 'stale'
-        : ipsec.connected && gatewayIsFresh ? 'loading' : 'stale';
+        ? ipsecConnected && rateIsFresh ? 'live' : 'stale'
+        : ipsecConnected && gatewayIsFresh ? 'loading' : 'stale';
 
   // Chart history is retained by the backend. Local counters below update
   // the current per-underlay link rows only.
@@ -344,7 +351,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   }, [usingFailover, failoverState, underlayRates]);
 
   const gatewayTwinApplies = branchId === 'b-mck-03';
-  const liveLanPorts = useMemo<LanPort[]>(() => gatewayTelemetry.ports.map((port) => ({
+  const liveLanPorts = useMemo<LanPort[]>(() => gatewayTwinApplies ? gatewayPorts.map((port) => ({
       id: port.id,
       label: port.label,
       interfaceName: port.interfaceName,
@@ -355,7 +362,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
       ...(port.txPackets !== undefined ? { txPackets: port.txPackets } : null),
       ...(port.rxPps !== undefined ? { rxPps: port.rxPps } : null),
       ...(port.txPps !== undefined ? { txPps: port.txPps } : null),
-    })), [gatewayTelemetry.ports]);
+    })) : [], [gatewayTwinApplies, gatewayPorts]);
   const clientTraffic = useMemo(() => measuredClientTraffic(liveDevices), [liveDevices]);
   const trafficItems = clientTraffic.rows;
   const activeClientAssociations = liveDevices.filter((device) => device.status !== 'err').length;
@@ -369,6 +376,17 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   // Source freshness still controls which observations exist, but the cards
   // stay labeled Live instead of surfacing transient reconnect/staleness noise.
   const overviewWidgetState: WidgetDataState = 'live';
+  const openDevices = useCallback(() => setDevicesModalOpen(true), []);
+  const wanInterfaceName = wanTrafficState?.metrics.wan.ifname || null;
+  const kpiWanTraffic = useMemo(() => wanTrafficTopic ? {
+    rate: liveWanRate, state: liveWanState, interfaceName: wanInterfaceName,
+  } : undefined, [wanTrafficTopic, liveWanRate, liveWanState, wanInterfaceName]);
+  const kpiGatewayMode = useMemo(() => usingFailover ? {
+    gatewayOnline: ipsecConnected, onGatewayClick: openDevices,
+  } : undefined, [usingFailover, ipsecConnected, openDevices]);
+  const insightTunnels = useMemo(() => failoverState?.metrics.tunnels.map((tunnel) => ({
+    ifname: tunnel.ifname, present: tunnel.present, reachable: tunnel.reachable,
+  })) ?? null, [failoverState]);
 
   return (
     <>
@@ -389,25 +407,16 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
 
       <KpiStrip
         branchId={branchId}
-        liveWanTraffic={wanTrafficTopic ? {
-          rate: liveWanRate,
-          state: liveWanState,
-          interfaceName: wanTrafficState?.metrics.wan.ifname || null,
-        } : undefined}
+        liveWanTraffic={kpiWanTraffic}
         liveAlertsCount={usingFailover ? liveAlertsCount : null}
-        livePlanoMode={usingFailover ? {
-          gatewayOnline: ipsec.connected,
-          onGatewayClick: () => setDevicesModalOpen(true),
-        } : undefined}
+        livePlanoMode={kpiGatewayMode}
       />
 
       <InsightStrip
         branchName={branch.name}
         wanState={failoverTopic ? liveWanState : undefined}
         lastRateAgeMs={liveWanState === 'stale' && liveWanRate ? nowMs - liveWanRate.observedAt : null}
-        tunnels={failoverState?.metrics.tunnels.map((t) => ({
-          ifname: t.ifname, present: t.present, reachable: t.reachable,
-        })) ?? null}
+        tunnels={insightTunnels}
         activeTunnel={failoverState?.metrics.active_tunnel ?? null}
         alertsCount={usingFailover ? liveAlertsCount : null}
         devices={branchDevices}
@@ -430,14 +439,14 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
             branch={branch}
             devices={branchDevices}
             onSelectBranch={onSelectBranch}
-            liveGatewayOnline={usingFailover ? ipsec.connected : undefined}
+            liveGatewayOnline={usingFailover ? ipsecConnected : undefined}
           />
         </div>
 
         {/* WAN, LAN, bandwidth and client traffic are live-only: never substitute demo values when a source
             is warming, stale, missing fields, or unavailable. */}
         <div className="col-6">
-          <WanWidget
+          <OverviewWan
             links={liveLinks}
             dataState={overviewWidgetState}
             source={failoverTopic ?? undefined}
@@ -445,11 +454,11 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
           />
         </div>
         <div className="col-6">
-          <LanPorts
+          <OverviewLan
             ports={liveLanPorts}
             dataState={overviewWidgetState}
             source={gatewayTwinApplies ? 'prplOS Ethernet telemetry' : undefined}
-            observedAt={gatewayTwinApplies ? gatewayTelemetry.freshness.receivedAt : undefined}
+            observedAt={gatewayTwinApplies ? gatewayFreshness.receivedAt : undefined}
           />
         </div>
 
@@ -461,7 +470,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
           />
         </div>
         <div className="col-4">
-          <AppTrafficWidget
+          <OverviewTraffic
             items={trafficItems}
             dataState={overviewWidgetState}
             source={deviceTopic ? `${deviceTopic} Wi-Fi counters` : undefined}
