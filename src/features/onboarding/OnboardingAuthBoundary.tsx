@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { LogIn, ShieldAlert, ShieldCheck } from 'lucide-react';
-import { PageHeader } from '../../components/PageHeader';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   beginOnboardingSignIn,
   completeOnboardingSignIn,
@@ -11,10 +9,17 @@ import {
 } from './auth';
 import { OnboardingAuthContext, type OnboardingAuthContextValue } from './onboardingAuthContext';
 
+// A StrictMode remount must reuse an in-flight single-use OAuth code exchange.
+let pendingSignIn: Promise<boolean> | undefined;
+function completeSignInOnce(): Promise<boolean> {
+  pendingSignIn ??= completeOnboardingSignIn().finally(() => { pendingSignIn = undefined; });
+  return pendingSignIn;
+}
+
 export function OnboardingAuthBoundary({ children }: { children: ReactNode }) {
   const configurationError = onboardingConfigurationError();
   const [state, setState] = useState<'checking' | 'authenticated' | 'anonymous' | 'error'>(
-    onboardingAuthEnabled ? 'checking' : configurationError ? 'error' : 'authenticated',
+    configurationError ? 'error' : onboardingAuthEnabled ? 'checking' : 'authenticated',
   );
   const [error, setError] = useState(configurationError);
   const [user, setUser] = useState<OnboardingAuthContextValue['user']>();
@@ -22,7 +27,7 @@ export function OnboardingAuthBoundary({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!onboardingAuthEnabled || configurationError) return;
     let cancelled = false;
-    completeOnboardingSignIn()
+    completeSignInOnce()
       .then((authenticated) => {
         if (cancelled) return;
         setUser(currentOnboardingUser());
@@ -36,48 +41,24 @@ export function OnboardingAuthBoundary({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [configurationError]);
 
-  const value = useMemo<OnboardingAuthContextValue>(() => ({ user, signOut: signOutOnboarding }), [user]);
+  const signIn = useCallback(() => {
+    setState('checking');
+    setError(undefined);
+    void beginOnboardingSignIn().catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : 'Unable to start sign-in.');
+      setState('error');
+    });
+  }, []);
+  const value = useMemo<OnboardingAuthContextValue>(() => ({
+    user: state === 'authenticated' ? user : undefined,
+    status: state,
+    authenticationRequired: onboardingAuthEnabled || Boolean(configurationError),
+    authenticationError: error,
+    signIn,
+    signOut: signOutOnboarding,
+  }), [user, state, error, configurationError, signIn]);
 
-  if (state === 'authenticated') return <OnboardingAuthContext.Provider value={value}>{children}</OnboardingAuthContext.Provider>;
-
-  return (
-    <div className="ce-onb-page">
-      <PageHeader
-        title="Gateway Onboarding"
-        subtitle="Verify factory serials, assign immutable profiles, and confirm configuration delivery and reported device health."
-      />
-      <section className="ce-onb-auth-gate" aria-labelledby="onboarding-auth-title">
-        <span className={`ce-onb-auth-mark${state === 'error' ? ' is-error' : ''}`}>
-          {state === 'error' ? <ShieldAlert size={28} aria-hidden="true" /> : <ShieldCheck size={28} aria-hidden="true" />}
-        </span>
-        <h2 id="onboarding-auth-title">
-          {state === 'checking' ? 'Confirming your onboarding session' : state === 'error' ? 'Onboarding sign-in needs attention' : 'Sign in to manage gateway identity'}
-        </h2>
-        <p>
-          {state === 'checking'
-            ? 'Completing the Cognito authorization-code exchange and tenant claim validation…'
-            : error ?? 'Cognito verifies your identity; the API derives tenant and role from signed token claims.'}
-        </p>
-        {state === 'checking' ? (
-          <span className="ce-onb-spinner" aria-label="Checking sign-in" />
-        ) : (
-          <button
-            type="button"
-            className="primary"
-            onClick={() => {
-              setState('checking');
-              setError(undefined);
-              void beginOnboardingSignIn().catch((cause: unknown) => {
-                setError(cause instanceof Error ? cause.message : 'Unable to start Cognito sign-in.');
-                setState('error');
-              });
-            }}
-          >
-            <LogIn size={16} aria-hidden="true" />{state === 'error' ? 'Start a fresh sign-in' : 'Sign in with Cognito'}
-          </button>
-        )}
-        <small>No bootstrap certificates, private keys, or AWS credentials are stored in the browser session.</small>
-      </section>
-    </div>
-  );
+  // The workspace stays visible while authorization is checked or requested.
+  // Changing identity remounts its data hooks after a successful OAuth callback.
+  return <OnboardingAuthContext.Provider key={value.user?.subject ?? 'anonymous'} value={value}>{children}</OnboardingAuthContext.Provider>;
 }

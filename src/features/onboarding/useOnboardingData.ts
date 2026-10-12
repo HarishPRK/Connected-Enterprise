@@ -69,9 +69,9 @@ function replaceById<T extends { id: string }>(items: T[], next: T): T[] {
   return copy;
 }
 
-export function useOnboardingData(): UseOnboardingDataResult {
+export function useOnboardingData({ enabled = true }: { enabled?: boolean } = {}): UseOnboardingDataResult {
   const [snapshot, setSnapshot] = useState<OnboardingSnapshot>();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const [streamState, setStreamState] = useState<OnboardingStreamState>(() => (
@@ -111,6 +111,7 @@ export function useOnboardingData(): UseOnboardingDataResult {
   }, []);
 
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     setRefreshing(true);
     try {
       applySnapshot(await fetchOnboardingSnapshot());
@@ -119,9 +120,10 @@ export function useOnboardingData(): UseOnboardingDataResult {
       setLoading(false);
       setError(cause instanceof Error ? cause.message : 'Unable to load onboarding inventory.');
     }
-  }, [applySnapshot]);
+  }, [applySnapshot, enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     fetchOnboardingSnapshot(controller.signal)
       .then(applySnapshot)
@@ -131,10 +133,10 @@ export function useOnboardingData(): UseOnboardingDataResult {
         setError(cause instanceof Error ? cause.message : 'Unable to load onboarding inventory.');
       });
     return () => controller.abort();
-  }, [applySnapshot]);
+  }, [applySnapshot, enabled]);
 
   useEffect(() => {
-    if (onboardingSseEnabled()) return undefined;
+    if (!enabled || onboardingSseEnabled()) return undefined;
     let controller: AbortController | undefined;
     let running = false;
     const poll = async () => {
@@ -161,10 +163,10 @@ export function useOnboardingData(): UseOnboardingDataResult {
       document.removeEventListener('visibilitychange', onVisibility);
       controller?.abort();
     };
-  }, [applySnapshot]);
+  }, [applySnapshot, enabled]);
 
   useEffect(() => {
-    if (!onboardingSseEnabled()) {
+    if (!enabled || !onboardingSseEnabled()) {
       return undefined;
     }
     const source = new EventSource(ONBOARDING_EVENTS_URL, { withCredentials: true });
@@ -221,7 +223,7 @@ export function useOnboardingData(): UseOnboardingDataResult {
     source.onerror = () => setStreamState('reconnecting');
 
     return () => source.close();
-  }, [applySnapshot, upsertController, upsertGateway, upsertOperation, upsertProfile]);
+  }, [applySnapshot, enabled, upsertController, upsertGateway, upsertOperation, upsertProfile]);
 
   return useMemo(
     () => ({ snapshot, loading, refreshing, error, streamState, refresh, upsertOperation, upsertProfile, upsertController }),

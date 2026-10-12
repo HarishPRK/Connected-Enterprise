@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { CloudCog, LogOut, MapPin, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CloudCog, LogIn, LogOut, MapPin, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { BootstrapPackageManager } from './BootstrapPackageManager';
 import { ControllerManager } from './ControllerManager';
 import { GatewayInventory } from './GatewayInventory';
@@ -15,8 +15,16 @@ import './activation-workspace.css';
 
 type Surface = WorkspaceSurface | 'operation';
 
+const pendingPanels = {
+  gateways: { title: 'Gateways', description: 'Review gateway identity, site assignments, and configuration health.' },
+  profiles: { title: 'Profiles', description: 'Review and publish immutable gateway configuration profiles.' },
+  controller: { title: 'Controller', description: 'Manage the USP Controller and MQTT connection settings for your tenant.' },
+  bootstrap: { title: 'Initiate Onboarding', description: 'Prepare a bootstrap package and register a gateway to its site.' },
+  operation: { title: 'Operation', description: 'Follow configuration delivery and reported gateway health.' },
+} satisfies Record<Surface, { title: string; description: string }>;
+
 export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: string }) {
-  const { user, signOut } = useOnboardingAuth();
+  const { user, signOut, signIn, status: authenticationStatus, authenticationRequired, authenticationError } = useOnboardingAuth();
   const {
     snapshot,
     loading,
@@ -27,13 +35,15 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     upsertOperation,
     upsertProfile,
     upsertController,
-  } = useOnboardingData();
+  } = useOnboardingData({ enabled: !authenticationRequired || authenticationStatus === 'authenticated' });
   const localSimulator = snapshot?.mode === 'local-simulator';
   const tenantRole = user?.tenantRole;
   const canOperate = localSimulator || tenantRole === 'platform_admin' || tenantRole === 'tenant_admin' || tenantRole === 'operator';
   const canAdminister = localSimulator || tenantRole === 'platform_admin' || tenantRole === 'tenant_admin';
   const canIssueBootstrapPackage = snapshot?.mode === 'aws'
     && (tenantRole === 'platform_admin' || tenantRole === 'tenant_admin');
+  const needsSignIn = authenticationRequired && authenticationStatus !== 'authenticated';
+  const checkingSignIn = authenticationStatus === 'checking';
   const [surface, setSurface] = useState<Surface>('gateways');
   const [operationId, setOperationId] = useState<string>();
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -61,33 +71,56 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
           <span className="ce-onb-masthead-mark"><CloudCog size={22} aria-hidden="true" /></span>
           <div><h1>Gateway Onboarding</h1><p>From device identity to a healthy gateway.</p></div>
         </div>
-        {snapshot && (
           <div className="ce-onb-page-context">
-            <span><ShieldCheck size={13} aria-hidden="true" />{snapshot.tenant.name}</span>
+            {snapshot && <span><ShieldCheck size={13} aria-hidden="true" />{snapshot.tenant.name}</span>}
             {preferredSite && <span><MapPin size={13} aria-hidden="true" />{preferredSite.name}</span>}
+            {needsSignIn && <>
+              <span role="status">{checkingSignIn ? 'Checking session…' : 'Session required for live data'}</span>
+              <button type="button" className="ce-onb-signout" onClick={signIn} disabled={checkingSignIn}>
+                <LogIn size={13} aria-hidden="true" />Sign in
+              </button>
+            </>}
             {user && (
               <button type="button" className="ce-onb-signout" onClick={signOut} title={user.email ?? user.subject}>
                 <LogOut size={13} aria-hidden="true" />Sign out
               </button>
             )}
           </div>
-        )}
       </header>
 
-      {loading && !snapshot ? (
-        <div className="ce-onb-loading" role="status" aria-live="polite">
-          <span className="ce-onb-spinner" aria-hidden="true" />
-          <div><strong>Loading tenant onboarding inventory</strong><span>Retrieving authorized sites, gateway state, and immutable profiles…</span></div>
+      {authenticationError && <div className="ce-onb-alert is-warning" role="status">
+        <TriangleAlert size={17} aria-hidden="true" /><span>{authenticationError}</span>
+      </div>}
+
+      {!snapshot ? (
+        <div className="ce-onb-workspace" ref={workspaceRef}>
+          <OnboardingNavigation surface={surface} onNavigate={navigate} canOperate={Boolean(canOperate)}
+            showOnboarding={needsSignIn || Boolean(canOperate)} localSimulator={false} streamState={streamState}
+            unavailableLabel={checkingSignIn ? 'Checking session' : needsSignIn ? 'Awaiting sign-in' : loading ? 'Loading inventory' : 'Unavailable'} />
+          <div className="ce-onb-workspace-content">
+            <section id={`ce-onb-${surface}-panel`} aria-labelledby="onboarding-pending-title" aria-busy={checkingSignIn || loading}>
+              <div className="ce-onb-section-heading"><div>
+                <h2 id="onboarding-pending-title">{pendingPanels[surface].title}</h2>
+                <p>{pendingPanels[surface].description}</p>
+              </div></div>
+              <div className={`ce-onb-alert${!needsSignIn && !loading ? ' is-warning' : ''}`} role="status">
+                {checkingSignIn || (!needsSignIn && loading) ? <>
+                  <span className="ce-onb-spinner" aria-hidden="true" />
+                  <span>{checkingSignIn ? 'Confirming your session…' : 'Retrieving tenant inventory…'}</span>
+                </> : needsSignIn ? <>
+                  <ShieldCheck size={17} aria-hidden="true" />
+                  <span>Tenant data and controls become available after sign-in.</span>
+                </> : <>
+                  <TriangleAlert size={17} aria-hidden="true" />
+                  <span>{error ?? 'The service did not return an onboarding snapshot.'}</span>
+                  <button type="button" onClick={() => void refresh()} disabled={refreshing}>
+                    <RefreshCw size={14} aria-hidden="true" />{refreshing ? 'Retrying…' : 'Retry connection'}
+                  </button>
+                </>}
+              </div>
+            </section>
+          </div>
         </div>
-      ) : !snapshot ? (
-        <section className="ce-onb-load-error" aria-labelledby="onboarding-load-error-title">
-          <span><TriangleAlert size={24} aria-hidden="true" /></span>
-          <h2 id="onboarding-load-error-title">Onboarding inventory is unavailable</h2>
-          <p>{error ?? 'The service did not return an onboarding snapshot.'}</p>
-          <button type="button" className="primary" onClick={() => void refresh()} disabled={refreshing}>
-            <RefreshCw size={14} aria-hidden="true" />{refreshing ? 'Retrying…' : 'Retry connection'}
-          </button>
-        </section>
       ) : (
         <>
           {error && (

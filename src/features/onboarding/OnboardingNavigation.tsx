@@ -7,21 +7,24 @@ interface OnboardingNavigationProps {
   surface: WorkspaceSurface | 'operation';
   onNavigate: (surface: WorkspaceSurface) => void;
   canOperate: boolean;
-  gatewayCount: number;
-  profileCount: number;
+  gatewayCount?: number;
+  profileCount?: number;
   streamState: OnboardingStreamState;
   localSimulator: boolean;
-  generatedAt: string;
+  generatedAt?: string;
+  unavailableLabel?: string;
+  showOnboarding?: boolean;
 }
 
 export function OnboardingNavigation({
   surface, onNavigate, canOperate, gatewayCount, profileCount, streamState, localSimulator, generatedAt,
+  unavailableLabel, showOnboarding = canOperate,
 }: OnboardingNavigationProps) {
   const items = [
-    { id: 'gateways' as const, title: 'Gateways', icon: CloudCog, count: gatewayCount },
-    { id: 'profiles' as const, title: 'Profiles', icon: FileLock2, count: profileCount },
+    { id: 'gateways' as const, title: 'Gateways', icon: CloudCog, count: gatewayCount ?? '—' },
+    { id: 'profiles' as const, title: 'Profiles', icon: FileLock2, count: profileCount ?? '—' },
     { id: 'controller' as const, title: 'Controller', icon: ServerCog },
-    ...(canOperate ? [{ id: 'bootstrap' as const, title: 'Initiate Onboarding', icon: FileKey2 }] : []),
+    ...(showOnboarding ? [{ id: 'bootstrap' as const, title: 'Initiate Onboarding', icon: FileKey2 }] : []),
   ];
   const current = surface === 'operation' ? 'gateways' : surface;
   return (
@@ -37,11 +40,11 @@ export function OnboardingNavigation({
         ))}
       </nav>
       <div className="ce-onb-workspace-status">
-        <strong>{localSimulator ? 'Local simulator' : 'AWS control plane'}</strong>
-        <span><i data-connected={streamState === 'connected'} aria-hidden="true" />
-          {streamState === 'connected' ? 'Live' : streamState === 'polling' ? 'Polling' : 'Reconnecting'}
+        <strong>{!generatedAt ? 'Onboarding workspace' : localSimulator ? 'Local simulator' : 'AWS control plane'}</strong>
+        <span><i data-connected={!unavailableLabel && streamState === 'connected'} aria-hidden="true" />
+          {unavailableLabel ?? (streamState === 'connected' ? 'Live' : streamState === 'polling' ? 'Polling' : 'Reconnecting')}
         </span>
-        <small>Updated <time dateTime={generatedAt}>{new Date(generatedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</time></small>
+        {generatedAt && <small>Updated <time dateTime={generatedAt}>{new Date(generatedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</time></small>}
       </div>
     </div>
   );

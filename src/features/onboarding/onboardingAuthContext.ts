@@ -3,10 +3,17 @@ import type { OnboardingUser } from './auth';
 
 export interface OnboardingAuthContextValue {
   user?: OnboardingUser;
+  status: 'checking' | 'authenticated' | 'anonymous' | 'error';
+  authenticationRequired: boolean;
+  authenticationError?: string;
+  signIn: () => void;
   signOut: () => void;
 }
 
-export const OnboardingAuthContext = createContext<OnboardingAuthContextValue>({ signOut: () => undefined });
+export const OnboardingAuthContext = createContext<OnboardingAuthContextValue>({
+  status: 'authenticated', authenticationRequired: false,
+  signIn: () => undefined, signOut: () => undefined,
+});
 
 export function useOnboardingAuth(): OnboardingAuthContextValue {
   return useContext(OnboardingAuthContext);
