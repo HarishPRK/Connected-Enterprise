@@ -21,6 +21,7 @@ import {
   type GatewayTwinUpstreamState,
 } from './gatewayTwinSource.js';
 import { createOnboardingRouter } from './onboardingRoutes.js';
+import { createPublicOnboardingRouter } from './onboardingPublicRoutes.js';
 import { createRoutingConfigRouter } from './routingConfigRoutes.js';
 import { aiCapabilities, resolveAiPreferences } from './aiPreferences.js';
 import { createCorsOptionsDelegate } from './corsPolicy.js';
@@ -74,6 +75,7 @@ app.use(compression({
 
 app.use(express.json({ limit: '256kb' }));
 
+app.use('/api/onboarding', createPublicOnboardingRouter());
 app.use('/api/onboarding', await createOnboardingRouter());
 app.use('/api/routing/config', createRoutingConfigRouter());
 

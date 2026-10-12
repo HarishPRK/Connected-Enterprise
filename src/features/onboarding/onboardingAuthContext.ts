@@ -6,12 +6,13 @@ export interface OnboardingAuthContextValue {
   status: 'checking' | 'authenticated' | 'anonymous' | 'error';
   authenticationRequired: boolean;
   authenticationError?: string;
+  accessMode: 'checking' | 'cognito' | 'temporary-public-aws' | 'unavailable';
   signIn: () => void;
   signOut: () => void;
 }
 
 export const OnboardingAuthContext = createContext<OnboardingAuthContextValue>({
-  status: 'authenticated', authenticationRequired: false,
+  status: 'authenticated', authenticationRequired: false, accessMode: 'cognito',
   signIn: () => undefined, signOut: () => undefined,
 });
 

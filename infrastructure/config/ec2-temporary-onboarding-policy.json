@@ -1,0 +1,11 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeDevelopmentOnboardingApi",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:us-east-1:841019700679:function:connected-enterprise-onboarding-dev-api"
+    }
+  ]
+}

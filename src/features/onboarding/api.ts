@@ -8,7 +8,7 @@ import type {
   ProfileVersion,
   VerificationResult,
 } from './types';
-import { onboardingApiUrl, onboardingAuthorizationHeaders } from './auth';
+import { onboardingApiUrl, onboardingAuthorizationHeaders, onboardingRequestCredentials } from './auth';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
@@ -61,7 +61,7 @@ async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(onboardingApiUrl(url), {
     method: 'GET',
     headers: { Accept: 'application/json', ...await onboardingAuthorizationHeaders() },
-    credentials: 'same-origin',
+    credentials: onboardingRequestCredentials(),
     cache: 'no-store',
     signal,
   });
@@ -82,7 +82,7 @@ async function postJson<T>(
       'Idempotency-Key': idempotencyKey,
       ...await onboardingAuthorizationHeaders(),
     },
-    credentials: 'same-origin',
+    credentials: onboardingRequestCredentials(),
     body: JSON.stringify(body),
     signal,
   });
@@ -219,7 +219,7 @@ export async function generateBootstrapPackage(
       'Idempotency-Key': idempotencyKey,
       ...await onboardingAuthorizationHeaders(),
     },
-    credentials: 'same-origin',
+    credentials: onboardingRequestCredentials(),
     cache: 'no-store',
     body: JSON.stringify(input),
     signal,

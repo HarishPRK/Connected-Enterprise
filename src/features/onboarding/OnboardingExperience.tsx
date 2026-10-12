@@ -24,7 +24,7 @@ const pendingPanels = {
 } satisfies Record<Surface, { title: string; description: string }>;
 
 export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: string }) {
-  const { user, signOut, signIn, status: authenticationStatus, authenticationRequired, authenticationError } = useOnboardingAuth();
+  const { user, signOut, signIn, status: authenticationStatus, authenticationRequired, authenticationError, accessMode } = useOnboardingAuth();
   const {
     snapshot,
     loading,
@@ -35,14 +35,14 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     upsertOperation,
     upsertProfile,
     upsertController,
-  } = useOnboardingData({ enabled: !authenticationRequired || authenticationStatus === 'authenticated' });
+  } = useOnboardingData({ enabled: authenticationStatus === 'authenticated' });
   const localSimulator = snapshot?.mode === 'local-simulator';
   const tenantRole = user?.tenantRole;
   const canOperate = localSimulator || tenantRole === 'platform_admin' || tenantRole === 'tenant_admin' || tenantRole === 'operator';
   const canAdminister = localSimulator || tenantRole === 'platform_admin' || tenantRole === 'tenant_admin';
   const canIssueBootstrapPackage = snapshot?.mode === 'aws'
     && (tenantRole === 'platform_admin' || tenantRole === 'tenant_admin');
-  const needsSignIn = authenticationRequired && authenticationStatus !== 'authenticated';
+  const needsSignIn = accessMode === 'cognito' && authenticationRequired && authenticationStatus !== 'authenticated';
   const checkingSignIn = authenticationStatus === 'checking';
   const [surface, setSurface] = useState<Surface>('gateways');
   const [operationId, setOperationId] = useState<string>();
@@ -80,7 +80,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                 <LogIn size={13} aria-hidden="true" />Sign in
               </button>
             </>}
-            {user && (
+            {user && accessMode === 'cognito' && (
               <button type="button" className="ce-onb-signout" onClick={signOut} title={user.email ?? user.subject}>
                 <LogOut size={13} aria-hidden="true" />Sign out
               </button>
@@ -96,7 +96,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
         <div className="ce-onb-workspace" ref={workspaceRef}>
           <OnboardingNavigation surface={surface} onNavigate={navigate} canOperate={Boolean(canOperate)}
             showOnboarding={needsSignIn || Boolean(canOperate)} localSimulator={false} streamState={streamState}
-            unavailableLabel={checkingSignIn ? 'Checking session' : needsSignIn ? 'Awaiting sign-in' : loading ? 'Loading inventory' : 'Unavailable'} />
+            unavailableLabel={checkingSignIn ? 'Checking connection' : needsSignIn ? 'Awaiting sign-in' : loading ? 'Loading inventory' : 'Unavailable'} />
           <div className="ce-onb-workspace-content">
             <section id={`ce-onb-${surface}-panel`} aria-labelledby="onboarding-pending-title" aria-busy={checkingSignIn || loading}>
               <div className="ce-onb-section-heading"><div>
@@ -106,14 +106,17 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
               <div className={`ce-onb-alert${!needsSignIn && !loading ? ' is-warning' : ''}`} role="status">
                 {checkingSignIn || (!needsSignIn && loading) ? <>
                   <span className="ce-onb-spinner" aria-hidden="true" />
-                  <span>{checkingSignIn ? 'Confirming your session…' : 'Retrieving tenant inventory…'}</span>
+                  <span>{checkingSignIn ? 'Connecting to onboarding…' : 'Retrieving tenant inventory…'}</span>
                 </> : needsSignIn ? <>
                   <ShieldCheck size={17} aria-hidden="true" />
                   <span>Tenant data and controls become available after sign-in.</span>
                 </> : <>
                   <TriangleAlert size={17} aria-hidden="true" />
-                  <span>{error ?? 'The service did not return an onboarding snapshot.'}</span>
-                  <button type="button" onClick={() => void refresh()} disabled={refreshing}>
+                  <span>{authenticationError ?? error ?? 'The service did not return an onboarding snapshot.'}</span>
+                  <button type="button" onClick={() => {
+                    if (authenticationStatus === 'error' && accessMode !== 'cognito') window.location.reload();
+                    else void refresh();
+                  }} disabled={refreshing}>
                     <RefreshCw size={14} aria-hidden="true" />{refreshing ? 'Retrying…' : 'Retry connection'}
                   </button>
                 </>}
