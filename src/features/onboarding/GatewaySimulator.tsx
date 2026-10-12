@@ -34,7 +34,7 @@ export function GatewaySimulator({ operation }: { operation: OnboardingOperation
   return <section className="ce-onb-simulator" aria-labelledby="gateway-simulator-title">
     <h3 id="gateway-simulator-title"><FlaskConical size={18} aria-hidden="true" />Simulated gateway · live AWS</h3>
     <p>Connect a software gateway on EC2 using the bootstrap ZIP for <strong>{operation.serialNumber}</strong>. It exchanges real AWS certificates, retrieves the signed profile, and simulates applying it. The activation timeline uses AWS acknowledgements.</p>
-    {job ? <p role="status">{job.state === 'running' && <LoaderCircle size={15} aria-hidden="true" />}{job.phase}</p> : operation.status !== 'IN_PROGRESS' ? <p>This operation has finished. Its recorded AWS result is shown below.</p> : <>
+    {job ? <p role="status">{job.state === 'running' && <LoaderCircle size={15} aria-hidden="true" />}{job.state === 'completed' && operation.status === 'SUCCEEDED' ? 'AWS confirmed activation. The simulated gateway is ready.' : job.phase}</p> : operation.status !== 'IN_PROGRESS' ? <p>This operation has finished. Its recorded AWS result is shown below.</p> : <>
       <label htmlFor="simulator-package">Downloaded bootstrap package</label>
       <input id="simulator-package" type="file" accept=".zip,application/zip" disabled={busy || operation.status !== 'IN_PROGRESS'} onChange={event => { setFile(event.target.files?.[0]); setError(undefined); }} />
       <small>The ZIP includes a private key. It is sent to this application's EC2 server and stored in a protected per-device directory for the simulator.</small>
