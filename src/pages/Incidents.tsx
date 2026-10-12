@@ -408,24 +408,22 @@ export function IncidentsPage() {
         <MiniKpi label="Escalated"      value={String(stats.escalated)}    icon={ArrowUpRight} accent="var(--accent-2)" sub="to humans" />
       </div>
 
-      <div className="grid">
+      <div className="grid inc-workspace">
         <div className="col-12"><IncidentsTrend /></div>
         <div className="col-5">
           <Card
+            className="inc-inbox-card"
             title={`Inbox · ${filtered.length}`}
             sub="Open incidents first, then by severity"
             right={
-              <div className="toolbar">
-                <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                  <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
-                  <input
-                    aria-label="Search incidents"
-                    placeholder="Search ID or title"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    style={{ paddingLeft: 30, minWidth: 200 }}
-                  />
-                </div>
+              <div className="inc-search">
+                <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
+                <input
+                  aria-label="Search incidents"
+                  placeholder="Search ID or title"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
               </div>
             }
           >

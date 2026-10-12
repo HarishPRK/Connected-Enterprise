@@ -4304,18 +4304,25 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 }
 
 /* ───── Incidents · segmented status filter ───── */
+/* Bound each panel to its grid track before sizing its controls. */
+.inc-workspace { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.inc-workspace > [class*="col-"],
+.inc-workspace > [class*="col-"] > .card { min-width: 0; }
+.inc-workspace .card-head { flex-wrap: wrap; }
+.inc-workspace .card-head > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.inc-search { position: relative; display: inline-flex; align-items: center; flex: 0 1 220px; min-width: 0; max-width: 100%; }
+.inc-search input { width: 100%; min-width: 0; padding-left: 30px; }
 .inc-seg {
-  display: inline-flex; align-items: center; gap: 2px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
   padding: 3px; margin-bottom: 10px;
   background: rgba(var(--accent-rgb) / 0.05);
   border: 1px solid var(--border);
-  border-radius: 999px;
-  max-width: 100%; overflow-x: auto;
-  scrollbar-width: none;
+  border-radius: 12px;
+  min-width: 0; max-width: 100%;
 }
-.inc-seg::-webkit-scrollbar { display: none; }
 [data-theme="light"] .inc-seg { background: #f1f5f9; }
 .inc-seg button {
+  flex: 0 0 auto;
   border: none; background: transparent; box-shadow: none;
   padding: 5px 11px; border-radius: 999px;
   display: inline-flex; align-items: center; gap: 6px;
@@ -4395,6 +4402,8 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   font-size: 11px; color: var(--text-muted);
 }
 .inc-row-meta .spacer { margin-left: auto; }
+.inc-workspace .inc-row-top, .inc-workspace .inc-row-meta { flex-wrap: wrap; }
+.inc-workspace .inc-row-title { flex-basis: 140px; }
 
 /* Live "ping" indicator for in-flight incidents */
 .inc-ping {
