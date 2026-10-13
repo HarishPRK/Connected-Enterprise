@@ -53,8 +53,10 @@ import { PacketTransferPath } from "../components/widgets/FailoverPacketFlow";
 import type { FailoverSceneData, FailoverSceneNode, FailoverRoutePresentation } from "../components/widgets/failoverSceneTypes";
 import { FailoverRouteStatus } from "../components/widgets/FailoverRouteStatus";
 import { TWIN_PALETTE } from "../components/widgets/failoverTwinPalette";
+import { TWIN_LAYOUT } from "../components/widgets/failoverSceneLayout";
 import "../components/widgets/FailoverTwin.css";
 import { usePathOverride } from "../ui/usePathOverride";
+import { resolveFlowSwitch, tunnelSwitchIntent } from "../ui/failoverFlowSwitch";
 import type { ForceMode, PathCommand } from "../ui/pathOverrideController";
 import {
   GatewayIllustration,
@@ -104,6 +106,8 @@ const metricCfg: Record<
 /** Classify a tunnel into its underlay bucket from the ifname. */
 type Underlay = "fiber" | "5g";
 function inferUnderlay(ifname: string): Underlay {
+  const knownTunnel = tunnelSwitchIntent(ifname);
+  if (knownTunnel) return knownTunnel.mode;
   const n = (ifname || "").toLowerCase();
   if (
     n.includes("cell") ||
@@ -2527,9 +2531,8 @@ function routeClassFor(
 
 /** The exact `mode` strings the gateway's local path API (`/api/path`) accepts.
  *  `auto` lets the device decide; `tunnel1`/`tunnel2` pin the two Fiber tunnels,
- *  `tunnel3`/`tunnel4` pin the two 5G tunnels. The UI now exposes only two
- *  overrides — Force Fiber pins `tunnel1`, Force 5G pins `tunnel3` — but the
- *  other commands (`tunnel2`/`tunnel4`, `fiber`/`5g`) stay valid on the API. */
+ *  `tunnel3`/`tunnel4` pin the two 5G tunnels. Force Fiber pins `tunnel1`,
+ *  Force 5G pins `tunnel3`; the twin can select any known reachable tunnel. */
 /** Calls the gateway's path-control endpoint via the same-origin proxy
  *  (`server/index.ts → /api/gateway/path`). The server publishes the command
  *  to AWS IoT Core (`<source>/path/control`); the gateway's pathcontrol
@@ -2750,6 +2753,23 @@ function GatewayBlock({
     return pick?.ifname ?? deviceActive;
   })();
   const effectiveM = { ...m, active_tunnel: effectiveActiveTunnel };
+  const flowSwitchContext = {
+    mode: viewMode,
+    tunnels: m.tunnels,
+    activeTunnel: effectiveActiveTunnel,
+    requestedTunnel: pathPending ? path.requestedTunnel : null,
+  };
+  const switchableTunnelIds = m.tunnels
+    .map((tunnel) => `tunnel:${tunnel.ifname}`)
+    .filter((nodeId) => resolveFlowSwitch(nodeId, flowSwitchContext) !== null);
+  const onTunnelSwitch = (nodeId: string): boolean => {
+    // Recheck the current feed at drop time, then use the same command ordering,
+    // preview isolation and telemetry confirmation as the override buttons.
+    const intent = resolveFlowSwitch(nodeId, flowSwitchContext);
+    if (!intent) return false;
+    applyPathMode(intent.mode, intent.command, intent.tunnel);
+    return true;
+  };
 
   // App-aware class each tunnel carries (IT / OT / none) under the current mode
   // — same `routeClassFor` policy the topology diagram uses, so the per-tunnel
@@ -2978,6 +2998,8 @@ function GatewayBlock({
         routePresentation={routePresentation}
         reportedActive={deviceActive}
         preview={sample}
+        switchableTunnelIds={switchableTunnelIds}
+        onTunnelSwitch={onTunnelSwitch}
       />
 
       {/* Failover / SLA event ribbon — flips + breaches over the live session */}
@@ -3078,6 +3100,8 @@ function IpsecFlowSvg({
   routePresentation,
   reportedActive,
   preview = false,
+  switchableTunnelIds,
+  onTunnelSwitch,
 }: {
   m: IpsecGatewayState["metrics"];
   c: ThemeColors;
@@ -3104,6 +3128,8 @@ function IpsecFlowSvg({
   routePresentation?: FailoverRoutePresentation;
   reportedActive: string;
   preview?: boolean;
+  switchableTunnelIds: readonly string[];
+  onTunnelSwitch(nodeId: string): boolean;
 }) {
   // Keep the canvas tight: less dead space = a larger render scale when the
   // SVG is fit to the card width, i.e. bigger, readable labels.
@@ -3427,22 +3453,22 @@ function IpsecFlowSvg({
   const deviceState = (devices: DeviceView[]): FailoverSceneNode['status'] => !devices.length ? 'idle'
     : devices.some(device => device.status === 'err') ? 'err' : devices.some(device => device.status !== 'ok') ? 'warn' : 'ok';
   const sceneNodes: FailoverSceneNode[] = [
-    { id: 'it-devices', label: 'IT DEVICES', kind: 'devices', position: [-12, .3, -2.5], color: IT_COLOR,
+    { id: 'it-devices', label: 'IT DEVICES', kind: 'devices', position: [TWIN_LAYOUT.devicesX, .3, -TWIN_LAYOUT.devicesZ], color: IT_COLOR,
       status: deviceState(itAll), detail: itDevices.length ? itDevices.map(device => device.name).join(' · ') : 'NO IT ENDPOINTS REPORTED',
       metrics: [{ label: 'DISCOVERED', value: `${itAll.length} ENDPOINTS` }] },
-    { id: 'ot-devices', label: 'OT DEVICES', kind: 'devices', position: [-12, .3, 2.5], color: OT_COLOR,
+    { id: 'ot-devices', label: 'OT DEVICES', kind: 'devices', position: [TWIN_LAYOUT.devicesX, .3, TWIN_LAYOUT.devicesZ], color: OT_COLOR,
       status: deviceState(otAll), detail: otDevices.length ? otDevices.map(device => device.name).join(' · ') : 'NO OT ENDPOINTS REPORTED',
       metrics: [{ label: 'DISCOVERED', value: `${otAll.length} DEVICES` }] },
-    { id: 'gateway', label: 'EDGE GATEWAY', kind: 'gateway', position: [-8.4, .3, 0], color: accentPurple,
+    { id: 'gateway', label: 'EDGE GATEWAY', kind: 'gateway', position: [TWIN_LAYOUT.gatewayX, .3, 0], color: accentPurple,
       status: anyReachable ? 'ok' : 'warn', active: anyReachable, detail: displayGatewayName(m.gateway.name) || 'GATEWAY',
       metrics: [{ label: 'MAC', value: m.gateway.mac || '—' }, { label: 'PRIMARY WAN', value: m.gateway.prim_wan_ip || '—' },
         { label: 'SECONDARY WAN', value: m.gateway.sec_wan_ip && m.gateway.sec_wan_ip.toLowerCase() !== 'none' ? m.gateway.sec_wan_ip : 'NOT REPORTED' },
         { label: 'LAST REPORTED', value: reportedActive || 'NOT REPORTED' },
         ...(illustratedPath ? [{ label: 'ILLUSTRATED ROUTE', value: activeIfname || 'NOT REPORTED' }] : [])] },
-    { id: 'fiber', label: 'FIBER', kind: 'fiber', position: [-4.4, .3, -2.7], color: FIBER_COLOR,
+    { id: 'fiber', label: 'FIBER', kind: 'fiber', position: [TWIN_LAYOUT.underlayX, .3, -TWIN_LAYOUT.underlayZ], color: FIBER_COLOR,
       status: fiberReachable ? 'ok' : 'warn', active: fiberActive, detail: 'FIBER WAN UNDERLAY',
       metrics: [{ label: 'REACHABLE', value: `${fiberTunnels.filter(t => t.reachable).length} / ${fiberTunnels.length} TUNNELS` }] },
-    { id: 'cellular', label: '5G / CELLULAR', kind: 'cellular', position: [-4.4, .3, 2.7], color: CELL_COLOR,
+    { id: 'cellular', label: '5G / CELLULAR', kind: 'cellular', position: [TWIN_LAYOUT.underlayX, .3, TWIN_LAYOUT.underlayZ], color: CELL_COLOR,
       status: cellReachable ? 'ok' : 'warn', active: cellActive, detail: 'CELLULAR WAN UNDERLAY',
       metrics: [{ label: 'REACHABLE', value: `${cellTunnels.filter(t => t.reachable).length} / ${cellTunnels.length} TUNNELS` }] },
     ...[...fiberTunnels, ...cellTunnels].map<FailoverSceneNode>((t, index, tunnels) => {
@@ -3452,23 +3478,25 @@ function IpsecFlowSvg({
       const carrying = cls != null && t.reachable;
       const color = tunnelColor(t);
       const observedRate = tunnelRates[t.ifname];
-      return { id: `tunnel:${t.ifname}`, label: `TUNNEL ${index + 1}`, kind: 'tunnel',
-        position: [0, .3, tunnels.length > 1 ? -4 + index * 8 / (tunnels.length - 1) : 0],
+      const command = tunnelSwitchIntent(t.ifname)?.command;
+      return { id: `tunnel:${t.ifname}`, label: command ? command.replace('tunnel', 'TUNNEL ') : `TUNNEL ${index + 1}`, kind: 'tunnel',
+        position: [TWIN_LAYOUT.tunnelsX, .3, tunnels.length > 1 ? -TWIN_LAYOUT.tunnelSpread / 2 + index * TWIN_LAYOUT.tunnelSpread / (tunnels.length - 1) : 0],
         color: carrying && cls ? carryColorOf(cls) : underlay === 'fiber' ? FIBER_COLOR : CELL_COLOR,
         status: !t.present ? 'idle' : color === c.err ? 'err' : color === c.warn ? 'warn' : 'ok', active: carrying,
+        switchable: switchableTunnelIds.includes(`tunnel:${t.ifname}`),
         detail: `${t.ifname} · ${underlay === 'fiber' ? 'FIBER' : 'CELLULAR'} · LOGICAL IPSEC TUNNEL`,
         metrics: [{ label: 'STATE', value: !t.present ? 'ABSENT' : !t.reachable ? 'UNREACHABLE' : carrying ? illustratedPath ? 'REQUESTED ROUTE' : isTarget ? 'POLICY ROUTE' : 'CARRYING' : 'STANDBY' },
           { label: 'LATENCY', value: t.reachable && t.latency_ms >= 0 ? `${t.latency_ms.toFixed(1)} MS` : '—' },
           { label: 'LOSS', value: t.reachable ? `${t.loss_percent.toFixed(1)}%` : '—' },
           { label: 'OBSERVED RATE', value: Number.isFinite(observedRate) && observedRate >= 0 ? fmtRate(observedRate).toUpperCase() : '—' }] };
     }),
-    { id: 'sdwan', label: 'SD-WAN', kind: 'sdwan', position: [5, .3, 0], color: SDWAN_COLOR,
+    { id: 'sdwan', label: 'SD-WAN', kind: 'sdwan', position: [TWIN_LAYOUT.sdwanX, .3, 0], color: SDWAN_COLOR,
       status: m.wan.link_up ? 'ok' : 'err', active: m.wan.link_up, detail: 'IPSEC TERMINATION · SECURE FABRIC TRANSIT',
       metrics: [{ label: 'GATEWAY WAN', value: m.wan.link_up ? 'UP' : 'DOWN' },
         { label: 'WAN THROUGHPUT', value: observedMbps == null ? 'WAITING FOR SAMPLE' : fmtRate(observedMbps).toUpperCase() }] },
-    { id: 'internet', label: 'INTERNET', kind: 'internet', position: [9, .3, 0], color: INT_COLOR,
+    { id: 'internet', label: 'INTERNET', kind: 'internet', position: [TWIN_LAYOUT.internetX, .3, 0], color: INT_COLOR,
       status: m.wan.link_up ? 'ok' : 'warn', detail: 'PUBLIC EGRESS', metrics: [{ label: 'WAN PATH', value: m.wan.link_up ? 'UP' : 'DOWN' }] },
-    { id: 'cloud', label: 'CLOUD', kind: 'cloud', position: [13, .3, 0], color: INT_COLOR,
+    { id: 'cloud', label: 'CLOUD', kind: 'cloud', position: [TWIN_LAYOUT.cloudX, .3, 0], color: INT_COLOR,
       status: m.wan.link_up ? 'ok' : 'warn', detail: 'APPLICATIONS & SERVICES', metrics: [{ label: 'WAN PATH', value: m.wan.link_up ? 'UP' : 'DOWN' }] },
   ];
   const sceneData: FailoverSceneData = {
@@ -3510,7 +3538,8 @@ function IpsecFlowSvg({
     return color;
   };
   const stageData: FailoverSceneData = { ...sceneData,
-    nodes: sceneData.nodes.map(node => ({ ...node, color: stageColor(node.color) })),
+    nodes: sceneData.nodes.map(node => ({ ...node, color: node.kind === 'internet' ? TWIN_PALETTE.internet
+      : node.kind === 'cloud' ? TWIN_PALETTE.cloud : node.kind === 'gateway' ? TWIN_PALETTE.gateway : stageColor(node.color) })),
     links: sceneData.links.map(link => ({ ...link, color: stageColor(link.color) })),
   };
 
@@ -3599,7 +3628,7 @@ function IpsecFlowSvg({
         <Suspense fallback={<div className="ipsec-scene-preparing" role="status">PREPARING YOUR NETWORK IN 3D</div>}>
           <FailoverNetworkStage data={stageData} theme={{ light: false, text: TWIN_PALETTE.text, muted: TWIN_PALETTE.muted,
             enterprise: TWIN_PALETTE.enterprise, operator: TWIN_PALETTE.operator, ok: TWIN_PALETTE.route,
-            warn: TWIN_PALETTE.warning, err: TWIN_PALETTE.error }} onUnavailable={onSceneUnavailable} />
+            warn: TWIN_PALETTE.warning, err: TWIN_PALETTE.error }} onUnavailable={onSceneUnavailable} onTunnelSwitch={onTunnelSwitch} />
         </Suspense>
       ) : (<>
       <FailoverRouteStatus route={routePresentation} />

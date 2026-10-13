@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Expand, Minimize2, Pause, Play, RotateCcw, ZoomIn, ZoomOut, Orbit, Box, Focus, ScanLine, ArrowRight, X } from 'lucide-react';
+import { Expand, Minimize2, Pause, Play, RotateCcw, ZoomIn, ZoomOut, Orbit, Box, Focus, ScanLine, ArrowRight, X, GripVertical, MoveRight } from 'lucide-react';
 import type { FailoverSceneData, FailoverSceneRenderer, FailoverSceneTheme } from './failoverSceneTypes';
 import './FailoverNetworkStage.css';
 import { FailoverRouteStatus } from './FailoverRouteStatus';
@@ -8,20 +8,29 @@ interface Props {
   data: FailoverSceneData;
   theme: FailoverSceneTheme;
   onUnavailable: () => void;
+  onTunnelSwitch?: (nodeId: string) => boolean;
 }
 
-export default function FailoverNetworkStage({ data, theme, onUnavailable }: Props) {
+export default function FailoverNetworkStage({ data, theme, onUnavailable, onTunnelSwitch }: Props) {
   const inspectorId = useId();
   const shellRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<FailoverSceneRenderer | null>(null);
-  const latestRef = useRef({ data, theme, onUnavailable });
+  const latestRef = useRef({ data, theme, onUnavailable, onTunnelSwitch });
+  const destinationRef = useRef<HTMLSelectElement>(null);
+  const flowPointerRef = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>('gateway');
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [motion, setMotion] = useState(true);
   const [orbit, setOrbit] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [flowDrag, setFlowDrag] = useState<{ targetId: string | null } | null>(null);
+  const [flowMessage, setFlowMessage] = useState('');
+  const [destinationId, setDestinationId] = useState('');
+  const destinations = data.nodes.filter(node => node.kind === 'tunnel' && node.switchable && !node.active);
+  const destination = destinations.find(node => node.id === destinationId) ?? destinations[0];
+  const dragTarget = data.nodes.find(node => node.id === flowDrag?.targetId);
   const selected = data.nodes.find(node => node.id === selectedId);
   const hovered = data.nodes.find(node => node.id === hoveredId);
   const connections = selected ? data.links.filter(link => link.from === selected.id || link.to === selected.id)
@@ -31,9 +40,22 @@ export default function FailoverNetworkStage({ data, theme, onUnavailable }: Pro
   const inspectorLabel = selected?.kind === 'tunnel' ? 'LOGICAL TUNNEL INSPECTOR' : selected && ['cloud', 'internet'].includes(selected.kind) ? 'NETWORK NODE INSPECTOR' : 'EQUIPMENT INSPECTOR';
 
   useEffect(() => {
-    latestRef.current = { data, theme, onUnavailable };
+    latestRef.current = { data, theme, onUnavailable, onTunnelSwitch };
     rendererRef.current?.update(data, theme);
-  }, [data, theme, onUnavailable]);
+  }, [data, theme, onUnavailable, onTunnelSwitch]);
+
+  function switchFlow(id: string) {
+    const latest = latestRef.current;
+    const target = latest.data.nodes.find(node => node.id === id && node.kind === 'tunnel' && node.switchable && !node.active);
+    if (latest.data.mode !== 'live' || !target || !latest.onTunnelSwitch?.(id)) {
+      setFlowMessage('TUNNEL IS NO LONGER AVAILABLE. CHOOSE ANOTHER ROUTE.');
+      return false;
+    }
+    setFlowMessage(latest.data.preview ? `PREVIEW MOVED TO ${target.label}` : `${target.label} REQUESTED. WAITING FOR GATEWAY CONFIRMATION.`);
+    return true;
+  }
+  const switchFlowRef = useRef(switchFlow);
+  useEffect(() => { switchFlowRef.current = switchFlow; });
 
   useEffect(() => {
     const host = hostRef.current;
@@ -49,7 +71,9 @@ export default function FailoverNetworkStage({ data, theme, onUnavailable }: Pro
         const latest = latestRef.current;
         const renderer = createFailoverSceneRenderer(host, latest.data, latest.theme,
           id => setSelectedId(id), () => latestRef.current.onUnavailable(),
-          id => setHoveredId(id), () => setOrbit(false));
+          id => setHoveredId(id), () => setOrbit(false),
+          id => switchFlowRef.current(id),
+          (targetId, dragging) => setFlowDrag(dragging ? { targetId } : null));
         if (cancelled) { renderer.dispose(); return; }
         rendererRef.current = renderer;
         renderer.select('gateway');
@@ -105,9 +129,42 @@ export default function FailoverNetworkStage({ data, theme, onUnavailable }: Pro
         </div>
       </div>
       <FailoverRouteStatus route={data.route} />
+      {data.mode === 'live' && onTunnelSwitch && <div className="failover-stage-flow-controls" aria-label="Move packet flow">
+        <button type="button" className="failover-stage-flow-handle" disabled={!ready || !destinations.length}
+          aria-label="Drag packet flow to a tunnel, or choose a destination below" title="Drag this packet onto a reachable tunnel"
+          onPointerDown={event => {
+            if (!event.isPrimary || event.button !== 0 || !rendererRef.current?.beginFlowDrag(event.clientX, event.clientY)) return;
+            event.preventDefault();
+            flowPointerRef.current = event.pointerId;
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={event => { if (flowPointerRef.current === event.pointerId) rendererRef.current?.moveFlowDrag(event.clientX, event.clientY); }}
+          onPointerUp={event => {
+            if (flowPointerRef.current !== event.pointerId) return;
+            rendererRef.current?.moveFlowDrag(event.clientX, event.clientY);
+            rendererRef.current?.endFlowDrag(true);
+            flowPointerRef.current = null;
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onLostPointerCapture={() => { rendererRef.current?.endFlowDrag(false); flowPointerRef.current = null; }}
+          onPointerCancel={() => { rendererRef.current?.endFlowDrag(false); flowPointerRef.current = null; }}
+          onClick={() => destinationRef.current?.focus()}><GripVertical size={14} /><span className="failover-stage-packet" aria-hidden="true" /><span>MOVE FLOW</span></button>
+        <span className="failover-stage-flow-hint">{destinations.length ? 'DRAG THE PACKET OR ACTIVE PATH ONTO A TUNNEL' : 'NO ALTERNATE REACHABLE TUNNEL'}</span>
+        <div className="failover-stage-flow-destination">
+          <label htmlFor={`${inspectorId}-destination`}>DESTINATION</label>
+          <select ref={destinationRef} id={`${inspectorId}-destination`} aria-label="Destination tunnel" value={destination?.id ?? ''}
+            disabled={!ready || !destinations.length} onChange={event => setDestinationId(event.target.value)}>
+            {!destinations.length && <option value="">NO AVAILABLE TUNNEL</option>}
+            {destinations.map(node => <option key={node.id} value={node.id}>{node.label}</option>)}
+          </select>
+          <button type="button" disabled={!ready || !destination} onClick={() => { if (destination) switchFlow(destination.id); }}><MoveRight size={14} />{data.preview ? 'PREVIEW TUNNEL' : 'SWITCH TUNNEL'}</button>
+        </div>
+        <span className="failover-stage-sr" role="status" aria-live="polite">{flowDrag ? dragTarget ? `RELEASE TO USE ${dragTarget.label}` : 'DRAG TO A HIGHLIGHTED TUNNEL. ESCAPE TO CANCEL.' : flowMessage}</span>
+      </div>}
       <div className="failover-stage-viewport" ref={hostRef}>
         {!ready && <div className="failover-stage-loading" role="status"><Box size={24} /><span>PREPARING YOUR NETWORK DIGITAL TWIN</span></div>}
-        {ready && hovered && <div className="failover-stage-hover" aria-hidden="true"><Box size={15} /><div><strong>{hovered.label}</strong><span>CLICK TO INSPECT · DOUBLE-CLICK TO FOCUS</span></div></div>}
+        {ready && hovered && !flowDrag && <div className="failover-stage-hover" aria-hidden="true"><Box size={15} /><div><strong>{hovered.label}</strong><span>CLICK TO INSPECT · DOUBLE-CLICK TO FOCUS</span></div></div>}
+        {flowDrag && <div className="failover-stage-drop-hint"><MoveRight size={16} /><strong>{dragTarget ? `RELEASE TO ${data.preview ? 'PREVIEW' : 'SWITCH TO'} ${dragTarget.label}` : 'DROP ON A HIGHLIGHTED TUNNEL'}</strong><span>ESC TO CANCEL</span></div>}
       </div>
       <div className="failover-stage-node-index" aria-label="Select network node">
         <span className="failover-stage-index-label">INSPECT</span>

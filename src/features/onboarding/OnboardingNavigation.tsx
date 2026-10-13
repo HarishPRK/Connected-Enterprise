@@ -1,4 +1,4 @@
-import { CloudCog, FileKey2, FileLock2, ServerCog } from 'lucide-react';
+import { CloudCog, FileKey2, FileLock2, FlaskConical, ServerCog } from 'lucide-react';
 import type { OnboardingStreamState } from './useOnboardingData';
 
 export type WorkspaceSurface = 'gateways' | 'profiles' | 'controller' | 'bootstrap';
@@ -14,11 +14,14 @@ interface OnboardingNavigationProps {
   generatedAt?: string;
   unavailableLabel?: string;
   showOnboarding?: boolean;
+  onSimulateFlow?: () => void;
+  simulationSelected?: boolean;
 }
 
 export function OnboardingNavigation({
   surface, onNavigate, canOperate, gatewayCount, profileCount, streamState, localSimulator, generatedAt,
   unavailableLabel, showOnboarding = canOperate,
+  onSimulateFlow, simulationSelected = false,
 }: OnboardingNavigationProps) {
   const items = [
     { id: 'gateways' as const, title: 'Gateways', icon: CloudCog, count: gatewayCount ?? '—' },
@@ -31,13 +34,18 @@ export function OnboardingNavigation({
     <div className="ce-onb-workspace-toolbar">
       <nav className="ce-onb-workspace-nav" aria-label="Onboarding workspace">
         {items.map(({ id, title, icon: Icon, count }) => (
-          <button key={id} type="button" aria-current={current === id ? 'page' : undefined}
+          <button key={id} type="button" aria-current={current === id && !(id === 'bootstrap' && simulationSelected) ? 'page' : undefined}
             onClick={() => onNavigate(id)}>
             <Icon size={16} aria-hidden="true" />
             <span>{title}</span>
             {count !== undefined && <span className="ce-onb-nav-count">{count}</span>}
           </button>
         ))}
+        {onSimulateFlow && <button type="button" className="ce-onb-simulate-action"
+          aria-current={current === 'bootstrap' && simulationSelected ? 'page' : undefined}
+          onClick={onSimulateFlow}>
+          <FlaskConical size={16} aria-hidden="true" /><span>SIMULATE FLOW</span>
+        </button>}
       </nav>
       <div className="ce-onb-workspace-status">
         <strong>{!generatedAt ? 'Onboarding workspace' : localSimulator ? 'Local simulator' : 'AWS control plane'}</strong>

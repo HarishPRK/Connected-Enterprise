@@ -1,4 +1,4 @@
-import type { ProfileVersion } from './types';
+import type { ProfileVersion, Site } from './types';
 
 /** Publication time is comparable across profile families; version numbers
  * only have meaning inside one family. Never change the supplied snapshot. */
@@ -35,4 +35,19 @@ export function selectableProfiles(profiles: readonly ProfileVersion[], selected
   return selected && !current.some((profile) => profile.id === selectedId)
     ? [selected, ...current]
     : current;
+}
+
+/** Carry an operation's assignment into a new simulation, but recheck the
+ * verified gateway model and authorized sites before choosing defaults. */
+export function initialOnboardingAssignment(
+  profiles: readonly ProfileVersion[],
+  modelId: string,
+  allowedSites: readonly Site[],
+  preferred: { siteId?: string; profileVersionId?: string } = {},
+): { siteId: string; profileVersionId: string } {
+  const compatible = selectableProfiles(profiles.filter(profile => profile.modelId === modelId), preferred.profileVersionId);
+  return {
+    siteId: (allowedSites.find(site => site.id === preferred.siteId) ?? allowedSites[0])?.id ?? '',
+    profileVersionId: (compatible.find(profile => profile.id === preferred.profileVersionId) ?? compatible[0])?.id ?? '',
+  };
 }

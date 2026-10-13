@@ -48,6 +48,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
   const [surface, setSurface] = useState<Surface>('gateways');
   const [operationId, setOperationId] = useState<string>();
   const [managedSimulatorSelected, setManagedSimulatorSelected] = useState(false);
+  const [simulationContext, setSimulationContext] = useState<{ siteId?: string; profileVersionId?: string; serialNumber?: string }>({});
   const [flowLaunchError, setFlowLaunchError] = useState<string>();
   const managedSimulatorAvailable = snapshot?.mode === 'aws' && onboardingGatewaySimulatorAvailable();
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -55,11 +56,22 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     setSurface(next);
     window.requestAnimationFrame(() => workspaceRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' }));
   };
+  const navigateWorkspace = (next: WorkspaceSurface) => {
+    if (next === 'bootstrap') setManagedSimulatorSelected(false);
+    navigate(next);
+  };
   const openOperation = (operation: OnboardingOperation, launchError?: string) => {
     upsertOperation(operation);
     setOperationId(operation.id);
     setFlowLaunchError(launchError);
     navigate('operation');
+  };
+  const openSimulation = (operation?: OnboardingOperation) => {
+    setSimulationContext(operation ? {
+      siteId: operation.siteId, profileVersionId: operation.profileVersionId, serialNumber: operation.serialNumber,
+    } : {});
+    setManagedSimulatorSelected(true);
+    navigate('bootstrap');
   };
 
   const activeOperation = operationId
@@ -99,7 +111,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
 
       {!snapshot ? (
         <div className="ce-onb-workspace" ref={workspaceRef}>
-          <OnboardingNavigation surface={surface} onNavigate={navigate} canOperate={Boolean(canOperate)}
+          <OnboardingNavigation surface={surface} onNavigate={navigateWorkspace} canOperate={Boolean(canOperate)}
             showOnboarding={needsSignIn || Boolean(canOperate)} localSimulator={false} streamState={streamState}
             unavailableLabel={checkingSignIn ? 'Checking connection' : needsSignIn ? 'Awaiting sign-in' : loading ? 'Loading inventory' : 'Unavailable'} />
           <div className="ce-onb-workspace-content">
@@ -140,8 +152,10 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
           )}
 
           <div className="ce-onb-workspace" ref={workspaceRef}>
-            <OnboardingNavigation surface={surface} onNavigate={navigate} canOperate={Boolean(canOperate)}
+            <OnboardingNavigation surface={surface} onNavigate={navigateWorkspace} canOperate={Boolean(canOperate)}
               gatewayCount={snapshot.gateways.length} profileCount={currentProfiles(snapshot.profiles).length}
+              onSimulateFlow={snapshot.mode === 'aws' && canOperate ? () => openSimulation(surface === 'operation' ? activeOperation : undefined) : undefined}
+              simulationSelected={managedSimulatorSelected}
               localSimulator={Boolean(localSimulator)} streamState={streamState} generatedAt={snapshot.generatedAt} />
             <div className="ce-onb-workspace-content">
 
@@ -161,7 +175,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                     canResetRegistration={snapshot.canResetGatewayRegistration}
                     canDeployProfile={canOperate}
                     onRefresh={() => void refresh()}
-                    onInitiateOnboarding={() => navigate('bootstrap')}
+                    onInitiateOnboarding={() => navigateWorkspace('bootstrap')}
                     onViewProfiles={() => navigate('profiles')}
                     localSimulator={Boolean(localSimulator)}
                     onOperation={openOperation}
@@ -192,20 +206,27 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
 
               {surface === 'bootstrap' && canOperate && (
                 <div id="ce-onb-bootstrap-panel">
-                  {managedSimulatorAvailable && <div className="ce-onb-enrollment-choice" role="group" aria-label="Gateway enrollment type">
+                  {snapshot.mode === 'aws' && <div className="ce-onb-enrollment-choice" role="group" aria-label="Gateway enrollment type">
                     <button type="button" aria-pressed={!managedSimulatorSelected} onClick={() => setManagedSimulatorSelected(false)}><FileKey2 size={16} aria-hidden="true" />Physical gateway</button>
-                    <button type="button" aria-pressed={managedSimulatorSelected} onClick={() => setManagedSimulatorSelected(true)}><FlaskConical size={16} aria-hidden="true" />Simulated gateway</button>
-                    <p>{managedSimulatorSelected ? 'Register a MOCK- gateway, then INITIATE FLOW. The server prepares the connection internally.' : 'Prepare a certificate package for installation on your physical gateway.'}</p>
+                    <button type="button" aria-pressed={managedSimulatorSelected} onClick={() => openSimulation()}><FlaskConical size={16} aria-hidden="true" />SIMULATE FLOW</button>
+                    <p>{managedSimulatorSelected ? 'Run a separate software gateway through the reported onboarding stages. AWS identity and configuration retrieval are live; device application is simulated.' : 'Prepare a certificate package for installation on your physical gateway.'}</p>
                   </div>}
-                  {localSimulator || managedSimulatorAvailable && managedSimulatorSelected ? <OnboardingWizard
-                    key={managedSimulatorSelected ? 'managed-gateway' : 'local-gateway'}
+                  {managedSimulatorSelected && !managedSimulatorAvailable && snapshot.mode === 'aws' ? <section className="ce-onb-simulation-entry" aria-labelledby="simulation-unavailable-title">
+                    <FlaskConical size={23} aria-hidden="true" />
+                    <div><h2 id="simulation-unavailable-title">Simulation is unavailable in this session</h2><p>This deployment has not enabled the managed software-gateway flow for your current session. A tenant administrator can check simulator access. Physical gateway onboarding remains available.</p></div>
+                    <button type="button" onClick={() => setManagedSimulatorSelected(false)}>Use physical gateway</button>
+                  </section> : localSimulator || managedSimulatorAvailable && managedSimulatorSelected ? <>
+                    {managedSimulatorSelected && simulationContext.serialNumber && <p className="ce-onb-simulation-context">Using the site and profile from <strong>{simulationContext.serialNumber}</strong> for a new simulated gateway. The original operation stays unchanged.</p>}
+                    <OnboardingWizard
+                    key={managedSimulatorSelected ? `managed-gateway:${simulationContext.serialNumber ?? ''}` : 'local-gateway'}
                     profiles={snapshot.profiles}
                     models={snapshot.gatewayModels}
-                    preferredSiteId={preferredSiteId}
+                    preferredSiteId={managedSimulatorSelected ? simulationContext.siteId ?? preferredSiteId : preferredSiteId}
+                    preferredProfileVersionId={managedSimulatorSelected ? simulationContext.profileVersionId : undefined}
                     onCancel={() => navigate('gateways')}
                     onStarted={openOperation}
                     managedSimulator={Boolean(managedSimulatorAvailable && managedSimulatorSelected)}
-                  /> : <BootstrapPackageManager
+                  /></> : <BootstrapPackageManager
                     key={`${snapshot.tenant.id}:${user?.subject ?? ''}`}
                     profiles={snapshot.profiles}
                     sites={snapshot.sites}
@@ -228,7 +249,8 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                   streamState={streamState}
                   onUpdate={upsertOperation}
                   flowLaunchError={flowLaunchError}
-                  onContinueOnboarding={canOperate ? () => navigate('bootstrap') : undefined}
+                  onSimulateFlow={snapshot.mode === 'aws' && canOperate ? () => openSimulation(activeOperation) : undefined}
+                  onContinueOnboarding={canOperate ? () => navigateWorkspace('bootstrap') : undefined}
                   onBack={() => {
                     navigate('gateways');
                     void refresh();

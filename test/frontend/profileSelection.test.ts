@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { currentProfiles, selectableProfiles } from '../../src/features/onboarding/profileSelection';
+import { currentProfiles, initialOnboardingAssignment, selectableProfiles } from '../../src/features/onboarding/profileSelection';
 import type { ProfileVersion } from '../../src/features/onboarding/types';
 
 function profile(id: string, overrides: Partial<ProfileVersion> = {}): ProfileVersion {
@@ -53,4 +53,25 @@ test('missing hashes never cause unrelated configurations to be hidden', () => {
     profile('b', { profileId: 'other', contentHash: '' }),
   ]).length, 2);
   assert.deepEqual(currentProfiles([]), []);
+});
+
+test('a simulation preserves its source operation site and exact compatible profile version', () => {
+  const original = profile('v1');
+  const newest = profile('v2', { version: 2, createdAt: '2026-09-01T00:00:00Z' });
+  const sites = [{ id: 'site-a', name: 'A', location: 'A' }, { id: 'site-b', name: 'B', location: 'B' }];
+  assert.deepEqual(initialOnboardingAssignment([original, newest], 'gateway-a', sites, {
+    siteId: 'site-b', profileVersionId: original.id,
+  }), { siteId: 'site-b', profileVersionId: original.id });
+});
+
+test('simulation defaults cannot select a source site that is unauthorized or a profile for another model', () => {
+  const current = profile('compatible');
+  const other = profile('incompatible', { modelId: 'gateway-b', createdAt: '2026-10-01T00:00:00Z' });
+  const sites = [{ id: 'allowed', name: 'Allowed', location: 'A' }];
+  assert.deepEqual(initialOnboardingAssignment([current, other], 'gateway-a', sites, {
+    siteId: 'forbidden', profileVersionId: other.id,
+  }), { siteId: 'allowed', profileVersionId: current.id });
+  assert.deepEqual(initialOnboardingAssignment([other], 'gateway-a', [], {
+    siteId: 'forbidden', profileVersionId: other.id,
+  }), { siteId: '', profileVersionId: '' });
 });

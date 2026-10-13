@@ -6,6 +6,7 @@ import {
   Clock3,
   CloudCog,
   FileCheck2,
+  FlaskConical,
   LoaderCircle,
   Radio,
   RotateCcw,
@@ -15,6 +16,7 @@ import {
 import { fetchOnboardingOperation } from './api';
 import { onboardingGatewaySimulatorAvailable } from './auth';
 import { GatewaySimulator } from './GatewaySimulator';
+import { isManagedGatewaySerial } from './gatewayFlowPresentation';
 import { isAuthenticatedPullConfirmedOperation } from './gatewayProfileDeploymentEligibility';
 import type { OnboardingOperation, OnboardingState, Site } from './types';
 import { isOperationHealthy, isOperationTerminal } from './types';
@@ -27,6 +29,7 @@ interface OperationProgressProps {
   onUpdate: (operation: OnboardingOperation) => void;
   onBack: () => void;
   onContinueOnboarding?: () => void;
+  onSimulateFlow?: () => void;
   flowLaunchError?: string;
 }
 
@@ -140,6 +143,7 @@ export function OperationProgress({
   onUpdate,
   onBack,
   onContinueOnboarding,
+  onSimulateFlow,
   flowLaunchError,
 }: OperationProgressProps) {
   useEffect(() => {
@@ -177,6 +181,8 @@ export function OperationProgress({
   const healthy = isOperationHealthy(operation);
   const failed = operation.status === 'FAILED';
   const registrationReset = operation.failure?.code === 'GATEWAY_RESET';
+  const simulatedIdentity = isManagedGatewaySerial(operation.serialNumber);
+  const managedFlowAvailable = onboardingGatewaySimulatorAvailable();
   const rolledBack = operation.state === 'ROLLED_BACK' || operation.failure?.rolledBack;
   const onboardingComplete = operation.type === 'ONBOARD'
     && hasReachedMilestone(operation, 'OPERATIONAL_IDENTITY_ISSUED');
@@ -229,13 +235,29 @@ export function OperationProgress({
       {registrationReset && (
         <div className="ce-onb-alert is-warning ce-onb-reset-notice" role="status">
           <RotateCcw size={17} aria-hidden="true" />
-          <span>This attempt was closed when its registration was reset. {onboardingGatewaySimulatorAvailable() && /^MOCK-/.test(operation.serialNumber) ? 'Create a new simulated-gateway flow from Initiate Onboarding.' : 'Continue onboarding with your current downloaded package.'}</span>
+          <span>This attempt was closed when its registration was reset. {managedFlowAvailable && simulatedIdentity ? 'Create a new simulated-gateway flow using SIMULATE FLOW.' : 'Continue onboarding with your current downloaded package.'}</span>
           {onContinueOnboarding && <button type="button" onClick={onContinueOnboarding}>Continue onboarding</button>}
         </div>
       )}
 
-      {onboardingGatewaySimulatorAvailable() && operation.type === 'ONBOARD' && /^MOCK-/.test(operation.serialNumber)
+      {managedFlowAvailable && operation.type === 'ONBOARD' && simulatedIdentity
         && !registrationReset && <GatewaySimulator key={operation.id} operation={operation} initialError={flowLaunchError} />}
+
+      {operation.type === 'ONBOARD' && (!simulatedIdentity || !managedFlowAvailable || registrationReset) && onSimulateFlow && (
+        <section className="ce-onb-simulation-entry" aria-labelledby="operation-simulation-title">
+          <FlaskConical size={23} aria-hidden="true" />
+          <div>
+            <h3 id="operation-simulation-title">See the onboarding flow with a simulated gateway</h3>
+            <p>{!simulatedIdentity
+              ? `${operation.serialNumber} uses the physical gateway flow, which advances when the device connects. SIMULATE FLOW opens a separate MOCK- gateway using this site and profile.`
+              : registrationReset
+                ? 'This registration was reset. SIMULATE FLOW opens a new software-gateway setup using this site and profile.'
+                : 'The managed simulator is unavailable in this session. Open SIMULATE FLOW to review availability.'}</p>
+            <small>{managedFlowAvailable ? 'No ZIP upload. Review the assignment, then INITIATE FLOW to follow the reported stages.' : 'Simulation requires managed simulator access for this deployment and session.'}</small>
+          </div>
+          <button type="button" className="primary" onClick={onSimulateFlow}><FlaskConical size={15} aria-hidden="true" />SIMULATE FLOW</button>
+        </section>
+      )}
 
       <div className="ce-onb-operation-layout">
         <div className="ce-onb-progress-rail" aria-live="polite">

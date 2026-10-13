@@ -9,6 +9,8 @@ export interface FailoverSceneNode {
   color: string;
   status: 'ok' | 'warn' | 'err' | 'idle';
   active?: boolean;
+  /** True only for a reachable tunnel with a supported switch command. */
+  switchable?: boolean;
   detail: string;
   metrics?: Array<{ label: string; value: string }>;
 }
@@ -59,6 +61,9 @@ export interface FailoverSceneRenderer {
   zoom(direction: 'in' | 'out'): void;
   setMotion(enabled: boolean): void;
   setOrbit(enabled: boolean): void;
+  beginFlowDrag(clientX: number, clientY: number): boolean;
+  moveFlowDrag(clientX: number, clientY: number): void;
+  endFlowDrag(commit: boolean): void;
   resize(): void;
   dispose(): void;
 }

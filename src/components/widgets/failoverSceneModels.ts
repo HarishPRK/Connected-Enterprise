@@ -12,6 +12,7 @@ type ModelMaterials = {
   accent: THREE.MeshStandardMaterial;
   glass: THREE.MeshPhysicalMaterial;
   status: THREE.MeshStandardMaterial;
+  light: THREE.MeshStandardMaterial;
   plinth: THREE.MeshStandardMaterial;
   plinthTop: THREE.MeshStandardMaterial;
 };
@@ -41,6 +42,7 @@ function bodyMaterial(color: string, node: FailoverSceneNode, theme: FailoverSce
   });
   material.userData.onlineColor = color;
   material.userData.idleColor = idleColor;
+  material.userData.surfaceEmission = 0.24;
   return material;
 }
 
@@ -84,6 +86,9 @@ function materials(node: FailoverSceneNode, theme: FailoverSceneTheme): ModelMat
   });
   face.userData.onlineColor = `#${panelColor}`;
   face.userData.idleColor = TWIN_PALETTE.metal;
+  face.userData.surfaceEmission = 0.32;
+  const light = new THREE.MeshStandardMaterial({ color: bodyColor, emissive: bodyColor, roughness: 0.35 });
+  light.userData.activityLight = true;
   return {
     shell: bodyMaterial(bodyColor, node, theme),
     face,
@@ -100,6 +105,7 @@ function materials(node: FailoverSceneNode, theme: FailoverSceneTheme): ModelMat
     accent,
     glass,
     status,
+    light,
     plinth: new THREE.MeshStandardMaterial({ color: TWIN_PALETTE.floorEdge, metalness: 0.12, roughness: 0.88 }),
     plinthTop: new THREE.MeshStandardMaterial({ color: TWIN_PALETTE.enclosure, metalness: 0.22, roughness: 0.75 }),
   };
@@ -197,7 +203,8 @@ function repeatedBoxes(parent: THREE.Object3D, size: Position, positions: Positi
 function plinth(group: THREE.Group, m: ModelMaterials): void {
   box(group, [2.08, 0.042, 1.88], [0, 0.021, 0], m.plinth, 0.02);
   box(group, [1.96, 0.012, 1.76], [0, 0.048, 0], m.plinthTop, 0.018);
-  box(group, [1.48, 0.008, 0.014], [-0.1, 0.011, 0.938], m.metal, 0.004);
+  box(group, [1.68, 0.026, 0.022], [0, 0.052, 0.913], m.light, 0.005);
+  for (const x of [-0.971, 0.971]) box(group, [0.019, 0.018, 1.38], [x, 0.052, 0], m.light, 0.004);
   repeatedBoxes(group, [0.045, 0.011, 0.045], [-0.91, 0.91].flatMap(x => [-0.79, 0.79].map(z => [x, 0.06, z] as Position)), m.metal);
   sphere(group, 0.028, [0.87, 0.075, 0.83], m.status);
 }
@@ -206,7 +213,7 @@ function gateway(group: THREE.Group, m: ModelMaterials): void {
   box(group, [1.73, 0.37, 1.02], [0, 0.4, 0], m.shell, 0.075);
   box(group, [1.61, 0.045, 0.93], [0, 0.602, 0], m.face, 0.02);
   box(group, [1.62, 0.23, 0.018], [0, 0.396, 0.512], m.recess, 0.015);
-  box(group, [1.61, 0.018, 0.025], [0, 0.535, 0.521], m.metal, 0.008);
+  box(group, [1.61, 0.018, 0.025], [0, 0.535, 0.521], m.light, 0.008);
   repeatedBoxes(group, [0.038, 0.008, 0.48], Array.from({ length: 10 }, (_, i) => [-0.3 + i * 0.068, 0.629, -0.035]), m.recess);
   for (let i = 0; i < 4; i += 1) {
     const x = -0.48 + i * 0.285;
@@ -302,7 +309,7 @@ function tunnel(group: THREE.Group, m: ModelMaterials): void {
   box(group, [3.4, 0.042, 1.1], [0, 0.021, 0], m.plinth, 0.02);
   box(group, [3.3, 0.012, 1.02], [0, 0.048, 0], m.plinthTop, 0.018);
   box(group, [2.98, 0.008, 0.96], [0, 0.058, 0], m.plinth, 0.01);
-  box(group, [2.7, 0.008, 0.015], [-0.04, 0.013, 0.55], m.metal, 0.004);
+  box(group, [2.98, 0.025, 0.026], [0, 0.057, 0.535], m.light, 0.005);
   sphere(group, 0.028, [1.47, 0.081, 0.434], m.status);
 
   // An open, octagonal collar preserves a clear packet channel along X.
@@ -340,7 +347,7 @@ function tunnel(group: THREE.Group, m: ModelMaterials): void {
   cover.receiveShadow = false;
   for (const z of [-0.23, 0.23]) {
     box(group, [2.84, 0.026, 0.026], [0, 0.382, z], m.accent, 0.009);
-    box(group, [2.74, 0.04, 0.04], [0, 0.862, z], m.metal, 0.012);
+    box(group, [2.74, 0.04, 0.04], [0, 0.862, z], m.light, 0.012);
   }
   for (const x of [-0.58, 0.58]) {
     const frame = mesh(group, collarGeometry, m.metal, [x - 0.022, 0.62, 0], [0, Math.PI / 2, 0]);
@@ -507,7 +514,7 @@ function cloud(group: THREE.Group, m: ModelMaterials, theme: FailoverSceneTheme,
   solid.receiveShadow = true;
   group.add(solid);
   const perimeter = new THREE.CatmullRomCurve3(silhouette.getPoints(18).slice(0, -1).map((point) => new THREE.Vector3(point.x, point.y + 1.1, 0.287)), true, 'centripetal');
-  mesh(group, new THREE.TubeGeometry(perimeter, 96, 0.009, 6, true), m.metal);
+  mesh(group, new THREE.TubeGeometry(perimeter, 96, 0.012, 6, true), m.accent);
   for (const x of [-0.68, 0.68]) {
     box(group, [0.38, 0.62, 0.39], [x, 0.52, 0.08], m.shell, 0.035);
     box(group, [0.28, 0.53, 0.017], [x, 0.52, 0.286], m.recess, 0.015);
@@ -598,7 +605,47 @@ export function createNodeModel(node: FailoverSceneNode, theme: FailoverSceneThe
     for (const material of Array.isArray(object.material) ? object.material : [object.material]) used.add(material);
   });
   for (const material of Object.values(m)) if (!used.has(material)) material.dispose();
+  updateNodeModel(group, node, theme);
   return group;
+}
+
+/** Equipment illumination follows the displayed route, independently of selection and motion. */
+export function updateNodeModel(group: THREE.Group, node: FailoverSceneNode, theme: FailoverSceneTheme): void {
+  const idle = node.status === 'idle';
+  const active = !idle && node.active === true;
+  const statusColor = idle ? theme.muted : node.status === 'err' ? theme.err : node.status === 'warn' ? theme.warn : theme.ok;
+  const signalColor = idle ? theme.muted : node.color;
+  const paint = identityColor(node);
+  const materials = new Set<THREE.MeshStandardMaterial>();
+  group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh) || object.userData.equipmentMotion) return;
+    for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+      if (material instanceof THREE.MeshStandardMaterial) materials.add(material);
+    }
+  });
+  for (const material of materials) {
+    if (material.userData.onlineColor) {
+      material.color.set(idle ? material.userData.idleColor : material.userData.onlineColor);
+      // A carrying tunnel is luminous through its whole frame, even with an SLA warning.
+      if (active && node.kind === 'tunnel') material.color.lerp(new THREE.Color(signalColor), 0.48);
+      material.emissive.copy(material.color);
+      material.emissiveIntensity = idle ? 0 : active ? (node.kind === 'tunnel' ? 0.65 : material.userData.surfaceEmission ?? 0.24) : 0.035;
+    }
+    if (material.userData.statusColor) {
+      material.color.set(statusColor);
+      material.emissive.set(statusColor);
+      material.emissiveIntensity = idle ? 0 : 0.65;
+    } else if (material.userData.activityLight) {
+      material.color.set(idle ? theme.muted : node.kind === 'tunnel' ? signalColor : paint);
+      material.emissive.copy(material.color);
+      material.emissiveIntensity = active ? 1.5 : 0;
+    } else if (material.userData.accentColor) {
+      material.color.set(signalColor);
+      material.emissive.set(signalColor);
+      material.emissiveIntensity = idle ? 0 : active ? 0.95 : 0.12;
+      if (material instanceof THREE.MeshPhysicalMaterial) material.opacity = idle ? 0.08 : active ? 0.3 : 0.12;
+    }
+  }
 }
 
 /** Dispose unique GPU resources; shared pieces within a model are released once. */

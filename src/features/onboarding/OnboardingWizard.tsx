@@ -22,12 +22,13 @@ import type {
   VerificationResult,
 } from './types';
 import { profileVersionLabel, siteLabel } from './types';
-import { currentProfiles, selectableProfiles } from './profileSelection';
+import { currentProfiles, initialOnboardingAssignment, selectableProfiles } from './profileSelection';
 
 interface OnboardingWizardProps {
   profiles: ProfileVersion[];
   models: GatewayModel[];
   preferredSiteId?: string;
+  preferredProfileVersionId?: string;
   initialSerialNumber?: string;
   managedSimulator?: boolean;
   onCancel: () => void;
@@ -58,6 +59,7 @@ export function OnboardingWizard({
   profiles,
   models,
   preferredSiteId,
+  preferredProfileVersionId,
   initialSerialNumber = '',
   managedSimulator = false,
   onCancel,
@@ -112,14 +114,16 @@ export function OnboardingWizard({
         serial,
         verifyKey,
         undefined,
-        currentProfiles(profiles)[0]?.modelId ?? models[0]?.id,
+        profiles.find((profile) => profile.id === preferredProfileVersionId)?.modelId
+          ?? currentProfiles(profiles)[0]?.modelId ?? models[0]?.id,
       );
-      const preferred = result.allowedSites.find((site) => site.id === preferredSiteId) ?? result.allowedSites[0];
-      const profilesForDevice = compatibleProfiles(profiles, result.identity.modelId);
+      const assignment = initialOnboardingAssignment(profiles, result.identity.modelId, result.allowedSites, {
+        siteId: preferredSiteId, profileVersionId: preferredProfileVersionId,
+      });
       setSerialNumber(result.identity.serialNumber);
       setVerification(result);
-      setSiteId(preferred?.id ?? '');
-      setProfileVersionId(profilesForDevice[0]?.id ?? '');
+      setSiteId(assignment.siteId);
+      setProfileVersionId(assignment.profileVersionId);
       setOperationKey(createIdempotencyKey('activate'));
       setStep(1);
     } catch (cause) {
@@ -175,8 +179,8 @@ export function OnboardingWizard({
           <button type="button" className="ce-onb-text-button" onClick={onCancel} disabled={busy}>
             <ArrowLeft size={14} aria-hidden="true" />Gateway inventory
           </button>
-          <h2 id="onboarding-wizard-title">{managedSimulator ? 'Set up a simulated gateway' : 'Register a gateway'}</h2>
-          <p>{managedSimulator ? 'Choose the gateway, site, and profile. INITIATE FLOW starts the server-managed connection and activation.' : 'Add a real or mock gateway, choose its site, and assign a profile.'}</p>
+          <h2 id="onboarding-wizard-title">{managedSimulator ? 'Simulate the onboarding flow' : 'Register a gateway'}</h2>
+          <p>{managedSimulator ? 'Review the generated gateway ID, site, and profile, then select INITIATE FLOW. Follow registration, identity, configuration, and health stages as the service reports them. No ZIP upload is needed.' : 'Add a real or mock gateway, choose its site, and assign a profile.'}</p>
         </div>
         <span className="ce-onb-security-mark"><ShieldCheck size={16} aria-hidden="true" />{managedSimulator ? 'Authorized registration' : 'Authenticated registration'}</span>
       </div>

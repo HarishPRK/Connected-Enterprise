@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { createNodeModel } from './failoverSceneModels';
+import { createNodeModel, updateNodeModel } from './failoverSceneModels';
 import { createEquipmentMotion } from './failoverEquipmentMotion';
 import { TWIN_PALETTE } from './failoverTwinPalette';
+import { TWIN_LAYOUT } from './failoverSceneLayout';
 import type {
   FailoverSceneData,
   FailoverSceneLink,
@@ -41,13 +42,17 @@ type SceneLink = {
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
-const TARGET = new THREE.Vector3(0.5, 0.8, 0);
+const TARGET = new THREE.Vector3(TWIN_LAYOUT.room.centerX, 0.8, 0);
 // The user's preferred front elevation keeps the premises level and reveals equipment tops.
 const START_POSITION = TARGET.clone().add(new THREE.Vector3(0, 20, 30));
-const WORLD_WIDTH = 30;
+const WORLD_WIDTH = TWIN_LAYOUT.room.width;
 const MAX_PIXEL_RATIO = 1.5;
 const STUDIO = { exposure: 0.9, environment: 0.24, hemisphere: 0.95, key: 2.35, rim: 0.9, fill: 0.55 };
-const ROOM_BOUNDS = { min: [-15.05, -0.04, -6.15], max: [16.05, 2.52, 5.95] } as const;
+const ROOM_BOUNDS = {
+  min: [TWIN_LAYOUT.room.centerX - WORLD_WIDTH / 2 - 0.05, -0.04, -TWIN_LAYOUT.room.depth / 2 - 0.15],
+  max: [TWIN_LAYOUT.room.centerX + WORLD_WIDTH / 2 + 0.05, 2.52, TWIN_LAYOUT.room.depth / 2 - 0.05],
+} as const;
+const EQUIPMENT_LABEL_WIDTH = 3.8;
 
 function disposeObject(object: THREE.Object3D) {
   const geometries = new Set<THREE.BufferGeometry>();
@@ -80,7 +85,7 @@ function labelSprite(text: string, color: string, worldWidth: number, premise = 
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     context.fillStyle = color;
-    let fontSize = premise ? 48 : 52;
+    let fontSize = premise ? 42 : 44;
     context.font = `700 ${fontSize}px "Space Grotesk", "Segoe UI", sans-serif`;
     while (context.measureText(text).width > canvas.width - 32 && fontSize > 22) {
       context.font = `700 ${--fontSize}px "Space Grotesk", "Segoe UI", sans-serif`;
@@ -152,8 +157,9 @@ function concreteTexture(width: number, depth: number) {
 function createPremise(width: number, centerX: number, label: string, color: string, theme: FailoverSceneTheme) {
   const group = new THREE.Group();
   group.position.x = centerX;
-  const texture = concreteTexture(width, 10);
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(width, 0.055, 10), new THREE.MeshStandardMaterial({
+  const depth = TWIN_LAYOUT.premisesDepth;
+  const texture = concreteTexture(width, depth);
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(width, 0.055, depth), new THREE.MeshStandardMaterial({
     color: TWIN_PALETTE.floor, map: texture, bumpMap: texture, bumpScale: 0.016,
     roughness: 0.96, metalness: 0.015, envMapIntensity: 0.08,
   }));
@@ -161,19 +167,19 @@ function createPremise(width: number, centerX: number, label: string, color: str
   slab.receiveShadow = true;
   group.add(slab);
   const marking = new THREE.MeshBasicMaterial({ color, toneMapped: false });
-  for (const z of [-4.88, 4.88]) {
+  for (const z of [-depth / 2 + 0.12, depth / 2 - 0.12]) {
     const line = new THREE.Mesh(new THREE.BoxGeometry(width - 0.24, 0.008, 0.055), marking);
     line.position.set(0, 0.306, z);
     group.add(line);
   }
   for (const x of [-width / 2 + 0.12, width / 2 - 0.12]) {
-    const line = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.008, 9.76), marking);
+    const line = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.008, depth - 0.24), marking);
     line.position.set(x, 0.306, 0);
     group.add(line);
   }
   const jointMaterial = new THREE.MeshBasicMaterial({ color: TWIN_PALETTE.floorEdge, transparent: true, opacity: 0.55, toneMapped: false });
   for (let x = -width / 2 + 4; x < width / 2 - 0.2; x += 4) {
-    const seam = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.004, 9.7), jointMaterial);
+    const seam = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.004, depth - 0.3), jointMaterial);
     seam.position.set(x, 0.303, 0);
     group.add(seam);
   }
@@ -183,14 +189,19 @@ function createPremise(width: number, centerX: number, label: string, color: str
     group.add(seam);
   }
   const title = labelSprite(label, theme.text, Math.min(width - 1, 8), true);
-  title.position.set(0, 0.55, 5.5);
+  title.position.set(0, 0.55, depth / 2 + 0.45);
   group.add(title);
   return group;
 }
 
 function createIndustrialRoom() {
   const room = new THREE.Group();
-  const texture = concreteTexture(31, 12);
+  const { width, depth, centerX } = TWIN_LAYOUT.room;
+  const back = -depth / 2;
+  const wallWidth = width - 0.85;
+  const bayWidth = (wallWidth - 0.15) / 10;
+  const wallStart = centerX - (wallWidth - 0.15) / 2;
+  const texture = concreteTexture(width, depth);
   const concrete = new THREE.MeshStandardMaterial({
     color: TWIN_PALETTE.floor, map: texture, bumpMap: texture, bumpScale: 0.012,
     roughness: 0.97, metalness: 0.01, envMapIntensity: 0.08,
@@ -208,31 +219,31 @@ function createIndustrialRoom() {
     return mesh;
   }
   const floorEdge = new THREE.MeshStandardMaterial({ color: TWIN_PALETTE.floorEdge, roughness: 0.96, envMapIntensity: 0.08 });
-  box([31, 0.25, 12], [0.5, 0.125, -0.1], [floorEdge, floorEdge, concrete, floorEdge, floorEdge, floorEdge], false);
+  box([width, 0.25, depth], [centerX, 0.125, -0.1], [floorEdge, floorEdge, concrete, floorEdge, floorEdge, floorEdge], false);
   // A cutaway rear elevation leaves the network stations fully visible from the preferred view.
-  box([30.15, 0.55, 0.12], [0.5, 0.575, -5.92], paintedWall);
-  box([30.15, 0.13, 0.16], [0.5, 2.435, -5.88], steel);
-  box([30.15, 0.06, 0.12], [0.5, 0.86, -5.87], steel);
-  for (let index = 0; index <= 8; index++) {
-    const x = -14.5 + index * 3.75;
-    box([0.12, 2.2, 0.17], [x, 1.4, -5.88], steel);
-    if (index === 8) continue;
-    const center = x + 1.875;
-    box([3.58, 1.38, 0.035], [center, 1.58, -5.91], glazing, false);
-    box([0.038, 1.38, 0.06], [center, 1.58, -5.85], steel);
-    box([3.58, 0.04, 0.06], [center, 1.57, -5.85], steel);
+  box([wallWidth, 0.55, 0.12], [centerX, 0.575, back + 0.08], paintedWall);
+  box([wallWidth, 0.13, 0.16], [centerX, 2.435, back + 0.12], steel);
+  box([wallWidth, 0.06, 0.12], [centerX, 0.86, back + 0.13], steel);
+  for (let index = 0; index <= 10; index++) {
+    const x = wallStart + index * bayWidth;
+    box([0.12, 2.2, 0.17], [x, 1.4, back + 0.12], steel);
+    if (index === 10) continue;
+    const center = x + bayWidth / 2;
+    box([bayWidth - 0.17, 1.38, 0.035], [center, 1.58, back + 0.09], glazing, false);
+    box([0.038, 1.38, 0.06], [center, 1.58, back + 0.15], steel);
+    box([bayWidth - 0.17, 0.04, 0.06], [center, 1.57, back + 0.15], steel);
   }
   // Functional cable containment along the room's rear wall, away from the visible route channels.
-  for (const z of [-5.68, -5.36]) box([29.9, 0.045, 0.038], [0.5, 2.08, z], traySteel);
+  for (const z of [back + 0.32, back + 0.64]) box([wallWidth - 0.25, 0.045, 0.038], [centerX, 2.08, z], traySteel);
   const rungs = new THREE.InstancedMesh(new THREE.BoxGeometry(0.033, 0.03, 0.35), traySteel, 40);
   const transform = new THREE.Matrix4();
   for (let index = 0; index < 40; index++) {
-    transform.makeTranslation(-14.1 + index * 0.75, 2.06, -5.52);
+    transform.makeTranslation(wallStart + 0.4 + index * (wallWidth - 0.95) / 39, 2.06, back + 0.48);
     rungs.setMatrixAt(index, transform);
   }
   rungs.instanceMatrix.needsUpdate = true;
   room.add(rungs);
-  for (const x of [-14.5, -7, 0.5, 8, 15.5]) box([0.08, 0.08, 0.5], [x, 2.015, -5.7], steel);
+  for (let index = 0; index <= 5; index++) box([0.08, 0.08, 0.5], [wallStart + index * bayWidth * 2, 2.015, back + 0.3], steel);
   return room;
 }
 
@@ -250,39 +261,6 @@ function contactShadowTexture() {
     context.fillRect(0, 0, 128, 128);
   }
   return new THREE.CanvasTexture(canvas);
-}
-
-function statusColor(node: FailoverSceneNode, theme: FailoverSceneTheme) {
-  if (node.status === 'err') return theme.err;
-  if (node.status === 'warn') return theme.warn;
-  if (node.status === 'idle') return theme.muted;
-  return theme.ok;
-}
-
-function updateNodeMaterials(object: THREE.Group, node: FailoverSceneNode, theme: FailoverSceneTheme) {
-  object.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.material) return;
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const material of materials) {
-      if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-      if (material.userData.onlineColor && material.userData.idleColor) {
-        material.color.set(node.status === 'idle' ? material.userData.idleColor : material.userData.onlineColor);
-      }
-      if (material.userData.statusColor) {
-        material.color.set(statusColor(node, theme));
-        material.emissive.set(statusColor(node, theme));
-        material.emissiveIntensity = node.status === 'idle' ? 0 : 0.65;
-      } else if (material.userData.accentColor) {
-        const accent = node.status === 'idle' ? theme.muted : node.color;
-        material.color.set(accent);
-        if (!(material instanceof THREE.MeshPhysicalMaterial)) {
-          material.emissive.set(accent);
-          material.emissiveIntensity = node.active ? 0.32 : 0.1;
-        }
-      }
-    }
-  });
 }
 
 function linkSignature(link: FailoverSceneLink, from: FailoverSceneNode, to: FailoverSceneNode) {
@@ -405,6 +383,8 @@ export function createFailoverSceneRenderer(
   onFailure: () => void,
   onHover?: (id: string | null) => void,
   onFocus?: (id: string) => void,
+  onFlowDrop?: (id: string) => boolean,
+  onFlowDrag?: (targetId: string | null, dragging: boolean) => void,
 ): FailoverSceneRenderer {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'default' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
@@ -502,6 +482,15 @@ export function createFailoverSceneRenderer(
   hoverRing.rotation.x = -Math.PI / 2;
   hoverRing.visible = false;
   scene.add(hoverRing);
+  const flowGuide = new THREE.Group();
+  flowGuide.visible = false;
+  scene.add(flowGuide);
+  const flowPacket = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.42, 4, 10),
+    new THREE.MeshBasicMaterial({ color: TWIN_PALETTE.text, depthTest: false, toneMapped: false }));
+  flowPacket.rotation.z = -Math.PI / 2;
+  flowPacket.renderOrder = 20;
+  flowPacket.visible = false;
+  scene.add(flowPacket);
 
   const nodeMap = new Map<string, SceneNode>();
   const linkMap = new Map<string, SceneLink>();
@@ -539,6 +528,104 @@ export function createFailoverSceneRenderer(
   let equipmentTime = 0;
   let hasInitialSelection = false;
   let hasFitProjection = false;
+  let flowDragging = false;
+  let flowTargetId: string | null = null;
+  let flowPointerId: number | null = null;
+  let flowClientX = 0;
+  let flowClientY = 0;
+
+  function validFlowTarget(id: string | null) {
+    return data.mode === 'live' && data.nodes.some(node => node.id === id && node.kind === 'tunnel' && node.switchable && !node.active);
+  }
+
+  function refreshFlowGuide() {
+    flowGuide.children.slice().forEach(child => { flowGuide.remove(child); disposeObject(child); });
+    if (!flowDragging) return;
+    for (const node of data.nodes) {
+      if (!validFlowTarget(node.id)) continue;
+      const selected = node.id === flowTargetId;
+      const box = new THREE.BoxGeometry(3.9, 1.6, 1.9);
+      const geometry = new THREE.EdgesGeometry(box);
+      box.dispose();
+      const outline = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({
+        color: selected ? TWIN_PALETTE.text : TWIN_PALETTE.selection,
+        transparent: true, opacity: selected ? 1 : 0.55, depthTest: false, toneMapped: false,
+      }));
+      outline.position.set(node.position[0], node.position[1] + 0.8, node.position[2]);
+      flowGuide.add(outline);
+    }
+  }
+
+  function beginFlowDrag(clientX: number, clientY: number) {
+    if (disposed || failed || flowDragging || dragging || !onFlowDrop || data.mode !== 'live' || !data.nodes.some(node => validFlowTarget(node.id))) return false;
+    flowDragging = true;
+    controls.enabled = false;
+    controls.autoRotate = false;
+    orbitRequested = false;
+    onFocus?.('flow');
+    setHovered(null);
+    flowGuide.visible = flowPacket.visible = true;
+    renderer.domElement.dataset.flowDragging = 'true';
+    refreshFlowGuide();
+    onFlowDrag?.(null, true);
+    moveFlowDrag(clientX, clientY);
+    return true;
+  }
+
+  function moveFlowDrag(clientX: number, clientY: number) {
+    if (!flowDragging) return;
+    flowClientX = clientX;
+    flowClientY = clientY;
+    // nodeAt also updates the ray for the floating packet, including points outside the viewport.
+    const hit = nodeAt(clientX, clientY);
+    const bounds = renderer.domElement.getBoundingClientRect();
+    const inside = clientX >= bounds.left && clientX <= bounds.right && clientY >= bounds.top && clientY <= bounds.bottom;
+    const target = inside && validFlowTarget(hit) ? hit : null;
+    if (flowTargetId !== target) {
+      flowTargetId = target;
+      refreshFlowGuide();
+      onFlowDrag?.(target, true);
+    }
+    raycaster.ray.intersectPlane(new THREE.Plane(UP, -1.25), flowPacket.position);
+    renderer.domElement.style.cursor = target ? 'copy' : 'grabbing';
+    invalidate();
+  }
+
+  function endFlowDrag(commit: boolean) {
+    if (!flowDragging) return;
+    // Recheck current telemetry at release; a tunnel may disappear during a drag.
+    const target = flowTargetId;
+    flowDragging = false;
+    flowTargetId = null;
+    flowGuide.visible = flowPacket.visible = false;
+    refreshFlowGuide();
+    controls.enabled = true;
+    delete renderer.domElement.dataset.flowDragging;
+    const captured = flowPointerId;
+    flowPointerId = null;
+    if (captured !== null && renderer.domElement.hasPointerCapture(captured)) renderer.domElement.releasePointerCapture(captured);
+    renderer.domElement.style.cursor = 'grab';
+    if (commit && validFlowTarget(target) && target) onFlowDrop?.(target);
+    onFlowDrag?.(null, false);
+    invalidate();
+  }
+
+  function flowAt(clientX: number, clientY: number, touch: boolean) {
+    if (!onFlowDrop || data.mode !== 'live') return false;
+    const bounds = renderer.domElement.getBoundingClientRect();
+    const point = new THREE.Vector3();
+    const threshold = touch ? 20 : 12;
+    // Hit-test the continuous active rail, rather than requiring a moving packet to be caught.
+    for (const link of linkMap.values()) {
+      if (!link.active || !(link.from.startsWith('tunnel:') || link.to.startsWith('tunnel:'))) continue;
+      for (let index = 0; index <= 48; index++) {
+        link.curve.getPointAt(index / 48, point).project(camera);
+        if (Math.hypot(bounds.left + (point.x + 1) * bounds.width / 2 - clientX,
+          bounds.top + (1 - point.y) * bounds.height / 2 - clientY) <= threshold) return true;
+      }
+    }
+    return false;
+  }
 
   function canAnimate() {
     return !disposed && !failed && visible && !document.hidden && !media.matches &&
@@ -576,7 +663,7 @@ export function createFailoverSceneRenderer(
     const delta = lastFrame ? Math.min((time - lastFrame) / 1000, 0.06) : 0;
     lastFrame = time;
     const moving = motionRequested && !media.matches;
-    controls.autoRotate = moving && orbitRequested;
+    controls.autoRotate = moving && orbitRequested && !flowDragging;
     if (controls.autoRotate) controls.update(delta);
     if (moving) equipmentTime += delta;
     positionPackets(moving ? delta : 0);
@@ -733,8 +820,8 @@ export function createFailoverSceneRenderer(
     stage.children.slice().forEach((child) => { stage.remove(child); disposeObject(child); });
     stage.add(
       createIndustrialRoom(),
-      createPremise(16, -6, 'ENTERPRISE PREMISES', theme.enterprise, theme),
-      createPremise(12, 9, 'OPERATOR PREMISES', theme.operator, theme),
+      createPremise(TWIN_LAYOUT.enterprise.width, TWIN_LAYOUT.enterprise.centerX, 'ENTERPRISE PREMISES', theme.enterprise, theme),
+      createPremise(TWIN_LAYOUT.operator.width, TWIN_LAYOUT.operator.centerX, 'OPERATOR PREMISES', theme.operator, theme),
     );
     scene.background = new THREE.Color(TWIN_PALETTE.backdrop);
     scene.fog = new THREE.Fog(TWIN_PALETTE.backdrop, 46, 100);
@@ -804,7 +891,7 @@ export function createFailoverSceneRenderer(
         }
       }
       object.traverse((child) => { child.userData.nodeId = node.id; });
-      const label = labelSprite(node.label.toUpperCase(), theme.text, node.kind === 'gateway' ? 4.2 : 4);
+      const label = labelSprite(node.label.toUpperCase(), theme.text, EQUIPMENT_LABEL_WIDTH);
       const height = node.kind === 'tunnel' ? 0.36 : node.kind === 'cellular' ? 3.03 : node.kind === 'cloud' ? 2.95 : node.kind === 'internet' ? 2.65 : 2.12;
       label.position.set(0, height, node.kind === 'tunnel' ? 0.74 : 0);
       label.userData.nodeId = node.id;
@@ -833,23 +920,6 @@ export function createFailoverSceneRenderer(
     if (themeChanged || layoutChanged) {
       rebuildNodes();
       renderer.shadowMap.needsUpdate = true;
-    }
-    else {
-      for (const node of data.nodes) {
-        const existing = nodeMap.get(node.id);
-        if (!existing) continue;
-        updateNodeMaterials(existing.object, node, theme);
-        if (node.label !== existing.labelText) {
-          const nextLabel = labelSprite(node.label.toUpperCase(), theme.text, node.kind === 'gateway' ? 4.2 : 4);
-          nextLabel.position.copy(existing.label.position);
-          nextLabel.userData.nodeId = node.id;
-          existing.object.remove(existing.label);
-          disposeObject(existing.label);
-          existing.object.add(nextLabel);
-          existing.label = nextLabel;
-          existing.labelText = node.label;
-        }
-      }
     }
     themeSignature = nextThemeSignature;
     modelSignature = nextModelSignature;
@@ -896,7 +966,23 @@ export function createFailoverSceneRenderer(
     for (const node of data.nodes) {
       const existing = nodeMap.get(node.id);
       if (!existing) continue;
-      existing.motion.update({ ...node, active: node.active !== false && activeNodeIds.has(node.id) });
+      const displayedNode = { ...node, active: node.active !== false && activeNodeIds.has(node.id) };
+      updateNodeModel(existing.object, displayedNode, theme);
+      existing.motion.update(displayedNode);
+      const routeState = node.metrics?.find(metric => metric.label === 'STATE')?.value;
+      const suffix = routeState === 'REQUESTED ROUTE' ? 'REQUESTED' : routeState === 'POLICY ROUTE' ? 'POLICY' : 'ACTIVE';
+      const labelText = node.kind === 'tunnel' && displayedNode.active && node.status !== 'idle'
+        ? `${node.label} · ${suffix}` : node.label;
+      if (labelText !== existing.labelText) {
+        const nextLabel = labelSprite(labelText.toUpperCase(), theme.text, EQUIPMENT_LABEL_WIDTH);
+        nextLabel.position.copy(existing.label.position);
+        nextLabel.userData.nodeId = node.id;
+        existing.object.remove(existing.label);
+        disposeObject(existing.label);
+        existing.object.add(nextLabel);
+        existing.label = nextLabel;
+        existing.labelText = labelText;
+      }
       existing.motion.render(equipmentTime, media.matches);
       if (existing.motion.animated) animatedEquipmentCount++;
       existing.internalActive = Boolean(existing.internalFlow && node.active && node.status !== 'idle');
@@ -909,6 +995,10 @@ export function createFailoverSceneRenderer(
     positionPackets(0);
     setSelection(selectedId);
     setHovered(hoveredId);
+    if (flowDragging) {
+      if (data.mode !== 'live' || !data.nodes.some(node => validFlowTarget(node.id))) endFlowDrag(false);
+      else { refreshFlowGuide(); moveFlowDrag(flowClientX, flowClientY); }
+    }
     invalidate();
   }
 
@@ -923,6 +1013,7 @@ export function createFailoverSceneRenderer(
   }
 
   function visibilityChanged() {
+    if (document.hidden) endFlowDrag(false);
     if (raf) { window.cancelAnimationFrame(raf); raf = 0; }
     lastFrame = 0;
     invalidate();
@@ -932,6 +1023,7 @@ export function createFailoverSceneRenderer(
     event.preventDefault();
     if (disposed || failed) return;
     failed = true;
+    endFlowDrag(false);
     if (raf) { window.cancelAnimationFrame(raf); raf = 0; }
     if (hoverRaf) { window.cancelAnimationFrame(hoverRaf); hoverRaf = 0; }
     onHover?.(null);
@@ -939,6 +1031,16 @@ export function createFailoverSceneRenderer(
   }
 
   function pointerDown(event: PointerEvent) {
+    if (event.isPrimary && event.button === 0 && flowAt(event.clientX, event.clientY, event.pointerType === 'touch') && beginFlowDrag(event.clientX, event.clientY)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      pointerStartX = event.clientX;
+      pointerStartY = event.clientY;
+      flowPointerId = event.pointerId;
+      renderer.domElement.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (flowDragging) { event.preventDefault(); event.stopImmediatePropagation(); return; }
     if (event.button < 0 || event.button > 2) return;
     pointerStartX = event.clientX;
     pointerStartY = event.clientY;
@@ -963,6 +1065,12 @@ export function createFailoverSceneRenderer(
   }
 
   function pointerMove(event: PointerEvent) {
+    if (flowDragging && flowPointerId === event.pointerId) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      moveFlowDrag(event.clientX, event.clientY);
+      return;
+    }
     hoverClientX = event.clientX;
     hoverClientY = event.clientY;
     if (dragging) {
@@ -973,11 +1081,19 @@ export function createFailoverSceneRenderer(
   }
 
   function pointerLeave() {
+    if (flowDragging) return;
     if (hoverRaf) { window.cancelAnimationFrame(hoverRaf); hoverRaf = 0; }
     setHovered(null);
   }
 
   function pointerUp(event: PointerEvent) {
+    if (flowDragging && flowPointerId === event.pointerId) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      moveFlowDrag(event.clientX, event.clientY);
+      endFlowDrag(Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY) > 5);
+      return;
+    }
     if (!dragging) return;
     dragging = false;
     const distance = Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY);
@@ -988,7 +1104,8 @@ export function createFailoverSceneRenderer(
     invalidate();
   }
 
-  function cancelPointer() { dragging = false; setHovered(null); }
+  function cancelPointer() { dragging = false; endFlowDrag(false); setHovered(null); }
+  function escapeFlow(event: KeyboardEvent) { if (event.key === 'Escape') endFlowDrag(false); }
 
   function doubleClick(event: MouseEvent) {
     const id = nodeAt(event.clientX, event.clientY);
@@ -1005,13 +1122,15 @@ export function createFailoverSceneRenderer(
   }, { rootMargin: '0px' });
   intersection.observe(host);
   renderer.domElement.addEventListener('webglcontextlost', contextLost);
-  renderer.domElement.addEventListener('pointerdown', pointerDown);
-  renderer.domElement.addEventListener('pointerup', pointerUp);
+  renderer.domElement.addEventListener('pointerdown', pointerDown, true);
+  renderer.domElement.addEventListener('pointerup', pointerUp, true);
   renderer.domElement.addEventListener('pointercancel', cancelPointer);
-  renderer.domElement.addEventListener('pointermove', pointerMove);
+  renderer.domElement.addEventListener('lostpointercapture', cancelPointer);
+  renderer.domElement.addEventListener('pointermove', pointerMove, true);
   renderer.domElement.addEventListener('pointerleave', pointerLeave);
   renderer.domElement.addEventListener('dblclick', doubleClick);
   document.addEventListener('visibilitychange', visibilityChanged);
+  window.addEventListener('keydown', escapeFlow);
   media.addEventListener('change', visibilityChanged);
   controls.addEventListener('change', invalidate);
   update(initialData, initialTheme);
@@ -1039,22 +1158,28 @@ export function createFailoverSceneRenderer(
     },
     setMotion(enabled) { motionRequested = enabled; visibilityChanged(); },
     setOrbit(enabled) { orbitRequested = enabled; visibilityChanged(); },
+    beginFlowDrag,
+    moveFlowDrag,
+    endFlowDrag,
     resize,
     dispose() {
       if (disposed) return;
       disposed = true;
+      endFlowDrag(false);
       if (raf) window.cancelAnimationFrame(raf);
       if (hoverRaf) window.cancelAnimationFrame(hoverRaf);
       observer.disconnect();
       intersection.disconnect();
       renderer.domElement.removeEventListener('webglcontextlost', contextLost);
-      renderer.domElement.removeEventListener('pointerdown', pointerDown);
-      renderer.domElement.removeEventListener('pointerup', pointerUp);
+      renderer.domElement.removeEventListener('pointerdown', pointerDown, true);
+      renderer.domElement.removeEventListener('pointerup', pointerUp, true);
       renderer.domElement.removeEventListener('pointercancel', cancelPointer);
-      renderer.domElement.removeEventListener('pointermove', pointerMove);
+      renderer.domElement.removeEventListener('lostpointercapture', cancelPointer);
+      renderer.domElement.removeEventListener('pointermove', pointerMove, true);
       renderer.domElement.removeEventListener('pointerleave', pointerLeave);
       renderer.domElement.removeEventListener('dblclick', doubleClick);
       document.removeEventListener('visibilitychange', visibilityChanged);
+      window.removeEventListener('keydown', escapeFlow);
       media.removeEventListener('change', visibilityChanged);
       controls.removeEventListener('change', invalidate);
       controls.dispose();
