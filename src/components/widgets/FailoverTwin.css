@@ -1,0 +1,7 @@
+/* Outer surfaces inherit the application theme; industrial materials live inside the canvas. */
+.ipsec-live-card .ipsec-transfer-summary { padding: 20px 8px 6px; }
+@media (max-width: 700px) {
+  .ipsec-live-card { padding: 12px; }
+  .ipsec-live-card .ipsec-gw { padding: 8px; }
+  .ipsec-live-card .ipsec-flow-wrap { padding: 10px 6px; }
+}

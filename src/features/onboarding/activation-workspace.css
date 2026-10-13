@@ -15,6 +15,27 @@
 .ce-onb-activation-workspace .ce-onb-simulator small { color: var(--text-dim); max-width: 75ch; }
 .ce-onb-activation-workspace .ce-onb-simulator input { max-width: 100%; min-width: 0; }
 .ce-onb-activation-workspace .ce-onb-simulator button { justify-self: start; }
+.ce-onb-activation-workspace .ce-onb-flow-status { display: flex; align-items: flex-start; gap: 10px; padding: 13px 0; border-block: 1px solid var(--border); }
+.ce-onb-activation-workspace .ce-onb-flow-status > svg { flex-shrink: 0; margin-top: 1px; color: var(--text-dim); }
+.ce-onb-activation-workspace .ce-onb-flow-status > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.ce-onb-activation-workspace .ce-onb-flow-status strong { font-size: 13px; color: var(--text); }
+.ce-onb-activation-workspace .ce-onb-flow-status span { font-size: 12px; line-height: 1.5; color: var(--text-dim); max-width: 75ch; overflow-wrap: anywhere; }
+.ce-onb-activation-workspace .ce-onb-flow-status[data-state="confirmed"] > svg { color: var(--ok); }
+.ce-onb-activation-workspace .ce-onb-flow-status[data-state="failed"] > svg { color: var(--err); }
+.ce-onb-activation-workspace .ce-onb-flow-status[data-state="starting"] > svg,
+.ce-onb-activation-workspace .ce-onb-flow-status[data-state="running"] > svg,
+.ce-onb-activation-workspace .ce-onb-flow-status[data-state="awaiting-confirmation"] > svg,
+.ce-onb-activation-workspace .ce-onb-flow-actions button:disabled > svg.lucide-loader-circle { animation: ce-onb-flow-spin 1.2s linear infinite; }
+.ce-onb-activation-workspace .ce-onb-flow-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+@keyframes ce-onb-flow-spin { to { transform: rotate(360deg); } }
+.ce-onb-activation-workspace .ce-onb-enrollment-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 22px; }
+.ce-onb-activation-workspace .ce-onb-enrollment-choice button { display: inline-flex; align-items: center; gap: 8px; }
+.ce-onb-activation-workspace .ce-onb-enrollment-choice button[aria-pressed="true"] { color: var(--ce-onb-accent-ink); border-color: var(--ce-onb-accent-ink); background: var(--ce-onb-raised); }
+.ce-onb-activation-workspace .ce-onb-enrollment-choice p { flex-basis: 100%; margin: 2px 0 0; color: var(--text-dim); max-width: 75ch; font-size: 12px; line-height: 1.6; }
+@media (prefers-reduced-motion: reduce) {
+  .ce-onb-activation-workspace .ce-onb-flow-status > svg,
+  .ce-onb-activation-workspace .ce-onb-flow-actions button:disabled > svg.lucide-loader-circle { animation: none; }
+}
 .ce-onb-page.ce-onb-activation-workspace {
   --ce-onb-surface: #fff;
   --ce-onb-raised: #f1f6fa;

@@ -247,10 +247,10 @@ export function fetchGatewaySimulator(operationId: string, signal?: AbortSignal)
   return getJson(`/api/onboarding/simulator/${encodeURIComponent(operationId)}`, signal);
 }
 
-export async function startGatewaySimulator(operationId: string, file: File): Promise<{ job: GatewaySimulatorJob }> {
-  if (!file.size || file.size > 64 * 1024) throw new Error('Choose the original bootstrap ZIP (up to 64 KiB).');
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let raw = '';
-  for (const byte of bytes) raw += String.fromCharCode(byte);
-  return postJson(`/api/onboarding/simulator/${encodeURIComponent(operationId)}`, { archiveBase64: btoa(raw) }, createIdempotencyKey('simulator'));
+export function startGatewaySimulator(
+  operationId: string,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<{ job: GatewaySimulatorJob }> {
+  return postJson(`/api/onboarding/simulator/${encodeURIComponent(operationId)}`, {}, idempotencyKey, signal);
 }

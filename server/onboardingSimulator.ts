@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, X509Certificate } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, writeFile } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -87,6 +87,16 @@ export function createOnboardingSimulator() {
   const root = join(homedir(), '.local', 'share', 'connected-enterprise', 'mock-gateways');
   return {
     status(operationId: string): SimulatorJob | undefined { return jobs.get(operationId); },
+    async prepare(operation: OnboardingOperation): Promise<void> {
+      if (!MOCK_SERIAL.test(operation.serialNumber)) throw new Error('Use a MOCK- gateway ID.');
+      if (jobs.has(operation.id)) return;
+      if (jobs.size >= 50 || pending.size + [...jobs.values()].filter(job => job.state === 'running').length >= 2) {
+        throw new Error('The simulator is busy. Wait for the current mock gateway to finish.');
+      }
+      try { await lstat(join(root, operation.serialNumber)); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+      throw new Error('This mock gateway already has simulator state. Use a new MOCK- ID for a fresh run.');
+    },
     async start(operation: OnboardingOperation, tenantId: string, encodedArchive: unknown): Promise<SimulatorJob> {
       const existing = jobs.get(operation.id);
       if (existing) return existing;

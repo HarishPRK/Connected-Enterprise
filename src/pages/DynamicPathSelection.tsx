@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   Line,
   LineChart,
@@ -41,7 +41,29 @@ import {
   Plug,
   HelpCircle,
   Radio,
+  Building2,
+  Network,
+  LockKeyhole,
+  ArrowRight,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Send,
 } from "lucide-react";
+import { PacketTransferPath } from "../components/widgets/FailoverPacketFlow";
+import type { FailoverSceneData, FailoverSceneNode, FailoverRoutePresentation } from "../components/widgets/failoverSceneTypes";
+import { FailoverRouteStatus } from "../components/widgets/FailoverRouteStatus";
+import { TWIN_PALETTE } from "../components/widgets/failoverTwinPalette";
+import "../components/widgets/FailoverTwin.css";
+import { usePathOverride } from "../ui/usePathOverride";
+import type { ForceMode, PathCommand } from "../ui/pathOverrideController";
+import {
+  GatewayIllustration,
+  FiberIllustration,
+  CellularIllustration,
+  SdwanIllustration,
+  InternetIllustration,
+  CloudIllustration,
+} from "../components/widgets/FailoverIllustrations";
 import {
   BRANCH_TO_DEVICE_TOPIC,
   BRANCH_TO_FAILOVER_TOPIC,
@@ -68,6 +90,7 @@ import { DEFAULT_ROUTING_THRESHOLDS, validateRoutingThresholds } from "../../sha
 import type { PathThreshold } from "../types";
 
 type Metric = "latency" | "jitter" | "loss";
+const FailoverNetworkStage = lazy(() => import("../components/widgets/FailoverNetworkStage"));
 
 const metricCfg: Record<
   Metric,
@@ -2374,7 +2397,7 @@ export function LiveIpsecCard({
       title={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
           <Cloud size={13} />
-          Live IPsec ingest{" "}
+          Dynamic Failover Digital Twin{" "}
           <span
             style={{
               fontSize: 10.5,
@@ -2387,6 +2410,7 @@ export function LiveIpsecCard({
           </span>
         </span>
       }
+      className="ipsec-live-card"
       // sub={ipsec.endpoint
       //   ? <span className="mono" style={{ fontSize: 11 }}>{ipsec.endpoint}</span>
       //   : 'protobuf decoded server-side · pushed to the dashboard via SSE'}
@@ -2439,7 +2463,7 @@ export function LiveIpsecCard({
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {effectiveList.map((g) => (
             <GatewayBlock
-              key={g.metrics.gateway.name}
+              key={`${g.source}:${g.topic}:${g.metrics.gateway.mac}:${g.metrics.gateway.name}:${showSample ? 'preview' : 'live'}`}
               g={g}
               c={c}
               sample={showSample}
@@ -2452,9 +2476,6 @@ export function LiveIpsecCard({
     </Card>
   );
 }
-
-/** UI highlight state for the three path-override buttons. */
-type ForceMode = "auto" | "fiber" | "5g";
 
 /** Topology view mode: `live` mirrors the device (single active tunnel, IT+OT
  *  share it); `target` shows the application-aware routing policy (IT/OT split
@@ -2509,15 +2530,6 @@ function routeClassFor(
  *  `tunnel3`/`tunnel4` pin the two 5G tunnels. The UI now exposes only two
  *  overrides — Force Fiber pins `tunnel1`, Force 5G pins `tunnel3` — but the
  *  other commands (`tunnel2`/`tunnel4`, `fiber`/`5g`) stay valid on the API. */
-type PathCommand =
-  | "auto"
-  | "fiber"
-  | "5g"
-  | "tunnel1"
-  | "tunnel2"
-  | "tunnel3"
-  | "tunnel4";
-
 /** Calls the gateway's path-control endpoint via the same-origin proxy
  *  (`server/index.ts → /api/gateway/path`). The server publishes the command
  *  to AWS IoT Core (`<source>/path/control`); the gateway's pathcontrol
@@ -2563,91 +2575,32 @@ function GatewayBlock({
   wanState?: IpsecGatewayState;
 }) {
   const m = g.metrics;
-  const [forceMode, setForceMode] = useState<ForceMode>("auto");
   // Topology view: "live" mirrors the device exactly (single active tunnel, both
   // IT+OT on it); "target" shows the application-aware routing policy (IT/OT
   // steered onto separate tunnels) as a roadmap capability. Default = live.
   const [viewMode, setViewMode] = useState<ViewMode>("live");
-  const [pathBusy, setPathBusy] = useState(false);
-  const [pathPending, setPathPending] = useState(false);
-  // The specific tunnel ifname the Force button pinned — so the diagram
-  // and rows highlight that exact tunnel, not just the first reachable one in
-  // the underlay. Null in auto mode (the device decides).
-  const [forcedTunnel, setForcedTunnel] = useState<string | null>(null);
-  const { push } = useToast();
 
   // The gateway's topic family — drives which IoT Core topic the command is
   // published to. Falls back to 'rdk' for the captured-sample / unknown case.
   const source: "rdk" | "prpl" = g.source === "prpl" ? "prpl" : "rdk";
 
-  const commandTitle = (cmd: PathCommand) =>
-    cmd === "auto"
-      ? "Auto path-selection"
-      : cmd === "tunnel1"
-        ? "Forced to Fiber · Tunnel 1"
-        : cmd === "tunnel2"
-          ? "Forced to Fiber · Tunnel 2"
-          : cmd === "tunnel3"
-            ? "Forced to 5G · Tunnel 3"
-            : cmd === "tunnel4"
-              ? "Forced to 5G · Tunnel 4"
-              : cmd === "fiber"
-                ? "Forced to Fiber"
-                : "Forced to 5G";
-
-  /** Publishes a path-control command to the gateway's Greengrass component over
-   *  IoT Core. `highlight` is the button to light up (auto / fiber / 5g); `command`
-   *  is the exact `mode` published (auto, or tunnel1–tunnel4). Optimistically flips
-   *  the UI and reverts on hard failure; a "pending" ack (component offline) keeps
-   *  the flip but flags it as unconfirmed. */
-  const applyPathMode = async (
-    highlight: ForceMode,
-    command: PathCommand,
-    tunnelIfname?: string,
-  ) => {
-    if (pathBusy) return;
-    if (sample) {
-      setForceMode(highlight);
-      setForcedTunnel(highlight === 'auto' ? null : (tunnelIfname ?? null));
-      push({ kind: 'info', title: 'Preview path updated', detail: 'Captured sample only. No gateway command was sent.' });
-      return;
-    }
-    const previous = forceMode;
-    const previousTunnel = forcedTunnel;
-    const previousPending = pathPending;
-    setForceMode(highlight);
-    setForcedTunnel(highlight === "auto" ? null : (tunnelIfname ?? null));
-    setPathBusy(true);
-    setPathPending(false);
-    try {
-      const { pending } = await postGatewayPathMode(command, source);
-      setPathPending(pending);
-      push(
-        pending
-          ? {
-              kind: "info",
-              title: `${commandTitle(command)} — command sent`,
-              detail:
-                "Published to the gateway, but no ack received yet. It may apply once the gateway reconnects.",
-            }
-          : {
-              kind: "success",
-              title: commandTitle(command),
-              detail: "Gateway confirmed the mode change.",
-            },
-      );
-    } catch (err) {
-      setForceMode(previous);
-      setForcedTunnel(previousTunnel);
-      setPathPending(previousPending);
-      push({
-        kind: "error",
-        title: "Path-change failed",
-        detail: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setPathBusy(false);
-    }
+  const sendPathCommand = useCallback((command: PathCommand) => postGatewayPathMode(command, source), [source]);
+  const path = usePathOverride({
+    scope: `${source}:${g.topic}:${m.gateway.mac}:${m.gateway.name}:${sample ? 'preview' : 'live'}`,
+    telemetry: { activeTunnel: (m.active_tunnel ?? '').trim(), receivedAt: g.receivedAt, sourceTimestampMs: m.timestamp_ms },
+    sample,
+    send: sendPathCommand,
+  });
+  const forceMode = path.mode;
+  const forcedTunnel = path.forcedTunnel;
+  const applyPathMode = path.request;
+  const pathPending = ['queued', 'sending', 'awaiting-ack', 'awaiting-telemetry'].includes(path.phase);
+  const routePresentation: FailoverRoutePresentation | undefined = path.phase === 'idle' ? undefined : {
+    phase: path.phase,
+    pending: pathPending,
+    requested: path.requestedTunnel || (forceMode === 'auto' ? 'AUTO SELECTION' : forceMode === 'fiber' ? 'FIBER' : '5G'),
+    reported: (m.active_tunnel ?? '').trim() || 'NOT REPORTED',
+    message: path.message,
   };
 
   // Keep the path model on the branch failover feed while the numerical WAN
@@ -2782,11 +2735,12 @@ function GatewayBlock({
     return Math.round(Math.max(0, 100 - latPen - lossPen - jitPen));
   };
 
-  // Live view follows gateway telemetry, including while commands await an
-  // acknowledgement. Target/preview views can illustrate the requested path.
+  // The requested path renders in the same frame as the button selection.
+  // Observed counters, health and failover history always keep the real feed.
   const deviceActive = (m.active_tunnel ?? "").trim();
   const effectiveActiveTunnel = (() => {
-    if ((!sample && viewMode === 'live') || forceMode === "auto") return deviceActive;
+    if (viewMode === 'live') return path.visualTunnel;
+    if (forceMode === "auto") return deviceActive;
     if (forcedTunnel) return forcedTunnel;
     const pool = m.tunnels.filter(
       (t) =>
@@ -2795,8 +2749,7 @@ function GatewayBlock({
     const pick = pool.find((t) => t.reachable) ?? pool[0];
     return pick?.ifname ?? deviceActive;
   })();
-  const effectiveM =
-    forceMode === "auto" ? m : { ...m, active_tunnel: effectiveActiveTunnel };
+  const effectiveM = { ...m, active_tunnel: effectiveActiveTunnel };
 
   // App-aware class each tunnel carries (IT / OT / none) under the current mode
   // — same `routeClassFor` policy the topology diagram uses, so the per-tunnel
@@ -2898,9 +2851,9 @@ function GatewayBlock({
             </div>
           ) : (
             <div className="ipsec-gw-meta-kv">
-              <span>ACTIVE</span>
+              <span>{sample ? 'SAMPLE PATH' : 'LAST REPORTED'}</span>
               <strong style={{ color: c.accent3 }}>
-                {effectiveActiveTunnel || "—"}
+                {deviceActive || "—"}
               </strong>
             </div>
           )}
@@ -2929,22 +2882,8 @@ function GatewayBlock({
             letterSpacing: "0.04em",
           }}
         >
-          Path override
-          {pathPending && <span className="badge warn" role="status" style={{ marginLeft: 8 }}>Command sent · awaiting gateway acknowledgement</span>}
-          {pathBusy && (
-            <span
-              className="badge"
-              style={{
-                fontSize: 9,
-                padding: "1px 6px",
-                marginLeft: 8,
-                color: c.accent3,
-              }}
-            >
-              <Loader2 size={9} className="spin" style={{ marginRight: 4 }} />
-              Sending…
-            </span>
-          )}
+          PATH OVERRIDE
+          {pathPending && <span className="badge warn" style={{ marginLeft: 8 }}>REQUESTED PATH SHOWN BELOW</span>}
         </div>
         <div
           style={{
@@ -2967,7 +2906,7 @@ function GatewayBlock({
                 onClick={() => setViewMode(v.id)}
                 title={
                   v.id === "live"
-                    ? "Live device path — single active tunnel from telemetry"
+                    ? "Live device path, with immediate requested-path feedback while switching"
                     : "Application-aware routing policy — IT/OT steered onto separate tunnels"
                 }
                 style={
@@ -3005,7 +2944,7 @@ function GatewayBlock({
                       ? applyPathMode("fiber", "tunnel1", fiberTunnelIfname)
                       : applyPathMode("5g", "tunnel3", cellTunnelIfname)
                 }
-                disabled={pathBusy}
+                aria-pressed={b.id === forceMode}
                 style={
                   b.id === forceMode
                     ? {
@@ -3029,12 +2968,16 @@ function GatewayBlock({
         c={c}
         wanMbps={wanMbps}
         wanPps={wanPps}
+        wanCounters={wanState?.metrics.wan ?? null}
         forceMode={forceMode}
         viewMode={viewMode}
         tunnelRates={tunnelRates}
         tunnelHist={tunnelHist}
         locationSource={source}
         deviceTopic={deviceTopic}
+        routePresentation={routePresentation}
+        reportedActive={deviceActive}
+        preview={sample}
       />
 
       {/* Failover / SLA event ribbon — flips + breaches over the live session */}
@@ -3098,6 +3041,8 @@ function GatewayBlock({
               // Live view: the device's single active tunnel. Target view: the
               // app-aware carriers. Either way, consistent with the diagram.
               active={rowActive(t)}
+              requested={!isTarget && pathPending && t.ifname === path.requestedTunnel}
+              preview={!!sample || isTarget}
               carrierClass={tunnelClass(t)}
               jitter={jitterOf(t.ifname)}
               score={slaScoreOf(t)}
@@ -3120,21 +3065,27 @@ function GatewayBlock({
  * Mirrors the visual idiom of the Overview page's `Topology` widget. */
 function IpsecFlowSvg({
   m,
-  c,
+  c: themeColors,
   wanMbps,
   wanPps,
+  wanCounters,
   forceMode,
   viewMode,
   tunnelRates,
   tunnelHist,
   locationSource,
   deviceTopic,
+  routePresentation,
+  reportedActive,
+  preview = false,
 }: {
   m: IpsecGatewayState["metrics"];
   c: ThemeColors;
   /** Live WAN throughput (Mbps) and packet rate (pps), if computed. */
   wanMbps?: number | null;
   wanPps?: number | null;
+  /** Counters from the same authoritative WAN feed as the rate above. */
+  wanCounters?: IpsecGatewayState["metrics"]["wan"] | null;
   /** Live per-tunnel throughput (Mbps), keyed by ifname. */
   tunnelRates: Record<string, number>;
   /** Rolling per-tunnel latency history (ms), keyed by ifname. */
@@ -3150,11 +3101,18 @@ function IpsecFlowSvg({
   locationSource?: "rdk" | "prpl";
   /** Exact primary inventory feed for the endpoint column. */
   deviceTopic?: string | null;
+  routePresentation?: FailoverRoutePresentation;
+  reportedActive: string;
+  preview?: boolean;
 }) {
   // Keep the canvas tight: less dead space = a larger render scale when the
   // SVG is fit to the card width, i.e. bigger, readable labels.
   const W = 1858;
   const H = 480;
+  const isLight = themeColors.text === "#0f172a";
+  const c = isLight
+    ? { ...themeColors, ok: "#047857", warn: "#b45309", err: "#b91c1c" }
+    : themeColors;
 
   // Live IT/OT device inventory (same feed as the Devices page). Show up to 3
   // per domain as the on-prem endpoints originating traffic into the gateway.
@@ -3176,6 +3134,12 @@ function IpsecFlowSvg({
     x: number;
     y: number;
   } | null>(null);
+  const [sceneMode, setSceneMode] = useState<'3d' | '2d'>('3d');
+  const [sceneUnavailable, setSceneUnavailable] = useState(false);
+  const onSceneUnavailable = useCallback(() => {
+    setSceneUnavailable(true);
+    setSceneMode('2d');
+  }, []);
   const onTunnelHover =
     (t: IpsecTunnelMetric) => (e: { clientX: number; clientY: number }) => {
       const r = wrapRef.current?.getBoundingClientRect();
@@ -3193,10 +3157,10 @@ function IpsecFlowSvg({
   const COL_DEST = { x: 1384, w: 200 };
   const COL_CLOUD = { x: 1630, w: 200 };
 
-  const GW_H = 120;
-  const UNDERLAY_H = 100;
-  const DEST_H = 96;
-  const WAN_H = 120;
+  const GW_H = 144;
+  const UNDERLAY_H = 128;
+  const DEST_H = 128;
+  const WAN_H = 144;
 
   const ROW_CENTER = H / 2; // 240
 
@@ -3205,12 +3169,39 @@ function IpsecFlowSvg({
   // Internet egress and final Cloud destination share the SD-WAN row.
   const INT_Y = ROW_CENTER - DEST_H / 2;
 
-  const FIBER_COLOR = "#5ac8ff"; // sky blue (Overview's fiber)
-  const CELL_COLOR = "#ffa07c"; // peach (Overview's 5G)
-  const INT_COLOR = "#a5f3fc"; // cyan
-  const SDWAN_COLOR = "#9aa7ff"; // soft blue-violet for the secure fabric
+  const FIBER_COLOR = isLight ? "#0369a1" : "#5ac8ff";
+  const CELL_COLOR = isLight ? "#9a3412" : "#ffa07c";
+  const INT_COLOR = isLight ? "#0e7490" : "#a5f3fc";
+  const SDWAN_COLOR = isLight ? "#4f46e5" : "#9aa7ff";
   // IT_COLOR / OT_COLOR are module-level (shared with the per-tunnel rows).
   const accentPurple = c.accent3 ?? "#c084fc";
+  const sceneId = useId().replace(/:/g, "");
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // SMIL motion does not obey CSS animation rules. Pause the whole SVG when
+  // reduced motion is requested, including newly updated telemetry paths.
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let visible = true;
+    const update = () => {
+      if (media.matches || document.hidden || !visible) {
+        svgRef.current?.pauseAnimations();
+        if (media.matches) svgRef.current?.setCurrentTime(0);
+      } else {
+        svgRef.current?.unpauseAnimations();
+      }
+    };
+    update();
+    media.addEventListener("change", update);
+    document.addEventListener("visibilitychange", update);
+    const observer = new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; update(); });
+    if (svgRef.current) observer.observe(svgRef.current);
+    return () => {
+      media.removeEventListener("change", update);
+      document.removeEventListener("visibilitychange", update);
+      observer.disconnect();
+    };
+  }, [sceneMode]);
 
   // Sort within each underlay by name so the pill numbering is stable —
   // Tunnel 1/2 = vti1/vti2 (fiber), Tunnel 3/4 = vti3/vti4 (5G) — matching the
@@ -3286,10 +3277,13 @@ function IpsecFlowSvg({
   // `tunnelCarry` is the single source of truth used by every flow leg, pill,
   // row, and badge so the whole page stays consistent.
   const isTarget = viewMode === "target";
+  const requestedPath = !isTarget && !!routePresentation?.pending;
+  const illustratedPath = requestedPath || preview;
   const activeIfname = (m.active_tunnel ?? "").trim();
   const activeUnderlayOf: Underlay | null = activeIfname
     ? inferUnderlay(activeIfname)
     : null;
+  const reportedUnderlay: Underlay | null = reportedActive ? inferUnderlay(reportedActive) : null;
 
   // ── Failover cinematic ──
   // When the live active tunnel flips underlays, choreograph the moment for
@@ -3297,12 +3291,13 @@ function IpsecFlowSvg({
   // gateway → new-underlay leg, and a banner naming the transition.
   const [cine, setCine] = useState<{ from: Underlay; to: Underlay; key: number } | null>(null);
   const prevUnderlayRef = useRef<Underlay | null>(null);
+  const cineKeyRef = useRef(0);
   useEffect(() => {
     const prev = prevUnderlayRef.current;
-    prevUnderlayRef.current = activeUnderlayOf;
-    if (isTarget || !prev || !activeUnderlayOf || prev === activeUnderlayOf) return;
-    setCine({ from: prev, to: activeUnderlayOf, key: Date.now() });
-  }, [activeUnderlayOf, isTarget]);
+    prevUnderlayRef.current = reportedUnderlay;
+    if (isTarget || illustratedPath || !prev || !reportedUnderlay || prev === reportedUnderlay) return;
+    setCine({ from: prev, to: reportedUnderlay, key: ++cineKeyRef.current });
+  }, [reportedUnderlay, isTarget, illustratedPath]);
   // Dismiss on the cinematic's own lifecycle so a mid-play view toggle or a
   // rapid flap always re-arms the timer instead of stranding the overlay.
   useEffect(() => {
@@ -3332,7 +3327,7 @@ function IpsecFlowSvg({
       : carry === "ot"
         ? OT_COLOR
         : carry === "infra"
-          ? c.ok
+          ? requestedPath ? TWIN_PALETTE.pending : c.ok
           : IT_COLOR;
 
   // Carrier tunnels for the gateway badge (target = configured IT/OT carriers;
@@ -3378,47 +3373,26 @@ function IpsecFlowSvg({
     : (activeUnderlayOf ?? "fiber");
 
   // ── Live throughput → reactive flow speed + rate labels ──
-  const rateOf = (ifname: string) => tunnelRates[ifname] ?? 0;
+  const rateOf = (ifname: string) => Number.isFinite(tunnelRates[ifname]) ? Math.max(0, tunnelRates[ifname]) : 0;
   const maxRate = Math.max(
     0,
     ...m.tunnels.filter((t) => t.reachable).map((t) => rateOf(t.ifname)),
   );
   // Busiest carrier ⇒ fastest particles; idle ⇒ slow. Clamped for sanity.
   const flowDur = (ifname: string) => {
-    const base = maxRate > 0 ? 1.5 - 0.85 * (rateOf(ifname) / maxRate) : 1.1;
-    return Math.max(0.55, Math.min(1.6, base));
+    const base = maxRate > 0 ? 2.6 - 1.2 * (rateOf(ifname) / maxRate) : 2.6;
+    return Math.max(1.2, Math.min(2.8, base));
   };
   // Carrier stroke width nudges up with relative throughput.
   const flowWidth = (ifname: string) =>
     2.4 + (maxRate > 0 ? (rateOf(ifname) / maxRate) * 1.6 : 0.6);
   const fmtRate = (mbps: number) =>
     mbps >= 1 ? `${mbps.toFixed(1)} Mbps` : `${Math.round(mbps * 1000)} Kbps`;
-  // Build a tiny sparkline path inside a box for the latency history.
-  const sparkPath = (
-    vals: number[],
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-  ) => {
-    if (vals.length < 2) return "";
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
-    const span = max - min || 1;
-    return vals
-      .map((v, i) => {
-        const px = x + (i / (vals.length - 1)) * w;
-        const py = y + h - ((v - min) / span) * h;
-        return `${i === 0 ? "M" : "L"} ${px.toFixed(1)} ${py.toFixed(1)}`;
-      })
-      .join(" ");
-  };
-
   // Section title + legend reflect only the selected failover state in live
   // mode. Endpoint inventory is intentionally confined to DeviceColumn.
   const sectionTitle = isTarget
     ? "Application-aware routing"
-    : "Live path · single active tunnel";
+    : preview ? "Preview path · captured sample" : requestedPath ? "Requested path · awaiting confirmation" : "Live path · single active tunnel";
   const itLabel = isTarget
     ? forceMode === "fiber"
       ? "IT devices → Fiber · T1"
@@ -3438,7 +3412,107 @@ function IpsecFlowSvg({
         { color: IT_COLOR, label: itLabel },
         { color: OT_COLOR, label: otLabel },
       ]
-    : [{ color: c.ok, label: `Infrastructure path → ${activeIfname || "active tunnel"}` }];
+    : [{ color: requestedPath ? TWIN_PALETTE.pending : c.ok, label: `${illustratedPath ? 'Illustrated route' : 'Infrastructure path'} → ${activeIfname || "active tunnel"}` }];
+  const observedMbps = wanMbps != null && Number.isFinite(wanMbps) && wanMbps >= 0 ? wanMbps : null;
+  const observedPps = wanPps != null && Number.isFinite(wanPps) && wanPps >= 0 ? wanPps : null;
+  const counterText = (value?: number) => value != null && Number.isFinite(value) && value >= 0
+    ? Math.trunc(value).toLocaleString() : "—";
+  const livePathAvailable = m.wan.link_up && !!liveActiveTunnel?.reachable;
+  const scenePathAvailable = isTarget ? m.wan.link_up && (fiberActive || cellActive) : livePathAvailable;
+  const transferMode = isTarget ? "POLICY PREVIEW" : preview ? "LOCAL PREVIEW" : requestedPath ? "REQUESTED PATH" : !m.wan.link_up ? "WAN LINK DOWN"
+    : !activeIfname ? "NO ACTIVE TUNNEL" : !liveActiveTunnel?.reachable ? "TUNNEL UNAVAILABLE" : "ACTIVE PATH";
+  const transferColor = isTarget || preview ? accentPurple : requestedPath ? TWIN_PALETTE.pending : livePathAvailable ? c.ok : c.warn;
+  const routeUnderlay = isTarget ? forceMode === "auto" ? "FIBER + 5G" : forceMode === "fiber" ? "FIBER" : "5G"
+    : activeUnderlayOf === "fiber" ? "FIBER" : activeUnderlayOf === "5g" ? "5G" : "—";
+  const deviceState = (devices: DeviceView[]): FailoverSceneNode['status'] => !devices.length ? 'idle'
+    : devices.some(device => device.status === 'err') ? 'err' : devices.some(device => device.status !== 'ok') ? 'warn' : 'ok';
+  const sceneNodes: FailoverSceneNode[] = [
+    { id: 'it-devices', label: 'IT DEVICES', kind: 'devices', position: [-12, .3, -2.5], color: IT_COLOR,
+      status: deviceState(itAll), detail: itDevices.length ? itDevices.map(device => device.name).join(' · ') : 'NO IT ENDPOINTS REPORTED',
+      metrics: [{ label: 'DISCOVERED', value: `${itAll.length} ENDPOINTS` }] },
+    { id: 'ot-devices', label: 'OT DEVICES', kind: 'devices', position: [-12, .3, 2.5], color: OT_COLOR,
+      status: deviceState(otAll), detail: otDevices.length ? otDevices.map(device => device.name).join(' · ') : 'NO OT ENDPOINTS REPORTED',
+      metrics: [{ label: 'DISCOVERED', value: `${otAll.length} DEVICES` }] },
+    { id: 'gateway', label: 'EDGE GATEWAY', kind: 'gateway', position: [-8.4, .3, 0], color: accentPurple,
+      status: anyReachable ? 'ok' : 'warn', active: anyReachable, detail: displayGatewayName(m.gateway.name) || 'GATEWAY',
+      metrics: [{ label: 'MAC', value: m.gateway.mac || '—' }, { label: 'PRIMARY WAN', value: m.gateway.prim_wan_ip || '—' },
+        { label: 'SECONDARY WAN', value: m.gateway.sec_wan_ip && m.gateway.sec_wan_ip.toLowerCase() !== 'none' ? m.gateway.sec_wan_ip : 'NOT REPORTED' },
+        { label: 'LAST REPORTED', value: reportedActive || 'NOT REPORTED' },
+        ...(illustratedPath ? [{ label: 'ILLUSTRATED ROUTE', value: activeIfname || 'NOT REPORTED' }] : [])] },
+    { id: 'fiber', label: 'FIBER', kind: 'fiber', position: [-4.4, .3, -2.7], color: FIBER_COLOR,
+      status: fiberReachable ? 'ok' : 'warn', active: fiberActive, detail: 'FIBER WAN UNDERLAY',
+      metrics: [{ label: 'REACHABLE', value: `${fiberTunnels.filter(t => t.reachable).length} / ${fiberTunnels.length} TUNNELS` }] },
+    { id: 'cellular', label: '5G / CELLULAR', kind: 'cellular', position: [-4.4, .3, 2.7], color: CELL_COLOR,
+      status: cellReachable ? 'ok' : 'warn', active: cellActive, detail: 'CELLULAR WAN UNDERLAY',
+      metrics: [{ label: 'REACHABLE', value: `${cellTunnels.filter(t => t.reachable).length} / ${cellTunnels.length} TUNNELS` }] },
+    ...[...fiberTunnels, ...cellTunnels].map<FailoverSceneNode>((t, index, tunnels) => {
+      const underlay = inferUnderlay(t.ifname);
+      const group = underlay === 'fiber' ? fiberTunnels : cellTunnels;
+      const cls = tunnelCarry(underlay, group.indexOf(t), t.ifname);
+      const carrying = cls != null && t.reachable;
+      const color = tunnelColor(t);
+      const observedRate = tunnelRates[t.ifname];
+      return { id: `tunnel:${t.ifname}`, label: `TUNNEL ${index + 1}`, kind: 'tunnel',
+        position: [0, .3, tunnels.length > 1 ? -4 + index * 8 / (tunnels.length - 1) : 0],
+        color: carrying && cls ? carryColorOf(cls) : underlay === 'fiber' ? FIBER_COLOR : CELL_COLOR,
+        status: !t.present ? 'idle' : color === c.err ? 'err' : color === c.warn ? 'warn' : 'ok', active: carrying,
+        detail: `${t.ifname} · ${underlay === 'fiber' ? 'FIBER' : 'CELLULAR'} · LOGICAL IPSEC TUNNEL`,
+        metrics: [{ label: 'STATE', value: !t.present ? 'ABSENT' : !t.reachable ? 'UNREACHABLE' : carrying ? illustratedPath ? 'REQUESTED ROUTE' : isTarget ? 'POLICY ROUTE' : 'CARRYING' : 'STANDBY' },
+          { label: 'LATENCY', value: t.reachable && t.latency_ms >= 0 ? `${t.latency_ms.toFixed(1)} MS` : '—' },
+          { label: 'LOSS', value: t.reachable ? `${t.loss_percent.toFixed(1)}%` : '—' },
+          { label: 'OBSERVED RATE', value: Number.isFinite(observedRate) && observedRate >= 0 ? fmtRate(observedRate).toUpperCase() : '—' }] };
+    }),
+    { id: 'sdwan', label: 'SD-WAN', kind: 'sdwan', position: [5, .3, 0], color: SDWAN_COLOR,
+      status: m.wan.link_up ? 'ok' : 'err', active: m.wan.link_up, detail: 'IPSEC TERMINATION · SECURE FABRIC TRANSIT',
+      metrics: [{ label: 'GATEWAY WAN', value: m.wan.link_up ? 'UP' : 'DOWN' },
+        { label: 'WAN THROUGHPUT', value: observedMbps == null ? 'WAITING FOR SAMPLE' : fmtRate(observedMbps).toUpperCase() }] },
+    { id: 'internet', label: 'INTERNET', kind: 'internet', position: [9, .3, 0], color: INT_COLOR,
+      status: m.wan.link_up ? 'ok' : 'warn', detail: 'PUBLIC EGRESS', metrics: [{ label: 'WAN PATH', value: m.wan.link_up ? 'UP' : 'DOWN' }] },
+    { id: 'cloud', label: 'CLOUD', kind: 'cloud', position: [13, .3, 0], color: INT_COLOR,
+      status: m.wan.link_up ? 'ok' : 'warn', detail: 'APPLICATIONS & SERVICES', metrics: [{ label: 'WAN PATH', value: m.wan.link_up ? 'UP' : 'DOWN' }] },
+  ];
+  const sceneData: FailoverSceneData = {
+    nodes: sceneNodes, mode: isTarget ? 'target' : 'live', activeLabel: transferMode, preview,
+    route: routePresentation,
+    links: [
+      ...(itDevices.length ? [{ id: 'it-origin', from: 'it-devices', to: 'gateway', color: IT_COLOR,
+        active: itDevices.some(device => device.status === 'ok'), available: true }] : []),
+      ...(otDevices.some(device => device.conn !== 'thread') ? [{ id: 'ot-origin', from: 'ot-devices', to: 'gateway', color: OT_COLOR,
+        active: otDevices.some(device => device.conn !== 'thread' && device.status === 'ok'), available: true }] : []),
+      { id: 'gateway-fiber', from: 'gateway', to: 'fiber', color: isTarget ? FIBER_COLOR : carryColorOf('infra'), active: fiberActive, available: fiberReachable },
+      { id: 'gateway-cellular', from: 'gateway', to: 'cellular', color: isTarget ? CELL_COLOR : carryColorOf('infra'), active: cellActive, available: cellReachable },
+      ...[...fiberTunnels, ...cellTunnels].flatMap(t => {
+        const underlay = inferUnderlay(t.ifname);
+        const group = underlay === 'fiber' ? fiberTunnels : cellTunnels;
+        const cls = tunnelCarry(underlay, group.indexOf(t), t.ifname);
+        const active = cls != null && t.reachable;
+        const color = cls ? carryColorOf(cls) : tunnelColor(t);
+        const load = maxRate > 0 ? rateOf(t.ifname) / maxRate : 0;
+        return [{ id: `in:${t.ifname}`, from: underlay === 'fiber' ? 'fiber' : 'cellular', to: `tunnel:${t.ifname}`, color, active, available: t.reachable, load },
+          { id: `out:${t.ifname}`, from: `tunnel:${t.ifname}`, to: 'sdwan', color, active, available: t.reachable, load }];
+      }),
+      { id: 'public-egress', from: 'sdwan', to: 'internet', color: INT_COLOR, active: scenePathAvailable, available: m.wan.link_up },
+      { id: 'cloud-destination', from: 'internet', to: 'cloud', color: INT_COLOR, active: scenePathAvailable, available: m.wan.link_up },
+    ],
+  };
+  // Keep hardware and paths legible against the dark 3D stage in either app theme.
+  const stageColor = (color: string) => {
+    if (color === FIBER_COLOR) return TWIN_PALETTE.fiber;
+    if (color === CELL_COLOR) return TWIN_PALETTE.cellular;
+    if (color === SDWAN_COLOR) return TWIN_PALETTE.sdwan;
+    if (color === INT_COLOR) return TWIN_PALETTE.selection;
+    if (color === IT_COLOR) return TWIN_PALETTE.it;
+    if (color === OT_COLOR) return TWIN_PALETTE.ot;
+    if (color === accentPurple) return TWIN_PALETTE.selection;
+    if (color === c.ok) return TWIN_PALETTE.route;
+    if (color === c.warn) return TWIN_PALETTE.warning;
+    if (color === c.err) return TWIN_PALETTE.error;
+    return color;
+  };
+  const stageData: FailoverSceneData = { ...sceneData,
+    nodes: sceneData.nodes.map(node => ({ ...node, color: stageColor(node.color) })),
+    links: sceneData.links.map(link => ({ ...link, color: stageColor(link.color) })),
+  };
 
   return (
     <div
@@ -3514,17 +3588,37 @@ function IpsecFlowSvg({
           ))}
         </span>
       </div>
+      <div className="ipsec-scene-viewbar">
+        {sceneUnavailable && <span role="status">3D IS UNAVAILABLE ON THIS DEVICE · 2D MAP IS READY</span>}
+        <div className="toolbar" aria-label="Network visualization">
+          <button type="button" aria-pressed={sceneMode === '3d'} disabled={sceneUnavailable} onClick={() => { setHover(null); setSceneMode('3d'); }}>3D SCENE</button>
+          <button type="button" aria-pressed={sceneMode === '2d'} onClick={() => { setHover(null); setSceneMode('2d'); }}>2D MAP</button>
+        </div>
+      </div>
+      {sceneMode === '3d' ? (
+        <Suspense fallback={<div className="ipsec-scene-preparing" role="status">PREPARING YOUR NETWORK IN 3D</div>}>
+          <FailoverNetworkStage data={stageData} theme={{ light: false, text: TWIN_PALETTE.text, muted: TWIN_PALETTE.muted,
+            enterprise: TWIN_PALETTE.enterprise, operator: TWIN_PALETTE.operator, ok: TWIN_PALETTE.route,
+            warn: TWIN_PALETTE.warning, err: TWIN_PALETTE.error }} onUnavailable={onSceneUnavailable} />
+        </Suspense>
+      ) : (<>
+      <FailoverRouteStatus route={routePresentation} />
+      <div className="ipsec-flow-scroll" tabIndex={0} role="region" aria-label="Dynamic Failover network diagram. Scroll horizontally to explore both premises.">
       <svg
-        viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", height: "auto", display: "block" }}
+        ref={svgRef}
+        className="ipsec-flow-scene"
+        viewBox={`0 -68 ${W} ${H + 80}`}
+        role="img"
+        aria-labelledby={`${sceneId}-title ${sceneId}-description`}
       >
+        <title id={`${sceneId}-title`}>Dynamic Failover across Enterprise Premises and Operator Premises</title>
+        <desc id={`${sceneId}-description`}>
+          Enterprise Premises contains IT and OT devices, the edge gateway,
+          Fiber and 5G WAN underlays, and IPsec tunnels. Operator Premises
+          contains SD-WAN transit, Internet egress, and Cloud applications and
+          services. {isTarget ? "Target policy shows intended IT and OT routing." : illustratedPath ? `The illustrated route is ${activeIfname || "not reported"}. Last reported route: ${reportedActive || "not reported"}.` : `The live active tunnel is ${activeIfname || "not reported"}.`}
+        </desc>
         <defs>
-          {/* Live single-active flow carries BOTH classes — emerald (IT) → pink
-              (OT) so the one active tunnel visibly shows IT+OT combined. */}
-          <linearGradient id="ipsec-flow-active" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor={IT_COLOR} />
-            <stop offset="100%" stopColor={OT_COLOR} />
-          </linearGradient>
           <pattern
             id="ipsec-flow-dotgrid"
             x="0"
@@ -3553,49 +3647,21 @@ function IpsecFlowSvg({
           fill="url(#ipsec-flow-dotgrid)"
         />
 
-        {/* Edge-site bounding box — groups Gateway + Underlays + Tunnels as
-            "everything that lives on-prem at the branch". */}
-        {(() => {
-          const EDGE_X = COL_GW.x - 22;
-          const EDGE_Y = 48;
-          const EDGE_W = COL_MANIFOLD.x + COL_MANIFOLD.w - EDGE_X + 22;
-          const EDGE_H = H - EDGE_Y - 24;
-          return (
-            <g>
-              <rect
-                x={EDGE_X}
-                y={EDGE_Y}
-                width={EDGE_W}
-                height={EDGE_H}
-                rx={20}
-                fill="rgba(124,140,255,0.025)"
-                stroke="rgba(124,140,255,0.22)"
-                strokeDasharray="6 6"
-                strokeWidth={1.2}
-              />
-              <g transform={`translate(${EDGE_X + 18} ${EDGE_Y + 22})`}>
-                <rect
-                  x={-6}
-                  y={-12}
-                  width={108}
-                  height={20}
-                  rx={5}
-                  fill="rgba(124,140,255,0.18)"
-                />
-                <text
-                  x={2}
-                  y={2}
-                  fontSize={12}
-                  fontWeight={800}
-                  fill="rgba(180,190,255,0.95)"
-                  letterSpacing="0.12em"
-                >
-                  ON-PREM EDGE
-                </text>
-              </g>
-            </g>
-          );
-        })()}
+        {/* Premises boundaries include the complete origin and service chains. */}
+        {[
+          { x: 8, w: 1100, label: "ENTERPRISE PREMISES", tint: accentPurple, Icon: Building2 },
+          { x: 1118, w: W - 1126, label: "OPERATOR PREMISES", tint: SDWAN_COLOR, Icon: Network },
+        ].map(({ x, w, label, tint, Icon }) => (
+          <g key={label} className="ipsec-premises">
+            <rect x={x} y={-58} width={w} height={H + 44} rx={16}
+              fill={tint} fillOpacity={0.035} stroke={tint} strokeOpacity={0.55} strokeWidth={1.5} />
+            <path d={`M ${x + 1} 0 H ${x + w - 1}`} stroke={tint} strokeOpacity={0.22} />
+            <Icon x={x + 20} y={-42} width={24} height={24} color={tint} strokeWidth={1.7} />
+            <text x={x + 56} y={-23} fontSize={19} fontWeight={700} fill={c.text}>
+              {label}
+            </text>
+          </g>
+        ))}
 
         {/* Tier labels */}
         {[
@@ -3678,8 +3744,8 @@ function IpsecFlowSvg({
                     state="ok"
                     c={c}
                     beziD={beziD}
-                    accent={c.ok}
-                    flowing
+                    accent={carryColorOf('infra')}
+                    flowing={livePathAvailable}
                   />
                 )}
                 {activeUnderlayOf !== "fiber" && standbyFiber}
@@ -3724,252 +3790,37 @@ function IpsecFlowSvg({
           );
         })()}
 
-        {/* ─── Underlay → tunnel pills (particles only on active path) ─── */}
-        {fiberTunnels.map((t, i) => {
-          const col = tunnelColor(t);
-          const reachable = t.reachable;
-          // What this Fiber tunnel carries in the current view (class / both / none).
-          const cls = tunnelCarry("fiber", i, t.ifname);
-          const carrying = cls != null && reachable;
-          const flowColor = cls ? carryColorOf(cls) : FIBER_COLOR;
-          // Live single-active flow shows IT+OT combined (emerald→pink); target
-          // class flows stay solid in their own class colour.
-          const flowStroke =
-            cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
-          const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
-          const pid = `ipsec-fiber-in-${i}`;
-          const target = { x: PILL_X, y: fiberPillY(i) + PILL_H / 2 };
-          const d = beziD(fiberRight, target);
-          return (
-            <g key={`fiber-in-${i}`}>
-              <path
-                id={pid}
-                d={d}
-                fill="none"
-                stroke={carrying ? flowStroke : col}
-                strokeWidth={
-                  carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9
-                }
-                strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
-                opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
-                strokeLinecap="round"
-              >
-                {carrying && (
-                  <animate
-                    attributeName="stroke-dashoffset"
-                    values="0;-32"
-                    dur="0.9s"
-                    repeatCount="indefinite"
-                  />
-                )}
-              </path>
-              {carrying && (
-                <>
-                  <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
-                    <animateMotion
-                      dur={`${flowDur(t.ifname)}s`}
-                      repeatCount="indefinite"
-                    >
-                      <mpath href={`#${pid}`} />
-                    </animateMotion>
-                  </circle>
-                  <circle r={2.4} fill={flowDot2} opacity={0.85}>
-                    <animateMotion
-                      dur={`${flowDur(t.ifname)}s`}
-                      begin="0.55s"
-                      repeatCount="indefinite"
-                    >
-                      <mpath href={`#${pid}`} />
-                    </animateMotion>
-                  </circle>
-                  {/* Density scales with load: the busiest carrier earns a
-                      third particle so heavy paths visibly stream. */}
-                  {maxRate > 0 && rateOf(t.ifname) / maxRate > 0.55 && (
-                    <circle r={3} fill={flowColor} opacity={0.7}>
-                      <animateMotion
-                        dur={`${flowDur(t.ifname)}s`}
-                        begin="0.28s"
-                        repeatCount="indefinite"
-                      >
-                        <mpath href={`#${pid}`} />
-                      </animateMotion>
-                    </circle>
-                  )}
-                </>
-              )}
-            </g>
-          );
-        })}
-        {cellTunnels.map((t, i) => {
-          const col = tunnelColor(t);
-          const reachable = t.reachable;
-          // What this 5G tunnel carries in the current view (class / both / none).
-          const cls = tunnelCarry("5g", i, t.ifname);
-          const carrying = cls != null && reachable;
-          const flowColor = cls ? carryColorOf(cls) : CELL_COLOR;
-          // Live single-active flow shows IT+OT combined (emerald→pink); target
-          // class flows stay solid in their own class colour.
-          const flowStroke =
-            cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
-          const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
-          const pid = `ipsec-cell-in-${i}`;
-          const target = { x: PILL_X, y: cellPillY(i) + PILL_H / 2 };
-          const d = beziD(cellRight, target);
-          return (
-            <g key={`cell-in-${i}`}>
-              <path
-                id={pid}
-                d={d}
-                fill="none"
-                stroke={carrying ? flowStroke : col}
-                strokeWidth={
-                  carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9
-                }
-                strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
-                opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
-                strokeLinecap="round"
-              >
-                {carrying && (
-                  <animate
-                    attributeName="stroke-dashoffset"
-                    values="0;-32"
-                    dur="0.9s"
-                    repeatCount="indefinite"
-                  />
-                )}
-              </path>
-              {carrying && (
-                <>
-                  <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
-                    <animateMotion
-                      dur={`${flowDur(t.ifname)}s`}
-                      repeatCount="indefinite"
-                    >
-                      <mpath href={`#${pid}`} />
-                    </animateMotion>
-                  </circle>
-                  <circle r={2.4} fill={flowDot2} opacity={0.85}>
-                    <animateMotion
-                      dur={`${flowDur(t.ifname)}s`}
-                      begin="0.55s"
-                      repeatCount="indefinite"
-                    >
-                      <mpath href={`#${pid}`} />
-                    </animateMotion>
-                  </circle>
-                  {/* Density scales with load: the busiest carrier earns a
-                      third particle so heavy paths visibly stream. */}
-                  {maxRate > 0 && rateOf(t.ifname) / maxRate > 0.55 && (
-                    <circle r={3} fill={flowColor} opacity={0.7}>
-                      <animateMotion
-                        dur={`${flowDur(t.ifname)}s`}
-                        begin="0.28s"
-                        repeatCount="indefinite"
-                      >
-                        <mpath href={`#${pid}`} />
-                      </animateMotion>
-                    </circle>
-                  )}
-                </>
-              )}
-            </g>
-          );
-        })}
-
-        {/* ─── Tunnel pills → WAN (merging; particles only on the active path) ─── */}
+        {/* Each selected tunnel has one inbound and one outbound signal rail. */}
         {[
-          ...fiberTunnels.map((t, i) => ({
-            t,
-            i,
-            kind: "fiber" as const,
-            source: { x: PILL_X + PILL_W, y: fiberPillY(i) + PILL_H / 2 },
-          })),
-          ...cellTunnels.map((t, i) => ({
-            t,
-            i,
-            kind: "cell" as const,
-            source: { x: PILL_X + PILL_W, y: cellPillY(i) + PILL_H / 2 },
-          })),
-        ].map(({ t, i, kind, source }, idx) => {
-          const col = tunnelColor(t);
-          const reachable = t.reachable;
-          // Same carrier mapping as the inbound leg, colour-matched to what the
-          // tunnel carries (IT = emerald, OT = pink, both = IT+OT emerald→pink).
-          const cls = tunnelCarry(
-            kind === "fiber" ? "fiber" : "5g",
-            i,
-            t.ifname,
-          );
-          const carrying = cls != null && reachable;
-          const flowColor = cls ? carryColorOf(cls) : col;
-          const flowStroke =
-            cls === "both" ? "url(#ipsec-flow-active)" : flowColor;
-          const flowDot2 = cls === "both" ? OT_COLOR : flowColor;
-          const pid = `ipsec-${kind}-out-${i}`;
+          ...fiberTunnels.map((t, i) => ({ t, i, kind: "fiber" as const,
+            underlay: "fiber" as Underlay, origin: fiberRight, py: fiberPillY(i) })),
+          ...cellTunnels.map((t, i) => ({ t, i, kind: "cell" as const,
+            underlay: "5g" as Underlay, origin: cellRight, py: cellPillY(i) })),
+        ].map(({ t, i, kind, underlay, origin, py }, idx) => {
+          const cls = tunnelCarry(underlay, i, t.ifname);
+          const carrying = cls != null && t.reachable;
+          const color = carrying && cls ? carryColorOf(cls) : tunnelColor(t);
           const total = Math.max(1, m.tunnels.length - 1);
           const band = WAN_H / 2 - 22;
-          const landY =
-            wanLeft.y +
-            (idx - m.tunnels.length / 2 + 0.5) * ((band * 2) / total);
-          const target = { x: wanLeft.x, y: landY };
-          const d = beziD(source, target);
+          const target = { x: wanLeft.x, y: wanLeft.y +
+            (idx - m.tunnels.length / 2 + 0.5) * ((band * 2) / total) };
+          const load = maxRate > 0 ? rateOf(t.ifname) / maxRate : 0;
           return (
-            <g key={`out-${kind}-${i}`}>
-              <path
-                id={pid}
-                d={d}
-                fill="none"
-                stroke={carrying ? flowStroke : col}
-                strokeWidth={
-                  carrying ? flowWidth(t.ifname) : reachable ? 1.2 : 0.9
-                }
-                strokeDasharray={reachable ? (carrying ? "7 9" : "5 6") : "3 5"}
-                opacity={carrying ? 1 : reachable ? 0.32 : 0.22}
-                strokeLinecap="round"
-              >
-                {carrying && (
-                  <animate
-                    attributeName="stroke-dashoffset"
-                    values="0;-32"
-                    dur="0.9s"
-                    repeatCount="indefinite"
-                  />
-                )}
-              </path>
-              {carrying && (
-                <>
-                  <circle r={4} fill={flowColor} filter="url(#ipsec-flow-glow)">
-                    <animateMotion
-                      dur={`${flowDur(t.ifname)}s`}
-                      repeatCount="indefinite"
-                    >
-                      <mpath href={`#${pid}`} />
-                    </animateMotion>
-                  </circle>
-                  <circle r={2.4} fill={flowDot2} opacity={0.85}>
-                    <animateMotion
-                      dur={`${flowDur(t.ifname)}s`}
-                      begin="0.55s"
-                      repeatCount="indefinite"
-                    >
-                      <mpath href={`#${pid}`} />
-                    </animateMotion>
-                  </circle>
-                  {/* Density scales with load: the busiest carrier earns a
-                      third particle so heavy paths visibly stream. */}
-                  {maxRate > 0 && rateOf(t.ifname) / maxRate > 0.55 && (
-                    <circle r={3} fill={flowColor} opacity={0.7}>
-                      <animateMotion
-                        dur={`${flowDur(t.ifname)}s`}
-                        begin="0.28s"
-                        repeatCount="indefinite"
-                      >
-                        <mpath href={`#${pid}`} />
-                      </animateMotion>
-                    </circle>
-                  )}
-                </>
-              )}
+            <g key={"packet-route-" + kind + "-" + t.ifname}>
+              <PacketTransferPath
+                id={sceneId + "-" + kind + "-in-" + i}
+                d={beziD(origin, { x: PILL_X, y: py + PILL_H / 2 })}
+                color={color} secondaryColor={cls === "both" ? OT_COLOR : undefined}
+                active={carrying} available={t.reachable}
+                duration={flowDur(t.ifname)} load={load} width={flowWidth(t.ifname)}
+              />
+              <PacketTransferPath
+                id={sceneId + "-" + kind + "-out-" + i}
+                d={beziD({ x: PILL_X + PILL_W, y: py + PILL_H / 2 }, target)}
+                color={color} secondaryColor={cls === "both" ? OT_COLOR : undefined}
+                active={carrying} available={t.reachable}
+                duration={flowDur(t.ifname)} load={load} width={flowWidth(t.ifname)}
+              />
             </g>
           );
         })}
@@ -3983,7 +3834,7 @@ function IpsecFlowSvg({
           c={c}
           beziD={beziD}
           accent={INT_COLOR}
-          flowing={m.wan.link_up}
+          flowing={scenePathAvailable}
         />
 
         {/* Final hop: all traffic ends at the Cloud node. */}
@@ -3994,20 +3845,8 @@ function IpsecFlowSvg({
           c={c}
           beziD={beziD}
           accent={INT_COLOR}
-          flowing={m.wan.link_up}
+          flowing={scenePathAvailable}
         />
-
-        {/* Live throughput badge — single, placed in clear space below the
-            SD-WAN node so it doesn't overlap with the merge connectors. */}
-        {wanMbps != null && m.wan.link_up && (
-          <RateBadge
-            x={COL_WAN.x + COL_WAN.w / 2}
-            y={ROW_CENTER + WAN_H / 2 + 18}
-            mbps={wanMbps}
-            pps={wanPps}
-            accent={c.ok}
-          />
-        )}
 
         {/* ─── Manifold rack (background + group bands) ─── */}
         <rect
@@ -4109,11 +3948,11 @@ function IpsecFlowSvg({
           const carrying = isCarrier && reachable;
           const preferredButDown = isCarrier && !reachable;
           const classLabel =
-            cls === "it" ? "IT" : cls === "ot" ? "OT" : "IT+OT";
+            cls === "it" ? "IT" : cls === "ot" ? "OT" : cls === "infra" ? requestedPath ? "REQUESTED" : preview ? "PREVIEW" : "LIVE" : "IT+OT";
           const classColor = cls ? carryColorOf(cls) : col;
           // Dim non-carrying tunnels so the eye lands on the active one.
           const dim = !carrying;
-          const pillOpacity = carrying ? 1 : reachable ? 0.55 : 0.38;
+          const pillOpacity = carrying ? 1 : reachable ? 0.85 : 0.65;
           // MOS quality grade — derived from latency + loss using the same
           // G.107 approximation we use on the SLA chart. Letter grade so the
           // diagram stays scannable: A toll-quality → E many-dissatisfied.
@@ -4141,7 +3980,6 @@ function IpsecFlowSvg({
                 : mos >= 3.6
                   ? c.warn
                   : c.err;
-          const spark = tunnelHist[t.ifname] ?? [];
           return (
             <g
               key={`pill-${idx}-${t.ifname}`}
@@ -4150,6 +3988,7 @@ function IpsecFlowSvg({
               onMouseMove={onTunnelHover(t)}
               onMouseLeave={() => setHover(null)}
             >
+              <title>{`${label}, ${t.ifname}: ${tunnelLabel(t)}${carrying ? `, carrying ${classLabel}` : preferredButDown ? ", preferred carrier, down" : ", standby"}`}</title>
               {carrying && (
                 <rect
                   x={PILL_X - 4}
@@ -4160,15 +3999,7 @@ function IpsecFlowSvg({
                   fill="none"
                   stroke={classColor}
                   strokeWidth={2.2}
-                  strokeDasharray="6 5"
-                >
-                  <animate
-                    attributeName="stroke-dashoffset"
-                    values="0;-22"
-                    dur="1.0s"
-                    repeatCount="indefinite"
-                  />
-                </rect>
+                />
               )}
               <rect
                 x={PILL_X}
@@ -4181,24 +4012,6 @@ function IpsecFlowSvg({
                 strokeWidth={carrying ? 2 : dim ? 0.9 : 1.3}
                 strokeDasharray={t.present ? "0" : "4 4"}
               />
-              {/* Faint latency-trend sparkline behind the pill text. */}
-              {spark.length > 1 && (
-                <path
-                  d={sparkPath(
-                    spark,
-                    PILL_X + 60,
-                    py + 8,
-                    PILL_W - 120,
-                    PILL_H - 16,
-                  )}
-                  fill="none"
-                  stroke={col}
-                  strokeWidth={1.4}
-                  opacity={0.3}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              )}
               {/* Underlay-color left rail */}
               <rect
                 x={PILL_X}
@@ -4209,23 +4022,15 @@ function IpsecFlowSvg({
                 fill={underlay}
                 opacity={carrying ? 0.95 : 0.5}
               />
-              {/* State dot */}
+              <LockKeyhole x={PILL_X + 14} y={py + 8} width={16} height={16} color={col} strokeWidth={1.6} />
+              {/* State dot stays below the security symbol. */}
               <circle
                 cx={PILL_X + 22}
-                cy={py + PILL_H / 2}
-                r={4}
+                cy={py + PILL_H - 11}
+                r={3}
                 fill={col}
                 opacity={reachable ? 1 : 0.65}
-              >
-                {carrying && (
-                  <animate
-                    attributeName="opacity"
-                    values="0.45;1;0.45"
-                    dur="1.0s"
-                    repeatCount="indefinite"
-                  />
-                )}
-              </circle>
+              />
               {/* Main label "Tunnel N" */}
               <text
                 x={PILL_X + 36}
@@ -4295,9 +4100,9 @@ function IpsecFlowSvg({
               ) : mos > 0 ? (
                 <g>
                   <rect
-                    x={PILL_X + PILL_W - 64}
+                    x={PILL_X + PILL_W - 102}
                     y={py + PILL_H / 2 + 3}
-                    width={50}
+                    width={88}
                     height={14}
                     rx={4}
                     fill={`${mosColor}1f`}
@@ -4305,7 +4110,7 @@ function IpsecFlowSvg({
                     strokeWidth={0.9}
                   />
                   <text
-                    x={PILL_X + PILL_W - 39}
+                    x={PILL_X + PILL_W - 58}
                     y={py + PILL_H / 2 + 13}
                     fontSize={11}
                     fontWeight={800}
@@ -4331,7 +4136,7 @@ function IpsecFlowSvg({
           status={anyReachable ? "ok" : "warn"}
           c={c}
           label={displayGatewayName(m.gateway.name) || "gateway"}
-          sub={`${m.gateway.mac || "—"} · ${m.gateway.prim_wan_ip || "—"}`}
+          sub={`${m.gateway.mac || "—"}\n${m.gateway.prim_wan_ip || "—"}`}
           illustration={
             <GatewayIllustration
               tint={accentPurple}
@@ -4339,7 +4144,6 @@ function IpsecFlowSvg({
               warnColor={c.warn}
             />
           }
-          haloPulse={anyReachable}
         />
         {/* Carrier badges below the gateway — target view: one per device class
             (IT / OT). Live view: the single active tunnel. */}
@@ -4353,7 +4157,7 @@ function IpsecFlowSvg({
                     { cls: "IT", t: itCarrierTunnel, color: IT_COLOR },
                     { cls: "OT", t: otCarrierTunnel, color: OT_COLOR },
                   ]
-                : [{ cls: "ACTIVE", t: liveActiveTunnel, color: c.ok }]
+                : [{ cls: illustratedPath ? "REQUEST" : "ACTIVE", t: liveActiveTunnel, color: carryColorOf('infra') }]
               ).filter((x) => x.t) as {
                 cls: string;
                 t: IpsecTunnelMetric;
@@ -4439,7 +4243,7 @@ function IpsecFlowSvg({
           label="SD-WAN"
           sub={
             m.wan.link_up
-              ? `secure fabric · ↓${fmtBytes(m.wan.rx_bytes)} ↑${fmtBytes(m.wan.tx_bytes)}`
+              ? `secure fabric\n↓${fmtBytes(m.wan.rx_bytes)} ↑${fmtBytes(m.wan.tx_bytes)}`
               : "transit unreachable"
           }
           illustration={
@@ -4471,16 +4275,16 @@ function IpsecFlowSvg({
           c={c}
           label="Cloud"
           sub="applications & services"
-          illustration={<Cloud x={-24} y={-18} width={48} height={36} color={INT_COLOR} strokeWidth={1.5} />}
+          illustration={<CloudIllustration tint={INT_COLOR} />}
         />
 
         {/* ─── Failover cinematic overlay — one-shot, on top of everything ─── */}
-        {cine &&
+        {cine && !illustratedPath && !isTarget &&
           (() => {
             const oldBoxY = cine.from === "fiber" ? FIBER_Y : CELL_Y;
             const newEnd = cine.to === "fiber" ? fiberLeft : cellLeft;
             const sweepD = beziD(gwRight, newEnd);
-            const sweepId = `ipsec-failover-sweep-${cine.key}`;
+            const sweepId = `${sceneId}-failover-sweep-${cine.key}`;
             const sweepColor = cine.to === "fiber" ? FIBER_COLOR : CELL_COLOR;
             return (
               <g key={cine.key} pointerEvents="none">
@@ -4536,9 +4340,43 @@ function IpsecFlowSvg({
             );
           })()}
       </svg>
+      </div>
+      <div className="ipsec-flow-scroll-hint">Scroll to explore Enterprise and Operator Premises</div>
+      </>)}
+      <div className="ipsec-transfer-summary" aria-label="WAN packet transfer summary">
+        <div className="ipsec-transfer-route">
+          <div className="ipsec-transfer-heading"><Send size={15} aria-hidden="true" /> PACKET TRANSFER</div>
+          <div className="ipsec-transfer-route-name">{isTarget ? "IT / OT ROUTING" : activeIfname || "PATH NOT REPORTED"}</div>
+          <div className="ipsec-transfer-hops">
+            <span>{routeUnderlay}</span><ArrowRight size={13} aria-hidden="true" />
+            <span>IPSEC</span><ArrowRight size={13} aria-hidden="true" /><span>OPERATOR SERVICES</span>
+          </div>
+        </div>
+        <div className="ipsec-transfer-metric"><span>WAN THROUGHPUT</span>
+          <strong>{observedMbps == null ? "—" : observedMbps < 1 ? (observedMbps * 1000).toFixed(0) : observedMbps.toFixed(2)}
+            {observedMbps != null && <small>{observedMbps < 1 ? "KBPS" : "MBPS"}</small>}</strong>
+          <span className="ipsec-transfer-detail">{observedMbps == null ? "WAITING FOR SAMPLE" : observedMbps === 0 ? "IDLE" : "LATEST WAN SAMPLE"}</span>
+        </div>
+        <div className="ipsec-transfer-metric"><span>PACKET RATE</span>
+          <strong>{observedPps == null ? "—" : Math.round(observedPps).toLocaleString()}{observedPps != null && <small>PKT/S</small>}</strong>
+          <span className="ipsec-transfer-detail">{observedPps == null ? "WAITING FOR SAMPLE" : "RECEIVE + SEND"}</span>
+        </div>
+        <div className="ipsec-transfer-metric"><span><ArrowDownToLine size={12} aria-hidden="true" /> RX PACKETS</span>
+          <strong>{counterText(wanCounters?.rx_packets)}</strong>
+          <span className="ipsec-transfer-detail">CUMULATIVE RECEIVED</span>
+        </div>
+        <div className="ipsec-transfer-metric"><span><ArrowUpFromLine size={12} aria-hidden="true" /> TX PACKETS</span>
+          <strong>{counterText(wanCounters?.tx_packets)}</strong>
+          <span className="ipsec-transfer-detail">CUMULATIVE SENT</span>
+        </div>
+        <div className="ipsec-transfer-footnote">
+          <span className="ipsec-transfer-mode" style={{ color: transferColor }}><span style={{ background: transferColor }} />{transferMode}</span>
+          <span>{illustratedPath ? 'CAPSULES PREVIEW THE SELECTED ROUTE · COUNTERS REMAIN OBSERVED TELEMETRY' : 'PACKET CAPSULES SHOW FLOW DIRECTION'}{wanCounters?.ifname ? ` · WAN ${wanCounters.ifname}` : ""}</span>
+        </div>
+      </div>
 
       {/* Failover banner — names the transition while the cinematic plays. */}
-      {cine && (
+      {cine && !illustratedPath && !isTarget && (
         <div
           key={`fo-banner-${cine.key}`}
           className="ipsec-failover-banner"
@@ -4891,7 +4729,7 @@ function DeviceColumn({
   );
 }
 
-/* ─── Helper: Overview-style node box with halo, tint stripe, illustration ─── */
+/* ─── Network node with separated title, illustration and telemetry bands ─── */
 function SysNodeBox({
   x,
   y,
@@ -4903,7 +4741,6 @@ function SysNodeBox({
   label,
   sub,
   illustration,
-  haloPulse,
 }: {
   x: number;
   y: number;
@@ -4915,39 +4752,17 @@ function SysNodeBox({
   label: string;
   sub: string;
   illustration: React.ReactNode;
-  haloPulse?: boolean;
 }) {
   const statusColor =
     status === "ok" ? c.ok : status === "warn" ? c.warn : c.err;
   const cx = x + w / 2;
-  // Three horizontal bands inside the node: title (top), illustration (mid),
-  // sub (bottom). The illustration is centred in the middle band — keep
-  // illustrations bounded to y ∈ [-32, +8] in local coords so they fit.
-  const titleY = y + 22;
-  const illY = y + h / 2 + 6; // illustration centre
-  const subY = y + h - 12;
+  const titleY = y + 24;
+  const illY = y + h / 2 - 3;
+  const subLines = sub.split("\n");
+  const subY = y + h - 16 - (subLines.length - 1) * 14;
   return (
     <g>
-      {/* Outer soft halo */}
-      <rect
-        x={x - 6}
-        y={y - 6}
-        width={w + 12}
-        height={h + 12}
-        rx={16}
-        fill={statusColor}
-        opacity={0.1}
-        filter="url(#ipsec-flow-glow)"
-      >
-        {haloPulse && (
-          <animate
-            attributeName="opacity"
-            values="0.08;0.18;0.08"
-            dur="3s"
-            repeatCount="indefinite"
-          />
-        )}
-      </rect>
+      <title>{`${label}: ${sub.replace(/\n/g, ", ")}`}</title>
       {/* Main body */}
       <rect
         x={x}
@@ -4955,7 +4770,7 @@ function SysNodeBox({
         width={w}
         height={h}
         rx={12}
-        fill="rgba(14,12,32,0.95)"
+        fill={c.panelSolid}
         stroke={statusColor}
         strokeWidth={status === "ok" ? 1.4 : 2}
       />
@@ -4975,17 +4790,17 @@ function SysNodeBox({
         x={cx}
         y={titleY}
         textAnchor="middle"
-        fontSize={14}
+        fontSize={label.length > 22 ? 12 : 14}
         fontWeight={700}
         fill={c.text}
       >
         {label}
       </text>
       {/* Illustration slot — centred between title and sub */}
-      <g transform={`translate(${cx} ${illY})`}>{illustration}</g>
+      <g aria-hidden="true" transform={`translate(${cx} ${illY})`}>{illustration}</g>
       {/* Sub-label */}
-      <text x={cx} y={subY} textAnchor="middle" fontSize={12} fill={c.textDim}>
-        {sub}
+      <text x={cx} y={subY} textAnchor="middle" fontSize={11.5} fill={c.textDim}>
+        {subLines.map((line, i) => <tspan key={i} x={cx} dy={i === 0 ? 0 : 14}>{line}</tspan>)}
       </text>
       {/* Status pulse dot top-right when not ok */}
       {status !== "ok" && (
@@ -5000,58 +4815,6 @@ function SysNodeBox({
           </circle>
         </g>
       )}
-    </g>
-  );
-}
-
-/** Live-rate badge sitting in a small dark pill — drawn along the active path. */
-function RateBadge({
-  x,
-  y,
-  mbps,
-  pps,
-  accent,
-}: {
-  x: number;
-  y: number;
-  mbps: number;
-  pps?: number | null;
-  accent: string;
-}) {
-  const rateText =
-    mbps < 0.001
-      ? "— idle"
-      : mbps < 1
-        ? `↕ ${(mbps * 1000).toFixed(0)} Kbps`
-        : mbps < 10
-          ? `↕ ${mbps.toFixed(2)} Mbps`
-          : `↕ ${Math.round(mbps)} Mbps`;
-  const ppsText = pps != null && pps > 0 ? ` · ${pps.toFixed(0)} pps` : "";
-  const text = rateText + ppsText;
-  const width = Math.max(96, text.length * 6 + 16);
-  return (
-    <g transform={`translate(${x} ${y})`}>
-      <rect
-        x={-width / 2}
-        y={-11}
-        width={width}
-        height={22}
-        rx={11}
-        fill="rgba(2,4,16,0.75)"
-        stroke={accent}
-        strokeWidth={1}
-      />
-      <text
-        x={0}
-        y={4}
-        textAnchor="middle"
-        fontSize={12.5}
-        fontWeight={700}
-        fill={accent}
-        fontFamily="JetBrains Mono, ui-monospace, monospace"
-      >
-        {text}
-      </text>
     </g>
   );
 }
@@ -5073,7 +4836,7 @@ function NodeConnector({
   beziD: (a: { x: number; y: number }, b: { x: number; y: number }) => string;
   /** Optional per-segment colour (overrides the state-based green/amber/red). */
   accent?: string;
-  /** If true, animate a marching-ants ghost stroke and a flying particle.
+  /** If true, show directional packet capsules on the selected signal rail.
    *  Disabled by default so quiet/idle segments stay static and the eye
    *  follows traffic on the genuinely-active path. */
   flowing?: boolean;
@@ -5088,360 +4851,8 @@ function NodeConnector({
           : c.err;
   const d = beziD(a, b);
   return (
-    <g>
-      <path
-        d={d}
-        stroke={col}
-        strokeWidth={2}
-        fill="none"
-        opacity={state === "err" ? 0.4 : flowing ? 0.95 : 0.55}
-        strokeDasharray={state === "err" ? "4 6" : flowing ? undefined : "5 7"}
-      />
-      {flowing && (
-        <>
-          <path
-            d={d}
-            stroke={col}
-            strokeWidth={1.4}
-            fill="none"
-            strokeDasharray="4 8"
-            opacity={0.75}
-          >
-            <animate
-              attributeName="stroke-dashoffset"
-              values="0;-24"
-              dur="1.4s"
-              repeatCount="indefinite"
-            />
-          </path>
-          <circle r={3.5} fill={col} filter="url(#ipsec-flow-glow)">
-            <animateMotion dur="1.6s" repeatCount="indefinite" path={d} />
-          </circle>
-        </>
-      )}
-    </g>
-  );
-}
-
-/* ─── Inline illustrations (Overview-style, centered around 0,0) ─── */
-function GatewayIllustration({
-  tint,
-  okColor,
-  warnColor,
-}: {
-  tint: string;
-  okColor: string;
-  warnColor: string;
-}) {
-  // Generic edge-router silhouette — 3 antennas + chassis with LEDs + RJ45 ports.
-  // Content vertically centred around y=0 (range y ∈ [-18, +18]).
-  return (
-    <g>
-      {/* Subtle signal arc above the centre antenna */}
-      <path
-        d="M -10 -16 A 10 10 0 0 1 10 -16"
-        fill="none"
-        stroke={tint}
-        strokeWidth={1}
-        opacity={0.45}
-      />
-      <path
-        d="M -16 -16 A 16 16 0 0 1 16 -16"
-        fill="none"
-        stroke={tint}
-        strokeWidth={0.8}
-        opacity={0.22}
-      />
-      {/* Antennas */}
-      <line
-        x1={-18}
-        y1={-2}
-        x2={-21}
-        y2={-12}
-        stroke={tint}
-        strokeWidth={1.7}
-        strokeLinecap="round"
-      />
-      <line
-        x1={0}
-        y1={-2}
-        x2={0}
-        y2={-14}
-        stroke={tint}
-        strokeWidth={1.7}
-        strokeLinecap="round"
-      />
-      <line
-        x1={18}
-        y1={-2}
-        x2={21}
-        y2={-12}
-        stroke={tint}
-        strokeWidth={1.7}
-        strokeLinecap="round"
-      />
-      <circle cx={-21} cy={-12} r={1.6} fill={tint} />
-      <circle cx={0} cy={-14} r={1.6} fill={tint} />
-      <circle cx={21} cy={-12} r={1.6} fill={tint} />
-      {/* Chassis body */}
-      <rect
-        x={-30}
-        y={-2}
-        width={60}
-        height={22}
-        rx={5}
-        fill={tint}
-        fillOpacity={0.18}
-        stroke={tint}
-        strokeWidth={1.3}
-      />
-      {/* LED strip */}
-      <circle cx={-20} cy={4} r={1.5} fill={okColor}>
-        <animate
-          attributeName="opacity"
-          values="1;0.35;1"
-          dur="1.4s"
-          repeatCount="indefinite"
-        />
-      </circle>
-      <circle cx={-12} cy={4} r={1.5} fill={okColor}>
-        <animate
-          attributeName="opacity"
-          values="0.35;1;0.35"
-          dur="1.6s"
-          repeatCount="indefinite"
-        />
-      </circle>
-      <circle cx={-4} cy={4} r={1.5} fill={warnColor} />
-      <circle cx={4} cy={4} r={1.5} fill={okColor} />
-      <circle cx={12} cy={4} r={1.5} fill={okColor} />
-      <circle cx={20} cy={4} r={1.5} fill={okColor} />
-      {/* Thin divider rail */}
-      <line
-        x1={-26}
-        y1={10}
-        x2={26}
-        y2={10}
-        stroke={tint}
-        strokeWidth={0.6}
-        opacity={0.35}
-      />
-      {/* RJ45 port slots */}
-      <rect
-        x={-23}
-        y={14}
-        width={10}
-        height={4.5}
-        rx={0.8}
-        fill={tint}
-        fillOpacity={0.5}
-        stroke={tint}
-        strokeWidth={0.5}
-      />
-      <rect
-        x={-11}
-        y={14}
-        width={10}
-        height={4.5}
-        rx={0.8}
-        fill={tint}
-        fillOpacity={0.5}
-        stroke={tint}
-        strokeWidth={0.5}
-      />
-      <rect
-        x={1}
-        y={14}
-        width={10}
-        height={4.5}
-        rx={0.8}
-        fill={tint}
-        fillOpacity={0.5}
-        stroke={tint}
-        strokeWidth={0.5}
-      />
-      <rect
-        x={13}
-        y={14}
-        width={10}
-        height={4.5}
-        rx={0.8}
-        fill={tint}
-        fillOpacity={0.5}
-        stroke={tint}
-        strokeWidth={0.5}
-      />
-    </g>
-  );
-}
-
-function SdwanIllustration({ tint }: { tint: string }) {
-  // Simple secure-fabric cloud mark, centred around (0,0) so it lines up
-  // with SysNodeBox's middle band without tying the node to a cloud vendor.
-  return (
-    <g transform="translate(0 0) scale(1.1) translate(-17.5 -12)">
-      <path
-        d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 0 1 0 9Z"
-        fill={tint}
-        fillOpacity={0.08}
-        stroke={tint}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </g>
-  );
-}
-
-function FiberIllustration({ tint }: { tint: string }) {
-  // Content centred around y=0 (range y ∈ [-7, +7]).
-  return (
-    <g>
-      {/* SC connector (left) */}
-      <rect
-        x={-26}
-        y={-5}
-        width={9}
-        height={10}
-        rx={1}
-        fill={tint}
-        fillOpacity={0.25}
-        stroke={tint}
-        strokeWidth={1.2}
-      />
-      <rect x={-23} y={-2} width={5} height={4} rx={0.5} fill={tint} />
-      {/* fiber strand */}
-      <path
-        d="M -17 0 C -8 0, 0 0, 8 0 S 16 0, 20 0"
-        stroke={tint}
-        strokeWidth={2.4}
-        fill="none"
-        opacity={0.35}
-      />
-      <path
-        d="M -17 0 C -8 0, 0 0, 8 0 S 16 0, 20 0"
-        stroke={tint}
-        strokeWidth={1.1}
-        fill="none"
-      />
-      {/* glowing terminator */}
-      <circle cx={20} cy={0} r={5} fill={tint} fillOpacity={0.2} />
-      <circle cx={20} cy={0} r={3} fill={tint} />
-      <circle cx={20} cy={0} r={1.2} fill="#ffffff" />
-    </g>
-  );
-}
-
-function CellularIllustration({ tint }: { tint: string }) {
-  // Tower mast + arc + signal waves, centred around y=0 (range y ∈ [-15, +8]).
-  return (
-    <g>
-      {/* mast */}
-      <line x1={0} y1={-15} x2={0} y2={5} stroke={tint} strokeWidth={1.8} />
-      {/* tower triangle */}
-      <polygon
-        points="-6,5 6,5 0,-15"
-        fill={tint}
-        fillOpacity={0.18}
-        stroke={tint}
-        strokeWidth={1.1}
-      />
-      <circle cx={0} cy={-15} r={2.2} fill={tint} />
-      {/* signal waves emanating from the top */}
-      <path
-        d="M -10 -15 A 10 10 0 0 1 10 -15"
-        stroke={tint}
-        strokeWidth={1.4}
-        fill="none"
-        opacity={0.85}
-      />
-      <path
-        d="M -16 -15 A 16 16 0 0 1 16 -15"
-        stroke={tint}
-        strokeWidth={1.2}
-        fill="none"
-        opacity={0.55}
-      />
-      <path
-        d="M -22 -15 A 22 22 0 0 1 22 -15"
-        stroke={tint}
-        strokeWidth={1.0}
-        fill="none"
-        opacity={0.3}
-      />
-      {/* ground */}
-      <line
-        x1={-14}
-        y1={7}
-        x2={14}
-        y2={7}
-        stroke={tint}
-        strokeWidth={1}
-        opacity={0.5}
-      />
-    </g>
-  );
-}
-
-function InternetIllustration({ tint }: { tint: string }) {
-  // Globe with latitudes/longitudes, centred around y=0 (range y ∈ [-14, +14]).
-  return (
-    <g>
-      <circle
-        cx={0}
-        cy={0}
-        r={14}
-        fill={tint}
-        fillOpacity={0.12}
-        stroke={tint}
-        strokeWidth={1.3}
-      />
-      {/* latitudes */}
-      <ellipse
-        cx={0}
-        cy={0}
-        rx={14}
-        ry={5}
-        fill="none"
-        stroke={tint}
-        strokeWidth={0.9}
-        opacity={0.6}
-      />
-      <ellipse
-        cx={0}
-        cy={0}
-        rx={14}
-        ry={9}
-        fill="none"
-        stroke={tint}
-        strokeWidth={0.8}
-        opacity={0.4}
-      />
-      {/* longitudes */}
-      <line
-        x1={0}
-        y1={-14}
-        x2={0}
-        y2={14}
-        stroke={tint}
-        strokeWidth={0.9}
-        opacity={0.55}
-      />
-      <path
-        d="M -10 -11 Q -14 0 -10 11"
-        stroke={tint}
-        strokeWidth={0.8}
-        fill="none"
-        opacity={0.45}
-      />
-      <path
-        d="M  10 -11 Q  14 0  10 11"
-        stroke={tint}
-        strokeWidth={0.8}
-        fill="none"
-        opacity={0.45}
-      />
-    </g>
+    <PacketTransferPath d={d} color={col} active={flowing && state !== "err"}
+      available={state !== "err"} width={2.2} duration={2.4} />
   );
 }
 
@@ -6541,6 +5952,8 @@ function FlowEventRibbon({
 function TunnelRow({
   t,
   active,
+  requested = false,
+  preview = false,
   carrierClass,
   jitter,
   score,
@@ -6548,6 +5961,8 @@ function TunnelRow({
 }: {
   t: IpsecTunnelMetric;
   active: boolean;
+  requested?: boolean;
+  preview?: boolean;
   /** Device class this tunnel carries under the current mode (app-aware demo
    *  policy), or null if it's an idle standby in this mode. */
   carrierClass: "it" | "ot" | null;
@@ -6613,10 +6028,10 @@ function TunnelRow({
         )}
         {carrying && (
           <span
-            className="badge ok"
+            className={`badge ${requested ? 'warn' : 'ok'}`}
             style={{ fontSize: 9.5, padding: "1px 6px" }}
           >
-            ACTIVE
+            {requested ? 'REQUESTED' : preview ? 'PREVIEW' : 'ACTIVE'}
           </span>
         )}
         {preferredButDown && (
@@ -6624,7 +6039,7 @@ function TunnelRow({
             className="badge warn"
             style={{ fontSize: 9.5, padding: "1px 6px" }}
           >
-            PREFERRED
+            {requested ? 'REQUESTED' : 'PREFERRED'}
           </span>
         )}
         <span className="ipsec-tunnel-state" style={{ color: stateColor }}>

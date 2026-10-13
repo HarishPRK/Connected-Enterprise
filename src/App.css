@@ -1774,7 +1774,16 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 
 /* ───── Live IPsec ingest card ───── */
+.ipsec-live-card {
+  min-width: 0;
+  width: 100%;
+  text-transform: uppercase;
+}
+.ipsec-live-card > div { min-width: 0; }
+.ipsec-live-card button { text-transform: uppercase; }
 .ipsec-gw {
+  min-width: 0;
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface-1);
@@ -1844,6 +1853,99 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   /* Fill the card horizontally. ViewBox aspect (≈3.9:1) keeps it from getting
      too tall on wide monitors. */
   width: 100%;
+  min-width: 0;
+}
+.ipsec-scene-viewbar { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.ipsec-scene-viewbar > span { margin-right: auto; color: var(--text-dim); font-size: 10px; }
+.ipsec-scene-viewbar button { font-size: 10px; min-height: 32px; padding: 7px 12px; }
+.ipsec-scene-viewbar button[aria-pressed="true"] { border-color: var(--accent-3); background: rgba(var(--accent-3-rgb) / .12); }
+.ipsec-scene-preparing { display: grid; place-items: center; height: 480px; color: var(--text-dim); font-size: 12px; }
+.ipsec-flow-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-muted) transparent;
+  border-radius: 8px;
+}
+.ipsec-flow-scroll:focus-visible {
+  outline: 2px solid var(--accent-3);
+  outline-offset: 3px;
+}
+.ipsec-flow-scene {
+  display: block;
+  width: 100%;
+  min-width: 1160px;
+  height: auto;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+.ipsec-transfer-summary {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.6fr) repeat(4, minmax(0, 1fr));
+  gap: 18px 0;
+  margin-top: 14px;
+  padding: 20px 4px 2px;
+  border-top: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+.ipsec-transfer-route { display: flex; flex-direction: column; gap: 8px; padding-right: 18px; min-width: 0; }
+.ipsec-transfer-heading { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; color: var(--text-dim); }
+.ipsec-transfer-route-name { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.ipsec-transfer-hops { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 10px; color: var(--text-dim); }
+.ipsec-transfer-metric { display: flex; flex-direction: column; justify-content: space-between; gap: 8px; border-inline-start: 1px solid var(--border); padding: 0 18px; min-width: 0; }
+.ipsec-transfer-metric > span:first-child { display: flex; align-items: center; gap: 5px; color: var(--text-dim); font-size: 10px; font-weight: 700; }
+.ipsec-transfer-metric strong { font-size: 21px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.ipsec-transfer-metric small { margin-left: 5px; font-size: 10px; color: var(--text-dim); font-weight: 500; }
+.ipsec-transfer-detail { color: var(--text-dim); font-size: 9px; }
+.ipsec-transfer-footnote { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--border); font-size: 9px; color: var(--text-dim); }
+.ipsec-transfer-mode { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+.ipsec-transfer-mode > span { width: 6px; height: 6px; border-radius: 50%; }
+@media (max-width: 1200px) {
+  .ipsec-transfer-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ipsec-transfer-route { grid-column: 1 / -1; }
+  .ipsec-transfer-metric { padding: 0 12px; }
+  .ipsec-transfer-metric:nth-child(2) { border-inline-start: 0; padding-left: 0; }
+}
+@media (max-width: 1000px) {
+  .ipsec-transfer-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ipsec-transfer-metric:nth-child(4) { border-inline-start: 0; padding-left: 0; }
+}
+@media (max-width: 700px) {
+  .ipsec-transfer-summary { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .ipsec-transfer-metric,
+  .ipsec-transfer-metric:nth-child(2),
+  .ipsec-transfer-metric:nth-child(4) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    border-inline-start: 0;
+    border-top: 1px solid var(--border);
+    padding: 12px 0 0;
+    gap: 6px 8px;
+  }
+  .ipsec-transfer-metric strong {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    font-size: 17px;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+}
+.ipsec-flow-scroll-hint {
+  display: none;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+@media (max-width: 1500px) {
+  .ipsec-flow-scroll-hint { display: block; }
+}
+@media (max-width: 700px) {
+  .ipsec-live-card .card-head { flex-wrap: wrap; }
+  .ipsec-gw-head { flex-wrap: wrap; }
+  .ipsec-gw-meta { width: 100%; justify-content: flex-end; }
+  .ipsec-flow-wrap { padding: 12px 8px 10px; }
 }
 .ipsec-gw-wan {
   display: flex;

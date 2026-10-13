@@ -217,7 +217,8 @@ export function BootstrapPackageManager({
             <p>
               <strong>{issued.serialNumber}</strong> has a bootstrap package.
               Verify and activate it with the site and profile selected for that package.
-              Then connect the gateway using the downloaded ZIP.
+              {onboardingGatewaySimulatorAvailable() && /^MOCK-/.test(issued.serialNumber)
+                ? 'Then choose INITIATE FLOW on the activation timeline.' : 'Then connect the gateway using the downloaded ZIP.'}
             </p>
           </div>
         </div>
@@ -291,7 +292,7 @@ export function BootstrapPackageManager({
                 required
               />
               <small>Use the same ID on the device. If you already downloaded a package for this ID, use that ZIP.</small>
-              {onboardingGatewaySimulatorAvailable() && <small>For a simulated gateway, start the ID with <strong>MOCK-</strong>. After Verify &amp; activate, use Connect simulated gateway with your downloaded ZIP.</small>}
+              {onboardingGatewaySimulatorAvailable() && <small>For a software gateway, choose <strong>Simulated gateway</strong> above to register a MOCK- ID and INITIATE FLOW without preparing a package here.</small>}
             </label>
 
             <label>

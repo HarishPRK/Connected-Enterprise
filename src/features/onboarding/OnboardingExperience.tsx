@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { CloudCog, LogIn, LogOut, MapPin, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CloudCog, FileKey2, FlaskConical, LogIn, LogOut, MapPin, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { BootstrapPackageManager } from './BootstrapPackageManager';
 import { ControllerManager } from './ControllerManager';
 import { GatewayInventory } from './GatewayInventory';
@@ -12,6 +12,7 @@ import { useOnboardingAuth } from './onboardingAuthContext';
 import { currentProfiles } from './profileSelection';
 import { OnboardingNavigation, type WorkspaceSurface } from './OnboardingNavigation';
 import './activation-workspace.css';
+import { onboardingGatewaySimulatorAvailable } from './auth';
 
 type Surface = WorkspaceSurface | 'operation';
 
@@ -46,14 +47,18 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
   const checkingSignIn = authenticationStatus === 'checking';
   const [surface, setSurface] = useState<Surface>('gateways');
   const [operationId, setOperationId] = useState<string>();
+  const [managedSimulatorSelected, setManagedSimulatorSelected] = useState(false);
+  const [flowLaunchError, setFlowLaunchError] = useState<string>();
+  const managedSimulatorAvailable = snapshot?.mode === 'aws' && onboardingGatewaySimulatorAvailable();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const navigate = (next: Surface) => {
     setSurface(next);
     window.requestAnimationFrame(() => workspaceRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' }));
   };
-  const openOperation = (operation: OnboardingOperation) => {
+  const openOperation = (operation: OnboardingOperation, launchError?: string) => {
     upsertOperation(operation);
     setOperationId(operation.id);
+    setFlowLaunchError(launchError);
     navigate('operation');
   };
 
@@ -187,12 +192,19 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
 
               {surface === 'bootstrap' && canOperate && (
                 <div id="ce-onb-bootstrap-panel">
-                  {localSimulator ? <OnboardingWizard
+                  {managedSimulatorAvailable && <div className="ce-onb-enrollment-choice" role="group" aria-label="Gateway enrollment type">
+                    <button type="button" aria-pressed={!managedSimulatorSelected} onClick={() => setManagedSimulatorSelected(false)}><FileKey2 size={16} aria-hidden="true" />Physical gateway</button>
+                    <button type="button" aria-pressed={managedSimulatorSelected} onClick={() => setManagedSimulatorSelected(true)}><FlaskConical size={16} aria-hidden="true" />Simulated gateway</button>
+                    <p>{managedSimulatorSelected ? 'Register a MOCK- gateway, then INITIATE FLOW. The server prepares the connection internally.' : 'Prepare a certificate package for installation on your physical gateway.'}</p>
+                  </div>}
+                  {localSimulator || managedSimulatorAvailable && managedSimulatorSelected ? <OnboardingWizard
+                    key={managedSimulatorSelected ? 'managed-gateway' : 'local-gateway'}
                     profiles={snapshot.profiles}
                     models={snapshot.gatewayModels}
                     preferredSiteId={preferredSiteId}
                     onCancel={() => navigate('gateways')}
                     onStarted={openOperation}
+                    managedSimulator={Boolean(managedSimulatorAvailable && managedSimulatorSelected)}
                   /> : <BootstrapPackageManager
                     key={`${snapshot.tenant.id}:${user?.subject ?? ''}`}
                     profiles={snapshot.profiles}
@@ -215,6 +227,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                   sites={snapshot.sites}
                   streamState={streamState}
                   onUpdate={upsertOperation}
+                  flowLaunchError={flowLaunchError}
                   onContinueOnboarding={canOperate ? () => navigate('bootstrap') : undefined}
                   onBack={() => {
                     navigate('gateways');

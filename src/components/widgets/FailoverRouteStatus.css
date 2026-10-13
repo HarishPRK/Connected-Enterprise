@@ -1,0 +1,35 @@
+.failover-route-status {
+  --route-accent: var(--accent-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+  padding: 15px 20px;
+  color: var(--text);
+  background: var(--panel-solid);
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 3px 0 var(--route-accent);
+  text-transform: uppercase;
+}
+.failover-route-status.is-warning { --route-accent: var(--warn); }
+.failover-route-status.is-confirmed { --route-accent: var(--ok); }
+.failover-route-status.is-preview { --route-accent: var(--accent-3); }
+.failover-route-state { display: flex; align-items: center; gap: 11px; flex: 1 1 260px; min-width: 0; }
+.failover-route-state > svg { color: var(--route-accent); flex-shrink: 0; }
+.failover-route-state > div { display: flex; flex-direction: column; gap: 5px; }
+.failover-route-state strong { color: var(--route-accent); font-size: 11px; letter-spacing: .055em; }
+.failover-route-state span { color: var(--text-dim); font-size: 10px; line-height: 1.5; max-width: 80ch; overflow-wrap: anywhere; }
+.failover-route-comparison { display: flex; align-items: center; flex-wrap: wrap; gap: 15px; min-width: 0; }
+.failover-route-comparison > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.failover-route-comparison span { color: var(--text-dim); font-size: 9px; letter-spacing: .07em; }
+.failover-route-comparison strong { font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.failover-route-requested strong, .failover-route-arrow { color: var(--route-accent); }
+.failover-route-status.is-pending .failover-route-arrow { animation: route-intent 1.6s ease-in-out infinite; }
+@keyframes route-intent { 50% { transform: translateX(4px); opacity: .5; } }
+@media (max-width: 600px) {
+  .failover-route-status { padding: 14px; }
+  .failover-route-comparison { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr); gap: 8px; }
+  .failover-route-comparison strong { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) { .failover-route-status.is-pending .failover-route-arrow { animation: none; } }

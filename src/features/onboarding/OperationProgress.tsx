@@ -27,6 +27,7 @@ interface OperationProgressProps {
   onUpdate: (operation: OnboardingOperation) => void;
   onBack: () => void;
   onContinueOnboarding?: () => void;
+  flowLaunchError?: string;
 }
 
 interface LifecycleMilestone {
@@ -139,6 +140,7 @@ export function OperationProgress({
   onUpdate,
   onBack,
   onContinueOnboarding,
+  flowLaunchError,
 }: OperationProgressProps) {
   useEffect(() => {
     if (isOperationTerminal(operation)) return;
@@ -227,13 +229,13 @@ export function OperationProgress({
       {registrationReset && (
         <div className="ce-onb-alert is-warning ce-onb-reset-notice" role="status">
           <RotateCcw size={17} aria-hidden="true" />
-          <span>This attempt was closed when its registration was reset. Continue onboarding with your current downloaded package.</span>
+          <span>This attempt was closed when its registration was reset. {onboardingGatewaySimulatorAvailable() && /^MOCK-/.test(operation.serialNumber) ? 'Create a new simulated-gateway flow from Initiate Onboarding.' : 'Continue onboarding with your current downloaded package.'}</span>
           {onContinueOnboarding && <button type="button" onClick={onContinueOnboarding}>Continue onboarding</button>}
         </div>
       )}
 
       {onboardingGatewaySimulatorAvailable() && operation.type === 'ONBOARD' && /^MOCK-/.test(operation.serialNumber)
-        && !registrationReset && <GatewaySimulator key={operation.id} operation={operation} />}
+        && !registrationReset && <GatewaySimulator key={operation.id} operation={operation} initialError={flowLaunchError} />}
 
       <div className="ce-onb-operation-layout">
         <div className="ce-onb-progress-rail" aria-live="polite">

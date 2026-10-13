@@ -5,6 +5,7 @@ import type { Server } from 'node:http';
 import express from 'express';
 import { createPublicOnboardingRouter, publicOnboardingConfig } from './onboardingPublicRoutes.js';
 import type { createOnboardingAwsBridge, OnboardingAwsResponse } from './onboardingAwsBridge.js';
+import type { ManagedBootstrapMetadata } from './onboardingManagedBootstrap.js';
 
 const initialTime = Date.parse('2026-10-12T20:00:00Z');
 const origin = 'https://connectedenterprise.app';
@@ -119,4 +120,47 @@ it('requires bounded expiry, fixed development Lambda and explicit origins', () 
     { ONBOARDING_PUBLIC_AWS_REGION: 'us-west-2' },
     { ONBOARDING_PUBLIC_AWS_TENANT_ID: 'tenant#other' },
   ]) assert.throws(() => publicOnboardingConfig({ ...configuredEnv, ...invalid }, initialTime));
+});
+
+it('initiates a managed gateway with an empty request and never accepts uploaded credentials or browser assignments', async () => {
+  const app = express(); app.use(express.json());
+  const operation = { id: 'op-managed', gatewayId: 'gw-managed', serialNumber: 'MOCK-ROUTE', type: 'ONBOARD', status: 'IN_PROGRESS', siteId: 'site-one', profileVersionId: 'profile-one', deploymentGeneration: 5 };
+  const job = { operationId: operation.id, state: 'running' as const, phase: 'Connecting', startedAt: '2026-10-12T00:00:00Z' };
+  let starts = 0;
+  const forwarded: string[] = [];
+  app.use('/api', createPublicOnboardingRouter({
+    env: { ...configuredEnv, ONBOARDING_PUBLIC_AWS_TENANT_ID: 'ce-test', ONBOARDING_AWS_SIMULATOR_ENABLED: 'true' }, now: () => initialTime,
+    bridgeFactory: config => ({ resolvePrincipal: () => ({ subject: 'test', tenantId: config.fixedTenantId, role: 'tenant_admin' }),
+      forward: async request => { forwarded.push(request.path); return { statusCode: 200, headers: { 'content-type': 'application/json' }, body: Buffer.from(JSON.stringify(request.path === '/snapshot'
+        ? { tenant: { id: 'ce-test' }, gateways: [{ id: operation.gatewayId, serialNumber: operation.serialNumber, state: 'PENDING', siteId: operation.siteId,
+          modelId: 'model-one', desiredProfileVersionId: operation.profileVersionId, deploymentGeneration: 5 }] } : { operation })) }; } }),
+    simulatorFactory: () => ({ status: () => starts ? job : undefined, prepare: async () => {}, start: async (assignment, tenant, archive) => {
+      assert.equal(assignment.serialNumber, operation.serialNumber); assert.equal(tenant, 'ce-test'); assert.equal(archive, Buffer.from('retained-only-on-server').toString('base64'));
+      starts++; return job;
+    } }),
+    packageStoreFactory: () => ({ prepare: async () => {}, load: async () => Buffer.from('retained-only-on-server'), retain: async (archive, expected) => {
+      assert.equal(archive.toString(), 'retained-only-on-server');
+      assert.deepEqual(expected, { tenantId: 'ce-test', serialNumber: operation.serialNumber, modelId: 'model-one',
+        siteId: operation.siteId, profileVersionId: operation.profileVersionId, initialGeneration: 5 });
+      return expected as ManagedBootstrapMetadata;
+    } }),
+  }));
+  const server = await new Promise<Server>(resolve => { const listener = app.listen(0, '127.0.0.1', () => resolve(listener)); });
+  try {
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/live/simulator/${operation.id}`;
+    const post = (body: unknown) => fetch(url, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    for (const body of [{ archiveBase64: 'secret' }, { serialNumber: 'MOCK-OTHER' }, []]) assert.equal((await post(body)).status, 400);
+    assert.equal(forwarded.length, 0);
+    const response = await post({});
+    assert.equal(response.status, 202); assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await response.json(), { job });
+    assert.equal(starts, 1); assert.deepEqual(forwarded, [`/operations/${operation.id}`, '/snapshot', `/operations/${operation.id}`, '/snapshot']);
+    assert.equal((await post({})).status, 202); assert.equal(starts, 1);
+    assert.deepEqual(await (await fetch(url)).json(), { job });
+    const beforeReissue = forwarded.length;
+    const reissue = await fetch(url.replace(`/simulator/${operation.id}`, '/bootstrap-packages'), {
+      method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ serialNumber: operation.serialNumber }),
+    });
+    assert.equal(reissue.status, 409); assert.equal(forwarded.length, beforeReissue);
+  } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 });

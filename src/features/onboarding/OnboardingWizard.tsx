@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -12,7 +12,8 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from 'lucide-react';
-import { createIdempotencyKey, startOnboardingOperation, verifyFactorySerial } from './api';
+import { createIdempotencyKey, startGatewaySimulator, startOnboardingOperation, verifyFactorySerial } from './api';
+import { isManagedGatewaySerial } from './gatewayFlowPresentation';
 import { ProfileParameterEditor } from './ProfileParameterEditor';
 import type {
   GatewayModel,
@@ -28,8 +29,9 @@ interface OnboardingWizardProps {
   models: GatewayModel[];
   preferredSiteId?: string;
   initialSerialNumber?: string;
+  managedSimulator?: boolean;
   onCancel: () => void;
-  onStarted: (operation: OnboardingOperation) => void;
+  onStarted: (operation: OnboardingOperation, flowError?: string) => void;
 }
 
 const WIZARD_STEPS = [
@@ -57,11 +59,13 @@ export function OnboardingWizard({
   models,
   preferredSiteId,
   initialSerialNumber = '',
+  managedSimulator = false,
   onCancel,
   onStarted,
 }: OnboardingWizardProps) {
   const [step, setStep] = useState(0);
-  const [serialNumber, setSerialNumber] = useState(initialSerialNumber);
+  const [serialNumber, setSerialNumber] = useState(() => initialSerialNumber || (managedSimulator
+    ? `MOCK-${createIdempotencyKey('gateway').replace(/^ce-gateway-/, '').toUpperCase()}` : ''));
   const [verification, setVerification] = useState<VerificationResult>();
   const [siteId, setSiteId] = useState('');
   const [profileVersionId, setProfileVersionId] = useState('');
@@ -69,6 +73,7 @@ export function OnboardingWizard({
   const [operationKey, setOperationKey] = useState(() => createIdempotencyKey('activate'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const startingRef = useRef(false);
 
   const modelById = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
   const model = verification ? modelById.get(verification.identity.modelId) : undefined;
@@ -91,6 +96,10 @@ export function OnboardingWizard({
   const verify = async (event: React.FormEvent) => {
     event.preventDefault();
     const serial = serialNumber.trim().toUpperCase();
+    if (managedSimulator && !isManagedGatewaySerial(serial)) {
+      setError('Use a gateway ID beginning with MOCK-, followed by 1–91 letters, numbers, hyphens, periods, or underscores.');
+      return;
+    }
     if (serial && !SERIAL_PATTERN.test(serial)) {
       setError('Use 3–128 letters, numbers, hyphens, periods, or underscores, or leave the gateway ID blank to generate one.');
       return;
@@ -121,10 +130,12 @@ export function OnboardingWizard({
   };
 
   const startOperation = async () => {
+    if (busy || startingRef.current) return;
     if (!verification || !selectedSite || !selectedProfile) {
       setError('Choose an authorized site and compatible immutable profile before activation.');
       return;
     }
+    startingRef.current = true;
     setBusy(true);
     setError(undefined);
     try {
@@ -134,10 +145,19 @@ export function OnboardingWizard({
         selectedProfile.id,
         operationKey,
       );
+      if (managedSimulator) {
+        try {
+          await startGatewaySimulator(operation.id, `ce-simulator-${operation.id}`);
+        } catch (cause) {
+          onStarted(operation, cause instanceof Error ? cause.message : 'The software gateway could not start. Review the operation and try INITIATE FLOW again.');
+          return;
+        }
+      }
       onStarted(operation);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to start the onboarding operation.');
     } finally {
+      startingRef.current = false;
       setBusy(false);
     }
   };
@@ -155,10 +175,10 @@ export function OnboardingWizard({
           <button type="button" className="ce-onb-text-button" onClick={onCancel} disabled={busy}>
             <ArrowLeft size={14} aria-hidden="true" />Gateway inventory
           </button>
-          <h2 id="onboarding-wizard-title">Register a gateway</h2>
-          <p>Add a real or mock gateway, choose its site, and assign a profile.</p>
+          <h2 id="onboarding-wizard-title">{managedSimulator ? 'Set up a simulated gateway' : 'Register a gateway'}</h2>
+          <p>{managedSimulator ? 'Choose the gateway, site, and profile. INITIATE FLOW starts the server-managed connection and activation.' : 'Add a real or mock gateway, choose its site, and assign a profile.'}</p>
         </div>
-        <span className="ce-onb-security-mark"><ShieldCheck size={16} aria-hidden="true" />Authenticated registration</span>
+        <span className="ce-onb-security-mark"><ShieldCheck size={16} aria-hidden="true" />{managedSimulator ? 'Authorized registration' : 'Authenticated registration'}</span>
       </div>
 
       <nav aria-label="Gateway activation progress" className="ce-onb-stepper">
@@ -172,7 +192,7 @@ export function OnboardingWizard({
                 disabled={index > step || busy}
               >
                 <span>{index < step ? <Check size={14} aria-hidden="true" /> : index + 1}</span>
-                <strong>{item.label}</strong>
+                <strong>{managedSimulator && item.id === 'review' ? 'Review & initiate' : item.label}</strong>
               </button>
             </li>
           ))}
@@ -193,7 +213,7 @@ export function OnboardingWizard({
                 <span className="ce-onb-panel-icon"><Fingerprint size={20} aria-hidden="true" /></span>
                 <div>
                   <h3>Gateway details</h3>
-                  <p>Choose your own ID or leave it blank to generate one. No factory inventory entry is required.</p>
+                  <p>{managedSimulator ? 'Use the generated MOCK- ID or enter a new one. This identifies a software gateway running on the server.' : 'Choose your own ID or leave it blank to generate one. No factory inventory entry is required.'}</p>
                 </div>
               </div>
 
@@ -210,7 +230,7 @@ export function OnboardingWizard({
                 <fieldset disabled={busy}>
                   <legend className="ce-onb-sr-only">Gateway registration</legend>
                   <label>
-                    <span>Gateway ID (optional)</span>
+                    <span>{managedSimulator ? 'Simulated gateway ID' : 'Gateway ID (optional)'}</span>
                     <input
                       value={serialNumber}
                       onChange={(event) => {
@@ -220,11 +240,12 @@ export function OnboardingWizard({
                       }}
                       autoComplete="off"
                       spellCheck={false}
-                      placeholder="For example, CE-GW-MCK-001"
+                      placeholder={managedSimulator ? 'MOCK-MCK-001' : 'For example, CE-GW-MCK-001'}
                       aria-describedby="serial-help"
-                      maxLength={128}
+                      maxLength={managedSimulator ? 96 : 128}
+                      required={managedSimulator}
                     />
-                    <small id="serial-help">Use this same ID on your real device or gateway simulator when connecting.</small>
+                    <small id="serial-help">{managedSimulator ? 'MOCK- IDs use the managed software-gateway flow. Choose a fresh ID for a new run.' : 'Use this same ID on your real device or gateway simulator when connecting.'}</small>
                   </label>
                 </fieldset>
               )}
@@ -246,14 +267,14 @@ export function OnboardingWizard({
 
             <aside className="ce-onb-trust-panel" aria-label="Gateway registration information">
               <ShieldCheck size={24} aria-hidden="true" />
-              <h3>Ready for real and mock devices</h3>
+              <h3>{managedSimulator ? 'One action starts the flow' : 'Ready for real and mock devices'}</h3>
               <ul>
-                <li>Custom or automatically generated gateway ID</li>
+                <li>{managedSimulator ? 'A dedicated MOCK- gateway ID' : 'Custom or automatically generated gateway ID'}</li>
                 <li>No preapproved serial or bootstrap certificate needed to register</li>
                 <li>Site and profile selected from your tenant</li>
-                <li>Device health appears after the gateway connects</li>
+                <li>{managedSimulator ? 'Activation stages reflect the reported AWS operation' : 'Device health appears after the gateway connects'}</li>
               </ul>
-              <p>When ready to connect, an administrator can issue a bootstrap package for this ID from the Initiate Onboarding tab. Use it on the real device or simulator.</p>
+              <p>{managedSimulator ? 'The server prepares the connection credentials internally. AWS identity and configuration retrieval are live; device application is simulated.' : 'For a physical device, an administrator can issue its bootstrap package from Initiate Onboarding. Supported MOCK- gateways can use the managed Simulated gateway flow.'}</p>
             </aside>
           </div>
         )}
@@ -373,7 +394,7 @@ export function OnboardingWizard({
           <div className="ce-onb-review-step">
             <div className="ce-onb-review-intro">
               <span className="ce-onb-panel-icon"><PackageCheck size={20} aria-hidden="true" /></span>
-              <div><h3>Ready to activate</h3><p>Confirm the gateway ID, site, and profile version.</p></div>
+              <div><h3>{managedSimulator ? 'Ready to initiate the flow' : 'Ready to activate'}</h3><p>Confirm the gateway ID, site, and profile version.</p></div>
             </div>
 
             <dl className="ce-onb-review-grid">
@@ -387,7 +408,7 @@ export function OnboardingWizard({
               <ShieldCheck size={20} aria-hidden="true" />
               <div>
                 <strong>Success requires device confirmation</strong>
-                <span>The operation completes only after operational mTLS reconnect, profile application, management-channel validation, and an <b>APPLIED_HEALTHY</b> acknowledgement.</span>
+                <span>{managedSimulator ? 'The server starts the software gateway and follows its reported stages. Completion requires confirmation from the onboarding service; applying the device configuration is simulated.' : <>The operation completes only after operational mTLS reconnect, profile application, management-channel validation, and an <b>APPLIED_HEALTHY</b> acknowledgement.</>}</span>
               </div>
             </div>
 
@@ -395,7 +416,7 @@ export function OnboardingWizard({
               <button type="button" onClick={() => goTo(2)} disabled={busy}><ArrowLeft size={14} aria-hidden="true" />Back</button>
               <button type="button" className="primary" onClick={() => void startOperation()} disabled={busy}>
                 {busy ? <span className="ce-onb-spinner" aria-hidden="true" /> : <PackageCheck size={15} aria-hidden="true" />}
-                {busy ? 'Starting activation…' : 'Start activation'}
+                {busy ? managedSimulator ? 'INITIATING FLOW…' : 'Starting activation…' : managedSimulator ? 'INITIATE FLOW' : 'Start activation'}
               </button>
             </div>
           </div>

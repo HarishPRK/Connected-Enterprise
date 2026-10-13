@@ -1,7 +1,8 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { createOnboardingAwsBridge, OnboardingAwsBridgeError } from './onboardingAwsBridge.js';
-import { createOnboardingSimulator } from './onboardingSimulator.js';
-import type { OnboardingOperation } from '../src/features/onboarding/types.js';
+import { createOnboardingSimulator, MOCK_SERIAL } from './onboardingSimulator.js';
+import { createManagedBootstrapStore, ManagedBootstrapError } from './onboardingManagedBootstrap.js';
+import { createManagedOnboardingFlow, withManagedBootstrapIssuance } from './onboardingManagedFlow.js';
 
 const PUBLIC_ACTOR = 'anonymous-ec2-onboarding-dev';
 const MAX_ACCESS_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -47,6 +48,8 @@ interface RouterOptions {
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   bridgeFactory?: typeof createOnboardingAwsBridge;
+  simulatorFactory?: typeof createOnboardingSimulator;
+  packageStoreFactory?: typeof createManagedBootstrapStore;
 }
 
 // This explicit temporary mode delegates one tenant's live operations to a
@@ -67,7 +70,10 @@ export function createPublicOnboardingRouter(options: RouterOptions = {}): expre
   }
   const enabled = () => Boolean(config && bridge && config.expiresAt > now());
   const simulatorEnabled = (options.env ?? process.env).ONBOARDING_AWS_SIMULATOR_ENABLED === 'true' && config?.fixedTenantId === 'ce-test';
-  const simulator = simulatorEnabled ? createOnboardingSimulator() : undefined;
+  const simulator = simulatorEnabled ? (options.simulatorFactory ?? createOnboardingSimulator)() : undefined;
+  const packages = simulator ? (options.packageStoreFactory ?? createManagedBootstrapStore)() : undefined;
+  const managedFlow = simulator && packages && bridge && config
+    ? createManagedOnboardingFlow({ bridge, simulator, packages, tenantId: config.fixedTenantId }) : undefined;
   const noStore = (_req: Request, res: Response, next: NextFunction) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -123,21 +129,34 @@ export function createPublicOnboardingRouter(options: RouterOptions = {}): expre
         if (!simulator) { res.status(404).json({ error: { message: 'The gateway simulator is unavailable.' } }); return; }
         const operationId = simulation[1];
         if (req.method === 'GET') { res.json({ job: simulator.status(operationId) ?? null }); return; }
-        const upstream = await bridge!.forward({ method: 'GET', path: `/operations/${operationId}` });
-        if (upstream.statusCode !== 200) { res.status(upstream.statusCode).set(upstream.headers).send(upstream.body); return; }
-        const payload = JSON.parse(upstream.body.toString('utf8'));
-        const operation = (payload.operation ?? payload) as OnboardingOperation;
-        if (operation.id !== operationId) throw new Error('Unexpected operation response');
-        try {
-          res.status(202).json({ job: await simulator.start(operation, config!.fixedTenantId, req.body?.archiveBase64) });
-        } catch {
-          res.status(400).json({ error: { message: 'Cannot start this simulator. Use an activating MOCK- gateway and its original bootstrap ZIP. A gateway already used by the simulator needs a new MOCK- ID for a fresh run.' } });
+        if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length) {
+          res.status(400).json({ error: { code: 'FLOW_BODY_NOT_EMPTY', message: 'Initiate flow accepts no package upload or assignment fields. The server uses the registered gateway assignment.' } }); return;
         }
+        res.status(202).json({ job: await managedFlow!.start(operationId) });
         return;
       }
-      const result = await bridge!.forward({ method: req.method, path: req.path, body: req.body, idempotencyKey: req.header('idempotency-key') });
+      const retainPackage = Boolean(packages && req.method === 'POST' && req.path === '/bootstrap-packages'
+        && typeof req.body?.serialNumber === 'string' && MOCK_SERIAL.test(req.body.serialNumber.trim().toUpperCase()));
+      const forward = () => bridge!.forward({ method: req.method, path: req.path, body: req.body, idempotencyKey: req.header('idempotency-key') });
+      const result = retainPackage ? await withManagedBootstrapIssuance(packages!, async () => {
+        if (await packages!.load(req.body.serialNumber.trim().toUpperCase())) {
+          throw new OnboardingAwsBridgeError(409, 'FLOW_IDENTITY_ALREADY_RETAINED', 'This MOCK- ID already has a retained one-time identity. Continue its existing activation, or use a new MOCK- ID for a fresh run.');
+        }
+        await packages!.prepare();
+        const issued = await forward();
+        if (issued.statusCode === 201 && issued.headers['content-type'] === 'application/zip') await packages!.retain(issued.body, {
+          serialNumber: req.body.serialNumber.trim().toUpperCase(), modelId: req.body.modelId?.trim(), siteId: req.body.siteId?.trim(),
+          profileVersionId: req.body.profileVersionId?.trim(), certificateId: issued.headers['x-certificate-id'],
+        });
+        return issued;
+      }) : await forward();
       res.status(result.statusCode).set(result.headers).send(result.body);
     } catch (error) {
+      if (error instanceof ManagedBootstrapError) {
+        res.status(error.code === 'BOOTSTRAP_IDENTITY_CONFLICT' || error.code === 'BOOTSTRAP_ARTIFACT_INVALID' ? 409 : 503)
+          .json({ error: { code: error.code, message: error.message } });
+        return;
+      }
       const known = error instanceof OnboardingAwsBridgeError;
       res.status(known ? error.statusCode : 502).json({ error: {
         code: known ? error.code : 'ONBOARDING_UPSTREAM_ERROR',
