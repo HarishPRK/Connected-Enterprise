@@ -26,10 +26,10 @@ export function gatewayFlowPresentation(
   };
   if (isOperationHealthy(operation)) return {
     state: 'confirmed', canInitiate: false,
-    title: isAuthenticatedPullConfirmedOperation(operation) ? 'Configuration retrieval confirmed' : 'Activation confirmed',
+    title: isAuthenticatedPullConfirmedOperation(operation) ? 'Configuration retrieval confirmed' : 'Configuration deployed',
     detail: isAuthenticatedPullConfirmedOperation(operation)
       ? 'The authenticated gateway retrieved its assigned configuration. The operation below records the confirmation.'
-      : 'The onboarding service confirmed activation. The timeline below records the reported application and health checks.',
+      : 'The onboarding service confirmed configuration deployment. The timeline below records the reported deployment stages.',
   };
   if (operation.type !== 'ONBOARD' || operation.status !== 'IN_PROGRESS') return {
     state: 'closed', title: 'Flow closed', canInitiate: false,
@@ -49,7 +49,13 @@ export function gatewayFlowPresentation(
   };
   if (job?.state === 'running') return {
     state: 'running', title: 'Flow in progress', canInitiate: false,
-    detail: job.phase || 'The software gateway is connecting. Follow the reported stages below.',
+    detail: operation.state === 'HEALTH_CHECK'
+      ? 'The gateway is verifying the assigned configuration.'
+      : job.phase === 'Applying configuration and checking health'
+        ? 'Applying and verifying configuration.'
+        : job.phase === 'Healthy acknowledgement sent to AWS'
+          ? 'Configuration deployment confirmation sent to AWS.'
+          : job.phase || 'The software gateway is connecting. Follow the reported stages below.',
   };
   return {
     state: 'ready', title: 'Ready to initiate', canInitiate: true,

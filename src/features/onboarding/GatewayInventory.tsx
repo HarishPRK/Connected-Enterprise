@@ -66,7 +66,7 @@ function gatewayDisplayState(
       title: `Generation ${gateway.deploymentGeneration} was retrieved by the authenticated gateway. Apply and health were not reported separately.`,
     };
   }
-  if (gateway.state === 'ACTIVE' && gateway.health === 'HEALTHY') return { label: 'Applied healthy', tone: 'ok' };
+  if (gateway.state === 'ACTIVE' && gateway.health === 'HEALTHY') return { label: 'Configuration deployed', tone: 'ok' };
   if (isLegacyHttpCompletedProfileAssignment(gateway, operation)) {
     return {
       label: 'Provisioned',

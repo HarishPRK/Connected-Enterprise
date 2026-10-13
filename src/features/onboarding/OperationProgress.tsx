@@ -49,8 +49,8 @@ const ONBOARD_MILESTONES: LifecycleMilestone[] = [
 const PROFILE_VALIDATION_MILESTONES: LifecycleMilestone[] = [
   { state: 'PROFILE_STAGED', label: 'Profile staged', description: 'The immutable assignment manifest is ready for the gateway.' },
   { state: 'APPLYING', label: 'Applying configuration', description: 'The gateway is applying the candidate transaction with its watchdog armed.' },
-  { state: 'HEALTH_CHECK', label: 'Validating health', description: 'Management connectivity and network services are being confirmed.' },
-  { state: 'APPLIED_HEALTHY', label: 'Applied healthy', description: 'The gateway acknowledged the exact version and passed health checks.' },
+  { state: 'HEALTH_CHECK', label: 'Verifying configuration', description: 'The gateway is verifying the assigned configuration and management connection.', preferDescription: true },
+  { state: 'APPLIED_HEALTHY', label: 'Configuration deployed', description: 'The gateway confirmed deployment of the assigned configuration version.', preferDescription: true },
 ];
 
 const ONBOARD_OPERATION_MILESTONES = [...ONBOARD_MILESTONES, ...PROFILE_VALIDATION_MILESTONES];
@@ -70,13 +70,13 @@ const RESET_MILESTONES: LifecycleMilestone[] = [
 const PROFILE_DEPLOY_MILESTONES: LifecycleMilestone[] = [
   { state: 'PROFILE_STAGED', label: 'Profile staged', description: 'The signed assignment is queued for this gateway.' },
   { state: 'APPLYING', label: 'Applying configuration', description: 'The gateway is applying the candidate transaction with its watchdog armed.' },
-  { state: 'HEALTH_CHECK', label: 'Validating health', description: 'Management connectivity and network services are being confirmed.' },
-  { state: 'APPLIED_HEALTHY', label: 'Applied healthy', description: 'The gateway acknowledged the exact version and passed health checks.' },
+  { state: 'HEALTH_CHECK', label: 'Verifying configuration', description: 'The gateway is verifying the assigned configuration and management connection.', preferDescription: true },
+  { state: 'APPLIED_HEALTHY', label: 'Configuration deployed', description: 'The gateway confirmed deployment of the assigned configuration version.', preferDescription: true },
 ];
 
 const AUTHENTICATED_PULL_MILESTONES: LifecycleMilestone[] = [
   { state: 'PROFILE_STAGED', label: 'Generation staged', description: 'The Controller payload and automatic profile assignment were staged for authenticated gateway retrieval.', preferDescription: true },
-  { state: 'APPLIED_HEALTHY', label: 'Retrieved by gateway', description: 'The authenticated gateway retrieved the Controller payload and assignment generation.' },
+  { state: 'APPLIED_HEALTHY', label: 'Retrieved by gateway', description: 'The authenticated gateway retrieved the Controller payload and assignment generation.', preferDescription: true },
 ];
 
 function formatTimestamp(value?: string): string {
@@ -193,7 +193,7 @@ export function OperationProgress({
     : pullConfirmed
     ? 'Controller configuration retrieved'
     : healthy
-    ? 'Configuration applied and healthy'
+    ? 'Configuration deployed'
     : failed
       ? rolledBack ? 'Activation failed; known-good profile restored' : 'Operation needs attention'
       : operation.type === 'ONBOARD' && onboardingComplete
@@ -316,7 +316,7 @@ export function OperationProgress({
                     </span>
                     <div>
                       <strong id="profile-validation-phase-title">Profile deployment &amp; validation</strong>
-                      <span>{healthy ? 'Assigned configuration applied and health validated.' : 'Delivering the assigned profile and waiting for device validation.'}</span>
+                      <span>{healthy ? 'Assigned configuration deployed and verified.' : 'Delivering the assigned profile and waiting for device validation.'}</span>
                     </div>
                   </div>
                   <span
@@ -356,13 +356,13 @@ export function OperationProgress({
             <div className="ce-onb-success-panel" role="status">
               <CheckCircle2 size={24} aria-hidden="true" />
               <div>
-                <strong>{pullConfirmed ? 'Retrieved successfully' : 'APPLIED_HEALTHY'}</strong>
+                <strong>{pullConfirmed ? 'Retrieved successfully' : 'Configuration deployed'}</strong>
                 <span>
                   {pullConfirmed
-                    ? `The authenticated gateway retrieved Controller generation ${operation.deploymentGeneration}. This gateway version does not report apply or health separately.`
+                    ? `The authenticated gateway retrieved Controller generation ${operation.deploymentGeneration}. This gateway reports retrieval only; configuration deployment is not yet confirmed.`
                     : operation.type === 'PROFILE_DEPLOY'
-                    ? 'The gateway applied the assigned version and confirmed management health.'
-                    : 'The gateway reconnected with its operational identity, applied the assigned version, and confirmed management health.'}
+                    ? 'The gateway confirmed deployment of the assigned configuration version.'
+                    : 'The gateway connected with its operational identity and confirmed deployment of the assigned configuration version.'}
                 </span>
               </div>
             </div>

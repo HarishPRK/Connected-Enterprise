@@ -180,7 +180,7 @@ export function OnboardingWizard({
             <ArrowLeft size={14} aria-hidden="true" />Gateway inventory
           </button>
           <h2 id="onboarding-wizard-title">{managedSimulator ? 'Simulate the onboarding flow' : 'Register a gateway'}</h2>
-          <p>{managedSimulator ? 'Review the generated gateway ID, site, and profile, then select INITIATE FLOW. Follow registration, identity, configuration, and health stages as the service reports them. No ZIP upload is needed.' : 'Add a real or mock gateway, choose its site, and assign a profile.'}</p>
+          <p>{managedSimulator ? 'Review the generated gateway ID, site, and profile, then select INITIATE FLOW. Follow registration, identity, configuration, and deployment confirmation as the service reports them. No ZIP upload is needed.' : 'Add a real or mock gateway, choose its site, and assign a profile.'}</p>
         </div>
         <span className="ce-onb-security-mark"><ShieldCheck size={16} aria-hidden="true" />{managedSimulator ? 'Authorized registration' : 'Authenticated registration'}</span>
       </div>
@@ -276,7 +276,7 @@ export function OnboardingWizard({
                 <li>{managedSimulator ? 'A dedicated MOCK- gateway ID' : 'Custom or automatically generated gateway ID'}</li>
                 <li>No preapproved serial or bootstrap certificate needed to register</li>
                 <li>Site and profile selected from your tenant</li>
-                <li>{managedSimulator ? 'Activation stages reflect the reported AWS operation' : 'Device health appears after the gateway connects'}</li>
+                <li>{managedSimulator ? 'Activation stages reflect the reported AWS operation' : 'Deployment confirmation appears after the gateway connects'}</li>
               </ul>
               <p>{managedSimulator ? 'The server prepares the connection credentials internally. AWS identity and configuration retrieval are live; device application is simulated.' : 'For a physical device, an administrator can issue its bootstrap package from Initiate Onboarding. Supported MOCK- gateways can use the managed Simulated gateway flow.'}</p>
             </aside>
@@ -412,7 +412,7 @@ export function OnboardingWizard({
               <ShieldCheck size={20} aria-hidden="true" />
               <div>
                 <strong>Success requires device confirmation</strong>
-                <span>{managedSimulator ? 'The server starts the software gateway and follows its reported stages. Completion requires confirmation from the onboarding service; applying the device configuration is simulated.' : <>The operation completes only after operational mTLS reconnect, profile application, management-channel validation, and an <b>APPLIED_HEALTHY</b> acknowledgement.</>}</span>
+                <span>{managedSimulator ? 'The server starts the software gateway and follows its reported stages. Completion requires confirmation from the onboarding service; applying the device configuration is simulated.' : 'The operation completes after the gateway reconnects with its operational identity, applies the assigned profile, and confirms configuration deployment.'}</span>
               </div>
             </div>
 

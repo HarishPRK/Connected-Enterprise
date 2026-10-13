@@ -17,11 +17,11 @@ import { onboardingGatewaySimulatorAvailable } from './auth';
 type Surface = WorkspaceSurface | 'operation';
 
 const pendingPanels = {
-  gateways: { title: 'Gateways', description: 'Review gateway identity, site assignments, and configuration health.' },
+  gateways: { title: 'Gateways', description: 'Review gateway identity, site assignments, and configuration deployment.' },
   profiles: { title: 'Profiles', description: 'Review and publish immutable gateway configuration profiles.' },
   controller: { title: 'Controller', description: 'Manage the USP Controller and MQTT connection settings for your tenant.' },
   bootstrap: { title: 'Initiate Onboarding', description: 'Prepare a bootstrap package and register a gateway to its site.' },
-  operation: { title: 'Operation', description: 'Follow configuration delivery and reported gateway health.' },
+  operation: { title: 'Operation', description: 'Follow configuration delivery and deployment confirmation.' },
 } satisfies Record<Surface, { title: string; description: string }>;
 
 export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: string }) {
@@ -86,7 +86,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
       <header className="ce-onb-masthead">
         <div className="ce-onb-masthead-title">
           <span className="ce-onb-masthead-mark"><CloudCog size={22} aria-hidden="true" /></span>
-          <div><h1>Gateway Onboarding</h1><p>From device identity to a healthy gateway.</p></div>
+          <div><h1>Gateway Onboarding</h1><p>From device identity to deployed configuration.</p></div>
         </div>
           <div className="ce-onb-page-context">
             {snapshot && <span><ShieldCheck size={13} aria-hidden="true" />{snapshot.tenant.name}</span>}
