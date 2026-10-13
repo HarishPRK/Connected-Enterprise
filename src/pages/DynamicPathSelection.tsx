@@ -92,6 +92,8 @@ import { DEFAULT_ROUTING_THRESHOLDS, validateRoutingThresholds } from "../../sha
 import type { PathThreshold } from "../types";
 
 type Metric = "latency" | "jitter" | "loss";
+// Keep the 3D implementation available for later; expose only the 2D map for now.
+const ENABLE_3D_FAILOVER = false;
 const FailoverNetworkStage = lazy(() => import("../components/widgets/FailoverNetworkStage"));
 
 const metricCfg: Record<
@@ -3160,7 +3162,7 @@ function IpsecFlowSvg({
     x: number;
     y: number;
   } | null>(null);
-  const [sceneMode, setSceneMode] = useState<'3d' | '2d'>('3d');
+  const [sceneMode, setSceneMode] = useState<'3d' | '2d'>('2d');
   const [sceneUnavailable, setSceneUnavailable] = useState(false);
   const onSceneUnavailable = useCallback(() => {
     setSceneUnavailable(true);
@@ -3639,14 +3641,14 @@ function IpsecFlowSvg({
           ))}
         </span>
       </div>
-      <div className="ipsec-scene-viewbar">
+      {ENABLE_3D_FAILOVER && <div className="ipsec-scene-viewbar">
         {sceneUnavailable && <span role="status">3D IS UNAVAILABLE ON THIS DEVICE · 2D MAP IS READY</span>}
         <div className="toolbar" aria-label="Network visualization">
           <button type="button" aria-pressed={sceneMode === '3d'} disabled={sceneUnavailable} onClick={() => { setHover(null); setSceneMode('3d'); }}>3D SCENE</button>
           <button type="button" aria-pressed={sceneMode === '2d'} onClick={() => { setHover(null); setSceneMode('2d'); }}>2D MAP</button>
         </div>
-      </div>
-      {sceneMode === '3d' ? (
+      </div>}
+      {ENABLE_3D_FAILOVER && sceneMode === '3d' ? (
         <Suspense fallback={<div className="ipsec-scene-preparing" role="status">PREPARING YOUR NETWORK IN 3D</div>}>
           <FailoverNetworkStage data={stageData} theme={{ light: false, text: TWIN_PALETTE.text, muted: TWIN_PALETTE.muted,
             enterprise: TWIN_PALETTE.enterprise, operator: TWIN_PALETTE.operator, ok: TWIN_PALETTE.route,
