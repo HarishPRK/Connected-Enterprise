@@ -3,7 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createNodeModel, updateNodeModel } from './failoverSceneModels';
 import { createEquipmentMotion } from './failoverEquipmentMotion';
-import { TWIN_PALETTE } from './failoverTwinPalette';
+import { PACKET_PALETTE, TWIN_PALETTE } from './failoverTwinPalette';
+import { createPacketFactory } from './failoverPackets';
 import { TWIN_LAYOUT } from './failoverSceneLayout';
 import type {
   FailoverSceneData,
@@ -11,6 +12,7 @@ import type {
   FailoverSceneNode,
   FailoverSceneRenderer,
   FailoverSceneTheme,
+  FailoverTrafficClass,
 } from './failoverSceneTypes';
 
 type SceneNode = {
@@ -19,7 +21,8 @@ type SceneNode = {
   labelText: string;
   kind: FailoverSceneNode['kind'];
   internalFlow?: { startX: number; endX: number; y: number; z: number };
-  internalPackets: THREE.Mesh<THREE.CapsuleGeometry, THREE.MeshBasicMaterial>[];
+  internalPackets: THREE.Group[];
+  internalClasses: string;
   internalPhase: number;
   internalActive: boolean;
   motion: ReturnType<typeof createEquipmentMotion>;
@@ -29,7 +32,7 @@ type SceneLink = {
   object: THREE.Group;
   rail: THREE.Mesh<THREE.TubeGeometry, THREE.MeshBasicMaterial>;
   curve: THREE.CatmullRomCurve3;
-  packets: THREE.Mesh<THREE.CapsuleGeometry, THREE.MeshBasicMaterial>[];
+  packets: THREE.Group[];
   length: number;
   phase: number;
   active: boolean;
@@ -264,7 +267,7 @@ function contactShadowTexture() {
 }
 
 function linkSignature(link: FailoverSceneLink, from: FailoverSceneNode, to: FailoverSceneNode) {
-  return `${from.id}:${to.id}:${from.position.join(',')}:${to.position.join(',')}:${link.active}:${link.available}:${link.color}`;
+  return `${from.id}:${to.id}:${from.position.join(',')}:${to.position.join(',')}:${link.active}:${link.available}:${link.color}:${link.packetClasses?.join(',')}`;
 }
 
 function carrierGeometry(curve: THREE.CatmullRomCurve3, segments = 32) {
@@ -318,7 +321,8 @@ function buildLink(link: FailoverSceneLink, from: FailoverSceneNode, to: Failove
   const curve = new THREE.CatmullRomCurve3([source, a, b, destination], false, 'centripetal');
   const group = new THREE.Group();
   const active = link.active && link.available;
-  const color = link.available ? link.color : theme.muted;
+  const classes: FailoverTrafficClass[] = link.packetClasses?.length ? link.packetClasses : ['network'];
+  const color = active ? classes.length === 1 ? PACKET_PALETTE[classes[0]] : TWIN_PALETTE.selection : link.available ? link.color : theme.muted;
   const carrier = carrierGeometry(curve);
   const carrierMaterial = new THREE.MeshStandardMaterial({
     color: TWIN_PALETTE.wallFrame, metalness: 0.65, roughness: 0.55, envMapIntensity: 0.25, side: THREE.DoubleSide,
@@ -353,16 +357,13 @@ function buildLink(link: FailoverSceneLink, from: FailoverSceneNode, to: Failove
     transparent: !active, opacity: link.available ? (active ? 1 : 0.5) : 0.24,
     depthWrite: active,
   });
-  const rail = new THREE.Mesh(new THREE.TubeGeometry(curve, 32, active ? 0.023 : 0.012, 6, false), material);
+  const rail = new THREE.Mesh(new THREE.TubeGeometry(curve, 32, active ? 0.035 : 0.012, 6, false), material);
   group.add(rail);
   const packets: SceneLink['packets'] = [];
   if (active) {
-    const packetGeometry = new THREE.CapsuleGeometry(0.065, 0.22, 3, 6);
-    const packetMaterial = new THREE.MeshBasicMaterial({
-      color: TWIN_PALETTE.text, toneMapped: false,
-    });
+    const createPacket = createPacketFactory();
     for (let index = 0; index < 4; index++) {
-      const packet = new THREE.Mesh(packetGeometry, packetMaterial);
+      const packet = createPacket(classes[index % classes.length]);
       group.add(packet);
       packets.push(packet);
     }
@@ -486,7 +487,7 @@ export function createFailoverSceneRenderer(
   flowGuide.visible = false;
   scene.add(flowGuide);
   const flowPacket = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.42, 4, 10),
-    new THREE.MeshBasicMaterial({ color: TWIN_PALETTE.text, depthTest: false, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ color: PACKET_PALETTE.it, depthTest: false, toneMapped: false }));
   flowPacket.rotation.z = -Math.PI / 2;
   flowPacket.renderOrder = 20;
   flowPacket.visible = false;
@@ -879,17 +880,6 @@ export function createFailoverSceneRenderer(
       const motion = createEquipmentMotion(object, node);
       object.position.set(...node.position);
       const internalFlow = object.userData.tunnelFlow as SceneNode['internalFlow'];
-      const internalPackets: SceneNode['internalPackets'] = [];
-      if (internalFlow) {
-        const geometry = new THREE.CapsuleGeometry(0.088, 0.22, 3, 7);
-        const material = new THREE.MeshBasicMaterial({ color: node.color, toneMapped: false });
-        for (let index = 0; index < 3; index++) {
-          const packet = new THREE.Mesh(geometry, material);
-          packet.rotation.z = -Math.PI / 2;
-          object.add(packet);
-          internalPackets.push(packet);
-        }
-      }
       object.traverse((child) => { child.userData.nodeId = node.id; });
       const label = labelSprite(node.label.toUpperCase(), theme.text, EQUIPMENT_LABEL_WIDTH);
       const height = node.kind === 'tunnel' ? 0.36 : node.kind === 'cellular' ? 3.03 : node.kind === 'cloud' ? 2.95 : node.kind === 'internet' ? 2.65 : 2.12;
@@ -897,7 +887,7 @@ export function createFailoverSceneRenderer(
       label.userData.nodeId = node.id;
       object.add(label);
       nodeRoot.add(object);
-      nodeMap.set(node.id, { object, label, labelText: node.label, kind: node.kind, internalFlow, internalPackets, internalPhase: 0, internalActive: false, motion });
+      nodeMap.set(node.id, { object, label, labelText: node.label, kind: node.kind, internalFlow, internalPackets: [], internalClasses: '', internalPhase: 0, internalActive: false, motion });
       const shadow = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.8), new THREE.MeshBasicMaterial({
         map: texture, transparent: true, opacity: theme.light ? 0.55 : 0.75, depthWrite: false,
       }));
@@ -987,9 +977,25 @@ export function createFailoverSceneRenderer(
       if (existing.motion.animated) animatedEquipmentCount++;
       existing.internalActive = Boolean(existing.internalFlow && node.active && node.status !== 'idle');
       if (existing.internalActive) activeInternalCount++;
+      const incoming = data.links.find(link => link.to === node.id && link.active && link.available);
+      const classes: FailoverTrafficClass[] = incoming?.packetClasses?.length ? incoming.packetClasses : ['network'];
+      const classesSignature = classes.join(',');
+      if (existing.internalFlow && existing.internalClasses !== classesSignature) {
+        const retired = new THREE.Group();
+        existing.internalPackets.forEach(packet => retired.add(packet));
+        disposeObject(retired);
+        const createPacket = createPacketFactory();
+        existing.internalPackets = Array.from({ length: 4 }, (_, index) => {
+          const packet = createPacket(classes[index % classes.length]);
+          packet.rotation.z = -Math.PI / 2;
+          packet.traverse(child => { child.userData.nodeId = node.id; });
+          existing.object.add(packet);
+          return packet;
+        });
+        existing.internalClasses = classesSignature;
+      }
       for (const packet of existing.internalPackets) {
         packet.visible = existing.internalActive;
-        packet.material.color.set(node.color);
       }
     }
     positionPackets(0);

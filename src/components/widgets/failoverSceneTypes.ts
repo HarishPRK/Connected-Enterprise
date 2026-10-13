@@ -1,5 +1,6 @@
 export type FailoverSceneKind = 'devices' | 'gateway' | 'fiber' | 'cellular' | 'tunnel' | 'sdwan' | 'internet' | 'cloud';
 export type ScenePosition = [number, number, number];
+export type FailoverTrafficClass = 'it' | 'ot' | 'network';
 
 export interface FailoverSceneNode {
   id: string;
@@ -23,6 +24,8 @@ export interface FailoverSceneLink {
   active: boolean;
   available: boolean;
   load?: number;
+  /** Illustrative traffic classes, not a measured packet mix. */
+  packetClasses?: FailoverTrafficClass[];
 }
 
 export interface FailoverSceneData {

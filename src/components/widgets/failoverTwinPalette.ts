@@ -32,3 +32,10 @@ export const TWIN_PALETTE = {
   toolbar: '#2a3143',
   border: '#535b71',
 } as const;
+
+/** Self-lit packet colours are independent of the hardware and SLA status colours. */
+export const PACKET_PALETTE = {
+  it: '#27e5ff',
+  ot: '#ff61cf',
+  network: '#ffcf4a',
+} as const;

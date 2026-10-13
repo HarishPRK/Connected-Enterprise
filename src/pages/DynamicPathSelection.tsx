@@ -50,7 +50,7 @@ import {
   Send,
 } from "lucide-react";
 import { PacketTransferPath } from "../components/widgets/FailoverPacketFlow";
-import type { FailoverSceneData, FailoverSceneNode, FailoverRoutePresentation } from "../components/widgets/failoverSceneTypes";
+import type { FailoverSceneData, FailoverSceneNode, FailoverSceneLink, FailoverRoutePresentation } from "../components/widgets/failoverSceneTypes";
 import { FailoverRouteStatus } from "../components/widgets/FailoverRouteStatus";
 import { TWIN_PALETTE } from "../components/widgets/failoverTwinPalette";
 import { TWIN_LAYOUT } from "../components/widgets/failoverSceneLayout";
@@ -3499,28 +3499,50 @@ function IpsecFlowSvg({
     { id: 'cloud', label: 'CLOUD', kind: 'cloud', position: [TWIN_LAYOUT.cloudX, .3, 0], color: INT_COLOR,
       status: m.wan.link_up ? 'ok' : 'warn', detail: 'APPLICATIONS & SERVICES', metrics: [{ label: 'WAN PATH', value: m.wan.link_up ? 'UP' : 'DOWN' }] },
   ];
+  type PacketClass = NonNullable<FailoverSceneLink['packetClasses']>[number];
+  const itOriginActive = itDevices.some(device => device.status === 'ok');
+  const otOriginActive = otDevices.some(device => device.conn !== 'thread' && device.status === 'ok');
+  const livePacketClasses: PacketClass[] = [
+    ...(itOriginActive ? ['it' as const] : []),
+    ...(otOriginActive ? ['ot' as const] : []),
+  ];
+  // Packet colours explain the illustrated traffic classes; they do not change
+  // the device-reported route or imply that flow-level telemetry is available.
+  const packetClassesFor = (carry: TunnelCarry | null): PacketClass[] => {
+    if (carry === 'it' || carry === 'ot') return [carry];
+    if (carry === 'both') return ['it', 'ot'];
+    if (carry === 'infra') return livePacketClasses.length ? livePacketClasses : ['network'];
+    return [];
+  };
+  const sceneTunnelLinks: FailoverSceneLink[] = [...fiberTunnels, ...cellTunnels].flatMap(t => {
+    const underlay = inferUnderlay(t.ifname);
+    const group = underlay === 'fiber' ? fiberTunnels : cellTunnels;
+    const cls = tunnelCarry(underlay, group.indexOf(t), t.ifname);
+    const active = cls != null && t.reachable;
+    const color = cls ? carryColorOf(cls) : tunnelColor(t);
+    const load = maxRate > 0 ? rateOf(t.ifname) / maxRate : 0;
+    const packetClasses = active ? packetClassesFor(cls) : [];
+    return [{ id: `in:${t.ifname}`, from: underlay === 'fiber' ? 'fiber' : 'cellular', to: `tunnel:${t.ifname}`, color, active, available: t.reachable, load, packetClasses },
+      { id: `out:${t.ifname}`, from: `tunnel:${t.ifname}`, to: 'sdwan', color, active, available: t.reachable, load, packetClasses }];
+  });
+  const carriedPacketClasses = (matches: (link: FailoverSceneLink) => boolean): PacketClass[] =>
+    [...new Set(sceneTunnelLinks.filter(link => link.active && link.available && matches(link)).flatMap(link => link.packetClasses ?? []))];
+  const egressPacketClasses = carriedPacketClasses(link => link.to === 'sdwan');
   const sceneData: FailoverSceneData = {
     nodes: sceneNodes, mode: isTarget ? 'target' : 'live', activeLabel: transferMode, preview,
     route: routePresentation,
     links: [
       ...(itDevices.length ? [{ id: 'it-origin', from: 'it-devices', to: 'gateway', color: IT_COLOR,
-        active: itDevices.some(device => device.status === 'ok'), available: true }] : []),
+        active: itOriginActive, available: true, packetClasses: ['it' as const] }] : []),
       ...(otDevices.some(device => device.conn !== 'thread') ? [{ id: 'ot-origin', from: 'ot-devices', to: 'gateway', color: OT_COLOR,
-        active: otDevices.some(device => device.conn !== 'thread' && device.status === 'ok'), available: true }] : []),
-      { id: 'gateway-fiber', from: 'gateway', to: 'fiber', color: isTarget ? FIBER_COLOR : carryColorOf('infra'), active: fiberActive, available: fiberReachable },
-      { id: 'gateway-cellular', from: 'gateway', to: 'cellular', color: isTarget ? CELL_COLOR : carryColorOf('infra'), active: cellActive, available: cellReachable },
-      ...[...fiberTunnels, ...cellTunnels].flatMap(t => {
-        const underlay = inferUnderlay(t.ifname);
-        const group = underlay === 'fiber' ? fiberTunnels : cellTunnels;
-        const cls = tunnelCarry(underlay, group.indexOf(t), t.ifname);
-        const active = cls != null && t.reachable;
-        const color = cls ? carryColorOf(cls) : tunnelColor(t);
-        const load = maxRate > 0 ? rateOf(t.ifname) / maxRate : 0;
-        return [{ id: `in:${t.ifname}`, from: underlay === 'fiber' ? 'fiber' : 'cellular', to: `tunnel:${t.ifname}`, color, active, available: t.reachable, load },
-          { id: `out:${t.ifname}`, from: `tunnel:${t.ifname}`, to: 'sdwan', color, active, available: t.reachable, load }];
-      }),
-      { id: 'public-egress', from: 'sdwan', to: 'internet', color: INT_COLOR, active: scenePathAvailable, available: m.wan.link_up },
-      { id: 'cloud-destination', from: 'internet', to: 'cloud', color: INT_COLOR, active: scenePathAvailable, available: m.wan.link_up },
+        active: otOriginActive, available: true, packetClasses: ['ot' as const] }] : []),
+      { id: 'gateway-fiber', from: 'gateway', to: 'fiber', color: isTarget ? FIBER_COLOR : carryColorOf('infra'), active: fiberActive, available: fiberReachable,
+        packetClasses: carriedPacketClasses(link => link.from === 'fiber') },
+      { id: 'gateway-cellular', from: 'gateway', to: 'cellular', color: isTarget ? CELL_COLOR : carryColorOf('infra'), active: cellActive, available: cellReachable,
+        packetClasses: carriedPacketClasses(link => link.from === 'cellular') },
+      ...sceneTunnelLinks,
+      { id: 'public-egress', from: 'sdwan', to: 'internet', color: INT_COLOR, active: scenePathAvailable, available: m.wan.link_up, packetClasses: egressPacketClasses },
+      { id: 'cloud-destination', from: 'internet', to: 'cloud', color: INT_COLOR, active: scenePathAvailable, available: m.wan.link_up, packetClasses: egressPacketClasses },
     ],
   };
   // Keep hardware and paths legible against the dark 3D stage in either app theme.

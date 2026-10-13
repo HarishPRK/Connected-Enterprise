@@ -3,6 +3,7 @@ import { Expand, Minimize2, Pause, Play, RotateCcw, ZoomIn, ZoomOut, Orbit, Box,
 import type { FailoverSceneData, FailoverSceneRenderer, FailoverSceneTheme } from './failoverSceneTypes';
 import './FailoverNetworkStage.css';
 import { FailoverRouteStatus } from './FailoverRouteStatus';
+import { PACKET_PALETTE } from './failoverTwinPalette';
 
 interface Props {
   data: FailoverSceneData;
@@ -31,6 +32,7 @@ export default function FailoverNetworkStage({ data, theme, onUnavailable, onTun
   const destinations = data.nodes.filter(node => node.kind === 'tunnel' && node.switchable && !node.active);
   const destination = destinations.find(node => node.id === destinationId) ?? destinations[0];
   const dragTarget = data.nodes.find(node => node.id === flowDrag?.targetId);
+  const packetClasses = new Set(data.links.filter(link => link.active && link.available).flatMap(link => link.packetClasses?.length ? link.packetClasses : ['network']));
   const selected = data.nodes.find(node => node.id === selectedId);
   const hovered = data.nodes.find(node => node.id === hoveredId);
   const connections = selected ? data.links.filter(link => link.from === selected.id || link.to === selected.id)
@@ -148,7 +150,7 @@ export default function FailoverNetworkStage({ data, theme, onUnavailable, onTun
           }}
           onLostPointerCapture={() => { rendererRef.current?.endFlowDrag(false); flowPointerRef.current = null; }}
           onPointerCancel={() => { rendererRef.current?.endFlowDrag(false); flowPointerRef.current = null; }}
-          onClick={() => destinationRef.current?.focus()}><GripVertical size={14} /><span className="failover-stage-packet" aria-hidden="true" /><span>MOVE FLOW</span></button>
+          onClick={() => destinationRef.current?.focus()}><GripVertical size={14} /><span className="failover-stage-packet" style={{ color: PACKET_PALETTE.it }} aria-hidden="true" /><span className="failover-stage-packet is-ot" style={{ color: PACKET_PALETTE.ot }} aria-hidden="true" /><span>MOVE FLOW</span></button>
         <span className="failover-stage-flow-hint">{destinations.length ? 'DRAG THE PACKET OR ACTIVE PATH ONTO A TUNNEL' : 'NO ALTERNATE REACHABLE TUNNEL'}</span>
         <div className="failover-stage-flow-destination">
           <label htmlFor={`${inspectorId}-destination`}>DESTINATION</label>
@@ -165,6 +167,12 @@ export default function FailoverNetworkStage({ data, theme, onUnavailable, onTun
         {!ready && <div className="failover-stage-loading" role="status"><Box size={24} /><span>PREPARING YOUR NETWORK DIGITAL TWIN</span></div>}
         {ready && hovered && !flowDrag && <div className="failover-stage-hover" aria-hidden="true"><Box size={15} /><div><strong>{hovered.label}</strong><span>CLICK TO INSPECT · DOUBLE-CLICK TO FOCUS</span></div></div>}
         {flowDrag && <div className="failover-stage-drop-hint"><MoveRight size={16} /><strong>{dragTarget ? `RELEASE TO ${data.preview ? 'PREVIEW' : 'SWITCH TO'} ${dragTarget.label}` : 'DROP ON A HIGHLIGHTED TUNNEL'}</strong><span>ESC TO CANCEL</span></div>}
+      </div>
+      <div className="failover-stage-packet-key" aria-label="Packet colour and shape legend">
+        <span>PACKET FLOW</span>
+        {(['it', 'ot', 'network'] as const).filter(traffic => packetClasses.has(traffic)).map(traffic =>
+          <span key={traffic}><i className={`failover-stage-packet${traffic === 'ot' ? ' is-ot' : ''}`} style={{ color: PACKET_PALETTE[traffic] }} aria-hidden="true" />{traffic === 'network' ? 'NETWORK TRAFFIC' : `${traffic.toUpperCase()} TRAFFIC`}</span>)}
+        <span className="failover-stage-packet-note">COLOURS IDENTIFY CLASS · PACKET MIX IS ILLUSTRATIVE</span>
       </div>
       <div className="failover-stage-node-index" aria-label="Select network node">
         <span className="failover-stage-index-label">INSPECT</span>
