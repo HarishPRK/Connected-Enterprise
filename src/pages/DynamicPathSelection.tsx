@@ -146,6 +146,7 @@ function displayGatewayName(raw: string): string {
   if (!name) return "";
   if (name === "rdk-bpi4-gateway") return "Edge Gateway";
   if (name === "prpl-bpi4-gateway") return "Edge Gateway";
+  if (/^prpl[-_\s]+ospv2[-_\s]+gateway$/i.test(name)) return "Prpl / Edge gateway";
   return name
     .split(/[-_\s]+/)
     .filter(Boolean)
