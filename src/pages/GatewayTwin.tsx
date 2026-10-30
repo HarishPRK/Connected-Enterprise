@@ -79,7 +79,7 @@ export function GatewayTwinPage() {
     <div ref={pageRef} className={`gateway-twin-page${isFullscreen ? ' is-fullscreen' : ''}`}>
       <PageHeader
         title="GW Digital Twin"
-        subtitle="Gemtek OSPv2 · Explore gateway hardware, live operations and network simulations"
+        subtitle="prpl Gateway · Explore gateway hardware, live operations and network simulations"
         right={
           <div className="gateway-twin-toolbar">
             <button type="button" className="gateway-twin-fullscreen-button" onClick={reloadStudio}>
@@ -113,7 +113,7 @@ export function GatewayTwinPage() {
         <iframe
           key={frameAttempt}
           src={STUDIO_URL}
-          title="Gemtek Digital Twin"
+          title="prpl Gateway Digital Twin"
           onLoad={() => { setLoaded(true); setLoadTimedOut(false); }}
           onError={() => { setLoaded(false); setLoadTimedOut(true); }}
           style={{ border: 0, width: '100%', height: '100%', display: 'block', background: '#060709' }}
