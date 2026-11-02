@@ -1,0 +1,13 @@
+.application-routing-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.application-routing-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.application-routing-grid > div, .application-routing-grid .card { min-width: 0; }
+.routing-policy-scroll { overflow-x: auto; }
+.routing-policy-scroll table { min-width: 1050px; }
+.routing-policy-scroll td { color: var(--text-dim); }
+.routing-bandwidth-chart { height: 264px; }
+.routing-policy-search { min-width: 0; width: 240px; max-width: 100%; }
+.routing-policy-card .card-head { flex-wrap: wrap; }
+.routing-empty { padding: 32px 16px; color: var(--text-dim); text-align: center; }
+@media (max-width: 700px) {
+  .application-routing-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

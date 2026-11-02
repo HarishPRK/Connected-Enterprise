@@ -388,6 +388,8 @@ export interface AppPolicy {
   throughputMbps: number;
   slaClass: 'realtime' | 'business' | 'best-effort';
   enabled: boolean;
+  /** Sample counters must remain identified when an example policy is saved. */
+  trafficSource?: 'sample';
 }
 
 /* ───── Incidents (agentic AI) ───── */

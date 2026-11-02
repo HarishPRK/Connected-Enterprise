@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { Modal } from '../ui/Modal';
@@ -15,6 +15,8 @@ import { AiInsightCard } from '../components/widgets/AiInsightCard';
 import { AppSteeringPatchboard } from '../components/widgets/AppSteeringPatchboard';
 import { useRoutingConfig } from '../ui/useRoutingConfig';
 import { ROUTING_TEMPLATES, validateRoutingPolicy } from '../../shared/routing-config';
+import { routingCategoryColor, routingTrafficSummary } from '../ui/routingPresentation';
+import './ApplicationAwareRouting.css';
 
 const catIcon: Record<AppCategoryId, React.ComponentType<{ size?: number }>> = {
   voice: Mic, video: Video, business: Briefcase, web: Globe, bulk: Cloud, iot: Cpu,
@@ -35,6 +37,9 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
   const policies = useMemo(() => config.branchId === branchId ? config.policies : [], [branchId, config]);
   const { push } = useToast();
   const chart = useThemeColors();
+  const { theme } = useTheme();
+  const traffic = routingTrafficSummary(policies);
+  const hasSampleTraffic = traffic.sampleCount > 0;
 
   const editPolicy = (policy: AppPolicy) => { setEditing({ ...policy }); setFormError(''); };
   const updateField = <K extends keyof AppPolicy>(key: K, value: AppPolicy[K]) => {
@@ -72,14 +77,11 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
     apps: policies.length,
     enabled: policies.filter((p) => p.enabled).length,
     realtime: policies.filter((p) => p.slaClass === 'realtime').length,
-    flowsPerMin: policies.reduce((s, p) => s + p.hitsPerMin, 0),
-    throughput: policies.reduce((s, p) => s + p.throughputMbps, 0),
+    flowsPerMin: hasSampleTraffic ? traffic.flowsPerMin : null,
+    throughput: hasSampleTraffic ? traffic.throughput : null,
   };
 
-  const topApps = [...policies]
-    .sort((a, b) => b.throughputMbps - a.throughputMbps)
-    .slice(0, 6)
-    .map((p) => ({ name: p.app.length > 14 ? p.app.slice(0, 13) + '…' : p.app, mbps: p.throughputMbps, color: appCategories.find(c => c.id === p.category)!.color }));
+  const topApps = traffic.topApps.map((p) => ({ id: p.id, name: p.app, mbps: p.throughputMbps, color: routingCategoryColor(p.category, theme) }));
 
   return (
     <>
@@ -97,21 +99,22 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
         }
       />
 
-      <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-        Policies are saved branch configuration for planning and analysis. Use the live patchboard below to publish individual application routes to the gateway. Policy counters await live telemetry.
+      <p style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+        {hasSampleTraffic ? 'Enterprise examples include sample traffic values for planning. ' : 'Policies are saved for this branch. Traffic counters await live telemetry. '}
+        Edit a policy to save its configuration. Use the live patchboard below to publish application routes to the gateway.
       </p>
       {loading && <p role="status">Loading routing configuration…</p>}
       {error && <div role="alert" style={{ color: 'var(--err)', marginBottom: 12 }}>{error} <button onClick={() => void refresh()} disabled={saving || loading}>Retry loading</button></div>}
 
       {/* KPI strip */}
-      <div className="kpi-strip" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      <div className="kpi-strip application-routing-kpis">
         <SmallStat label="Apps tracked" value={String(totals.apps)} sub={`${totals.enabled} enabled`} icon={Layers} color="var(--accent)" />
         <SmallStat label="Real-time apps" value={String(totals.realtime)} sub="configured SLA class" icon={Mic} color="var(--err)" />
-        <SmallStat label="Flows / min" value={totals.flowsPerMin.toLocaleString()} sub="across all policies" icon={Shuffle} color="var(--accent-2)" />
-        <SmallStat label="Throughput" value={`${totals.throughput} Mbps`} sub="aggregate now" icon={Cloud} color="var(--ok)" />
+        <SmallStat label="Flows / min" value={totals.flowsPerMin?.toLocaleString() ?? '—'} sub={hasSampleTraffic ? 'sample traffic' : 'awaiting telemetry'} icon={Shuffle} color="var(--accent-2)" />
+        <SmallStat label="Throughput" value={totals.throughput === null ? '—' : `${totals.throughput} Mbps`} sub={hasSampleTraffic ? 'sample traffic' : 'awaiting telemetry'} icon={Cloud} color="var(--ok)" />
       </div>
 
-      <div className="grid">
+      <div className="grid application-routing-grid">
         {/* Application Steering Patchboard — drag a client's app onto a tunnel */}
         <div className="col-8">
           <Card
@@ -145,12 +148,14 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
         </div>
 
         {/* AI insight remains in its normal full-width analysis position */}
-        <div className="col-12">
+        {!loading && !error && config.branchId === branchId && <div className="col-12">
           <AiInsightCard
+            key={`${branchId}:${config.revision}`}
             topic="app-routing"
             subtitle="Review of routing policies against SLA classes"
             data={{
               totals,
+              trafficSource: hasSampleTraffic ? 'sample — illustrative values, not live measurements' : 'unavailable',
               categories: appCategories.map((c) => ({
                 id: c.id, name: c.name, trafficSharePct: c.trafficSharePct,
               })),
@@ -161,32 +166,36 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
                 preferredPath: p.preferredPath,
                 backupPath: p.backupPath,
                 match: p.match,
-                hitsPerMin: p.hitsPerMin,
-                throughputMbps: p.throughputMbps,
+                hitsPerMin: p.trafficSource === 'sample' ? p.hitsPerMin : null,
+                throughputMbps: p.trafficSource === 'sample' ? p.throughputMbps : null,
+                trafficSource: p.trafficSource ?? 'unavailable',
                 enabled: p.enabled,
               })),
             }}
           />
-        </div>
+        </div>}
 
         {/* Policy table */}
         <div className="col-12">
           <Card
+            className="routing-policy-card"
             title="Routing policies"
-            sub={`${list.length} saved policies shown · click a policy to edit`}
+            sub={`${list.length} ${config.revision === 0 ? 'example' : 'saved'} policies shown${hasSampleTraffic ? ' · sample traffic' : ''} · click a policy to edit`}
             right={
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted)' }} />
                 <input
+                  className="routing-policy-search"
                   placeholder="Search app or match rule"
                   aria-label="Search routing policies"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  style={{ paddingLeft: 30, minWidth: 240 }}
+                  style={{ paddingLeft: 30 }}
                 />
               </div>
             }
           >
+            <div className="routing-policy-scroll" role="region" aria-label="Routing policies table" tabIndex={0}>
             <table>
               <thead>
                 <tr>
@@ -205,17 +214,18 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
                 {list.map((p, i) => {
                   const cat = appCategories.find((c) => c.id === p.category)!;
                   const Icon = catIcon[p.category];
+                  const categoryColor = routingCategoryColor(p.category, theme);
                   return (
                     <tr key={p.id} style={{ cursor: 'pointer' }} tabIndex={0} onClick={() => !saving && editPolicy(p)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); if (!saving) editPolicy(p); } }}>
                       <td className="mono" style={{ color: 'var(--text-muted)', width: 22 }}>{i + 1}</td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span style={{ color: cat.color, display: 'inline-flex' }}><Icon size={15} /></span>
+                          <span style={{ color: categoryColor, display: 'inline-flex' }}><Icon size={15} /></span>
                           <span style={{ color: 'var(--text)', fontWeight: 500 }}>{p.app}</span>
                         </div>
                       </td>
                       <td>
-                        <span className="badge" style={{ color: cat.color, borderColor: `${cat.color}55`, background: `${cat.color}15` }}>
+                        <span className="badge" style={{ color: categoryColor, borderColor: `${categoryColor}55`, background: `${categoryColor}15` }}>
                           {cat.name}
                         </span>
                       </td>
@@ -224,8 +234,8 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
                       <td>
                         <PathPair pref={p.preferredPath} backup={p.backupPath} />
                       </td>
-                      <td className="mono" style={{ fontVariantNumeric: 'tabular-nums' }}>{p.hitsPerMin}</td>
-                      <td className="mono" style={{ fontVariantNumeric: 'tabular-nums' }}>{p.throughputMbps} Mbps</td>
+                      <td className="mono" style={{ fontVariantNumeric: 'tabular-nums' }} title={p.trafficSource === 'sample' ? 'Sample traffic' : 'Awaiting live telemetry'}>{p.trafficSource === 'sample' ? p.hitsPerMin.toLocaleString() : '—'}</td>
+                      <td className="mono" style={{ fontVariantNumeric: 'tabular-nums' }} title={p.trafficSource === 'sample' ? 'Sample traffic' : 'Awaiting live telemetry'}>{p.trafficSource === 'sample' ? `${p.throughputMbps} Mbps` : '—'}</td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <button
                           className="icon-btn"
@@ -242,43 +252,39 @@ export function ApplicationAwareRoutingPage({ branchId }: { branchId: string }) 
                   );
                 })}
                 {list.length === 0 && (
-                  <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>No policies match the current filters.</td></tr>
+                  <tr><td colSpan={9} className="routing-empty">{loading ? 'Loading routing policies…' : error ? 'Routing policies could not be loaded. Use Retry loading above.' : query ? 'No policies match the current filters.' : 'No saved policies. Add a new policy or choose a template to get started.'}</td></tr>
                 )}
               </tbody>
             </table>
+            </div>
           </Card>
         </div>
 
         {/* Top apps + match rule hits */}
         <div className="col-7">
-          <Card title="Top apps by bandwidth" sub="Saved policies · counters await live telemetry">
-            <div style={{ height: 240 }}>
+          <Card title="Top apps by bandwidth" sub={hasSampleTraffic ? 'Sample traffic · Mbps by application' : 'Saved policies · awaiting live telemetry'}>
+            {topApps.length > 0 ? <div className="routing-bandwidth-chart">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topApps} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-                  <defs>
-                    {topApps.map((a, i) => (
-                      <linearGradient key={i} id={`bar-${i}`} x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stopColor={a.color} stopOpacity={0.95} />
-                        <stop offset="100%" stopColor={a.color} stopOpacity={0.4} />
-                      </linearGradient>
-                    ))}
-                  </defs>
-                  <CartesianGrid stroke={chart.chartGrid} strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" stroke={chart.textMuted} fontSize={11} tickLine={false} axisLine={false} interval={0} />
-                  <YAxis stroke={chart.textMuted} fontSize={11} tickLine={false} axisLine={false} unit=" Mbps" />
+                <BarChart data={topApps} layout="vertical" margin={{ top: 4, right: 36, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={chart.chartGrid} strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" stroke={chart.textDim} fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis type="category" dataKey="name" width={126} stroke={chart.textDim} fontSize={11} tickLine={false} axisLine={false} interval={0} />
                   <Tooltip
                     contentStyle={{ background: chart.tooltipBg, border: `1px solid ${chart.tooltipBorder}`, borderRadius: 10, fontSize: 12 }}
                     labelStyle={{ color: chart.textDim }}
+                    itemStyle={{ color: chart.text }}
+                    formatter={(value) => [`${value} Mbps`, 'Sample throughput']}
                     cursor={{ fill: chart.chartCursor }}
                   />
-                  <Bar dataKey="mbps" radius={[6, 6, 0, 0]}>
-                    {topApps.map((_, i) => (
-                      <Cell key={i} fill={`url(#bar-${i})`} />
+                  <Bar dataKey="mbps" name="Throughput" fill={chart.accent} radius={[0, 4, 4, 0]} barSize={22} isAnimationActive={false}>
+                    {topApps.map((app) => (
+                      <Cell key={app.id} fill={app.color} />
                     ))}
+                    <LabelList dataKey="mbps" position="right" fill={chart.textDim} fontSize={11} />
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            </div>
+            </div> : <div className="routing-empty">{loading ? 'Loading application traffic…' : error ? 'Traffic data is unavailable until routing policies load.' : 'Per-application bandwidth will appear when traffic counters are available.'}</div>}
           </Card>
         </div>
 

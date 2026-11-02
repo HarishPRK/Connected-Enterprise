@@ -33,12 +33,15 @@ describe('routing configuration HTTP API', () => {
   });
   after(async () => { await close(); await rm(directory, { recursive: true, force: true }); });
 
-  it('starts with honest empty policy counters and default SLA bounds', async () => {
+  it('starts with enterprise examples marked as sample traffic and default SLA bounds', async () => {
     const response = await fetch(`${baseUrl}/b-mck-03`);
     assert.equal(response.status, 200);
     const config = await response.json() as RoutingConfig;
     assert.equal(config.revision, 0);
-    assert.deepEqual(config.policies, []);
+    assert.equal(config.policies.length, 10);
+    assert.ok(config.policies.every((policy) => policy.trafficSource === 'sample'));
+    assert.equal(config.policies[0].app, 'Microsoft Teams');
+    assert.equal(config.policies[0].throughputMbps, 88);
     assert.equal(config.thresholds.length, 4);
     assert.equal(response.headers.get('cache-control'), 'no-store');
   });
@@ -55,8 +58,30 @@ describe('routing configuration HTTP API', () => {
     await close();
     await start();
     assert.deepEqual(await (await fetch(`${baseUrl}/b-mck-03`)).json(), saved);
-    assert.deepEqual((await (await fetch(`${baseUrl}/b-pln-01`)).json()).policies, []);
+    assert.deepEqual((await (await fetch(`${baseUrl}/b-pln-01`)).json()).policies, defaultRoutingConfig('b-pln-01').policies);
     assert.equal(JSON.parse(await readFile(dataFile, 'utf8'))['b-mck-03'].thresholds[0].fiber.warn, 42);
+  });
+  it('persists example edits and their sample provenance without changing another branch', async () => {
+    const next = defaultRoutingConfig('examples-edited');
+    next.policies[0].preferredPath = '5G';
+    next.policies[0].backupPath = 'Fiber';
+    const response = await put('examples-edited', next);
+    assert.equal(response.status, 200);
+    await close();
+    await start();
+    const saved = await (await fetch(`${baseUrl}/examples-edited`)).json() as RoutingConfig;
+    assert.equal(saved.policies[0].preferredPath, '5G');
+    assert.equal(saved.policies[0].trafficSource, 'sample');
+    assert.equal(defaultRoutingConfig('another-branch').policies[0].preferredPath, 'Fiber');
+  });
+  it('preserves an explicitly saved empty policy list across reloads', async () => {
+    const next = { ...defaultRoutingConfig('deliberately-empty'), policies: [] };
+    assert.equal((await put('deliberately-empty', next)).status, 200);
+    await close();
+    await start();
+    const saved = await (await fetch(`${baseUrl}/deliberately-empty`)).json() as RoutingConfig;
+    assert.equal(saved.revision, 1);
+    assert.deepEqual(saved.policies, []);
   });
   it('rejects stale concurrent writes and keeps the accepted revision', async () => {
     const first = defaultRoutingConfig('concurrent');

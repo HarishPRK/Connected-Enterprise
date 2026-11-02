@@ -1,4 +1,5 @@
 import type { AppPolicy, PathThreshold } from '../src/types';
+import { ENTERPRISE_ROUTING_EXAMPLES } from './routing-examples';
 
 export interface RoutingConfig {
   branchId: string;
@@ -25,7 +26,7 @@ export const ROUTING_TEMPLATES: AppPolicy[] = [
 ];
 
 export function defaultRoutingConfig(branchId: string): RoutingConfig {
-  return { branchId, revision: 0, updatedAt: null, policies: [], thresholds: structuredClone(DEFAULT_ROUTING_THRESHOLDS) };
+  return { branchId, revision: 0, updatedAt: null, policies: structuredClone(ENTERPRISE_ROUTING_EXAMPLES), thresholds: structuredClone(DEFAULT_ROUTING_THRESHOLDS) };
 }
 
 export function validateRoutingPolicy(policy: unknown): string | undefined {
@@ -39,6 +40,7 @@ export function validateRoutingPolicy(policy: unknown): string | undefined {
   if (!['Auto', 'Fiber', '5G'].includes(p.preferredPath) || !['None', 'Fiber', '5G'].includes(p.backupPath)) return 'Choose supported WAN paths.';
   if (p.preferredPath === p.backupPath) return 'Preferred and backup paths must be different.';
   if (typeof p.enabled !== 'boolean') return 'The policy state must be enabled or disabled.';
+  if (p.trafficSource !== undefined && p.trafficSource !== 'sample') return 'The policy traffic source is invalid.';
   if (!Number.isFinite(p.hitsPerMin) || p.hitsPerMin < 0 || !Number.isFinite(p.throughputMbps) || p.throughputMbps < 0) return 'Policy counters must be nonnegative numbers.';
   return undefined;
 }

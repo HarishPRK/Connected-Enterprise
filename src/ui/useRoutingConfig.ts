@@ -17,7 +17,10 @@ async function requestConfig(branchId: string, update?: RoutingConfig, signal?: 
 }
 
 export function useRoutingConfig(branchId: string) {
-  const [state, setState] = useState(() => ({ config: defaultRoutingConfig(branchId), loading: true, saving: false, error: '' }));
+  // Wait for the server before showing defaults; saved branches may be empty.
+  const [state, setState] = useState<{ config: RoutingConfig; loading: boolean; saving: boolean; error: string }>(() => ({
+    config: { ...defaultRoutingConfig(branchId), policies: [] }, loading: true, saving: false, error: '',
+  }));
   const activeBranch = useRef(branchId);
   const savingRef = useRef(false);
   activeBranch.current = branchId;
@@ -34,7 +37,7 @@ export function useRoutingConfig(branchId: string) {
   }, [branchId]);
   useEffect(() => {
     const controller = new AbortController();
-    setState({ config: defaultRoutingConfig(branchId), loading: true, saving: false, error: '' });
+    setState({ config: { ...defaultRoutingConfig(branchId), policies: [] }, loading: true, saving: false, error: '' });
     void refresh(controller.signal);
     return () => controller.abort();
   }, [branchId, refresh]);
