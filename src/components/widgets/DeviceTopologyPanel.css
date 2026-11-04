@@ -1,0 +1,21 @@
+.device-fabric { container-type: inline-size; min-width: 0; }
+.device-topology-panel[open] {
+  display: block; position: relative; inset: auto; width: 100%; max-width: none; max-height: none;
+  margin: 0; padding: 0; border: 0; overflow: visible; background: transparent; color: inherit;
+}
+.device-topology-header { display: flex; align-items: center; justify-content: space-between; gap: 9px; min-height: 40px; margin-bottom: 10px; }
+.device-topology-header h3 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 15px; font-weight: 650; }
+.device-topology-header h3 svg { color: var(--accent); }
+.device-topology-header p { margin: 5px 0 0; color: var(--text-dim); font-size: 10px; }
+.device-topology-header > button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--text-dim); }
+.device-topology-header > button:hover { color: var(--accent); border-color: var(--accent); }
+.device-topology-waiting { display: grid; place-items: center; min-height: 280px; padding: 24px; text-align: center; font-size: 12px; color: var(--text-dim); }
+.device-topology-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text-dim); }
+.device-topology-panel:modal { display: flex; flex-direction: column; position: fixed; inset: 0; width: min(95%, 1440px); max-height: 94%; margin: auto; padding: 22px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel-solid); overflow: auto; box-shadow: 0 16px 90px #0008; }
+.device-topology-panel::backdrop { background: #020710d9; }
+.device-topology-panel:modal > :is(.device-topology-header,.device-topology-meta) { flex-shrink: 0; }
+.device-topology-panel :is(button,a,select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 520px) {
+  .device-topology-panel:modal { width: 100%; max-height: 100%; padding: 14px; border-radius: 8px; }
+  .device-topology-meta { font-size: 9px; }
+}

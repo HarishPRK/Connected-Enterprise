@@ -1,0 +1,53 @@
+.branch-atlas { min-width: 0; }
+dialog.branch-atlas[open] { display: block; position: relative; inset: auto; width: 100%; max-width: none; height: auto; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; color: inherit; background: transparent; overflow: visible; }
+.branch-atlas-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 6px; margin-bottom: 10px; }
+.branch-atlas-heading { margin-right: auto; }
+.branch-atlas-heading { display: flex; align-items: center; gap: 7px; font-size: 15px; font-weight: 650; color: var(--text); }
+.branch-atlas-heading svg { color: var(--accent); }
+.branch-atlas-views { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+.branch-atlas-views button { min-height: 28px; padding: 3px 8px; border: 1px solid transparent; border-radius: 5px; color: var(--text-dim); background: transparent; font-size: 11px; line-height: 1.2; box-shadow: none; transform: none; }
+.branch-atlas-views button[aria-pressed='true'] { background: rgb(var(--accent-rgb) / .13); border-color: rgb(var(--accent-rgb) / .32); color: var(--text); }
+.branch-atlas-views button:hover { color: var(--text); background: rgb(var(--accent-rgb) / .1); }
+.branch-atlas-expand { display: grid; place-items: center; width: 32px; min-height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 7px; color: var(--text-dim); background: transparent; }
+.branch-atlas-expand:hover { background: rgb(var(--accent-rgb) / .08); color: var(--text); }
+.branch-atlas :is(button, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.branch-atlas-viewport { width: 100%; min-width: 0; position: relative; overflow: hidden; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); }
+.branch-atlas-viewport[data-globe='true'] { aspect-ratio: 1.67; min-height: 230px; isolation: isolate; background: url('./atlas-night-sky.svg') center center / 760px 510px repeat, radial-gradient(ellipse at 50% 60%, #04101b, #020407 55%, #010204); }
+.branch-atlas-back { display: flex; align-items: center; gap: 6px; position: absolute; z-index: 2; left: 10px; top: 10px; min-height: 29px; padding: 4px 9px; border: 1px solid #a6c2d450; border-radius: 5px; background: #0b1620ed; color: #e8f2f9; font-size: 11px; }
+.branch-atlas-back:hover { background: #172a39; }
+.branch-atlas-viewport[data-globe='true'] > .studio-scene-boundary,
+.branch-globe-stage { position: absolute; inset: 0; }
+.branch-globe-stage canvas { width: 100% !important; height: 100% !important; cursor: grab; touch-action: pan-y; }
+.branch-globe-stage canvas.is-orbiting { cursor: grabbing; }
+.branch-atlas-loading { display: grid; place-content: center; position: absolute; inset: 0; color: #bdd3e1; font-size: 12px; }
+.branch-atlas-loading > span { background: #112438; border: 1px solid #35516b; border-radius: 20px; padding: 4px 10px; }
+.branch-globe-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.branch-globe-pin { position: absolute; left: 0; top: 0; width: 24px; height: 24px; margin: -12px 0 0 -12px; padding: 0; border: none; background: none; box-shadow: none; border-radius: 0; display: block; transition: none; color: #eaf6ff; pointer-events: auto; --pin: #77dbff; }
+.branch-globe-pin[hidden] { display: none; }
+.branch-globe-pin[data-tone='warn'] { --pin: #ffd168; }
+.branch-globe-pin[data-tone='err'] { --pin: #ff8395; }
+.branch-globe-pin > span { display: inline-flex; align-items: center; gap: 6px; position: absolute; top: -13px; left: 16px; min-height: 23px; padding: 3px 7px; border: 1px solid #d7e7f03e; border-radius: 4px; background: #0b1720e8; font-size: clamp(10px, .78vw, 12px); font-weight: 550; line-height: 1.2; white-space: nowrap; }
+.branch-globe-pin b { padding: 1px 3px; border-radius: 2px; color: #07172b; background: #a6dff7; font: 700 9px/1.15 'JetBrains Mono', monospace; }
+.branch-globe-beacon { display: block; position: absolute; left: 8px; top: 8px; height: 8px; width: 8px; border: 1.5px solid #152732; border-radius: 50%; background: var(--pin); box-shadow: 0 0 0 1px var(--pin), 0 0 5px 1px #102838a8; }
+.branch-globe-pin[data-selected='true'] .branch-globe-beacon::before { content: ''; position: absolute; inset: -7px; border-radius: 50%; border: 1px solid var(--pin); }
+.branch-globe-pin:is(:focus-visible,:hover) > span { border-color: #b9edff; background: #17374b; outline: 1px solid #91d9f8; }
+.branch-globe-pin:is(:hover,:active,:focus-visible) { outline: none; box-shadow: none; background: none; }
+.branch-atlas-footer { display: flex; justify-content: space-between; align-items: center; gap: 5px 12px; flex-wrap: wrap; min-height: 30px; padding: 7px 0 0; color: var(--text-muted); font-size: 10px; }
+.branch-atlas-footer span { display: inline-flex; align-items: center; gap: 5px; }
+.branch-atlas-footer svg { color: var(--accent); }
+dialog.branch-atlas:modal { display: flex; flex-direction: column; position: fixed; inset: 0; width: min(96%, 1640px); height: 92%; max-width: 100%; max-height: 100%; margin: auto; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel-solid, var(--bg)); box-shadow: 0 12px 80px #0008; overflow: hidden; }
+dialog.branch-atlas::backdrop { background: #020710d9; }
+.branch-atlas:modal .branch-atlas-toolbar { flex: none; }
+.branch-atlas:modal .branch-atlas-viewport { flex: 1; min-height: 0; aspect-ratio: auto; }
+.branch-atlas:modal .branch-globe-stage canvas { touch-action: none; }
+.branch-atlas:modal .branch-atlas-viewport[data-globe='false'] > div { height: 100%; }
+.branch-atlas:modal .branch-atlas-viewport[data-globe='false'] > div > svg { height: 100% !important; max-height: 100% !important; }
+.branch-atlas:modal .branch-atlas-footer { flex: none; }
+.branch-atlas-credit { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 5px; font-size: 10px; color: var(--text-muted); }
+.branch-atlas-credit a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 480px) {
+  .branch-atlas-viewport[data-globe='true'] { min-height: 215px; }
+  .branch-atlas-footer { font-size: 9px; }
+  .branch-globe-pin > span { padding: 2px 4px; min-height: 19px; }
+  dialog.branch-atlas:modal { width: 100%; height: 100%; border: 0; border-radius: 0; padding: 9px; }
+}

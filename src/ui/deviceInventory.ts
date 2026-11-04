@@ -1,3 +1,5 @@
+export type BranchInventorySource = 'gateway' | 'sample' | 'waiting';
+
 export interface DeviceInventoryProvenance {
   locationSource?: 'rdk' | 'prpl';
   inventoryTopics?: string[];

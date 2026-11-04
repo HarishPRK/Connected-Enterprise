@@ -1,15 +1,27 @@
-import { memo, useEffect, useId, useMemo, useState } from 'react';
-import { geoPath, geoAlbersUsa, geoMercator, geoCentroid, type GeoProjection } from 'd3-geo';
+import { lazy, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { geoPath, geoAlbersUsa, geoMercator, geoCentroid, geoBounds, type GeoProjection } from 'd3-geo';
 import { feature } from 'topojson-client';
 import type { Feature, FeatureCollection, Geometry } from 'geojson';
 import type { Topology, GeometryCollection } from 'topojson-specification';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Globe2, MapPin, RotateCcw } from 'lucide-react';
 import { Card } from '../Card';
 import { branches, fleetStats } from '../../data/mock';
 import type { Branch } from '../../types';
 import { useTheme, useThemeColors } from '../../ui/Theme';
 
-const TOPO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json';
+import { StudioSceneBoundary } from '../../ui/StudioSceneBoundary';
+import { AtlasExpandButton, BranchAtlasPanel } from './BranchAtlasPanel';
+import { RegionalSatelliteMap } from './RegionalSatelliteMap';
+import type { GlobePin, GlobeRegion, GlobeView } from './BranchGlobe';
+import TOPO_URL from '../../assets/atlas/us-states.json?url';
+import './BranchAtlas.css';
+
+const BranchGlobe = lazy(() => import('./BranchGlobe'));
+
+function GlobeUnavailable({ onFallback }: { onFallback: () => void }) {
+  useEffect(onFallback, [onFallback]);
+  return null;
+}
 
 const W = 800, H = 500;
 
@@ -109,8 +121,13 @@ function issueColorFor(list: Branch[], colors: { warn: string; err: string }): s
 
 export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedded = false }: BranchMapProps) {
   const [states, setStates] = useState<Feature<Geometry, StateProps>[] | null>(null);
+  const [view, setView] = useState<GlobeView | '2d'>('us');
+  const [reset, setReset] = useState(0);
+  const [globeAvailable, setGlobeAvailable] = useState(true);
   const [hover, setHover] = useState<string | null>(null);
   const [zoom, setZoom] = useState<ZoomLevel | null>(null);
+  const mapSvg = useRef<SVGSVGElement>(null);
+  const displayGlobe = view !== '2d';
   const c = useThemeColors();
   const { theme } = useTheme();
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
@@ -122,6 +139,16 @@ export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedde
       .catch(() => { /* leave null */ });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    const svg = mapSvg.current;
+    if (!svg) return;
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const apply = () => { if (media.matches) svg.pauseAnimations(); else svg.unpauseAnimations(); };
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, [displayGlobe]);
 
   // ── Group branches by state ──
   const branchesByState = useMemo(() => {
@@ -357,7 +384,7 @@ export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedde
             <ArrowLeft size={13} />{backLabel}
           </button>
         )}
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio={embedded ? 'xMidYMin meet' : 'xMidYMid meet'} style={{ width: '100%', height: 'auto', maxHeight: embedded ? undefined : 420, display: 'block' }}>
+        <svg ref={mapSvg} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio={embedded ? 'xMidYMin meet' : 'xMidYMid meet'} style={{ width: '100%', height: 'auto', maxHeight: embedded ? undefined : 420, display: 'block' }}>
           <defs>
             <radialGradient id="map-bg" cx="50%" cy="50%" r="60%">
               <stop offset="0%"  stopColor={haloFill} stopOpacity={0.18} />
@@ -606,14 +633,90 @@ export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedde
       </div>
   );
 
-  if (embedded) return mapBody;
+  const changeView = useCallback((next: GlobeView | '2d') => {
+    if (next !== '2d') setZoom(null);
+    setView(next);
+    setReset(value => value + 1);
+  }, []);
+  const focusUS = useCallback(() => changeView('us'), [changeView]);
+  const useFallback = useCallback(() => { setGlobeAvailable(false); setView('2d'); }, []);
+  const globePins = useMemo<GlobePin[]>(() => {
+    return markers.map((marker): GlobePin => {
+      const cluster = marker.type !== 'branch';
+      const members = marker.type === 'branch' ? [marker.branch] : marker.branches;
+      const label = marker.type === 'branch' ? marker.branch.name : marker.type === 'state-cluster' ? marker.state : marker.metro;
+      const coords = cluster ? projection.invert?.([marker.x, marker.y]) : null;
+      const { lon, lat } = coords ? { lon: coords[0], lat: coords[1] } : cityCoords[members[0].location];
+      const statuses = members.map(branch => fleetStats[branch.id]?.status);
+      const tone = statuses.includes('err') ? 'err' : statuses.includes('warn') ? 'warn' : 'normal';
+      return {
+        id: marker.type === 'branch' ? marker.branch.id : label,
+        label, ariaLabel: cluster ? `Explore ${members.length} branches in ${label}` : `Select ${label}, ${members[0].location}`,
+        count: members.length, lon, lat, tone, selected: members.some(branch => branch.id === selectedId),
+        activate: () => {
+          if (marker.type === 'branch') onSelect(marker.branch.id);
+          else if (marker.type === 'state-cluster') setZoom({ state: marker.state });
+          else if (zoom) setZoom({ state: zoom.state, metro: marker.metro });
+        },
+      };
+    });
+  }, [markers, zoom, projection, selectedId, onSelect]);
+
+  const region = useMemo<GlobeRegion | undefined>(() => {
+    if (!zoom) return;
+    const stateFeature = states?.find(state => state.properties.name === zoom.state);
+    const branchesInView = (branchesByState.get(zoom.state) ?? [])
+      .map(branch => cityCoords[branch.location])
+      .filter(coord => coord && (!zoom.metro || coord.metro === zoom.metro));
+    if (!branchesInView.length) return;
+    const lons = branchesInView.map(coord => coord.lon);
+    const lats = branchesInView.map(coord => coord.lat);
+    const [[west, south], [east, north]] = !zoom.metro && stateFeature
+      ? geoBounds(stateFeature)
+      : [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]];
+    const shape = stateFeature?.geometry;
+    const outline = !zoom.metro && shape?.type === 'Polygon' ? shape.coordinates
+      : !zoom.metro && shape?.type === 'MultiPolygon' ? shape.coordinates.flat() : undefined;
+    return {
+      level: zoom.metro ? 'metro' : 'state', outline, lon: (east + west) / 2, lat: (north + south) / 2,
+      widthDegrees: Math.max(.25, east - west), heightDegrees: Math.max(.25, north - south),
+    };
+  }, [zoom, states, branchesByState]);
+  const selected = branches.find(branch => branch.id === selectedId);
+  const atlas = <BranchAtlasPanel>
+    <header className="branch-atlas-toolbar">
+      <div className="branch-atlas-heading"><Globe2 size={17} aria-hidden="true" />Branch atlas</div>
+      <div className="branch-atlas-views" role="group" aria-label="Map view">
+        {globeAvailable && <><button type="button" aria-pressed={!zoom && view === 'world'} onClick={() => changeView('world')}>World</button>
+          <button type="button" aria-pressed={!zoom && view === 'us'} onClick={focusUS}>US</button></>}
+        <button type="button" aria-pressed={!displayGlobe} onClick={() => changeView('2d')}>2D map</button>
+      </div>
+      <AtlasExpandButton />
+    </header>
+    <div className="branch-atlas-viewport" data-globe={displayGlobe} data-level={region?.level ?? view}>
+      {displayGlobe && zoom && <button type="button" className="branch-atlas-back" onClick={goBack}><ArrowLeft size={14} />{backLabel}</button>}
+      {displayGlobe ? <StudioSceneBoundary fallback={<GlobeUnavailable onFallback={useFallback} />}
+        loading={<div className="branch-atlas-loading" role="status"><span>Loading globe…</span></div>}>
+        <BranchGlobe view={view} region={region} reset={reset} pins={globePins} onFocusUS={focusUS} />
+      </StudioSceneBoundary> : zoom?.state === 'Texas'
+        ? <RegionalSatelliteMap region={zoom.metro ? 'dfw' : 'texas'} pins={globePins} backLabel={backLabel} onBack={goBack} />
+        : mapBody}
+    </div>
+    <footer className="branch-atlas-footer">
+      <span><MapPin size={12} aria-hidden="true" />{selected?.name} · {selected?.location}</span>
+      {displayGlobe && <span aria-live="polite">{zoom?.metro ? `${zoom.metro} Metro` : zoom?.state ?? (view === 'world' ? 'World' : 'United States')}</span>}
+      {displayGlobe ? <span><RotateCcw size={11} aria-hidden="true" />Drag to orbit · Select a location</span> : <span>{subtitle}</span>}
+    </footer>
+  </BranchAtlasPanel>;
+  if (embedded) return atlas;
+
   return (
     <Card
       title="Branch Map"
       sub={subtitle}
       right={<span className="badge ok"><span className="dot ok" /> Live</span>}
     >
-      {mapBody}
+      {atlas}
     </Card>
   );
 });

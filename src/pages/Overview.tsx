@@ -165,8 +165,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
   const mockDevices = useMemo(() => getDevicesForBranch(branchId), [branchId]);
   // Strictly filter live devices by location source so Plano (rdk) and McKinney
   // (prpl) device fleets never mix. A device is shown only if its locationSource
-  // exactly matches this branch — devices with no locationSource (pure seed) are
-  // excluded here; the branch-specific mock fallback below covers the empty state.
+  // exactly matches this branch. Seed records have no discovery location.
   const branchIpsecSource = BRANCH_TO_IPSEC_SOURCE[branchId] as 'rdk' | 'prpl' | undefined;
   const branchDeviceTopic = BRANCH_TO_DEVICE_TOPIC[branchId];
   const liveDevices = useMemo(
@@ -175,9 +174,11 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
     ),
     [liveDevicesAll, branchIpsecSource, branchDeviceTopic],
   );
-  // Use real devices if loaded, otherwise fall back to mock data
   const hasBranchInventory = devicesLoaded && (liveDevices.length > 0 || !!branchDeviceTopic && inventoryTopicsSeen.includes(branchDeviceTopic));
-  const branchDevices = hasBranchInventory ? liveDevices : mockDevices;
+  const inventorySource = hasBranchInventory ? 'gateway' : branchDeviceTopic ? 'waiting' : 'sample';
+  // A configured gateway may be warming up or may report an empty roster.
+  // Neither case is a reason to show a different set of sample endpoints.
+  const branchDevices = inventorySource === 'sample' ? mockDevices : liveDevices;
   const [devicesModalOpen, setDevicesModalOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { push } = useToast();
@@ -409,6 +410,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
         branchId={branchId}
         liveWanTraffic={kpiWanTraffic}
         liveAlertsCount={usingFailover ? liveAlertsCount : null}
+        liveTunnelCount={failoverState?.metrics.tunnels.filter((tunnel) => tunnel.present).length}
         livePlanoMode={kpiGatewayMode}
       />
 
@@ -438,6 +440,7 @@ export function Overview({ branchId, onSelectBranch }: OverviewProps) {
             branchId={branchId}
             branch={branch}
             devices={branchDevices}
+            inventorySource={inventorySource}
             onSelectBranch={onSelectBranch}
             liveGatewayOnline={usingFailover ? ipsecConnected : undefined}
           />
