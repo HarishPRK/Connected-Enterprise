@@ -32,7 +32,7 @@ test('category colors remain legible in light and dark charts and badges', () =>
     return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
   };
   for (const theme of ['light', 'dark'] as const) {
-    const bg = luminance(theme === 'light' ? '#ffffff' : '#25223f');
+    const bg = luminance(theme === 'light' ? '#ffffff' : '#1e293b');
     for (const category of ['voice', 'video', 'business', 'web', 'bulk', 'iot'] as AppCategoryId[]) {
       const fg = luminance(routingCategoryColor(category, theme));
       assert.ok((Math.max(bg, fg) + 0.05) / (Math.min(bg, fg) + 0.05) >= 4.5, `${theme} ${category}`);

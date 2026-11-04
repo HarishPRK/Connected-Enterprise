@@ -14,7 +14,7 @@ export const PREFERENCES_KEY = 'ce-preferences-v1';
 export const PREFERENCES_EVENT = 'ce-preferences-changed';
 export const DEFAULT_PREFERENCES: Preferences = {
   emailAlerts: true, smsAlerts: true, digest: false, aiAuto: true,
-  tone: 'concise', model: 'haiku', timeZone: 'America/Chicago', theme: 'light', density: 'comfortable',
+  tone: 'concise', model: 'haiku', timeZone: 'America/Chicago', theme: 'dark', density: 'comfortable',
 };
 
 export function normalizePreferences(value: unknown): Preferences {
@@ -27,14 +27,16 @@ export function normalizePreferences(value: unknown): Preferences {
     tone: p.tone === 'detailed' ? 'detailed' : 'concise',
     model: p.model === 'sonnet' || p.model === 'opus' ? p.model : 'haiku',
     timeZone: ['America/Chicago', 'America/New_York', 'America/Los_Angeles', 'UTC'].includes(p.timeZone ?? '') ? p.timeZone! : DEFAULT_PREFERENCES.timeZone,
-    theme: p.theme === 'dark' || p.theme === 'auto' ? p.theme : 'light',
+    theme: p.theme === 'light' || p.theme === 'auto' ? p.theme : DEFAULT_PREFERENCES.theme,
     density: p.density === 'compact' ? 'compact' : 'comfortable',
   };
 }
 
 export function readPreferences(): Preferences {
   try {
-    const prefs = normalizePreferences(JSON.parse(localStorage.getItem(PREFERENCES_KEY) ?? 'null'));
+    let prefs = { ...DEFAULT_PREFERENCES };
+    try { prefs = normalizePreferences(JSON.parse(localStorage.getItem(PREFERENCES_KEY) ?? 'null')); }
+    catch { /* A damaged settings record can still have a valid saved theme. */ }
     const theme = localStorage.getItem('ce-theme');
     if (theme === 'dark' || theme === 'light') prefs.theme = theme;
     if (localStorage.getItem('ce-theme-mode') === 'auto') prefs.theme = 'auto';

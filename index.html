@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/jpeg" href="/capgemini.jpg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#fafbff" />
+    <meta name="theme-color" content="#0f172a" />
     <link rel="preload" href="/fonts/space-grotesk-latin-v22.woff2" as="font" type="font/woff2" crossorigin />
     <title>Small-Medium Enterprise (SME)</title>
     <style>
@@ -17,7 +17,7 @@
         background: #fafbff;
         font-family: 'Segoe UI', system-ui, sans-serif;
       }
-      [data-theme="dark"] .ce-boot-shell { color: #f3f1ff; background: #0c0d1c; }
+      [data-theme="dark"] .ce-boot-shell { color: #f1f5f9; background: #0f172a; }
       .ce-boot-panel {
         width: min(520px, 100%);
         padding: 32px;
@@ -27,13 +27,13 @@
         box-shadow: 0 16px 42px rgba(15, 23, 42, 0.12);
       }
       [data-theme="dark"] .ce-boot-panel {
-        border-color: rgba(200, 195, 230, 0.18);
-        background: #25223f;
+        border-color: #334155;
+        background: #1e293b;
         box-shadow: 0 18px 48px rgba(5, 4, 16, 0.5);
       }
       .ce-boot-panel h1 { margin: 0 0 10px; font-size: 28px; letter-spacing: -0.02em; }
       .ce-boot-panel p { margin: 0 0 24px; max-width: 48ch; color: #475569; line-height: 1.6; }
-      [data-theme="dark"] .ce-boot-panel p { color: #c4bee0; }
+      [data-theme="dark"] .ce-boot-panel p { color: #cbd5e1; }
       .ce-boot-panel button {
         min-height: 44px;
         padding: 10px 18px;
@@ -44,22 +44,26 @@
         font: 600 15px/1 'Segoe UI', system-ui, sans-serif;
         cursor: pointer;
       }
-      .ce-boot-panel button:focus-visible { outline: 3px solid #7cffd4; outline-offset: 3px; }
+      [data-theme="dark"] .ce-boot-panel button { background: #38bdf8; color: #0f172a; }
+      .ce-boot-panel button:focus-visible { outline: 3px solid #38bdf8; outline-offset: 3px; }
     </style>
     <script>
       // Apply saved/preferred theme before first paint to avoid flash.
       (function () {
+        var theme = 'dark';
         try {
           var saved = localStorage.getItem('ce-theme');
-          var theme = localStorage.getItem('ce-theme-mode') === 'auto'
+          var mode = localStorage.getItem('ce-theme-mode');
+          if (mode !== 'auto' && saved !== 'dark' && saved !== 'light') {
+            var prefs = JSON.parse(localStorage.getItem('ce-preferences-v1') || 'null');
+            saved = prefs && prefs.theme;
+          }
+          theme = mode === 'auto' || saved === 'auto'
             ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-            : saved === 'dark' || saved === 'light'
-            ? saved
-            : 'light';
-          document.documentElement.setAttribute('data-theme', theme);
-        } catch (_e) {
-          document.documentElement.setAttribute('data-theme', 'light');
-        }
+            : saved === 'light' ? 'light' : 'dark';
+        } catch (_e) { /* Use the default if storage is unavailable. */ }
+        document.documentElement.setAttribute('data-theme', theme);
+        document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#0f172a' : '#fafbff';
       })();
     </script>
   </head>

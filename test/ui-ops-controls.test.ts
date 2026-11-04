@@ -7,7 +7,7 @@ test('invalid persisted preferences cannot inject unsupported models, zones or m
   const prefs = normalizePreferences({ model: 'unknown-model', timeZone: 'not-a-zone', theme: 'invalid', density: 'invalid', emailAlerts: 'yes', tone: 'detailed' });
   assert.equal(prefs.model, 'haiku');
   assert.equal(prefs.timeZone, 'America/Chicago');
-  assert.equal(prefs.theme, 'light');
+  assert.equal(prefs.theme, 'dark');
   assert.equal(prefs.density, 'comfortable');
   assert.equal(prefs.emailAlerts, true);
   assert.equal(prefs.tone, 'detailed');

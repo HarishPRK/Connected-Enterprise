@@ -28,6 +28,7 @@
 .fabric-node-halo { fill: currentColor; opacity: .12; transition: opacity 150ms ease; }
 .fabric-node-body { fill: currentColor; stroke: currentColor; stroke-width: .6; }
 .fabric-node-mark { fill: none; stroke: var(--panel-solid); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.fabric-node[data-status='ok'] { color: var(--ok); }
 .fabric-node[data-status='err'] { color: var(--err); }
 .fabric-node[data-status='warn'] { color: var(--warn); }
 .fabric-node[data-status='off'] { color: var(--text-dim); }
@@ -46,6 +47,7 @@
 .fabric-health button:disabled { opacity: .65; cursor: default; }
 .fabric-health button:enabled:hover span { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .fabric-health i, .fabric-gateway > span i { width: 5px; height: 5px; border-radius: 50%; background: var(--node-color); }
+.fabric-health button[data-status='ok'] i { background: var(--ok); }
 .fabric-health button[data-status='warn'] i { background: var(--warn); }
 .fabric-health button[data-status='err'] i { background: var(--err); }
 .fabric-health button[data-status='off'] i { background: var(--text-dim); }
@@ -73,7 +75,8 @@
 .fabric-chip text { fill: var(--text); font-size: 10px; font-family: inherit; font-weight: 700; letter-spacing: .12em; }
 .fabric-gateway > strong { margin-top: 11px; font-size: 11px; color: var(--text); font-weight: 600; }
 .fabric-gateway > span { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 10px; }
-.fabric-gateway-online i { background: var(--accent) !important; }
+.fabric-gateway-online { color: var(--ok); }
+.fabric-gateway-online i { background: var(--ok) !important; }
 .fabric-gateway-offline, .fabric-gateway[data-online='false'] { color: var(--err); }
 .fabric-gateway-offline i { background: var(--err) !important; }
 .fabric-gateway[data-online='false'] .fabric-stream { display: none; }

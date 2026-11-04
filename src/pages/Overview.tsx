@@ -646,7 +646,7 @@ function DevicesModal({
           <SummaryStat label="Online"   value={`${onlineCount}/${devices.length}`} color="var(--ok)"   icon={<CheckCircle2 size={14} />} />
           <SummaryStat label="Issues"   value={String(issuesCount)}                color={issuesCount > 0 ? 'var(--warn)' : 'var(--text-dim)'} icon={<AlertCircle size={14} />} />
           <SummaryStat label="IT"       value={String(itCount)}                    color="var(--accent)"  icon={<Laptop size={14} />} />
-          <SummaryStat label="OT"       value={String(otCount)}                    color="var(--accent2)" icon={<Flame size={14} />} />
+          <SummaryStat label="OT"       value={String(otCount)}                    color="var(--accent-2)" icon={<Flame size={14} />} />
         </div>
 
         {/* ── Search + filter chips ── */}
@@ -763,7 +763,7 @@ function DeviceTile({ device: d }: { device: Device }) {
             width: 28, height: 28, borderRadius: 7,
             background: `linear-gradient(135deg, ${d.domain === 'IT' ? 'rgba(124,255,212,0.18)' : 'rgba(255,107,200,0.18)'}, transparent)`,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            color: d.domain === 'IT' ? 'var(--accent)' : 'var(--accent2)',
+            color: d.domain === 'IT' ? 'var(--accent)' : 'var(--accent-2)',
             flexShrink: 0,
           }}>
             <KindIcon size={14} />
@@ -773,7 +773,7 @@ function DeviceTile({ device: d }: { device: Device }) {
               {d.name}
             </div>
             <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
-              {KIND_LABEL[d.kind]} · <span style={{ color: d.domain === 'IT' ? 'var(--accent)' : 'var(--accent2)' }}>{d.domain}</span>
+              {KIND_LABEL[d.kind]} · <span style={{ color: d.domain === 'IT' ? 'var(--accent)' : 'var(--accent-2)' }}>{d.domain}</span>
             </div>
           </div>
         </div>

@@ -17,19 +17,11 @@ const Ctx = createContext<ThemeCtx | null>(null);
 
 const STORAGE_KEY = 'ce-theme';
 
-function readInitialTheme(): Theme {
-  if (typeof window === 'undefined') return 'light';
-  try {
-    if (window.localStorage.getItem('ce-theme-mode') === 'auto') return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved === 'light' || saved === 'dark') return saved;
-  } catch { /* private mode can deny browser storage */ }
-  return 'light';
-}
-
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(readInitialTheme);
   const [themeMode, setModeState] = useState<Theme | 'auto'>(() => readPreferences().theme);
+  const [theme, setThemeState] = useState<Theme>(() => themeMode === 'auto'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : themeMode);
 
   const setTheme = useCallback((t: Theme) => {
     setModeState(t);
@@ -81,6 +73,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0f172a' : '#fafbff');
   }, [theme]);
 
   const value = useMemo(() => ({ theme, themeMode, setTheme, setThemeMode, toggle }), [theme, themeMode, setTheme, setThemeMode, toggle]);
@@ -138,24 +131,24 @@ export const colorsByTheme: Record<Theme, ThemeColors> = {
     pinHalo:       '#ffffff',
   },
   dark: {
-    accent:        '#7cffd4',
-    accent2:       '#ff7bd6',
-    accent3:       '#c084fc',
+    accent:        '#38bdf8',
+    accent2:       '#a78bfa',
+    accent3:       '#7dd3fc',
     ok:            '#4ade80',
     warn:          '#fbbf24',
-    err:           '#ff5577',
-    text:          '#f3f1ff',
-    textDim:       '#c4bee0',
-    textMuted:     '#8a83b0',
-    chartGrid:     'rgba(200,195,230,0.10)',
-    chartCursor:   'rgba(124,255,212,0.45)',
-    tooltipBg:     'rgba(20,16,42,0.94)',
-    tooltipBorder: 'rgba(124,255,212,0.30)',
-    panelSolid:    '#25223f',
+    err:           '#fb7185',
+    text:          '#f1f5f9',
+    textDim:       '#cbd5e1',
+    textMuted:     '#b8c5d6',
+    chartGrid:     'rgba(148,163,184,0.10)',
+    chartCursor:   'rgba(56,189,248,0.45)',
+    tooltipBg:     'rgba(30,41,59,0.94)',
+    tooltipBorder: 'rgba(56,189,248,0.30)',
+    panelSolid:    '#1e293b',
     surfaceDim:    'rgba(255,255,255,0.025)',
     surfaceFaint:  'rgba(255,255,255,0.03)',
-    pinDot:        'rgba(14,12,32,0.95)',
-    pinHalo:       'rgba(14,12,32,0.95)',
+    pinDot:        'rgba(15,23,42,0.95)',
+    pinHalo:       'rgba(15,23,42,0.95)',
   },
 };
 

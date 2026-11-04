@@ -309,16 +309,16 @@ export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedde
   }, [zoom, markers]);
 
   // ── Theme-aware fills ──
-  const stateActiveFill   = theme === 'dark' ? 'rgba(124,255,212,0.18)' : 'rgba(6,214,160,0.14)';
-  const stateActiveStroke = theme === 'dark' ? 'rgba(124,255,212,0.55)' : 'rgba(6,214,160,0.55)';
-  const stateInactiveFill = theme === 'dark' ? 'rgba(124,255,212,0.04)' : 'rgba(15,23,42,0.04)';
-  const stateInactiveStroke = theme === 'dark' ? 'rgba(200,195,230,0.30)' : 'rgba(15,23,42,0.18)';
-  const stateZoomFill     = theme === 'dark' ? 'rgba(124,255,212,0.10)' : 'rgba(6,214,160,0.08)';
-  const stateZoomStroke   = theme === 'dark' ? 'rgba(124,255,212,0.65)' : 'rgba(6,214,160,0.65)';
-
-  const labelStrokeBg = theme === 'dark' ? 'rgba(14,12,32,0.9)' : 'rgba(255,255,255,0.85)';
-  const dotPaperFill  = theme === 'dark' ? 'rgba(14,12,32,0.95)' : '#ffffff';
-  const haloFill      = theme === 'dark' ? 'rgba(124,255,212,0.55)' : 'rgba(6,214,160,0.45)';
+  const stateActiveFill = theme === 'dark' ? 'rgb(var(--accent-rgb) / .18)' : 'rgb(var(--accent-rgb) / .14)';
+  const stateActiveStroke = 'rgb(var(--accent-rgb) / .55)';
+  const stateInactiveFill = theme === 'dark' ? 'rgb(var(--accent-rgb) / .04)' : 'rgba(15,23,42,0.04)';
+  const stateInactiveStroke = theme === 'dark' ? 'rgba(148,163,184,0.40)' : 'rgba(15,23,42,0.18)';
+  const stateZoomFill = theme === 'dark' ? 'rgb(var(--accent-rgb) / .10)' : 'rgb(var(--accent-rgb) / .08)';
+  const stateZoomStroke = 'rgb(var(--accent-rgb) / .65)';
+  const selectedPin = theme === 'dark' ? c.accent3 : c.accent2;
+  const labelStrokeBg = c.pinHalo;
+  const dotPaperFill = c.pinHalo;
+  const haloFill = theme === 'dark' ? 'rgb(var(--accent-rgb) / .55)' : 'rgb(var(--accent-rgb) / .45)';
 
   function onStateClick(stateName: string) {
     if (zoom) return; // already zoomed somewhere
@@ -364,7 +364,7 @@ export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedde
               <stop offset="100%" stopColor={haloFill} stopOpacity={0} />
             </radialGradient>
             <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
-              <circle cx="1" cy="1" r="1" fill={theme === 'dark' ? 'rgba(200,195,230,0.18)' : 'rgba(15,23,42,0.10)'} />
+              <circle cx="1" cy="1" r="1" fill={theme === 'dark' ? 'rgba(148,163,184,0.18)' : 'rgba(15,23,42,0.10)'} />
             </pattern>
             <radialGradient id="pin-glow" cx="50%" cy="50%" r="50%">
               <stop offset="0%"  stopColor={haloFill} />
@@ -511,7 +511,7 @@ export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedde
                   <circle cx={m.x} cy={m.y} r={r + 4} fill={dotPaperFill} stroke={c.accent} strokeWidth={1.5} />
                   <circle cx={m.x} cy={m.y} r={r} fill={c.accent} />
                   <text x={m.x} y={m.y + 4} textAnchor="middle" fontSize="13" fontWeight={700}
-                    fill={theme === 'dark' ? '#0a0a18' : '#ffffff'} style={{ pointerEvents: 'none' }}>
+                    fill={theme === 'dark' ? 'var(--bg)' : '#ffffff'} style={{ pointerEvents: 'none' }}>
                     {m.count}
                   </text>
                   <text x={m.x} y={m.y - 22} textAnchor="middle" fontSize="11" fontWeight={600}
@@ -544,10 +544,10 @@ export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedde
                 >
                   <circle cx={m.x} cy={m.y} r={32} fill="url(#pin-glow)" />
                   {issueColor && <RadarRipple x={m.x} y={m.y} r={r + 7} color={issueColor} />}
-                  <circle cx={m.x} cy={m.y} r={r + 4} fill={dotPaperFill} stroke={c.accent2} strokeWidth={1.5} />
-                  <circle cx={m.x} cy={m.y} r={r} fill={c.accent2} />
+                  <circle cx={m.x} cy={m.y} r={r + 4} fill={dotPaperFill} stroke={selectedPin} strokeWidth={1.5} />
+                  <circle cx={m.x} cy={m.y} r={r} fill={selectedPin} />
                   <text x={m.x} y={m.y + 4} textAnchor="middle" fontSize="12" fontWeight={700}
-                    fill={theme === 'dark' ? '#0a0a18' : '#ffffff'} style={{ pointerEvents: 'none' }}>
+                    fill={theme === 'dark' ? 'var(--bg)' : '#ffffff'} style={{ pointerEvents: 'none' }}>
                     {m.count}
                   </text>
                   <text x={m.x} y={m.y - 22} textAnchor="middle" fontSize="11" fontWeight={600}
@@ -570,10 +570,10 @@ export const BranchMap = memo(function BranchMap({ selectedId, onSelect, embedde
             const stat = fleetStats[b.id]?.status;
             const pinFill = stat === 'err' ? c.err
               : stat === 'warn' ? c.warn
-              : isSel ? c.accent2 : c.accent;
+              : isSel ? selectedPin : c.accent;
             const rippleColor = stat === 'err' ? c.err
               : stat === 'warn' ? c.warn
-              : isSel ? c.accent2 : null;
+              : isSel ? selectedPin : null;
             return (
               <g
                 key={b.id}

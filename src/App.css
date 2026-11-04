@@ -16,9 +16,9 @@
   overflow: hidden;
 }
 
-/* ───── Theme switch — native View Transitions API crossfade ─────
+/* â”€â”€â”€â”€â”€ Theme switch â€” native View Transitions API crossfade â”€â”€â”€â”€â”€
    The browser captures a snapshot of the DOM before & after, then
-   crossfades between them on the GPU compositor — no per-element
+   crossfades between them on the GPU compositor â€” no per-element
    color animation, no paint storm. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
@@ -82,7 +82,7 @@
   }
 }
 
-/* ───── Dynamic Failover page ─────
+/* â”€â”€â”€â”€â”€ Dynamic Failover page â”€â”€â”€â”€â”€
    The page wraps its content in a display:contents <div.failover-page> so it
    can lift secondary ("muted") text for legibility without affecting other
    pages. Point it straight at --text (the bright white the card titles use)
@@ -95,7 +95,7 @@
   will-change: opacity, transform, filter;
 }
 
-/* ───── Top bar ───── */
+/* â”€â”€â”€â”€â”€ Top bar â”€â”€â”€â”€â”€ */
 .topbar {
   grid-area: topbar;
   display: flex;
@@ -110,7 +110,7 @@
   position: relative;
   z-index: 5;
 }
-[data-theme="dark"] .topbar { background: rgba(14, 12, 32, 0.62); }
+[data-theme="dark"] .topbar { background: var(--bg); }
 [data-theme="light"] .topbar { background: rgba(255, 255, 255, 0.85); backdrop-filter: saturate(140%) blur(14px); -webkit-backdrop-filter: saturate(140%) blur(14px); }
 
 .topbar .brand {
@@ -130,7 +130,7 @@
   color: #ffffff; font-weight: 700; font-size: 13px; letter-spacing: -0.02em;
 }
 [data-theme="dark"] .topbar .brand .logo { color: #0a0a18; }
-/* Capgemini brand-mark variant — render the bitmap logo on a plain white
+/* Capgemini brand-mark variant â€” render the bitmap logo on a plain white
    tile (no neon gradient/glow) so the blue mark stays on-brand. */
 .topbar .brand .logo.cgm-logo {
   background: #ffffff;
@@ -158,7 +158,7 @@
   position: relative;
 }
 
-/* ───── Sidebar ───── */
+/* â”€â”€â”€â”€â”€ Sidebar â”€â”€â”€â”€â”€ */
 .sidebar {
   grid-area: sidebar;
   background: var(--panel);
@@ -173,14 +173,14 @@
   /* Prevent wheel events bubbling from sidebar to .main and vice-versa,
      so the two scroll regions don't fight each other. */
   overscroll-behavior: contain;
-  /* Hide scrollbar on the sidebar — content is always meant to fit. We just
+  /* Hide scrollbar on the sidebar â€” content is always meant to fit. We just
      fall back to scrolling if a user has very large zoom or short viewport. */
   scrollbar-width: thin;
 }
 .sidebar::-webkit-scrollbar { width: 4px; }
 .sidebar::-webkit-scrollbar-thumb { background: transparent; }
 .sidebar:hover::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb) / 0.20); }
-[data-theme="dark"]  .sidebar { background: rgba(14, 12, 32, 0.55); }
+[data-theme="dark"]  .sidebar { background: var(--bg); }
 [data-theme="light"] .sidebar { background: rgba(255, 255, 255, 0.7); backdrop-filter: saturate(140%) blur(14px); -webkit-backdrop-filter: saturate(140%) blur(14px); }
 
 .sidebar a {
@@ -212,7 +212,7 @@
   color: var(--text);
   background: var(--grad-accent-soft);
   box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb) / 0.30);
-  /* Active links don't get the hover slide — they sit firmly in place. */
+  /* Active links don't get the hover slide â€” they sit firmly in place. */
   transform: translateZ(0);
   padding-left: 12px;
 }
@@ -248,7 +248,7 @@
   border-top: 1px solid var(--border);
 }
 
-/* ─── Collapse toggle button (top of sidebar) ─── */
+/* â”€â”€â”€ Collapse toggle button (top of sidebar) â”€â”€â”€ */
 .sidebar-toggle {
   display: flex; align-items: center; gap: 10px;
   padding: 7px 12px; margin-bottom: 4px;
@@ -264,7 +264,7 @@
   border-color: rgba(var(--accent-rgb) / 0.30);
 }
 
-/* ─── Collapsed-sidebar state ───
+/* â”€â”€â”€ Collapsed-sidebar state â”€â”€â”€
    Toggling the data attribute on <html> reflows the shell to a 56-px
    sidebar with icon-only navigation. Labels, section headers, footer
    text, and the toggle's "Collapse" caption all hide. */
@@ -299,11 +299,11 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
   left: -6px; top: 10px; bottom: 10px;
 }
 
-/* ───── Main ───── */
+/* â”€â”€â”€â”€â”€ Main â”€â”€â”€â”€â”€ */
 .main {
   grid-area: main;
   overflow-y: auto;
-  /* Wheel events on main stay in main — don't propagate up and scroll the
+  /* Wheel events on main stay in main â€” don't propagate up and scroll the
      sidebar or the body when reaching the bottom of the page. */
   overscroll-behavior: contain;
   /* Padding scales with viewport so the chrome breathes on large displays. */
@@ -333,13 +333,13 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
   -webkit-text-fill-color: transparent; color: transparent;
 }
 [data-theme="dark"] .page-header h1 {
-  background: linear-gradient(135deg, #ffffff 0%, #c8cfff 50%, #ff7bd6 110%);
-  -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent; color: transparent;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--text);
 }
 .page-header .subtitle { color: var(--text-dim); font-size: 14px; margin-top: 4px; }
 
-/* ───── GW Operational Twin ───── */
+/* â”€â”€â”€â”€â”€ GW Operational Twin â”€â”€â”€â”€â”€ */
 .gateway-twin-main { overflow: hidden; }
 .gateway-twin-route {
   height: 100%;
@@ -593,7 +593,7 @@ html[data-sidebar-collapsed="true"] .sidebar a.active::before {
   .gateway-twin-loading-mark { animation: none; }
 }
 
-/* ───── Grid ───── */
+/* â”€â”€â”€â”€â”€ Grid â”€â”€â”€â”€â”€ */
 html[data-density="compact"] .main > .page-transition > .grid,
 html[data-density="compact"] .grid { gap: 12px; }
 html[data-density="compact"] .card { padding: 14px; gap: 10px; }
@@ -627,7 +627,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   .col-3, .col-4, .col-6, .col-5, .col-7 { grid-column: span 12; }
 }
 
-/* ───── Branch Overview combined card ───── */
+/* â”€â”€â”€â”€â”€ Branch Overview combined card â”€â”€â”€â”€â”€ */
 .branch-overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr);
@@ -777,7 +777,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   }
 }
 
-/* ───── Onboarding wizard ───── */
+/* â”€â”€â”€â”€â”€ Onboarding wizard â”€â”€â”€â”€â”€ */
 .onb-label {
   font-size: 11px; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
@@ -813,7 +813,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
     rgba(0,0,0,0.18);
   border: 1px solid var(--border);
   border-radius: 12px;
-  /* Never let the card's flex sizing squeeze the box below its content —
+  /* Never let the card's flex sizing squeeze the box below its content â€”
      otherwise the caption + badge strip spill out the bottom. */
   flex-shrink: 0;
   width: 100%;
@@ -825,7 +825,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
    illustration card; sizing to content keeps everything contained. */
 .grid > .onb-side > .card { flex: 0 0 auto; }
 
-/* Provisioning target — model + site selectors */
+/* Provisioning target â€” model + site selectors */
 .onb-target {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -866,7 +866,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   .onb-target { grid-template-columns: 1fr; }
 }
 
-/* ───── Onboarding · gateway list (landing) ───── */
+/* â”€â”€â”€â”€â”€ Onboarding Â· gateway list (landing) â”€â”€â”€â”€â”€ */
 .onb-form-top { margin-bottom: 12px; }
 .onb-back-link {
   display: inline-flex;
@@ -1026,7 +1026,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
 .onb-summary .kv { padding: 4px 0; }
 .onb-summary .kv:not(:last-child) { border-bottom: 1px dashed var(--border); }
 
-/* ───── Onboarding · parameter table ───── */
+/* â”€â”€â”€â”€â”€ Onboarding Â· parameter table â”€â”€â”€â”€â”€ */
 .onb-param-row {
   display: grid;
   grid-template-columns: minmax(180px, 1.4fr) minmax(220px, 1fr);
@@ -1103,7 +1103,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 [data-theme="light"] .onb-locked { background: rgba(15, 23, 42, 0.03); }
 
-/* Segmented toggle — contained track */
+/* Segmented toggle â€” contained track */
 .onb-seg {
   display: inline-flex;
   gap: 2px;
@@ -1137,7 +1137,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
 [data-theme="dark"] .onb-seg button.on { color: #0a0a18; }
 .onb-action-btn { font-size: 12.5px; padding: 6px 12px; border-radius: 8px; }
 
-/* Controls strip — search + expand/collapse */
+/* Controls strip â€” search + expand/collapse */
 .onb-controls {
   display: flex;
   align-items: center;
@@ -1222,7 +1222,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   box-shadow: none;
 }
 
-/* Category accordion — one cohesive card per category, themed via --cat */
+/* Category accordion â€” one cohesive card per category, themed via --cat */
 .onb-cat {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1388,7 +1388,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   .onb-param-row { grid-template-columns: 1fr; gap: 6px; padding: 12px 8px; }
 }
 
-/* ───── Cost Insights · chart headline strip ───── */
+/* â”€â”€â”€â”€â”€ Cost Insights Â· chart headline strip â”€â”€â”€â”€â”€ */
 .ci-chart-headline {
   display: flex;
   align-items: flex-end;
@@ -1422,7 +1422,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-style: italic;
 }
 
-/* ───── Cost Insights · clickable category strip ───── */
+/* â”€â”€â”€â”€â”€ Cost Insights Â· clickable category strip â”€â”€â”€â”€â”€ */
 .ci-cat-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -1431,7 +1431,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   border-top: 1px dashed var(--border);
 }
 .ci-cat-mini {
-  /* Reset default button styling — we render as a styled card. */
+  /* Reset default button styling â€” we render as a styled card. */
   appearance: none;
   font: inherit;
   color: inherit;
@@ -1507,7 +1507,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   gap: 6px;
 }
 
-/* ───── NaaS visual service tile + gauge ───── */
+/* â”€â”€â”€â”€â”€ NaaS visual service tile + gauge â”€â”€â”€â”€â”€ */
 .naas-service-tile {
   display: flex;
   flex-direction: column;
@@ -1549,7 +1549,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   filter: drop-shadow(0 0 6px currentColor);
 }
 
-/* ───── NaaS service utilisation chart (horizontal bars) ───── */
+/* â”€â”€â”€â”€â”€ NaaS service utilisation chart (horizontal bars) â”€â”€â”€â”€â”€ */
 .naas-bar-chart {
   display: flex;
   flex-direction: column;
@@ -1671,7 +1671,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   white-space: nowrap;
 }
 
-/* ───── Devices dashboard (Grafana-style) ───── */
+/* â”€â”€â”€â”€â”€ Devices dashboard (Grafana-style) â”€â”€â”€â”€â”€ */
 .dev-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1773,7 +1773,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   flex-shrink: 0;
 }
 
-/* ───── Live IPsec ingest card ───── */
+/* â”€â”€â”€â”€â”€ Live IPsec ingest card â”€â”€â”€â”€â”€ */
 .ipsec-live-card {
   min-width: 0;
   width: 100%;
@@ -1850,7 +1850,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 14px 10px;
-  /* Fill the card horizontally. ViewBox aspect (≈3.9:1) keeps it from getting
+  /* Fill the card horizontally. ViewBox aspect (â‰ˆ3.9:1) keeps it from getting
      too tall on wide monitors. */
   width: 100%;
   min-width: 0;
@@ -2001,7 +2001,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
 }
 .ipsec-tunnel-metrics {
   display: grid;
-  /* One column per metric (Latency · Jitter · Loss · SLA · RX · TX) so every
+  /* One column per metric (Latency Â· Jitter Â· Loss Â· SLA Â· RX Â· TX) so every
      value for a tunnel stays on a single line. */
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
@@ -2025,7 +2025,7 @@ svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-of
   font-variant-numeric: tabular-nums;
 }
 
-/* ───── Video Analytics ───── */
+/* â”€â”€â”€â”€â”€ Video Analytics â”€â”€â”€â”€â”€ */
 .va-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -2269,7 +2269,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 }
 .va-retry { width: auto; padding: 6px 12px; gap: 6px; }
 
-/* ── Fullscreen mode ── */
+/* â”€â”€ Fullscreen mode â”€â”€ */
 .va-tile:fullscreen {
   background: #000;
   border-radius: 0;
@@ -2323,7 +2323,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 .va-tile:fullscreen .va-fs-exit { opacity: 1; }
 .va-fs-exit:hover { background: rgba(0, 0, 0, 0.85); }
 
-/* ───── Agentic AI ───── */
+/* â”€â”€â”€â”€â”€ Agentic AI â”€â”€â”€â”€â”€ */
 
 /* Pulsing orb in the page title */
 .agentic-title-orb {
@@ -2521,7 +2521,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   color: var(--text);
   line-height: 1.55;
 }
-/* "Key points" pulled from a noisy smart-upstream response — sits above the
+/* "Key points" pulled from a noisy smart-upstream response â€” sits above the
    prose so the user gets the gist before reading the full reply. */
 .agentic-msg-keypoints {
   background: var(--grad-accent-soft);
@@ -2810,7 +2810,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   line-height: 1.45;
 }
 
-/* ── Live reasoning pipeline (horizontal flow of nodes) ── */
+/* â”€â”€ Live reasoning pipeline (horizontal flow of nodes) â”€â”€ */
 .trace-pipeline {
   display: flex;
   align-items: center;
@@ -2864,7 +2864,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   border-radius: 1px;
 }
 
-/* ── Trace step cards ── */
+/* â”€â”€ Trace step cards â”€â”€ */
 .trace-steps {
   display: flex;
   flex-direction: column;
@@ -3004,7 +3004,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   background: rgba(192, 132, 252, 0.10);
 }
 
-/* SLA row with embedded gauge (legacy — unused now) */
+/* SLA row with embedded gauge (legacy â€” unused now) */
 .naas-sla-row {
   display: flex;
   align-items: center;
@@ -3073,7 +3073,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   font-variant-numeric: tabular-nums;
 }
 
-/* ───── NaaS value-prop hero strip ───── */
+/* â”€â”€â”€â”€â”€ NaaS value-prop hero strip â”€â”€â”€â”€â”€ */
 .naas-valueprops {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -3150,7 +3150,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   .naas-valueprops { grid-template-columns: 1fr; }
 }
 
-/* ───── Topology inspector ───── */
+/* â”€â”€â”€â”€â”€ Topology inspector â”€â”€â”€â”€â”€ */
 .topo-inspector {
   margin-top: 6px;
   padding: 10px 14px;
@@ -3240,7 +3240,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   flex-shrink: 0;
 }
 
-/* ───── Connectivity page rows ───── */
+/* â”€â”€â”€â”€â”€ Connectivity page rows â”€â”€â”€â”€â”€ */
 .conn-row {
   display: flex;
   align-items: center;
@@ -3253,7 +3253,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   min-width: 0;
 }
 
-/* ───── Cards ───── */
+/* â”€â”€â”€â”€â”€ Cards â”€â”€â”€â”€â”€ */
 .card {
   position: relative;
   background: var(--panel);
@@ -3303,7 +3303,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 .card-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
 .card > * { position: relative; z-index: 1; }
 
-/* ───── Key/value ───── */
+/* â”€â”€â”€â”€â”€ Key/value â”€â”€â”€â”€â”€ */
 .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; align-items: center; }
 .kv .k { color: var(--text-dim); display: inline-flex; align-items: center; gap: 6px; }
 .kv .v { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -3312,7 +3312,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 .stat .label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); font-weight: 600; }
 .stat .value { font-size: 28px; font-weight: 600; color: var(--text); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 
-/* ───── Port rows ───── */
+/* â”€â”€â”€â”€â”€ Port rows â”€â”€â”€â”€â”€ */
 .port-row {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; border-radius: 10px;
@@ -3326,7 +3326,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 .port-row .port-dev { color: var(--text); flex: 1; }
 .port-row .port-rate { font-size: 12px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
 
-/* ───── Progress ───── */
+/* â”€â”€â”€â”€â”€ Progress â”€â”€â”€â”€â”€ */
 .progress {
   height: 6px; background: rgba(15,23,42,0.07);
   border-radius: 999px; overflow: hidden;
@@ -3340,7 +3340,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   transition: width 0.4s ease;
 }
 
-/* ───── Alerts ───── */
+/* â”€â”€â”€â”€â”€ Alerts â”€â”€â”€â”€â”€ */
 .alert-row {
   display: flex; gap: 10px; padding: 11px 12px; border-radius: 10px;
   background: rgba(var(--accent-rgb) / 0.03);
@@ -3356,7 +3356,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 .alert-row .alert-title { font-size: 14px; font-weight: 500; color: var(--text); }
 .alert-row .alert-meta  { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
 
-/* ───── Ask AI — immersive chat experience ─────
+/* â”€â”€â”€â”€â”€ Ask AI â€” immersive chat experience â”€â”€â”€â”€â”€
    Full-height route (mirrors the gateway-twin pattern): .askai-main disables
    the page scroll so the thread owns the only scrollbar and the composer
    stays pinned at the bottom. Everything runs on theme tokens. */
@@ -3370,7 +3370,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   min-height: 0;
 }
 
-/* ── Chat column ── */
+/* â”€â”€ Chat column â”€â”€ */
 .askai-chat {
   flex: 1;
   min-width: 0;
@@ -3393,7 +3393,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 }
 .askai-newchat { font-size: 13px; padding: 6px 12px; border-radius: 999px; }
 
-/* AI avatar — gradient tile used in the header and every AI message */
+/* AI avatar â€” gradient tile used in the header and every AI message */
 .askai-avatar {
   flex: 0 0 auto;
   width: 30px; height: 30px; border-radius: 10px;
@@ -3410,7 +3410,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   50%      { box-shadow: 0 0 0 7px rgba(var(--accent-rgb) / 0),  0 2px 14px rgba(var(--accent-rgb) / 0.50); }
 }
 
-/* ── Thread — the only scroll region ── */
+/* â”€â”€ Thread â€” the only scroll region â”€â”€ */
 .askai-thread {
   flex: 1; min-height: 0;
   overflow-y: auto;
@@ -3476,7 +3476,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 }
 @keyframes askai-blink { to { visibility: hidden; } }
 
-/* Thinking dots — shown before the first chunk arrives */
+/* Thinking dots â€” shown before the first chunk arrives */
 .askai-thinking { display: inline-flex; gap: 5px; padding: 8px 2px; }
 .askai-thinking span {
   width: 7px; height: 7px; border-radius: 50%;
@@ -3540,7 +3540,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 }
 .askai-error strong { color: var(--err); font-weight: 600; margin-right: 4px; }
 
-/* ── Hero (empty state) ── */
+/* â”€â”€ Hero (empty state) â”€â”€ */
 .askai-hero {
   min-height: 100%;
   display: flex; flex-direction: column;
@@ -3643,7 +3643,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 }
 .askai-suggest:hover .askai-suggest-go { opacity: 1; transform: translateX(0); color: var(--accent); }
 
-/* ── Composer ── */
+/* â”€â”€ Composer â”€â”€ */
 .askai-composer-zone {
   flex: 0 0 auto;
   max-width: 860px; width: 100%;
@@ -3661,7 +3661,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   box-shadow: var(--shadow);
   transition: border-color 0.22s ease, box-shadow 0.28s ease;
 }
-[data-theme="dark"] .askai-composer { background: rgba(30, 27, 55, 0.72); }
+[data-theme="dark"] .askai-composer { background: var(--panel-solid); }
 .askai-composer:focus-within {
   border-color: rgba(var(--accent-rgb) / 0.55);
   box-shadow:
@@ -3720,7 +3720,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 .askai-footnote-ctx { display: inline-flex; align-items: center; gap: 7px; }
 .askai-footnote .dot { width: 6px; height: 6px; }
 
-/* ── Context rail ── */
+/* â”€â”€ Context rail â”€â”€ */
 .askai-rail {
   flex: 0 0 clamp(280px, 21vw, 336px);
   min-height: 0;
@@ -3827,7 +3827,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   box-shadow: var(--glow-accent);
 }
 
-/* ── Responsive & motion prefs ── */
+/* â”€â”€ Responsive & motion prefs â”€â”€ */
 @media (max-width: 1180px) { .askai-rail { display: none; } }
 @media (max-width: 760px) {
   .askai-suggest-grid { grid-template-columns: 1fr; }
@@ -3845,7 +3845,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-/* ───── Wizard ───── */
+/* â”€â”€â”€â”€â”€ Wizard â”€â”€â”€â”€â”€ */
 .wizard-steps { display: flex; gap: 0; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
 .wizard-steps .step {
   display: flex; align-items: center; gap: 8px; padding: 9px 16px;
@@ -3864,7 +3864,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
 .wizard-steps .step.done { color: var(--ok); border-color: rgba(var(--ok-rgb) / 0.40); background: rgba(var(--ok-rgb) / 0.10); }
 .wizard-steps .sep { flex: 0 0 32px; height: 1px; background: var(--border); margin: 0 6px; }
 
-/* ───── Utility accents ───── */
+/* â”€â”€â”€â”€â”€ Utility accents â”€â”€â”€â”€â”€ */
 .gradient-text {
   background: var(--grad-accent);
   -webkit-background-clip: text; background-clip: text;
@@ -3872,7 +3872,7 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   font-weight: 600;
 }
 
-/* ───── KPI strip ───── */
+/* â”€â”€â”€â”€â”€ KPI strip â”€â”€â”€â”€â”€ */
 .kpi-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3905,20 +3905,20 @@ a.gateway-twin-fullscreen-button:hover { background: rgba(var(--accent-rgb) / 0.
   transform: translate3d(0, -2px, 0);
   box-shadow: var(--shadow), 0 0 28px rgba(var(--accent-rgb) / 0.12);
 }
-/* Slow red "breathing" while a KPI needs attention (e.g. active alerts > 0) —
+/* Slow warning pulse while a KPI needs attention (e.g. active alerts > 0) â€”
    ambient enough to read from across the room without being a strobe. */
 @keyframes kpi-breathe {
-  0%, 100% { box-shadow: var(--shadow), 0 0 0 0 color-mix(in srgb, var(--err) 0%, transparent); }
-  50%      { box-shadow: var(--shadow), 0 0 26px 2px color-mix(in srgb, var(--err) 30%, transparent); }
+  0%, 100% { box-shadow: var(--shadow), 0 0 0 0 color-mix(in srgb, var(--warn) 0%, transparent); }
+  50%      { box-shadow: var(--shadow), 0 0 26px 2px color-mix(in srgb, var(--warn) 30%, transparent); }
 }
 .kpi-card-alerting {
-  border-color: color-mix(in srgb, var(--err) 45%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
   animation: kpi-breathe 2.6s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .kpi-card-alerting { animation: none; }
 }
-/* ─── Wall / TV kiosk mode (Command Center) ───
+/* â”€â”€â”€ Wall / TV kiosk mode (Command Center) â”€â”€â”€
    Root attribute mirrors the data-sidebar-collapsed pattern: chrome is
    removed entirely and content scales up for across-the-room legibility. */
 html[data-wall-mode="true"] .app-shell {
@@ -4001,7 +4001,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   .wall-spotlight-progress { animation: none; transform: scaleX(1); opacity: 0.25; }
 }
 
-/* ─── Overview insight strip ─── */
+/* â”€â”€â”€ Overview insight strip â”€â”€â”€ */
 .insight-strip {
   display: flex;
   align-items: center;
@@ -4010,7 +4010,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   margin-bottom: clamp(14px, 1.1vw, 22px);
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: linear-gradient(90deg, rgba(192, 132, 252, 0.06), transparent 40%), var(--panel);
+  background: linear-gradient(90deg, rgb(var(--accent-3-rgb) / 0.06), transparent 40%), var(--panel);
   backdrop-filter: var(--card-blur);
   box-shadow: var(--shadow);
   min-width: 0;
@@ -4059,7 +4059,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   .insight-strip-msg { animation: none; }
 }
 
-/* Loading skeleton — shimmering placeholder rows while a live source warms up. */
+/* Loading skeleton â€” shimmering placeholder rows while a live source warms up. */
 .skeleton-row {
   height: 14px;
   border-radius: 7px;
@@ -4080,7 +4080,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   .skeleton-row { animation: none; }
 }
 
-/* Failover cinematic banner — floats over the IPsec flow diagram for ~2.6s
+/* Failover cinematic banner â€” floats over the IPsec flow diagram for ~2.6s
    when the active tunnel flips underlays. Tint comes inline (err/ok). */
 .ipsec-failover-banner {
   position: absolute;
@@ -4113,7 +4113,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   .ipsec-failover-banner { animation: none; transform: translateX(-50%); }
 }
 
-/* Port activity LED — hard on/off toggle like real switch hardware; the
+/* Port activity LED â€” hard on/off toggle like real switch hardware; the
    per-port packet rate sets animation-duration inline. */
 @keyframes led-blink {
   0%, 49%  { opacity: 1; }
@@ -4182,7 +4182,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
-.kpi-wan-rate-up { color: var(--accent2); }
+.kpi-wan-rate-up { color: var(--accent-2); }
 .kpi-wan-number {
   overflow: hidden;
   color: var(--text);
@@ -4207,7 +4207,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   white-space: nowrap;
 }
 
-/* ───── Modal ───── */
+/* â”€â”€â”€â”€â”€ Modal â”€â”€â”€â”€â”€ */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(15,23,42,0.45);
@@ -4215,7 +4215,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   display: flex; align-items: center; justify-content: center;
   animation: fade-in 0.18s ease both;
 }
-[data-theme="dark"] .modal-backdrop { background: rgba(8, 6, 22, 0.65); }
+[data-theme="dark"] .modal-backdrop { background: rgba(2, 6, 23, 0.65); }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .modal {
   background: var(--panel-solid);
@@ -4228,8 +4228,8 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   animation: pop-in 0.18s cubic-bezier(.2,.8,.3,1) both;
 }
 [data-theme="dark"] .modal {
-  background: rgba(30, 26, 56, 0.94);
-  box-shadow: 0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.05) inset, 0 0 50px rgba(124,255,212,0.12);
+  background: var(--panel-solid);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.05) inset, 0 0 50px rgb(var(--accent-rgb) / 0.12);
 }
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
 .modal-head {
@@ -4240,7 +4240,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 .modal-body { min-height: 0; padding: 18px; overflow-y: auto; font-size: 13.5px; color: var(--text-dim); line-height: 1.55; }
 .modal-foot { padding: 14px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; flex: 0 0 auto; }
 
-/* ───── Drawer ───── */
+/* â”€â”€â”€â”€â”€ Drawer â”€â”€â”€â”€â”€ */
 .drawer-backdrop {
   position: fixed; inset: 0; z-index: 90;
   background: rgba(15,23,42,0.35);
@@ -4248,7 +4248,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   opacity: 0; pointer-events: none;
   transition: opacity 0.2s;
 }
-[data-theme="dark"] .drawer-backdrop { background: rgba(8, 6, 22, 0.55); }
+[data-theme="dark"] .drawer-backdrop { background: rgba(2, 6, 23, 0.55); }
 .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0;
@@ -4267,7 +4267,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   visibility: hidden;
   pointer-events: none;
 }
-[data-theme="dark"] .drawer { background: rgba(22, 18, 48, 0.95); box-shadow: -20px 0 60px rgba(0,0,0,0.4); }
+[data-theme="dark"] .drawer { background: var(--panel-solid); box-shadow: -20px 0 60px rgba(0,0,0,0.4); }
 .drawer.open {
   transform: translateX(0);
   visibility: visible;
@@ -4281,7 +4281,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 }
 .drawer-body { padding: 18px 20px; overflow-y: auto; flex: 1; }
 
-/* ───── Toast ───── */
+/* â”€â”€â”€â”€â”€ Toast â”€â”€â”€â”€â”€ */
 .toast-stack {
   position: fixed; top: 78px; right: 20px; z-index: 110;
   display: flex; flex-direction: column; gap: 10px;
@@ -4300,7 +4300,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   box-shadow: 0 16px 40px rgba(15,23,42,0.15);
   animation: toast-in 0.22s cubic-bezier(.2,.8,.3,1) both;
 }
-[data-theme="dark"] .toast { background: rgba(22, 18, 48, 0.95); box-shadow: 0 16px 40px rgba(0,0,0,0.45); }
+[data-theme="dark"] .toast { background: var(--panel-solid); box-shadow: 0 16px 40px rgba(0,0,0,0.45); }
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(20px); }
   to   { opacity: 1; transform: none; }
@@ -4308,7 +4308,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 .toast-title { font-size: 14px; font-weight: 600; color: var(--text); }
 .toast-detail { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
 
-/* ───── Command palette ───── */
+/* â”€â”€â”€â”€â”€ Command palette â”€â”€â”€â”€â”€ */
 .cmdk {
   width: 600px; max-width: 92vw;
   background: var(--panel-solid);
@@ -4320,7 +4320,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   display: flex; flex-direction: column;
   animation: pop-in 0.18s cubic-bezier(.2,.8,.3,1) both;
 }
-[data-theme="dark"] .cmdk { background: rgba(30, 26, 56, 0.94); box-shadow: 0 30px 70px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05) inset, 0 0 60px rgba(124,255,212,0.15); }
+[data-theme="dark"] .cmdk { background: var(--panel-solid); box-shadow: 0 30px 70px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.05) inset, 0 0 60px rgb(var(--accent-rgb) / 0.15); }
 .cmdk-input-row {
   display: flex; align-items: center; gap: 10px;
   padding: 14px 16px; border-bottom: 1px solid var(--border);
@@ -4353,7 +4353,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   margin: 0 2px;
 }
 
-/* ───── Timeline ───── */
+/* â”€â”€â”€â”€â”€ Timeline â”€â”€â”€â”€â”€ */
 .timeline { display: flex; flex-direction: column; gap: 12px; position: relative; }
 .timeline::before {
   content: ''; position: absolute; left: 11px; top: 4px; bottom: 4px;
@@ -4367,7 +4367,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   z-index: 1;
 }
 
-/* ───── Search pill ───── */
+/* â”€â”€â”€â”€â”€ Search pill â”€â”€â”€â”€â”€ */
 .search-pill {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; min-width: 220px;
@@ -4391,7 +4391,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   white-space: nowrap;
 }
 
-/* ───── Incidents · KPI accent tiles ───── */
+/* â”€â”€â”€â”€â”€ Incidents Â· KPI accent tiles â”€â”€â”€â”€â”€ */
 .inc-kpi { --kpi-accent: var(--accent); }
 .inc-kpi::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
@@ -4405,7 +4405,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   opacity: 0.22;
 }
 
-/* ───── Incidents · segmented status filter ───── */
+/* â”€â”€â”€â”€â”€ Incidents Â· segmented status filter â”€â”€â”€â”€â”€ */
 /* Bound each panel to its grid track before sizing its controls. */
 .inc-workspace { grid-template-columns: repeat(12, minmax(0, 1fr)); }
 .inc-workspace > [class*="col-"],
@@ -4456,7 +4456,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   background: rgba(var(--accent-rgb) / 0.22); color: var(--text);
 }
 
-/* ───── Incidents · inbox rows ───── */
+/* â”€â”€â”€â”€â”€ Incidents Â· inbox rows â”€â”€â”€â”€â”€ */
 .inc-row {
   --sev: var(--accent);
   position: relative;
@@ -4523,7 +4523,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   75%, 100% { transform: scale(1.7);  opacity: 0; }
 }
 
-/* ───── Incidents · detail meta chips ───── */
+/* â”€â”€â”€â”€â”€ Incidents Â· detail meta chips â”€â”€â”€â”€â”€ */
 .inc-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 0 10px; }
 .inc-chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -4543,7 +4543,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   opacity: 0.25; pointer-events: none;
 }
 
-/* ───── Incidents · Agent timeline ───── */
+/* â”€â”€â”€â”€â”€ Incidents Â· Agent timeline â”€â”€â”€â”€â”€ */
 .agent-timeline-head {
   display: flex; align-items: center; gap: 8px;
   font-size: 12px; font-weight: 600;
@@ -4695,7 +4695,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   .pending-action::before { animation: none; }
 }
 
-/* ───── Audit log ───── */
+/* â”€â”€â”€â”€â”€ Audit log â”€â”€â”€â”€â”€ */
 .audit-day {
   display: flex; align-items: center; gap: 8px;
   font-size: 11.5px; font-weight: 600;
@@ -4738,14 +4738,14 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   .audit-details { padding: 6px 0 0; }
 }
 
-/* ───── Fleet table ───── */
+/* â”€â”€â”€â”€â”€ Fleet table â”€â”€â”€â”€â”€ */
 .fleet-table th {
   font-size: 11.5px;
 }
 .fleet-table tbody tr:hover td { background: rgba(var(--accent-rgb) / 0.05); }
 .fleet-table td { vertical-align: middle; }
 
-/* ───── Live indicator pill in topbar ───── */
+/* â”€â”€â”€â”€â”€ Live indicator pill in topbar â”€â”€â”€â”€â”€ */
 .live-pill {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 10px;
@@ -4768,7 +4768,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   50%      { box-shadow: 0 0 0 6px rgba(var(--ok-rgb) / 0); transform: scale(1.15); }
 }
 
-/* ───── Theme toggle ───── */
+/* â”€â”€â”€â”€â”€ Theme toggle â”€â”€â”€â”€â”€ */
 .switch {
   position: relative; width: 38px; height: 22px; border-radius: 999px;
   background: rgba(15,23,42,0.10); border: 1px solid var(--border);
@@ -4789,7 +4789,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 @keyframes ce-spin { to { transform: rotate(360deg); } }
 .spin { animation: ce-spin 1s linear infinite; transform-origin: 50% 50%; }
 
-/* ── OT device power toggle ──────────────────────────────────────────── */
+/* â”€â”€ OT device power toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .power-toggle {
   --pt-accent: var(--ok, #10b981);
   position: relative;
@@ -4823,7 +4823,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pt-accent) 32%, transparent);
 }
 
-/* ON: filled, glossy, glowing — reads as energised. */
+/* ON: filled, glossy, glowing â€” reads as energised. */
 .power-toggle.on {
   color: #fff;
   border-color: transparent;
@@ -4846,7 +4846,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 }
 .power-toggle.on svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .25)); }
 
-/* ─────────────────────────── Executive Command Center (ecc-) ─────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Executive Command Center (ecc-) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .ecc-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ecc-chips-label {
@@ -4917,7 +4917,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 .ecc-form-grid .full { grid-column: 1 / -1; }
 .ecc-form-hint { grid-column: 1 / -1; font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
 
-/* ── Print / "Export PDF" ──
+/* â”€â”€ Print / "Export PDF" â”€â”€
  * The app had no print styles at all (html/body/.main clip overflow, so
  * printing cut everything off). This layer makes any page printable and
  * turns the Command Center's Export PDF into a clean report: chrome and
@@ -4954,7 +4954,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
   font-size: 13px;
 }
 
-/* ─────────────────────────── Service Offerings (so-) ─────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Service Offerings (so-) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .so-problem {
   display: flex; align-items: center; justify-content: space-between; gap: 28px;
@@ -4978,7 +4978,7 @@ html[data-wall-mode="true"] .fleet-table td { font-size: 14.5px; }
 @media (max-width: 800px) { .so-problem { flex-direction: column; align-items: stretch; gap: 16px; } .so-problem-points { min-width: 0; } }
 
 /* The architecture "sandwich": consumer APIs above the container grid, the
- * prplLCM runtime band below it — mirrors the source architecture slide. */
+ * prplLCM runtime band below it â€” mirrors the source architecture slide. */
 .so-arch-band {
   text-align: center;
   font-size: 11.5px; font-weight: 700;
