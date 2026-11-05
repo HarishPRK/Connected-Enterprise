@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OFFERING_CHAPTERS } from '../../src/components/offerings/offeringCatalog.ts';
 import { sampleActor, STORY_ACTORS } from '../../src/components/offerings/OfferingStoryMotion.ts';
-import { isCheckoutStory } from '../../src/components/offerings/OfferingCheckoutStory.ts';
+import { isCheckoutStory, sampleCheckout } from '../../src/components/offerings/OfferingCheckoutStory.ts';
 import { makeConnections } from '../../src/components/offerings/OfferingConnectionPaths.ts';
 import { sampleRouting } from '../../src/components/offerings/OfferingRoutingStory.ts';
 
@@ -23,22 +23,30 @@ test('every visible actor clears both counter footprints throughout all stories'
   }
 });
 
-test('application policy keeps healthy links active and never becomes another checkout story', () => {
-  for (const variant of ['voice','stock','video']) {
+test('application policy keeps both links available and finishes one new payment without a failover retry', () => {
+  for (const variant of ['payment','orders','archive']) {
     const context = {offering:'routing' as const,variant};
-    assert.equal(isCheckoutStory(context),false);
+    assert.equal(isCheckoutStory(context),true);
     for (const time of [0,4,7,11,18,24]) {
       const links=makeConnections(context,time>=4,time>=10);
       assert.ok(links.every(link=>!link.failed));
       assert.equal(links.find(link=>link.id==='fiber')?.lit,true);
       assert.equal(links.find(link=>link.id==='5g')?.lit,time>=10);
-      assert.equal(sampleActor('shopper',context,time).receipt,0);
+      assert.notEqual(sampleCheckout(context,time).stage,'retrying');
+      assert.equal(sampleCheckout(context,time).delayed,false);
     }
+    assert.equal(sampleCheckout(context,7).stage,'waiting');
+    assert.equal(sampleCheckout(context,12.6).stage,'reading');
+    assert.equal(sampleCheckout(context,13).stage,'approved');
+    assert.equal(sampleCheckout(context,13).route,'5G');
+    assert.equal(sampleActor('shopper',context,7).walk,0);
+    assert.ok(sampleActor('shopper',context,17).receipt>.9);
+    assert.ok(sampleActor('shopper',context,22).walk>0);
   }
-  assert.equal(sampleRouting(7).voice,'Fiber');
-  assert.equal(sampleRouting(11).voice,'5G');
-  assert.equal(sampleRouting(11).stock,'Queued');
-  assert.equal(sampleRouting(18).stock,'Syncing · Fiber');
+  assert.equal(sampleRouting(7).paymentPath,'Fiber');
+  assert.equal(sampleRouting(11).paymentPath,'5G');
+  assert.equal(sampleRouting(11).archivePath,'Fiber');
+  assert.equal(sampleRouting(18).localRecording,true);
   const initial=sampleRouting(7);
   sampleRouting(24);
   assert.deepEqual(sampleRouting(7),initial);

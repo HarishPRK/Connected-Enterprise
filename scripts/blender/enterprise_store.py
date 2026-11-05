@@ -4,6 +4,8 @@ Blender 4.5: blender -b --factory-startup --python-exit-code 1 --python scripts/
 Design coordinates throughout are glTF/Three.js X,Y,Z, with +Y up and front +Z.
 The GLB contains architecture and fixtures only. Optional equipment in the proof
 is loaded from offerings-kit.glb AFTER the architectural export.
+Append --studio after the output directory for the Smart Kitchen material family.
+The studio edition has its own filenames and preserves the original layout.
 """
 import json
 import math
@@ -16,8 +18,12 @@ from pathlib import Path
 import bpy
 from mathutils import Vector
 
-OUT = (Path(sys.argv[sys.argv.index("--") + 1]) if "--" in sys.argv else
-       Path(__file__).resolve().parents[2] / "src/assets/offerings")
+arguments = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+STUDIO = "--studio" in arguments
+output_args = [argument for argument in arguments if not argument.startswith("--")]
+OUT = Path(output_args[0]) if output_args else Path(__file__).resolve().parents[2] / "src/assets/offerings"
+OUT = OUT.resolve()
+STEM = "enterprise-store.studio" if STUDIO else "enterprise-store"
 OUT.mkdir(parents=True, exist_ok=True)
 bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
@@ -31,7 +37,22 @@ def V(p):
     return Vector((p[0], -p[2], p[1]))
 
 
+STUDIO_PALETTE = {
+    "Warm mineral plaster": "efe8d5", "Warm limestone tile": "3d443f",
+    "Limestone tone variation": "414842", "Recessed tile grout": "252c28",
+    "Board formed concrete": "b5b7a8", "Exterior charcoal paving": "20282a",
+    "Graphite architectural steel": "263633", "Satin stainless steel": "929f9c",
+    "Natural smoked oak": "be8956", "Oak end grain": "92683e",
+    "Pale terrazzo countertop": "efe8d5", "Retail blue green enamel": "24564d",
+    "Slate navy panels": "173f39", "Sky blue wayfinding": "e5a54f",
+    "Soft white signage": "f5e4c3", "Blank terminal display": "18352f",
+    "Architectural clear blue glazing": "c1d3be",
+}
+
+
 def material(name, color, metal=0, rough=.5, emission=0, alpha=1):
+    if STUDIO:
+        color = STUDIO_PALETTE.get(name, color)
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     rgb = [v / 255 for v in bytes.fromhex(color)]
@@ -77,6 +98,9 @@ goods = [material("Product " + name, code, .02, .52) for name, code in (
 paper = material("Uncoated product paper", "eee4cf", .0, .86)
 label_ink = material("Printed charcoal ink", "233b40", .0, .85)
 foil = material("Satin package foil", "c6b184", .52, .43)
+bronze = material("Satin bronze details", "a77f45", .6, .32)
+clay = material("Terracotta enamel", "b8593f", .03, .47)
+glaze = material("Spruce glazed ceramic", "24564d", .02, .35)
 
 
 def surface_texture(name, width, height, sample):
@@ -103,14 +127,49 @@ def oak_sample(x, y):
     return (.62 + tone, .435 + tone * .79, .266 + tone * .51)
 
 
-oak_map = surface_texture("Original smoked oak grain", 192, 512, oak_sample)
-oak_node = wood.node_tree.nodes.new("ShaderNodeTexImage")
-oak_node.image, oak_node.extension = oak_map, "REPEAT"
-wood.node_tree.links.new(oak_node.outputs["Color"], wood.node_tree.nodes.get("Principled BSDF").inputs["Base Color"])
+if STUDIO:
+    # Original Smart Kitchen maps, copied into this repository for reproducible
+    # authoring. The GLB embeds all three; the browser needs no external files.
+    surface_dir = Path(__file__).resolve().parent / "studio-surfaces"
+    for finish_material, filename in ((wood, "oak.jpg"), (tile, "terrazzo.jpg"),
+                                      (tile2, "terrazzo.jpg"), (glaze, "tile.jpg")):
+        image = bpy.data.images.load(str(surface_dir / filename), check_existing=True)
+        image.pack()
+        node = finish_material.node_tree.nodes.new("ShaderNodeTexImage")
+        node.image, node.extension = image, "REPEAT"
+        bsdf = finish_material.node_tree.nodes.get("Principled BSDF")
+        if finish_material in (tile, tile2):
+            # A glTF-compatible color factor darkens the original mineral chips
+            # without flattening their texture or changing any furniture finish.
+            tint = finish_material.node_tree.nodes.new("ShaderNodeMix")
+            tint.data_type = "RGBA"
+            tint.blend_type = "MULTIPLY"
+            tint.inputs[0].default_value = 1
+            factor = 1.055 if finish_material == tile2 else 1
+            tint.inputs[7].default_value = (.012 * factor, .016 * factor, .018 * factor, 1)
+            finish_material.node_tree.links.new(node.outputs["Color"], tint.inputs[6])
+            finish_material.node_tree.links.new(tint.outputs[2], bsdf.inputs["Base Color"])
+            # Matte mineral surfaces retain their dark appearance under the
+            # application's bright studio environment, including grazing views.
+            # Blender exports this as KHR_materials_specular (factor .14).
+            bsdf.inputs["Metallic"].default_value = 0
+            bsdf.inputs["Roughness"].default_value = .9
+            bsdf.inputs["Specular IOR Level"].default_value = .07
+        else:
+            finish_material.node_tree.links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
+    paving_bsdf = paving.node_tree.nodes.get("Principled BSDF")
+    paving_bsdf.inputs["Metallic"].default_value = 0
+    paving_bsdf.inputs["Roughness"].default_value = .9
+    paving_bsdf.inputs["Specular IOR Level"].default_value = .07
+else:
+    oak_map = surface_texture("Original smoked oak grain", 192, 512, oak_sample)
+    oak_node = wood.node_tree.nodes.new("ShaderNodeTexImage")
+    oak_node.image, oak_node.extension = oak_map, "REPEAT"
+    wood.node_tree.links.new(oak_node.outputs["Color"], wood.node_tree.nodes.get("Principled BSDF").inputs["Base Color"])
 
 
 def map_material_uv(obj, mat):
-    if mat != wood:
+    if mat != wood and not (STUDIO and mat in (tile, tile2, glaze)):
         return
     uv = obj.data.uv_layers.active or obj.data.uv_layers.new(name="Surface UV")
     for face in obj.data.polygons:
@@ -124,6 +183,18 @@ def map_material_uv(obj, mat):
                 coord = (p.y * 2.0, p.z * .8)
             else:
                 coord = (p.x * 2.0, p.z * .8)
+            if STUDIO:
+                frequency = .65 if mat in (tile, tile2) else .55
+                if mat == wood:
+                    # Horizontal fibers in the image follow the vertical
+                    # manufactured millwork, just like the restaurant counters.
+                    coord = (coord[1], coord[0])
+                elif abs(normal.z) > .65:
+                    coord = (p.x * frequency, p.y * frequency)
+                elif abs(normal.x) > .65:
+                    coord = (p.y * frequency, p.z * frequency)
+                else:
+                    coord = (p.x * frequency, p.z * frequency)
             uv.data[loop_index].uv = coord
 
 
@@ -137,7 +208,7 @@ def soften(obj, width, segments=1):
     if width <= 0:
         return
     m = obj.modifiers.new("Manufactured edge", "BEVEL")
-    m.width, m.segments = width, segments
+    m.width, m.segments = width, max(2, segments) if STUDIO else segments
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier=m.name)
     for p in obj.data.polygons:
@@ -270,7 +341,7 @@ for x in (-10.75, -6.45, -2.15, 2.15, 6.45, 10.75):
     box("Clerestory glazing", (x, 3.91, -9.9), (4.2, .78, .025), glass, .004)
 for x in (-12.6, -7.4, 5.6, 12.5):
     box("Rear structural column", (x, 2.2, -9.65), (.16, 4.4, .18), steel, .012)
-box("Fresh wall blue enamel", (-.5, 1.53, -9.73), (8.2, 2.66, .09), teal, .02)
+box("Fresh wall blue enamel", (-.5, 1.53, -9.73), (8.2, 2.66, .09), glaze if STUDIO else teal, .02)
 box("Rear brand strip", (-.5, 3.05, -9.70), (9.4, .65, .12), powder, .025)
 text("CONNECTED MARKET", (-.5, 2.94, -9.615), .37)
 text("FRESH  /  EVERYDAY  /  CONNECTED", (-.5, 2.48, -9.66), .13)
@@ -278,6 +349,11 @@ for x in (-11.5, -10.75, -10, -9.25, -8.5):
     box("Climate bay wall panel", (x, 1.55, -9.72), (.68, 2.75, .06), concrete, .01)
 text("BUILDING SERVICES", (-10, 3.0, -9.64), .18, ink)
 box("Network bay rear panel", (9.35, 1.8, -9.72), (5.2, 3.15, .07), navy, .01)
+if STUDIO:
+    box("Fresh wall bronze upper reveal", (-.5, 2.91, -9.65), (8.25, .035, .045), bronze, .006)
+    box("Fresh wall ceramic skirting", (-.5, .14, -9.65), (8.25, .18, .055), navy, .008)
+    for x in (-4.63, 3.63):
+        box("Fresh wall bronze side reveal", (x, 1.53, -9.65), (.035, 2.72, .04), bronze, .005)
 text("NETWORK & OPERATIONS", (9.25, 3.15, -9.64), .18, ink)
 for y in (.4, 2.8):
     box("Network horizontal trunking", (9.2, y, -9.6), (4.9, .10, .1), steel, .012)
@@ -287,6 +363,9 @@ finish("RearElevation")
 box("Left cutaway wall", (-12.9, .26, 0), (.25, .52, 19.8), plaster, .025)
 box("Left rear wall", (-12.9, 1.53, -6.0), (.25, 3.06, 7.8), plaster, .03)
 box("Left oak wall cap", (-12.9, .55, 4.1), (.31, .065, 11.6), wood, .012)
+if STUDIO:
+    box("Left hospitality oak wainscot", (-12.755, .27, 4.1), (.045, .46, 11.5), wood, .008)
+    box("Left bronze skirting reveal", (-12.715, .08, 4.1), (.018, .024, 11.5), bronze, .004)
 for z in (-9.65, -6, -2.2):
     box("Left structural post", (-12.8, 2.2, z), (.17, 4.4, .17), powder, .012)
 box("Right cutaway curb", (12.92, .16, 0), (.22, .32, 20), concrete, .025)
@@ -373,6 +452,12 @@ for index, cz in enumerate((4.5, 7.0)):
     box("Checkout stone worktop", (cx, 1.105, cz), (3.3, .09, 1.30), stone, .025)
     for dx in (-1.15, -.57, 0, .57, 1.15):
         box("Vertical millwork reveal", (cx + dx, .60, cz + .584), (.012, .89, .008), woodedge, 0)
+    if STUDIO:
+        for i in range(25):
+            box("Fluted oak checkout batten", (cx - 1.44 + i * .12, .59, cz + .596),
+                (.043, .87, .032), wood, .008)
+        box("Checkout bronze worktop reveal", (cx, 1.048, cz + .61), (3.13, .023, .025), bronze, .004)
+        box("Checkout bronze foot reveal", (cx, .135, cz + .541), (2.96, .024, .018), bronze, .004)
     box("Conveyor inset", (cx - .42, 1.156, cz), (1.53, .012, .82), powder, .018)
     for i in range(7):
         box("Conveyor rubber seam", (cx - 1.05 + i * .205, 1.164, cz), (.008, .002, .76), grout, 0)
@@ -446,11 +531,21 @@ for x in (-9, -3, 3, 9):
 for z in (-6.2, -1.5):
     beam("Left support cantilever", (-12.8, 3.25, z), (-10.8, 3.25, z), .075, powder)
     box("Side linear luminaire", (-11.8, 3.21, z), (1.75, .07, .2), warm, .012)
+if STUDIO:
+    # Slim cantilevers stay outside the existing customer/staff paths. The
+    # diffusers remain in LightingRig, so the automation dimmer controls them.
+    for z in (4.5, 7.0):
+        cylinder("Checkout pendant support", (12.78, 1.96, z), .037, 3.6, bronze, vertices=12)
+        beam("Checkout bronze cantilever", (12.78, 3.76, z), (8, 3.76, z), .042, bronze)
+        cylinder("Checkout pendant cord", (8, 3.40, z), .014, .72, powder, vertices=8)
+        cylinder("Clay shade", (8, 3.02, z), .35, .31, clay, vertices=32, top=.085)
+        cylinder("Pendant warm diffuser", (8, 2.857, z), .324, .016, warm, vertices=32)
+        cylinder("Pendant bronze collar", (8, 3.193, z), .041, .055, bronze, vertices=16)
 finish("LightingRig")
 
 
 def plant(x, z, scale=1):
-    cylinder("Tapered planter", (x, .30 * scale, z), .30 * scale, .6 * scale, concrete, vertices=16, top=.37 * scale)
+    cylinder("Tapered planter", (x, .30 * scale, z), .30 * scale, .6 * scale, clay if STUDIO else concrete, vertices=24 if STUDIO else 16, top=.37 * scale)
     cylinder("Planter soil", (x, .605 * scale, z), .33 * scale, .025 * scale, soil, vertices=16)
     for j in range(9):
         angle = j * math.tau / 9 + .17
@@ -500,7 +595,9 @@ manifest = {
     "actualBounds": {
         "min": [round(min(p[axis] for p in world_points), 4) for axis in range(3)],
         "max": [round(max(p[axis] for p in world_points), 4) for axis in range(3)]},
-    "surfaceMaps": ["Original smoked oak grain · 192 × 512 · embedded PNG"],
+    "surfaceMaps": (["Smart Kitchen terrazzo · 384 × 384 · embedded JPEG", "Smart Kitchen honey oak · 512 × 256 · embedded JPEG", "Smart Kitchen spruce glazed tile · 384 × 384 · embedded JPEG"]
+                    if STUDIO else ["Original smoked oak grain · 192 × 512 · embedded PNG"]),
+    "style": "Smart Kitchen studio" if STUDIO else "Original enterprise",
     "equipmentIncluded": False,
     "anchors": {
         "Gateway": [7, 1.10, -3], "ServerRack": [10, 0, -6],
@@ -512,12 +609,12 @@ manifest = {
     },
     "clearances": "Shelf aisles at x=-6,-1,4 span z=-1.43..3.43. Customer path z=6 is clear from x=-2..5. The front entrance opening spans x=-.68..2.68.",
 }
-(OUT / "enterprise-store.manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+(OUT / (STEM + ".manifest.json")).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 bpy.ops.object.select_all(action="DESELECT")
 root.select_set(True)
 for obj in root.children_recursive:
     obj.select_set(True)
-bpy.ops.export_scene.gltf(filepath=str(OUT / "enterprise-store.glb"), export_format="GLB",
+bpy.ops.export_scene.gltf(filepath=str(OUT / (STEM + ".glb")), export_format="GLB",
                          use_selection=True, export_yup=True, export_materials="EXPORT",
                          export_cameras=False, export_lights=False)
 print("STORE_EXPORTED", json.dumps(manifest), flush=True)
@@ -573,9 +670,9 @@ scene.render.engine = "CYCLES"
 scene.cycles.samples, scene.cycles.use_denoising = 40, True
 scene.render.resolution_x, scene.render.resolution_y, scene.render.resolution_percentage = 1800, 1400, 100
 scene.render.image_settings.file_format = "PNG"
-scene.render.filepath = str(OUT / "enterprise-store-proof.png")
+scene.render.filepath = str(OUT / (STEM + "-proof.png"))
 scene.view_settings.view_transform = "AgX"
 scene.view_settings.look = "AgX - Medium High Contrast"
 scene.render.film_transparent = True
 bpy.ops.render.render(write_still=True)
-print("STORE_COMPLETE", (OUT / "enterprise-store.glb").stat().st_size, "bytes", triangles, "triangles", flush=True)
+print("STORE_COMPLETE", (OUT / (STEM + ".glb")).stat().st_size, "bytes", triangles, "triangles", flush=True)

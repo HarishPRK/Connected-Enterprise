@@ -35,8 +35,8 @@ test('the card reaches the reader once and replaying or reverse seeking reconstr
   for(const time of [5,12.5,13,23])assert.equal(sampleCheckout(fiber,time).cardReach,0);
   sampleCheckout(fiber,23);
   assert.deepEqual(sampleCheckout(fiber,3.8),contact);
-  assert.equal(isCheckoutStory({offering:'routing',variant:'stock'}),false);
-  assert.equal(isCheckoutStory({offering:'routing',variant:'voice'}),false);
+  assert.equal(isCheckoutStory({offering:'routing',variant:'payment'}),true);
+  assert.equal(isCheckoutStory({offering:'video',variant:'man-down'}),false);
 });
 test('the film reveals payment details at the reader and then returns to the human outcome',()=>{
   assert.ok(sampleStoryCamera(fiber,3.8).distance<2);

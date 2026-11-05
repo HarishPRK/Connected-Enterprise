@@ -1,8 +1,7 @@
-import { storyProgress, type StoryContext } from './OfferingStoryMotion';
+import type { StoryContext } from './OfferingStoryMotion';
 
-export function storeLightLevel(context: StoryContext, time: number) {
-  if (context.offering !== 'automation') return 1;
-  const progress = storyProgress(time, 10.5, 15.5);
-  const eased = progress * progress * (3 - 2 * progress);
-  return context.variant === 'after-hours' ? 1 - eased * .7 : .3 + eased * .7;
+export function storeLightLevel(context: StoryContext) {
+  // Closing occurs in an evening setting. Only the three connected loads
+  // switch; walkway, refrigeration and network lighting stay available.
+  return context.offering === 'automation' ? .48 : 1;
 }

@@ -1,5 +1,8 @@
 import type { OfferingId } from './OfferingScene';
 import { sampleTwin } from './OfferingTwinStory';
+import { sampleRouting } from './OfferingRoutingStory';
+import { EAGLE_TIMING, sampleEagle } from './OfferingEagleStory';
+import { sampleAutomation } from './OfferingAutomationStory';
 import { CHECKOUT_SHOTS, isCheckoutStory, sampleCheckout } from './OfferingCheckoutStory';
 
 export type StoryPoint = [number, number, number];
@@ -61,11 +64,11 @@ export function smartPoint(variant:string):StoryPoint {return variant==='hvac'?[
 export function sampleActor(id:ActorId,{offering,variant}:StoryContext,time:number):ActorPose {
   const t=Math.max(0,Math.min(24,time));
   let result=pose(id==='staff'?8:id==='technician'?9.5:id==='security'?10.8:-5,id==='staff'?3.25:id==='technician'?-1.5:id==='security'?-6.8:5.7,0);
-  if(id==='caller'){result=pose(8,8.15,Math.PI);result.visible=offering==='routing';result.phone=ease(storyProgress(t,.6,2));}
+  if(id==='caller'){result=pose(8,8.15,Math.PI);result.visible=false;result.phone=ease(storyProgress(t,.6,2));}
   if(id.startsWith('crowd'))result.visible=false;
   if(id==='technician'){result.tablet=1;result.visible=['twin','eagle','smart'].includes(offering);}
   if(id==='security')result.visible=offering==='video'&&variant==='intruder';
-  if(offering==='failover'){
+  if(isCheckoutStory({offering,variant})){
     const release=17;
     if(id==='shopper'){
       result=travel([[0,3.6,7.8],[1.2,5.55,7.8],[2,5.55,5.55],[3.05,7.25,5.55],[release-2,7.25,5.55],[release-.6,8.43,5.55],[release,8.43,5.55],[release+2.2,5.55,5.55],[release+3.8,5.55,8.3],[release+7,1,11.5]],t,Math.PI);
@@ -79,13 +82,6 @@ export function sampleActor(id:ActorId,{offering,variant}:StoryContext,time:numb
     if(id==='queue1')result=travel([[0,2.6,8],[4,4.6,6.2],[release+2,4.6,6.2],[release+4,5.55,5.55],[release+7,7.25,5.55]],t,Math.PI);
     if(id==='queue2')result=travel([[0,1.2,9],[5,3.5,7.1],[release+2,3.5,7.1],[release+6,5.3,6.1]],t,Math.PI);
     if(id==='staff'){result=pose(8,3.25,0);result.tap=.12+ease(storyProgress(t,11.6,12.6))*(1-ease(storyProgress(t,14.5,15.5)))*.55;if(offering==='failover'&&variant==='fiber'){result.concern=ease(storyProgress(t,5,6))*(1-ease(storyProgress(t,9.5,10.5)))*.6;result.lookY=-.3*result.concern;}}
-  }else if(offering==='routing'){
-    // Business demand, not a broken link: the supplier call is the human lead.
-    if(id==='caller'){result=pose(8,8.18,Math.PI);result.phone=ease(storyProgress(t,.6,2))*(1-ease(storyProgress(t,21,23)));result.concern=.35*ease(storyProgress(t,4,5))*(1-ease(storyProgress(t,10,12)));result.lookY=.12*Math.sin(t*.9);}
-    if(id==='shopper')result=travel([[0,-3.5,6],[24,3.5,6]],t,Math.PI/2);
-    if(id==='queue1')result=pose(1.5,9.2,-.3);
-    if(id==='queue2')result.visible=false;
-    if(id==='staff'){result=pose(10.9,-4.4,Math.PI);result.tablet=1;result.tap=.3;}
   }else if(offering==='video'){
     if(variant==='man-down'){
       if(id==='shopper'){result=travel([[0,-3.5,6],[4,.3,6]],t,Math.PI/2);result.collapse=ease(storyProgress(t,4.1,4.8));result.fall=ease(storyProgress(t,4.7,6.1));result.at[1]+=.13*result.fall;result.walk*=1-result.collapse;result.heading=Math.PI/2;}
@@ -106,12 +102,33 @@ export function sampleActor(id:ActorId,{offering,variant}:StoryContext,time:numb
       if(id==='staff'){result=travel([[0,8,3.25],[10,8,3.25],[12,5.7,3.25],[14,5.7,5.6],[18,3.8,6.8]],t,-Math.PI/2);result.tap=storyProgress(t,14,15)*.85;}
     }
   }else if(offering==='automation'){
-    const leaving=variant==='after-hours';
-    if(id==='shopper')result=travel(leaving?[[0,-8.5,.8],[4,-5,5.6],[8,1,9.7],[10,1,12.5]]:[[0,1,12.5],[4,1,9.7],[8,-5,5.6],[11,-8.5,.8]],t);
+    if(id==='shopper'){
+      const staying=variant==='occupied';
+      result=travel(staying?[[0,-8.9,.35],[4,-8.9,.35],[7,-7.35,2.4],[24,-7.35,2.4]]:[[0,-8.9,.35],[4,-8.9,.35],[5.8,-7.5,.35],[8.5,-7.5,-2.75],[24,-7.5,-2.75]],t,staying?-.9:Math.PI);
+      result.tablet=1;result.visible=staying||t<9;
+    }
     if(id==='queue1'||id==='queue2')result.visible=false;
     if(id==='staff'){result=pose(8,3.25,0);result.visible=false;}
-  }else if(offering==='eagle'||offering==='smart'){
-    const target=offering==='eagle'?monitoredPoint(variant):smartPoint(variant);
+  }else if(offering==='eagle'){
+    if(id==='technician'){
+      const end:Record<string,[number,number]>={gateway:[6.82,-2.14],fiber:[13.6,-5.4],'5g':[13.2,.8],it:[10.42,-4.95],ot:[-6.55,-5.3]};
+      const destination=end[variant]??end.gateway,target=monitoredPoint(variant);
+      const follow:Stop[]=variant==='gateway'?[[14.6,9.05,-4.35],[16.1,9.05,-1.85],[18,...destination]]
+        :variant==='ot'?[[14.6,8.3,-4.35],[19,-6.55,-4.35],[20,...destination]]
+        :variant==='it'?[[16.5,...destination]]
+        :[[15.3,12.7,-4.5],[18,...destination]];
+      const heading=t<EAGLE_TIMING.dispatch?2.825:Math.atan2(target[0]-destination[0],target[2]-destination[1]);
+      result=travel([[0,8.9,-4.35],[6.5,8.9,-4.35],[8.5,9.82,-4.84],[13.5,9.82,-4.84],...follow],t,heading);
+      result.tablet=t<6.5||t>=13.5?1:0;
+      result.tap=t>=9.8&&t<12.2?.5:0;
+      result.lookY=0;
+    }
+    if(id==='staff'){result=pose(8,3.25);result.concern=sampleEagle(variant,t).checkoutAffected?ease(storyProgress(t,4,5))*.45:0;}
+    if(id==='shopper')result=pose(7.25,5.55,Math.PI);
+    if(id==='queue1')result=pose(4.6,6.2,Math.PI);
+    if(id==='queue2')result.visible=false;
+  }else if(offering==='smart'){
+    const target=smartPoint(variant);
     if(id==='technician'){
       const nearX=target[0]>12?12.7:target[0]+1.2,nearZ=target[2]<-4?target[2]+1.3:target[2]+.4;
       const arrive=11+Math.min(8.5,Math.max(2.5,Math.abs(nearX-8.9)/1.5));
@@ -121,7 +138,7 @@ export function sampleActor(id:ActorId,{offering,variant}:StoryContext,time:numb
     if(id==='shopper')result=offering==='smart'&&variant==='cooler'?travel([[0,-1.2,-5.5],[4,-1.2,-6.1],[8,-1.2,-6.1],[12,2,-4.3],[18,5.7,4.5]],t,Math.PI):pose(3.1,8.1,-.8);
     if(id==='queue1')result=pose(-3.5,6.3,.5);if(id==='queue2')result.visible=false;
   }else if(offering==='twin'){
-    if(id==='technician'){result=travel([[0,7.1,1.14],[9,7.1,1.14],[9.65,8.45,1.14],[10.65,8.45,-1.7],[11.4,6.8,-1.9],[17,6.8,-1.9],[17.75,8.45,-1.7],[19,8.45,1.14],[20,7.1,1.14],[24,7.1,1.14]],t,Math.PI);result.tablet=0;result.tap=sampleTwin(t).typing*.3;result.lookY=0;}
+    if(id==='technician'){result=travel([[0,7.27,.71],[9,7.27,.71],[9.65,8.6,.71],[10.65,8.6,-1.7],[11.4,6.82,-2.14],[17,6.82,-2.14],[17.75,8.6,-1.7],[19,8.6,.71],[20,7.27,.71],[24,7.27,.71]],t,t>=9&&t<19?Math.PI+.3:Math.PI);result.tablet=0;result.tap=sampleTwin(t).typing*.3;result.lookY=0;}
     if(id==='shopper')result=pose(3.1,8.1,-.8);if(id==='queue1')result=pose(-3.5,6.3,.5);if(id==='queue2')result.visible=false;
   }
   if(offering==='smart'&&variant==='energy'&&id!=='technician')result.visible=false;
@@ -134,42 +151,90 @@ export function sampleStoryCamera(context:StoryContext,time:number):{target:Stor
   const {offering,variant}=context;let stops:CameraStop[];
   // Cut from the observed event to the dedicated inference appliance, then
   // return to the original human-response sequence at exactly the same clock.
-  if(offering==='video'&&time>=10.05&&time<13.05)return {target:[7.4,2,-3],distance:6.7-(time-10.05)*.08,yaw:-.75,pitch:.28};
+  if(offering==='video'&&time>=10.05&&time<13.05)return {target:[8.05,1.33,-2.9],distance:1.7-(time-10.05)*.04,yaw:-.65,pitch:.26};
+  if(offering==='routing'&&variant==='orders'&&time>=17&&time<19.4)return {target:[8,1.294,4.406],distance:.94,yaw:-.3,pitch:.335};
   // A short-film grammar: establish the place, stay with the human reaction,
   // cut to the responsible equipment, then return for the business payoff.
   // Cuts are authored in absolute time; pauses and backwards seeks reproduce
   // the same shot, rather than replaying a camera tween from an arbitrary pose.
-  if(isCheckoutStory(context))stops=CHECKOUT_SHOTS;
-  else if(offering==='routing')stops=[
-    {t:0,at:[7.6,1.25,7.6],distance:8.8,yaw:1.7,pitch:.28},
-    {t:3.95,at:[8,1.35,8.05],distance:5.6,yaw:1.65,pitch:.23},
-    {t:4,at:variant==='stock'?[10,1.7,-6]:[8.05,2,-3],distance:6.8,yaw:-.55,pitch:.28,cut:true},
-    {t:8.95,at:[8,2,-3],distance:6.5,yaw:-.5,pitch:.28},
-    {t:9,at:[10.2,2,-1.6],distance:16,yaw:-.17,pitch:.33,cut:true},
-    {t:17,at:[10.2,2,-1.6],distance:15.5,yaw:-.12,pitch:.33},
-    {t:17.05,at:variant==='voice'?[8,1.3,8.15]:variant==='stock'?[10,1.7,-6]:[8.05,2,-3],distance:variant==='voice'?6.5:7,yaw:variant==='voice'?1.65:-.55,pitch:.28,cut:true},
-    {t:21,at:variant==='voice'?[8,1.3,8.15]:variant==='stock'?[10,1.7,-6]:[8.05,2,-3],distance:variant==='voice'?6.2:6.6,yaw:variant==='voice'?1.65:-.55,pitch:.28},
-    {t:21.05,at:[7,1.3,4.5],distance:20,yaw:.1,pitch:.4,cut:true},
-    {t:24,at:[7,1.3,4.5],distance:20.5,yaw:.1,pitch:.4},
+  if(offering==='routing')stops=[
+    ...CHECKOUT_SHOTS.filter(shot=>shot.t<=5.35),
+    {t:5.4,at:[8.05,1.36,-2.9],distance:2.2,yaw:-.55,pitch:.3,cut:true},
+    {t:8.3,at:[8.05,1.34,-2.9],distance:2.05,yaw:-.5,pitch:.3},
+    {t:8.35,at:[10.1,1.65,-1.65],distance:15.6,yaw:-.18,pitch:.32,cut:true},
+    {t:12.45,at:[10.1,1.65,-1.65],distance:15.1,yaw:-.16,pitch:.32},
+    ...CHECKOUT_SHOTS.filter(shot=>shot.t>=12.5),
   ];
+  else if(isCheckoutStory(context))stops=CHECKOUT_SHOTS;
   else if(offering==='twin')stops=[
-    {t:0,at:[7.1,1.3,-.8],distance:8,yaw:.15,pitch:.31},
-    {t:3.95,at:[7.1,1.25,-.5],distance:7.5,yaw:.15,pitch:.31},
-    {t:4,at:[7.1,1.56,-.04],distance:1.85,yaw:-1,pitch:.23,cut:true},
-    {t:8.95,at:[7.1,1.56,-.04],distance:1.85,yaw:-1,pitch:.23},
-    {t:9,at:[7.1,1.4,-.8],distance:7.2,yaw:.15,pitch:.27,cut:true},
-    {t:11.35,at:[6.6,1.45,-2.4],distance:5.4,yaw:-.1,pitch:.25},
-    {t:11.4,at:[6.62,1.45,-2.39],distance:2.3,yaw:-1.4,pitch:.19,cut:true},
-    {t:15.35,at:[6.62,1.45,-2.39],distance:2.2,yaw:-1.4,pitch:.19},
-    {t:15.4,at:[6.6,1.7,-2.6],distance:4.8,yaw:-.9,pitch:.24,cut:true},
-    {t:19.95,at:[5.8,1.4,-2.2],distance:7.8,yaw:-.2,pitch:.3},
-    {t:20,at:[7.1,1.56,-.04],distance:1.85,yaw:-1,pitch:.23,cut:true},
-    {t:22,at:[7.1,1.56,-.04],distance:1.85,yaw:-1,pitch:.23},
-    {t:22.05,at:[6,1.5,-2.7],distance:9.8,yaw:-.2,pitch:.32,cut:true},
-    {t:24,at:[6,1.5,-2.7],distance:10,yaw:-.2,pitch:.32},
+    {t:0,at:[7.18,1.17,.28],distance:3.2,yaw:-1.1,pitch:.3},
+    {t:2.8,at:[7.1,1.19,.156],distance:2.5,yaw:-1.1,pitch:.3},
+    {t:4,at:[7.1,1.1934,.156],distance:.74,yaw:-1.42,pitch:.30},
+    {t:8.95,at:[7.1,1.1934,.156],distance:.72,yaw:-1.42,pitch:.30},
+    {t:9,at:[7.2,1.13,-.7],distance:4.6,yaw:-.4,pitch:.3,cut:true},
+    {t:10.9,at:[6.66,1.22,-2.34],distance:2.4,yaw:-1.2,pitch:.25},
+    {t:12.2,at:[6.49,1.18,-2.53],distance:.76,yaw:-1.1,pitch:.34},
+    {t:15.35,at:[6.49,1.18,-2.53],distance:.72,yaw:-1.1,pitch:.34},
+    {t:16.1,at:[6.65,1.3,-2.37],distance:2.3,yaw:-1,pitch:.28},
+    {t:18.8,at:[7.15,1.2,.2],distance:3.3,yaw:-1.1,pitch:.3},
+    {t:20,at:[7.1,1.1934,.156],distance:.74,yaw:-1.42,pitch:.30},
+    {t:22,at:[7.1,1.1934,.156],distance:.72,yaw:-1.42,pitch:.30},
+    {t:22.05,at:[6.9,1.18,-1.15],distance:5.6,yaw:-.5,pitch:.33,cut:true},
+    {t:24,at:[6.9,1.18,-1.15],distance:5.8,yaw:-.5,pitch:.33},
   ];
-  else if(offering==='eagle'){const p=monitoredPoint(variant),span=variant==='5g'?11.7:8.8;stops=[{t:0,at:[7.5,1.3,-3],distance:13,pitch:.4},{t:4.8,at:[7.5,1.3,-3],distance:12.7,pitch:.4},{t:4.85,at:[p[0],p[1]+.7,p[2]],distance:span,pitch:.4,cut:true},{t:14.5,at:[p[0],p[1]+.7,p[2]],distance:span-.3,pitch:.4},{t:14.55,at:[p[0]+.5,1.1,p[2]+.7],distance:span+2,pitch:.38,cut:true},{t:24,at:[p[0]+.5,1.1,p[2]+.7],distance:span+1.5,pitch:.38}];}
-  else if(offering==='automation')stops=[{t:0,at:[-5,1,4.4],distance:18,pitch:.4},{t:7.8,at:[-3.5,1,5.4],distance:18.5,pitch:.4},{t:7.85,at:[-9.9,1.3,.2],distance:9.4,pitch:.3,cut:true},{t:18,at:[-9.9,1.3,.2],distance:9,pitch:.3},{t:18.05,at:[-8.5,1,.8],distance:14,pitch:.42,cut:true},{t:24,at:[-8.5,1,.8],distance:14.4,pitch:.42}];
+  else if(offering==='eagle'){
+    const diagnostic=sampleEagle(variant,time),p=monitoredPoint(variant);
+    const start:StoryPoint=diagnostic.checkoutAffected?[7.55,1.3,4.6]:[10,1.47,-5.39];
+    const inspection=variant==='gateway'?[6.7,1.3,-2.4] as StoryPoint:variant==='it'?[10,1.1,-5.45] as StoryPoint:[p[0]-.3,1.2,p[2]+.4] as StoryPoint;
+    const arrival=variant==='ot'?20:18;
+    stops=[
+      {t:0,at:start,distance:diagnostic.checkoutAffected?5.7:3.7,yaw:.6,pitch:.3},
+      {t:3.95,at:start,distance:diagnostic.checkoutAffected?5.4:3.3,yaw:.6,pitch:.3},
+      {t:4,at:diagnostic.checkoutAffected?[7.19,1.51,4.98]:[10,1.47,-5.391],distance:1.5,yaw:diagnostic.checkoutAffected?.02:.15,pitch:diagnostic.checkoutAffected?.5:.2,cut:true},
+      {t:6.45,at:diagnostic.checkoutAffected?[7.19,1.51,4.98]:[10,1.47,-5.391],distance:1.5,yaw:diagnostic.checkoutAffected?.02:.15,pitch:diagnostic.checkoutAffected?.5:.2},
+      {t:6.5,at:[9.8,1.15,-4.95],distance:4.1,yaw:.15,pitch:.24,cut:true},
+      {t:8.5,at:[10,1.47,-5.391],distance:1.5,yaw:.15,pitch:.2},
+      {t:13.45,at:[10,1.47,-5.391],distance:1.45,yaw:.15,pitch:.2},
+      {t:13.5,at:[9.6,1.15,-4.5],distance:5.3,yaw:-.4,pitch:.3,cut:true},
+      {t:arrival,at:inspection,distance:variant==='gateway'||variant==='it'?3:variant==='ot'?3.3:5,yaw:-.8,pitch:.32},
+      {t:24,at:inspection,distance:variant==='gateway'||variant==='it'?2.8:variant==='ot'?3.2:4.7,yaw:-.8,pitch:.32},
+    ];
+  }
+  else if(offering==='automation')stops=variant==='occupied'?[
+    {t:0,at:[-9.6,1.3,-.1],distance:7,yaw:-.1,pitch:.3},
+    {t:2.9,at:[-8.9,1.25,.35],distance:2.5,yaw:-1.1,pitch:.3},
+    {t:3,at:[-10.2,1.97,-1.39],distance:.72,yaw:-.45,pitch:.18,cut:true},
+    {t:4.5,at:[-10.2,1.97,-1.39],distance:.70,yaw:-.45,pitch:.18},
+    {t:4.6,at:[-8.1,1.3,.9],distance:5.5,yaw:-.2,pitch:.3,cut:true},
+    {t:8.9,at:[-7.35,1.15,2.4],distance:3.7,yaw:-.2,pitch:.3},
+    {t:9,at:[-10.15,2.76,-.95],distance:.8,yaw:-.3,pitch:-.25,cut:true},
+    {t:11.9,at:[-10.15,2.76,-.95],distance:.75,yaw:-.3,pitch:-.25},
+    {t:12,at:[-10.2,1.97,-1.39],distance:.72,yaw:-.45,pitch:.18,cut:true},
+    {t:16.9,at:[-10.2,1.97,-1.39],distance:.70,yaw:-.45,pitch:.18},
+    {t:17,at:[-8.9,1.35,.6],distance:7.5,yaw:-.25,pitch:.3,cut:true},
+    {t:24,at:[-8.9,1.35,.6],distance:7.8,yaw:-.25,pitch:.3},
+  ]:[
+    {t:0,at:[-9.6,1.3,-.1],distance:7,yaw:-.1,pitch:.3},
+    {t:2.9,at:[-8.9,1.25,.35],distance:2.5,yaw:-1.1,pitch:.3},
+    {t:3,at:[-10.2,1.97,-1.39],distance:.72,yaw:-.45,pitch:.18,cut:true},
+    {t:4.2,at:[-10.2,1.97,-1.39],distance:.70,yaw:-.45,pitch:.18},
+    {t:4.3,at:[-8.5,1.2,-.5],distance:5.8,yaw:-.2,pitch:.3,cut:true},
+    {t:8.8,at:[-8.5,1.2,-.5],distance:5.4,yaw:-.2,pitch:.3},
+    {t:8.9,at:[-10.15,2.76,-.95],distance:.8,yaw:-.3,pitch:-.25,cut:true},
+    {t:10.7,at:[-10.15,2.76,-.95],distance:.75,yaw:-.3,pitch:-.25},
+    {t:10.8,at:[-11.25,1.70,-1.37],distance:1.75,yaw:-.45,pitch:.17,cut:true},
+    {t:12.4,at:[-11.25,1.70,-1.37],distance:1.68,yaw:-.45,pitch:.17},
+    {t:12.5,at:[-10.2,1.12,-1.10],distance:1.3,yaw:-.55,pitch:-.1,cut:true},
+    {t:13.9,at:[-10.2,1.12,-1.10],distance:1.25,yaw:-.55,pitch:-.1},
+    {t:14,at:[-9.1,1.40,-1.35],distance:.47,yaw:-.2,pitch:.16,cut:true},
+    {t:14.7,at:[-9.1,1.40,-1.35],distance:.47,yaw:-.2,pitch:.16},
+    {t:15,at:[-9.1,1.76,-1.35],distance:1.6,yaw:-.2,pitch:.16},
+    {t:16.3,at:[-9.1,1.76,-1.35],distance:1.6,yaw:-.2,pitch:.16},
+    {t:16.4,at:[-10.2,1.97,-1.39],distance:.72,yaw:-.45,pitch:.18,cut:true},
+    {t:18.2,at:[-10.2,1.97,-1.39],distance:.70,yaw:-.45,pitch:.18},
+    {t:18.3,at:[-4.7,1.15,-4.5],distance:17,yaw:-.4,pitch:.4,cut:true},
+    {t:24,at:[-4.7,1.15,-4.5],distance:17.5,yaw:-.4,pitch:.4},
+  ];
   else if(offering==='smart'){const p=smartPoint(variant);stops=[{t:0,at:[p[0],1.2,p[2]],distance:12,pitch:.43},{t:4.8,at:[p[0],1.2,p[2]],distance:11.6,pitch:.43},{t:4.85,at:[p[0],1.2,p[2]],distance:variant==='energy'?9.5:8.5,pitch:.38,cut:true},{t:14.5,at:[p[0],1.2,p[2]],distance:variant==='energy'?9.2:8.2,pitch:.38},{t:14.55,at:[p[0]+.7,1.1,p[2]+.6],distance:11,pitch:.4,cut:true},{t:24,at:[p[0]+.7,1.1,p[2]+.6],distance:10.5,pitch:.4}];}
   else if(variant==='intruder')stops=[{t:0,at:[9.7,1,.2],distance:11.5,yaw:-.6,pitch:.34},{t:5,at:[9.7,1,-2.4],distance:11,yaw:-.6,pitch:.34},{t:5.05,at:[9.8,1,-4.2],distance:8.5,yaw:-.6,pitch:.35,cut:true},{t:12,at:[9.8,1,-4.2],distance:8.2,yaw:-.6,pitch:.35},{t:12.05,at:[10,1,-5.2],distance:10.5,yaw:-.6,pitch:.4,cut:true},{t:19,at:[10,1,-4.1],distance:10,yaw:-.6,pitch:.4},{t:19.05,at:[10.1,1,-4.1],distance:7.8,yaw:-.6,pitch:.32,cut:true},{t:24,at:[10.1,1,-4.1],distance:7.6,yaw:-.6,pitch:.32}];
   else if(variant==='crowd')stops=[{t:0,at:[1.3,1,8.2],distance:15,pitch:.44},{t:6,at:[1.3,1,7.3],distance:14.5,pitch:.44},{t:6.05,at:[1.3,1,7],distance:11.5,pitch:.45,cut:true},{t:13,at:[1.3,1,7],distance:11.2,pitch:.45},{t:13.05,at:[3.5,1,5.9],distance:12,pitch:.4,cut:true},{t:20,at:[1.5,1,6],distance:13,pitch:.4},{t:20.05,at:[0,1,6.5],distance:17,pitch:.46,cut:true},{t:24,at:[0,1,6.5],distance:17.3,pitch:.46}];
@@ -186,18 +251,27 @@ export function sampleSignals({offering,variant}:StoryContext,time:number):Story
     signal(!event?'Tap to pay':t<13&&variant==='fiber'?'Payment on hold':t<17?'Payment approved':'Receipt issued',!event?'Checkout 01':t<13&&variant==='fiber'?'Waiting for an available path':t<17?'Transaction completed':'Next customer, please',[8,3.5,4.5],t>=4&&t<13&&variant==='fiber'?'#ffbd79':'#8ce3c6'),
     signal(!event?'Fiber primary · 5G ready':variant==='fiber'?response?'5G carries the transaction':'Fiber link interrupted':response?'Fiber remains active':'5G backup unavailable',response?'Traffic follows gateway policy':'Local demonstration',variant==='fiber'?(response?[14.6,5.5,1.4]:[14.6,2.8,-6]):(response?[14.6,2.8,-6]:[14.6,5.5,1.4]),event?'#b4a5ff':'#68d6ff',t>6&&t<16),
   ];
-  if(offering==='routing')return [
-    signal(response?'Supplier call / 5G':'Supplier call / fiber','Latency-sensitive conversation',[8,2.6,8.18],'#8ce3c6',t<4||t>=17&&variant==='voice'),
-    signal('Camera archive / fiber','Footage continues to upload',[8.05,2.9,-3],'#b4a5ff',t>=4&&t<9||t>=17&&variant==='video'),
-    signal(response&&!outcome?'Stock sync / queued':outcome?'Stock sync / scheduled':'Stock sync / bulk upload','Background transfer budget',[10,3.6,-6],'#ffc885',t>=4&&t<9||t>=17&&variant==='stock'),
-  ];
-  if(offering==='twin'){const twin=sampleTwin(t);return [signal(twin.resolved?'LAN 1 / link stable':'LAN 1 / inspect connector',twin.action,[6.62,1.7,-2.39],twin.color,t>=9&&t<20)];}
-  if(offering==='eagle'){const p=monitoredPoint(variant);return [signal(event?'Connection needs attention':'Monitoring the selected layer',outcome?'Technician inspecting · fault remains':response?'Gateway correlates the affected connection':event?'Health signal changed':'Hardware and connectivity visible',[p[0],p[1]+2.6,p[2]],event?'#ff897a':'#68d6ff')];}
-  if(offering==='automation')return [signal(!event?'Store in use':!response?variant==='after-hours'?'Last colleague leaves':'Arrival detected':variant==='after-hours'?'Closing routine applied':'Opening routine applied',response?variant==='after-hours'?'Lighting dimmed · access secured · climate setback':'Lighting on · access open · climate comfort':'Occupancy event at the edge',[-10,3.8,-1.1],'#b4a5ff')];
+  if(offering==='routing'){
+    const allocation=sampleRouting(t);
+    return [
+      signal(allocation.paymentApproved?'Payment / approved':allocation.policyApplied?'Checkout / 5G selected':t>=4?'Checkout / request held':'Checkout / card read',allocation.status,[7.3,1.95,5.1],'#8ce3c6',t<4||t>=12.5),
+      signal(`Archive / fiber · ${allocation.archiveMbps} Mb/s`,'Local camera recording continues',[8.05,1.65,-2.9],'#b4a5ff',t>=5.4&&t<8.35),
+      signal(allocation.orderAccepted?'Online order / accepted':allocation.policyApplied?'Online orders / 5G':'Online order / queued','New requests use the selected route',[8,1.9,4.5],'#ffc885',variant==='orders'&&t>=13.2&&t<17),
+    ];
+  }
+  if(offering==='twin'){const twin=sampleTwin(t);return [signal(twin.resolved?'LAN 1 / link stable':'LAN 1 / inspect connector',twin.action,[6.48,1.37,-2.55],twin.color,t>=9&&t<20)];}
+  if(offering==='eagle'){const p=monitoredPoint(variant),diagnostic=sampleEagle(variant,t);return [signal(diagnostic.operatorAtConsole?'EA:GLE / reviewing evidence':diagnostic.inspectionStarted?'Physical check / investigation open':diagnostic.symptom?`${diagnostic.endpointLabel} / ${(diagnostic.endpointDelayMs/1000).toFixed(1)} s`:'EA:GLE / monitoring',diagnostic.status,diagnostic.operatorAtConsole?[10,1.85,-5.39]:[p[0],p[1]+.6,p[2]],diagnostic.symptom?'#ffc885':'#68d6ff')];}
+  if(offering==='automation'){
+    const routine=sampleAutomation(variant,t);
+    if(t>=8.9&&t<10.8||variant==='occupied'&&t>=9&&t<12)return [signal(routine.presence?'Zigbee / presence detected':'Zigbee / vacancy check',routine.detail,[-10.15,2.9,-.9],routine.presence?'#efba7c':'#9dd9bb')];
+    const id=t<12.5?'display':t<14?'lamp':'sign',device=routine.devices[id],x=id==='display'?-11.25:id==='lamp'?-10.2:-9.1;
+    const readback=id==='sign'&&t>=15?`${routine.devices.sign.watts.toFixed(0)} W · ${device.confirmed?'verified':'checking'}`:device.confirmed?'Off confirmed':device.ack?'acknowledged':device.requested?'command sent':'On';
+    return [signal(`${id==='sign'?'Shelly · MQTT':device.transport} / ${readback}`,device.status,[x,id==='lamp'?1.8:2.4,-1.15],device.confirmed?'#9dd9bb':'#efba7c',variant!=='occupied'&&t>=10.8&&t<16.4)];
+  }
   if(offering==='smart'){
     const p=smartPoint(variant);return [signal(variant==='hvac'?event?'Fan condition changed':'HVAC running':variant==='cooler'?event?'Cooler temperature drifting':'Cold stock protected':event?'Unused loads still running':'Store energy overview',outcome?variant==='energy'?'Efficiency adjustment prepared · review schedule':'Technician inspection requested':response?'Gateway flags the pattern for review':event&&variant==='cooler'?'Check door activity and compressor condition':event?'Observe the physical change':'Illustrative equipment activity',[p[0],3.5,p[2]],event?'#ffc885':'#68d6ff')];
   }
-  if(offering==='video'&&t>=10.05&&t<13.05)return [signal('Dell analytics server','Camera A + Camera B / local inference',[8.05,2.9,-3],'#b4a5ff')];
+  if(offering==='video'&&t>=10.05&&t<13.05)return [signal('Dell analytics server','Camera A + Camera B / local inference',[8.05,1.7,-2.9],'#b4a5ff')];
   const actor=sampleActor('shopper',{offering,variant},t);
   if(variant==='man-down')return [signal(t<4?'Customer aisle':t<10?'A person has fallen':t<17?'Possible fall · verify & assist':'Colleague assisting',t<4?'Camera observes the shared aisle':t<10?'Scene event before the edge response':t<17?'Local analytics prompts operator review':'Human response follows the alert',[actor.at[0]-.7,2.7,actor.at[2]-1.1],t<4?'#68d6ff':'#ffc885')];
   if(variant==='intruder')return [signal(t<4?'Staff-only access':t<10?'Boundary crossed':t<17?'Entry alert · review required':'Security checks the entry',t<4?'Defined restricted area':t<10?'Track movement through the boundary':t<17?'Operator reviews the event':'An alert supports a human decision',[actor.at[0],3,actor.at[2]],t<4?'#68d6ff':'#ff897a')];

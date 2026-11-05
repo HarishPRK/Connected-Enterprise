@@ -1,0 +1,40 @@
+{
+  "maxBindMatrixError": 1.1920928955078125e-07,
+  "skinVerticesChecked": 70022,
+  "padTargetErrorMeters": {
+    "CustomerRight": {
+      "Thumb": 7.90253409579263e-09,
+      "Index": 6.7158625935464895e-09
+    },
+    "CustomerLeft": {
+      "Thumb": 7.90253409579263e-09,
+      "Index": 6.7158625935464895e-09
+    },
+    "StaffRight": {
+      "Thumb": 7.90253409579263e-09,
+      "Index": 6.7158625935464895e-09
+    },
+    "StaffLeft": {
+      "Thumb": 7.90253409579263e-09,
+      "Index": 6.7158625935464895e-09
+    },
+    "TechnicianRight": {
+      "Thumb": 7.90253409579263e-09,
+      "Index": 6.7158625935464895e-09
+    },
+    "TechnicianLeft": {
+      "Thumb": 7.90253409579263e-09,
+      "Index": 6.7158625935464895e-09
+    },
+    "SecurityRight": {
+      "Thumb": 7.90253409579263e-09,
+      "Index": 6.7158625935464895e-09
+    },
+    "SecurityLeft": {
+      "Thumb": 7.90253409579263e-09,
+      "Index": 6.7158625935464895e-09
+    }
+  },
+  "sourceGLBBytes": 7985296,
+  "fingerJointsPerActor": 30
+}

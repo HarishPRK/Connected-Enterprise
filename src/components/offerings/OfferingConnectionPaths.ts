@@ -2,7 +2,7 @@ import { CurvePath, LineCurve3, QuadraticBezierCurve3, Vector3 } from 'three';
 import manifest from '../../assets/offerings/offerings-kit.manifest.json';
 import twinManifest from '../../assets/offerings/gemtek-gateway.manifest.json';
 import analyticsManifest from '../../assets/offerings/analytics-server.manifest.json';
-import { GATEWAY_EXPLODE, PARTS, type Vec } from './OfferingEquipment';
+import { CONNECTOR_WITHDRAWAL, GATEWAY_EXPLODE, PARTS, type Vec } from './OfferingEquipment';
 import type { StoryContext } from './OfferingStoryMotion';
 
 export interface Socket { point: Vec; normal: Vec; device: string; radio?: boolean; addSocket?: boolean; }
@@ -55,17 +55,25 @@ export function makeConnections(context:StoryContext,active:boolean,response:boo
   const radio=(id:string,from:Socket,to:Socket,color:string,lit:boolean,failed=false):Connection=>({id,from,to,via:[],color,lit,failed,wireless:true});
   // Leads leave each jack straight, pass the counter edge, then descend. A
   // separate physical cable serves each of the four CPE Ethernet interfaces.
-  const drop=(socket:Socket):Vec[]=>{const lead=outward(socket,.38);return [lead,floor(lead)];};
-  const up=(socket:Socket):Vec[]=>{const lead=outward(socket,.30);return [floor(lead),lead];};
+  const drop=(socket:Socket):Vec[]=>{
+    if(socket.device==='it'){
+      const lead=outward(socket,.12),side:Vec=[socket.point[0]<10?9.38:10.62,lead[1],lead[2]];
+      // Patch leads use the rack's side channels, leaving the diagnostic
+      // display and keyboard unobstructed for the operator.
+      return [lead,side,floor(side)];
+    }
+    const lead=outward(socket,.38);return [lead,floor(lead)];
+  };
+  const up=(socket:Socket):Vec[]=>{if(socket.device==='it')return drop(socket).reverse();const lead=outward(socket,socket.device==='analytics'?.42:.30);return [floor(lead),lead];};
   const routes:Connection[]=[
-    wire('fiber',cpe,fiber,[...drop(cpe),[11.8,.055,-2.03],[11.8,.055,-5.05],...up(fiber)],fiberDown?CORAL:SKY,offering==='failover'?!fiberDown:offering==='routing'?true:offering==='eagle'&&variant==='fiber',fiberDown),
+    wire('fiber',cpe,fiber,[...drop(cpe),[11.8,.055,-2.03],[11.8,.055,-5.05],...up(fiber)],fiberDown?CORAL:offering==='routing'?VIOLET:SKY,offering==='failover'?!fiberDown:offering==='routing'?true:offering==='eagle'&&variant==='fiber',fiberDown),
     radio('5g',radioFrom,radioTo,cellDown?CORAL:offering==='routing'?TEAL:VIOLET,offering==='failover'&&fiberDown&&response||cellPolicy||offering==='eagle'&&variant==='5g',cellDown),
-    wire('pos',pos,checkout,[...drop(pos),[10.9,.055,-2.04],[10.9,.055,3.6],[6.2,.055,3.6],[6.2,1.19,3.6],[6.2,1.19,3.92],[7.4,1.19,3.92],[7.4,1.19,4.51]],switched?VIOLET:SKY,offering==='twin'||offering==='failover'&&(!fiberDown||response)),
-    wire('voice',voice,phone,[...drop(voice),[11.1,.055,-2.02],[11.1,.055,6.35],[8.15,.055,6.35],[8.15,1.2,6.35]],TEAL,offering==='routing'),
+    wire('pos',pos,checkout,[...drop(pos),[10.9,.055,-2.04],[10.9,.055,3.6],[6.2,.055,3.6],[6.2,1.19,3.6],[6.2,1.19,3.92],[7.65,1.19,3.92],[7.65,1.19,4.51]],offering==='routing'?TEAL:switched?VIOLET:SKY,offering==='routing'||offering==='twin'||offering==='failover'&&(!fiberDown||response)),
+    wire('voice',voice,phone,[...drop(voice),[11.1,.055,-2.02],[11.1,.055,6.35],[8.15,.055,6.35],[8.15,1.2,6.35]],TEAL,false),
     wire('it',lan,rackPort(0),[...drop(lan),[11.35,.055,-2],[11.35,.055,-4.65],...up(rackPort(0))],AMBER,offering==='routing'||offering==='eagle'&&['gateway','it'].includes(variant)),
     wire('camera',camera,analyticsPort('Camera A'),[[4.8,3.4,8.1],[4.8,.055,8.1],[11.3,.055,8.1],[11.3,.055,-2.1],...up(analyticsPort('Camera A'))],VIOLET,offering==='video'||offering==='routing'),
     wire('camera-back',cameraBack,analyticsPort('Camera B'),[[11.4,3.3,-2.1],[11.4,.055,-2.1],[9.2,.055,-2.1],...up(analyticsPort('Camera B'))],VIOLET,offering==='video'||offering==='routing'),
-    wire('analytics',gatewayPort('analytics'),analyticsPort('LAN'),[outward(gatewayPort('analytics'),.32),[7.1,1.22,-2.42],[8.25,1.22,-2.42],outward(analyticsPort('LAN'),.25)],VIOLET,offering==='video'||offering==='routing'),
+    wire('analytics',gatewayPort('analytics'),analyticsPort('LAN'),[outward(gatewayPort('analytics'),.32),[7.1,1.14,-2.3],[8.25,1.14,-2.3],outward(analyticsPort('LAN'),.42)],VIOLET,offering==='video'||offering==='routing'),
     wire('hvac',rackPort(2),hvac,[...drop(rackPort(2)),[7,.055,-4.75],[-7.25,.055,-4.75],...up(hvac)],SKY,offering==='smart'&&variant==='hvac'),
     wire('cooler',rackPort(3),cooler,[...drop(rackPort(3)),[7,.055,-4.95],[0,.055,-4.95],[0,.055,-6.5],...up(cooler)],TEAL,offering==='smart'&&variant==='cooler'),
     wire('energy',rackPort(4),meter,[...drop(rackPort(4)),[11.5,.055,-4.8],[11.5,.055,-8.9],[-9.1,.055,-8.9],...up(meter)],AMBER,offering==='smart'&&variant==='energy'),
@@ -73,7 +81,7 @@ export function makeConnections(context:StoryContext,active:boolean,response:boo
     radio('sensor',radioFrom,sensor,VIOLET,offering==='automation'&&response),
     ...(['thermostat','lock','light'] as const).map(id=>radio(id,sensor,equipmentSocket(id,id==='light'?[0,.95,0]:id==='lock'?[0,.87,.135]:[0,.36,.13]),variant==='after-hours'?VIOLET:TEAL,offering==='automation'&&response)),
   ];
-  if(offering==='eagle'&&active)for(const route of routes)if(route.id===variant||variant==='gateway'&&route.from.device==='gateway'){route.failed=true;route.color=CORAL;}
+  if(offering==='eagle'&&active)for(const route of routes)if(route.id===variant||variant==='gateway'&&route.from.device==='gateway'||route.id==='pos'&&['gateway','fiber','it'].includes(variant)){route.lit=true;route.color=AMBER;}
   return routes;
 }
 
@@ -87,7 +95,7 @@ export function connectionCurve(connection:Connection,explode=0,unplug=0) {
     offset.multiplyScalar(part.size/Math.max(...bounds.GatewayTwin.size)*explode).applyAxisAngle(new Vector3(0,1,0),part.yaw??0);
     from.point=new Vector3(...from.point).add(offset).toArray() as Vec;
   }
-  if(unplug)from.point=outward(from,unplug*.14);
+  if(unplug)from.point=outward(from,unplug*CONNECTOR_WITHDRAWAL);
   if(connection.wireless){
     const start=new Vector3(...from.point),end=new Vector3(...connection.to.point),middle=start.clone().lerp(end,.5);
     middle.y+=Math.min(1.7,start.distanceTo(end)*.16);

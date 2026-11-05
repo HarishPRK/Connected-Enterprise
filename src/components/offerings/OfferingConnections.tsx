@@ -1,14 +1,16 @@
 import { sampleTwin } from './OfferingTwinStory';
 import { sampleRouting } from './OfferingRoutingStory';
+import { EAGLE_CASES, sampleEagle } from './OfferingEagleStory';
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { BufferGeometry, Color, Group, Line, LineDashedMaterial, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TubeGeometry, Vector3 } from 'three';
 import { connectionCurve, makeConnections, type Connection, type Socket } from './OfferingConnectionPaths';
 import { type StoryContext } from './OfferingStoryMotion';
+import { ETHERNET_CABLE_RADIUS, ETHERNET_PLUG_SCALE } from './OfferingEquipment';
 
 function Connector({socket,color}:{socket:Socket;color:string}){
   const rotation=useMemo(()=>new Quaternion().setFromUnitVectors(new Vector3(0,0,1),new Vector3(...socket.normal)),[socket]);
-  return <group quaternion={rotation}>
+  return <group quaternion={rotation} scale={[ETHERNET_PLUG_SCALE,ETHERNET_PLUG_SCALE,.55]}>
     {socket.addSocket&&<mesh position={[0,0,-.006]}><boxGeometry args={[.12,.085,.028]}/><meshStandardMaterial color="#202e39" metalness={.55} roughness={.38}/></mesh>}
     <mesh position={[0,0,.016]} castShadow><boxGeometry args={[.084,.055,.065]}/><meshStandardMaterial color="#9aaab4" metalness={.75} roughness={.3}/></mesh>
     <mesh position={[0,0,.065]} castShadow><boxGeometry args={[.072,.048,.055]}/><meshStandardMaterial color="#263943" roughness={.58}/></mesh>
@@ -17,7 +19,7 @@ function Connector({socket,color}:{socket:Socket;color:string}){
 }
 function makeResources(spec:Connection){
   const curve=connectionCurve(spec);
-  const tube=spec.wireless?null:new TubeGeometry(curve,150,.022,6,false);
+  const tube=spec.wireless?null:new TubeGeometry(curve,150,ETHERNET_CABLE_RADIUS,6,false);
   const line=spec.wireless?new Line(new BufferGeometry().setFromPoints(curve.getPoints(100)),new LineDashedMaterial({color:spec.color,dashSize:.14,gapSize:.12,transparent:true,opacity:spec.failed?.34:spec.lit?.8:.16,depthWrite:false})):null;
   line?.computeLineDistances();
   return {curve,tube,line,amount:0,unplug:0};
@@ -25,7 +27,7 @@ function makeResources(spec:Connection){
 function followExplodedPorts(resources:ReturnType<typeof makeResources>,spec:Connection,amount:number,unplug=0){
   if(resources.amount===amount&&resources.unplug===unplug)return;
   resources.amount=amount;resources.unplug=unplug;resources.curve=connectionCurve(spec,amount,unplug);
-  if(resources.tube){const next=new TubeGeometry(resources.curve,150,.022,6,false);resources.tube.copy(next);next.dispose();}
+  if(resources.tube){const next=new TubeGeometry(resources.curve,150,ETHERNET_CABLE_RADIUS,6,false);resources.tube.copy(next);next.dispose();}
   if(resources.line){resources.line.geometry.setFromPoints(resources.curve.getPoints(100));resources.line.computeLineDistances();}
 }
 function ConnectionLink({spec,context,timeRef}:{spec:Connection;context:StoryContext;timeRef:RefObject<number>}){
@@ -45,10 +47,28 @@ function ConnectionLink({spec,context,timeRef}:{spec:Connection;context:StoryCon
     if(twin&&cable.current)cable.current.color.set(twin.resolved?'#6c9688':failed?'#8e5c52':'#647f90');
     if(startPlug.current){resources.curve.getPoint(0,point);startPlug.current.position.copy(point);}
     const routing=context.offering==='routing',allocation=sampleRouting(t);
-    const queued=routing&&allocation.queued&&spec.id==='it';
-    const speed = routing && t >= 4 && !allocation.policy ? .065 : .16;
+    const held=routing&&(spec.id==='pos'&&!allocation.authorizationSent||spec.id==='it'&&!allocation.orderSent);
+    const speed = routing && spec.id==='fiber' ? allocation.archiveMbps / 120 : .16;
+    const eagle=context.offering==='eagle'?sampleEagle(context.variant,t):null;
+    const slow=eagle&&(spec.id===context.variant||context.variant==='gateway'&&spec.from.device==='gateway'||spec.id==='pos'&&eagle.checkoutAffected);
+    let elapsed=t;
+    if(slow&&t>4){
+      // Integrate the deceleration, rather than multiplying absolute time by
+      // a changing speed (which makes packets jump backwards at onset).
+      const ratio=eagle.baselineResponseMs/EAGLE_CASES[eagle.variant].delay;
+      const d=Math.min(1.5,t-4),u=d/1.5;
+      elapsed=4+d-(1-ratio)*1.5*(u*u*u-.5*u*u*u*u)+Math.max(0,t-5.5)*ratio;
+    }
     packets.current?.children.forEach((packet,index)=>{
-      const progress=failed||queued ? .12+index*.055 : (t*speed+index/packetCount)%1;
+      let progress=failed ? .12+index*.055 : (elapsed*speed+index/packetCount)%1;
+      if(routing&&(spec.id==='pos'||spec.id==='it')){
+        const sentAt=spec.id==='pos'?12.5:12.6;
+        const travel=Math.max(0,Math.min(1,(t-sentAt)/.5));
+        // One newly submitted request, moving from its local endpoint to CPE.
+        // Do not depict a repeated charge or migrate an in-flight transaction.
+        progress=1-travel;
+        packet.visible=!held&&index===0&&t<sentAt+.5;
+      }
       resources.curve.getPointAt(progress,point);packet.position.copy(point);
       if(twin)((packet as Mesh).material as MeshBasicMaterial).color.set(twin.color);
       packet.scale.setScalar(Math.min(1,Math.max(.05,point.distanceTo(camera.position)/7)));
@@ -65,6 +85,6 @@ function ConnectionLink({spec,context,timeRef}:{spec:Connection;context:StoryCon
   </group>;
 }
 export function OfferingConnections({context,active,response,timeRef}:{context:StoryContext;active:boolean;response:boolean;timeRef:RefObject<number>}){
-  const connections=useMemo(()=>makeConnections(context,active,response),[context,active,response]);
+  const connections=useMemo(()=>makeConnections(context,active,response).filter(spec=>context.offering!=='automation'||!spec.wireless),[context,active,response]);
   return <>{connections.map(spec=><ConnectionLink key={spec.id} spec={spec} context={context} timeRef={timeRef}/>)}</>;
 }

@@ -4,11 +4,11 @@ import { CanvasTexture, Mesh, type DirectionalLight, type HemisphereLight, type 
 import { sampleActor, STORY_ACTORS, type ActorId, type StoryContext } from './OfferingStoryMotion';
 import { storeLightLevel } from './offeringLighting';
 
-export function OfferingStudioLighting({ context, timeRef }: { context: StoryContext; timeRef: RefObject<number> }) {
+export function OfferingStudioLighting({ context }: { context: StoryContext; timeRef: RefObject<number> }) {
   const key = useRef<DirectionalLight>(null), fill = useRef<DirectionalLight>(null);
   const sky = useRef<HemisphereLight>(null), practical = useRef<PointLight>(null);
   useFrame(() => {
-    const level = storeLightLevel(context, timeRef.current);
+    const level = storeLightLevel(context);
     if (key.current) key.current.intensity = 1.2 + level * 1.8;
     if (fill.current) fill.current.intensity = .22 + level * .43;
     if (sky.current) sky.current.intensity = .18 + level * .16;

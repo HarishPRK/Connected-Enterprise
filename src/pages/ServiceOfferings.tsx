@@ -6,8 +6,7 @@ import { StudioSceneBoundary } from '../ui/StudioSceneBoundary';
 import { COMPONENT_DETAILS, OFFERING_CHAPTERS, type OfferingId } from '../components/offerings/offeringCatalog';
 import { getOfferingStory } from '../components/offerings/offeringStories';
 import { getOfferingUseCase } from '../components/offerings/offeringUseCases';
-import '../components/offerings/solution-showcase.css';
-import '../components/offerings/offerings-workbench.css';
+import '../components/offerings/enterprise-field-guide.css';
 
 const OfferingScene = lazy(() => import('../components/offerings/OfferingScene'));
 const BEATS = ['Business as usual', 'The incident', 'Edge response', 'The outcome'];
@@ -21,6 +20,7 @@ export function ServiceOfferingsPage() {
   const [params, setParams] = useSearchParams();
   const offering = OFFERING_CHAPTERS.find(item => item.id === params.get('offering')) ?? OFFERING_CHAPTERS[0];
   const index = OFFERING_CHAPTERS.indexOf(offering);
+  const playbackSeconds = offering.id === 'automation' ? 60 : PLAYBACK_SECONDS;
   const [variantId, setVariantId] = useState(offering.variants[0].id);
   const [selected, setSelected] = useState<string | null>(null);
   const [phase, setPhase] = useState<0 | 1 | 2 | 3>(0);
@@ -74,7 +74,11 @@ export function ServiceOfferingsPage() {
     setFollowStory(!reducedMotion);
   }
 
-  function togglePlayback() { if(finished)seek(0);setPlaying(!playing);setTouring(false); }
+  function togglePlayback() {
+    if(finished)seek(0);
+    if(!playing&&offering.id==='twin')setFollowStory(true);
+    setPlaying(!playing);setTouring(false);
+  }
   function replayFilm() { seek(reducedMotion?BEAT_TIMES[0]:0);setFollowStory(true);setPlaying(!reducedMotion);setTouring(false); }
   async function watchCinema() {
     const scene=stageRef.current?.querySelector<HTMLElement>('.offering-scene');
@@ -96,7 +100,7 @@ export function ServiceOfferingsPage() {
     const updateMotion = () => { setReducedMotion(media.matches); if (media.matches) { setPlaying(false); setTouring(false); } };
     let inView = true;
     const updateVisibility = () => setVisible(inView && !document.hidden);
-    const observer = new IntersectionObserver(([entry]) => { inView = entry.isIntersecting; updateVisibility(); });
+    const observer = new IntersectionObserver(entries => { inView = entries[entries.length - 1]?.isIntersecting ?? false; updateVisibility(); });
     if (hostRef.current) observer.observe(hostRef.current);
     media.addEventListener('change', updateMotion);
     document.addEventListener('visibilitychange', updateVisibility);
@@ -113,7 +117,7 @@ export function ServiceOfferingsPage() {
     const tick = (now: number) => {
       const delta = previous === undefined ? 0 : Math.min((now - previous) / 1000, .1);
       previous = now;
-      const time = Math.min(DURATION, timeRef.current + delta * DURATION / PLAYBACK_SECONDS);
+      const time = Math.min(DURATION, timeRef.current + delta * DURATION / playbackSeconds);
       timeRef.current = time;
       if (progressRef.current) progressRef.current.style.transform = `scaleX(${time / DURATION})`;
       if (rangeRef.current) rangeRef.current.value = String(time);
@@ -128,9 +132,9 @@ export function ServiceOfferingsPage() {
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [running, touring, index, changeOffering]);
+  }, [running, touring, index, changeOffering, playbackSeconds]);
 
-  function selectPhase(next: number) { setPlaying(false); setTouring(false); seek(BEAT_TIMES[next]); }
+  function selectPhase(next: number) { setPlaying(false); setTouring(false); setFollowStory(true); seek(BEAT_TIMES[next]); }
   function toggleTour() {
     if (touring) { setTouring(false); setPlaying(false); return; }
     changeOffering(OFFERING_CHAPTERS[0].id);
@@ -142,7 +146,7 @@ export function ServiceOfferingsPage() {
     <PageHeader title="Challenges / Offerings" subtitle="Real-world challenges, played out in one connected enterprise."
       right={<span className="enterprise-capability-count"><Layers3 size={15} aria-hidden="true" />7 offerings</span>} />
     <section className="solution-showcase enterprise-showcase" ref={hostRef} aria-labelledby="enterprise-showcase-title" data-color={OFFERING_TONES[offering.id]}>
-      <div className="showcase-heading"><div><h2 id="enterprise-showcase-title">A working day at the connected store</h2><p className="enterprise-heading-sub">Follow the customers, the equipment and the response when something changes.</p></div>
+      <div className="showcase-heading"><div><span className="enterprise-guide-kicker"><Layers3 size={14} aria-hidden="true" />Enterprise field guide</span><h2 id="enterprise-showcase-title">Inside the connected store</h2><p className="enterprise-heading-sub">People, equipment, and the services that keep the day moving.</p></div>
         <div className="showcase-heading-actions"><span className="showcase-disclosure">{touring ? `Tour ${index + 1} / 7` : 'One store · 7 offerings'}</span>
           {!reducedMotion && <button type="button" className="showcase-tour" aria-pressed={touring} onClick={toggleTour}>{touring ? <Pause size={15} aria-hidden="true" /> : <Play size={15} aria-hidden="true" />}{touring ? 'End tour' : 'Play store tour'}</button>}
         </div>
@@ -156,9 +160,10 @@ export function ServiceOfferingsPage() {
           </button>;
         })}</nav>
         <div className="enterprise-case-summary">
+          <div className="enterprise-brief-index"><span>Field briefing</span><span>{String(index + 1).padStart(2, '0')} / 07</span></div>
           <div className="enterprise-case-copy"><span>{useCase.setting}</span><h3>{useCase.title}</h3><p>{useCase.stakes}</p></div>
           <div className="enterprise-case-actions">
-            <button type="button" className="enterprise-watch-story" onClick={watchStory}><Play size={17} aria-hidden="true" />{reducedMotion ? 'Explore the story' : 'Watch story'}<span>{reducedMotion ? '4 steps' : `${PLAYBACK_SECONDS} s`}</span></button>
+            <button type="button" className="enterprise-watch-story" onClick={watchStory}><Play size={17} aria-hidden="true" />{reducedMotion ? 'Explore the story' : 'Watch story'}<span>{reducedMotion ? '4 steps' : `${playbackSeconds} s`}</span></button>
             <button type="button" className="enterprise-cinema" disabled={!sceneReady} onClick={()=>void watchCinema()}><Maximize2 size={16} aria-hidden="true"/>{reducedMotion?'Explore in cinema':'Watch in cinema'}</button>
             <button type="button" className="enterprise-follow-story" aria-pressed={followStory} onClick={() => setFollowStory(!followStory)}><Route size={14} aria-hidden="true" />{followStory ? 'Following the action' : 'Follow the action'}</button>
           </div>
@@ -178,8 +183,8 @@ export function ServiceOfferingsPage() {
           <div className="enterprise-variant-picker" role="group" aria-label={`${offering.title} scenarios`}>{offering.variants.map(item => <button type="button" key={item.id} aria-pressed={variant.id === item.id}
             onClick={() => { setVariantId(item.id); setSelected(null); setTouring(false); setPlaying(!reducedMotion); setFollowStory(!reducedMotion); seek(0); }}>{item.label}</button>)}</div>
           <div className="showcase-narrative" aria-live="polite" aria-atomic="true"><div className="showcase-chapter-label"><span>{phase + 1}</span>{BEATS[phase]}</div><h3>{beat.title}</h3><p>{beat.description}</p></div>
-          <div className="showcase-sensor-readings"><h3>Scenario activity</h3><ul>{beat.signals.map(signal => <li key={signal.label}><span className="showcase-sensor-dot" /><div><strong>{signal.label}</strong></div><em>{signal.value}</em></li>)}</ul></div>
-          <div className="enterprise-business-outcome"><span>{phase === 3 ? 'Business outcome' : 'What is at stake'}</span><p>{phase === 3 ? useCase.outcome : useCase.trigger}</p></div>
+          <details className="showcase-sensor-readings"><summary>Scenario activity</summary><ul>{beat.signals.map(signal => <li key={signal.label}><span className="showcase-sensor-dot" /><div><strong>{signal.label}</strong></div><em>{signal.value}</em></li>)}</ul></details>
+          {phase === 3 && <div className="enterprise-business-outcome"><span>Business outcome</span><p>{useCase.outcome}</p></div>}
           {detail && <div className="enterprise-component-inspector" aria-live="polite"><span><CircleDot size={13} aria-hidden="true" />Component focus</span><h4>{detail.title}</h4><p>{detail.detail}</p><div>{detail.signals.map(signal => <small key={signal}>{signal}</small>)}</div><button type="button" onClick={() => setSelected(null)}>Clear selection</button></div>}
           <div className="showcase-service"><div className="showcase-service-heading"><offering.icon size={16} aria-hidden="true" /><span>{offering.category}</span></div>
             {offering.links.map(link => <Link key={link.href} to={link.href}>{link.label}<ArrowRight size={14} aria-hidden="true" /></Link>)}
@@ -188,7 +193,7 @@ export function ServiceOfferingsPage() {
         <div className="showcase-transport">
           <div className="showcase-playback">
             {reducedMotion ? <button type="button" className="showcase-play" onClick={() => selectPhase((phase + 1) % 4)}><ChevronRight size={16} aria-hidden="true" />Next step</button>
-              : <button type="button" className="showcase-play" aria-label={finished ? 'Replay scenario' : playing ? 'Pause scenario' : 'Play scenario'} onClick={() => { if (finished) seek(0); setPlaying(!playing); setTouring(false); }}>{playing ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}{finished ? 'Replay' : playing ? 'Pause' : 'Play'}</button>}
+              : <button type="button" className="showcase-play" aria-label={finished ? 'Replay scenario' : playing ? 'Pause scenario' : 'Play scenario'} onClick={togglePlayback}>{playing ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}{finished ? 'Replay' : playing ? 'Pause' : 'Play'}</button>}
             <button type="button" className="showcase-restart" aria-label="Reset scenario" title="Reset scenario" onClick={() => { seek(0); setPlaying(false); setTouring(false); }}><RotateCcw size={16} aria-hidden="true" /></button><span className="showcase-chapter-count">{phase + 1} / 4</span>
           </div>
           <div className="showcase-timeline"><div className="showcase-progress-track"><div ref={progressRef} style={{ transform: 'scaleX(0)' }} /></div>

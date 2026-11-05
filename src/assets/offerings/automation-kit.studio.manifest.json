@@ -1,0 +1,787 @@
+{
+  "root": "AutomationKit",
+  "units": "meters",
+  "up": "+Y",
+  "front": "+Z",
+  "placement": "Already in enterprise store world coordinates; render at identity scale/transform.",
+  "bounds": {
+    "min": [
+      -11.57937,
+      0.0,
+      -1.64
+    ],
+    "max": [
+      -6.99,
+      2.907039,
+      -0.9279
+    ],
+    "size": [
+      4.58937,
+      2.907039,
+      0.7121
+    ]
+  },
+  "groups": {
+    "WiFiPlug": {
+      "origin": [
+        -11.25,
+        1.4,
+        -1.385
+      ],
+      "bounds": {
+        "min": [
+          -11.57937,
+          1.300537,
+          -1.49
+        ],
+        "max": [
+          -11.207,
+          1.890536,
+          -1.336936
+        ],
+        "size": [
+          0.37237,
+          0.589999,
+          0.153064
+        ]
+      }
+    },
+    "ThreadPlug": {
+      "origin": [
+        -10.2,
+        1.4,
+        -1.382
+      ],
+      "bounds": {
+        "min": [
+          -10.382593,
+          0.799662,
+          -1.49
+        ],
+        "max": [
+          -10.157,
+          1.443,
+          -1.138377
+        ],
+        "size": [
+          0.225593,
+          0.643338,
+          0.351623
+        ]
+      }
+    },
+    "PromoDisplay": {
+      "origin": [
+        -11.25,
+        1.98,
+        -1.42
+      ],
+      "bounds": {
+        "min": [
+          -11.555,
+          1.795,
+          -1.4905
+        ],
+        "max": [
+          -10.945,
+          2.165,
+          -1.39625
+        ],
+        "size": [
+          0.61,
+          0.37,
+          0.09425
+        ]
+      }
+    },
+    "DeskLamp": {
+      "origin": [
+        -10.2,
+        0.79,
+        -1.14
+      ],
+      "bounds": {
+        "min": [
+          -10.308,
+          0.785,
+          -1.248
+        ],
+        "max": [
+          -10.092,
+          1.295,
+          -1.032
+        ],
+        "size": [
+          0.216,
+          0.51,
+          0.216
+        ]
+      }
+    },
+    "ShellyRelay": {
+      "origin": [
+        -9.1,
+        1.4,
+        -1.4
+      ],
+      "bounds": {
+        "min": [
+          -9.360853,
+          1.335,
+          -1.49
+        ],
+        "max": [
+          -9.030001,
+          2.0,
+          -1.36195
+        ],
+        "size": [
+          0.330852,
+          0.665,
+          0.12805
+        ]
+      }
+    },
+    "IlluminatedSign": {
+      "origin": [
+        -9.1,
+        2.05,
+        -1.42
+      ],
+      "bounds": {
+        "min": [
+          -9.445001,
+          1.925,
+          -1.489
+        ],
+        "max": [
+          -8.755,
+          2.175,
+          -1.397
+        ],
+        "size": [
+          0.690001,
+          0.25,
+          0.092
+        ]
+      }
+    },
+    "EdgeController": {
+      "origin": [
+        -10.2,
+        1.97,
+        -1.42
+      ],
+      "bounds": {
+        "min": [
+          -10.477691,
+          0.84,
+          -1.49
+        ],
+        "max": [
+          -10.0715,
+          2.051,
+          -1.39565
+        ],
+        "size": [
+          0.406191,
+          1.211,
+          0.09435
+        ]
+      }
+    },
+    "WiFiAP": {
+      "origin": [
+        -9.55,
+        0.821,
+        -1.1
+      ],
+      "bounds": {
+        "min": [
+          -9.616468,
+          0.785,
+          -1.430063
+        ],
+        "max": [
+          -9.4895,
+          0.855,
+          -1.04874
+        ],
+        "size": [
+          0.126968,
+          0.07,
+          0.381323
+        ]
+      }
+    },
+    "ThreadBorderRouter": {
+      "origin": [
+        -9.15,
+        0.8125,
+        -1.1
+      ],
+      "bounds": {
+        "min": [
+          -9.216478,
+          0.785,
+          -1.430062
+        ],
+        "max": [
+          -9.097,
+          0.838,
+          -1.04874
+        ],
+        "size": [
+          0.119478,
+          0.053,
+          0.381322
+        ]
+      }
+    },
+    "ZigbeeBridge": {
+      "origin": [
+        -8.75,
+        0.8125,
+        -1.1
+      ],
+      "bounds": {
+        "min": [
+          -8.816479,
+          0.785,
+          -1.430062
+        ],
+        "max": [
+          -8.697001,
+          0.838,
+          -1.04874
+        ],
+        "size": [
+          0.119478,
+          0.053,
+          0.381322
+        ]
+      }
+    },
+    "ZigbeePresenceSensor": {
+      "origin": [
+        -10.15,
+        2.77,
+        -0.95
+      ],
+      "bounds": {
+        "min": [
+          -10.1825,
+          2.5,
+          -1.49
+        ],
+        "max": [
+          -10.117499,
+          2.907039,
+          -0.9279
+        ],
+        "size": [
+          0.065001,
+          0.407039,
+          0.5621
+        ]
+      }
+    },
+    "StaffDoorFrame": {
+      "origin": [
+        -7.55,
+        0.0,
+        -1.55
+      ],
+      "bounds": {
+        "min": [
+          -8.110001,
+          0.0,
+          -1.64
+        ],
+        "max": [
+          -6.99,
+          2.345,
+          -1.46
+        ],
+        "size": [
+          1.120001,
+          2.345,
+          0.18
+        ]
+      }
+    },
+    "StaffDoorHinge": {
+      "origin": [
+        -8.02,
+        0.0,
+        -1.49
+      ],
+      "bounds": {
+        "min": [
+          -8.02,
+          0.015,
+          -1.512
+        ],
+        "max": [
+          -7.08,
+          2.115,
+          -1.417
+        ],
+        "size": [
+          0.94,
+          2.1,
+          0.095
+        ]
+      }
+    }
+  },
+  "animatedNodes": {
+    "WiFiPlugLED": {
+      "group": "WiFiPlug",
+      "center": [
+        -11.25,
+        1.426,
+        -1.3633
+      ],
+      "bounds": {
+        "min": [
+          -11.2528,
+          1.4232,
+          -1.3637
+        ],
+        "max": [
+          -11.2472,
+          1.4288,
+          -1.3629
+        ],
+        "size": [
+          0.0056,
+          0.0056,
+          0.0008
+        ]
+      },
+      "material": "Automation / WiFiPlugLED"
+    },
+    "ThreadPlugLED": {
+      "group": "ThreadPlug",
+      "center": [
+        -10.2,
+        1.418,
+        -1.3578
+      ],
+      "bounds": {
+        "min": [
+          -10.2028,
+          1.4152,
+          -1.3582
+        ],
+        "max": [
+          -10.1972,
+          1.4208,
+          -1.3574
+        ],
+        "size": [
+          0.0056,
+          0.0056,
+          0.0008
+        ]
+      },
+      "material": "Automation / ThreadPlugLED"
+    },
+    "PromoDisplayFace": {
+      "group": "PromoDisplay",
+      "center": [
+        -11.25,
+        1.98,
+        -1.397
+      ],
+      "bounds": {
+        "min": [
+          -11.54,
+          1.81,
+          -1.397
+        ],
+        "max": [
+          -10.96,
+          2.15,
+          -1.397
+        ],
+        "size": [
+          0.58,
+          0.34,
+          0.0
+        ]
+      },
+      "material": "Automation / PromoDisplayFace"
+    },
+    "LampDiffuser": {
+      "group": "DeskLamp",
+      "center": [
+        -10.2,
+        1.126,
+        -1.14
+      ],
+      "bounds": {
+        "min": [
+          -10.294,
+          1.122,
+          -1.234
+        ],
+        "max": [
+          -10.106,
+          1.13,
+          -1.046
+        ],
+        "size": [
+          0.188,
+          0.008,
+          0.188
+        ]
+      },
+      "material": "Automation / LampDiffuser"
+    },
+    "ShellyRelayContact": {
+      "group": "ShellyRelay",
+      "center": [
+        -9.113,
+        1.401,
+        -1.3906
+      ],
+      "bounds": {
+        "min": [
+          -9.115,
+          1.397,
+          -1.3911
+        ],
+        "max": [
+          -9.111,
+          1.405,
+          -1.3901
+        ],
+        "size": [
+          0.004,
+          0.008,
+          0.001
+        ]
+      },
+      "material": "Automation / graphite hardware"
+    },
+    "ShellyIndicator": {
+      "group": "ShellyRelay",
+      "center": [
+        -9.0855,
+        1.411,
+        -1.3903
+      ],
+      "bounds": {
+        "min": [
+          -9.08665,
+          1.40985,
+          -1.3907
+        ],
+        "max": [
+          -9.08435,
+          1.41215,
+          -1.3899
+        ],
+        "size": [
+          0.0023,
+          0.0023,
+          0.0008
+        ]
+      },
+      "material": "Automation / ShellyIndicator"
+    },
+    "RelayServiceCover": {
+      "group": "ShellyRelay",
+      "center": [
+        -9.100001,
+        1.4,
+        -1.366
+      ],
+      "bounds": {
+        "min": [
+          -9.169001,
+          1.336,
+          -1.369
+        ],
+        "max": [
+          -9.031,
+          1.464,
+          -1.363
+        ],
+        "size": [
+          0.138001,
+          0.128,
+          0.006
+        ]
+      },
+      "material": "Automation / isolated transparent service cover"
+    },
+    "IlluminatedSignFace": {
+      "group": "IlluminatedSign",
+      "center": [
+        -9.1,
+        2.05,
+        -1.397
+      ],
+      "bounds": {
+        "min": [
+          -9.43,
+          1.94,
+          -1.397
+        ],
+        "max": [
+          -8.77,
+          2.16,
+          -1.397
+        ],
+        "size": [
+          0.66,
+          0.22,
+          0.0
+        ]
+      },
+      "material": "Automation / IlluminatedSignFace"
+    },
+    "EdgeControllerScreen": {
+      "group": "EdgeController",
+      "center": [
+        -10.2,
+        1.97,
+        -1.397
+      ],
+      "bounds": {
+        "min": [
+          -10.315,
+          1.905,
+          -1.397
+        ],
+        "max": [
+          -10.085,
+          2.035,
+          -1.397
+        ],
+        "size": [
+          0.23,
+          0.13,
+          0.0
+        ]
+      },
+      "material": "Automation / EdgeControllerScreen"
+    },
+    "ControllerStatusLED": {
+      "group": "EdgeController",
+      "center": [
+        -10.087,
+        1.903,
+        -1.396
+      ],
+      "bounds": {
+        "min": [
+          -10.0884,
+          1.9016,
+          -1.39635
+        ],
+        "max": [
+          -10.0856,
+          1.9044,
+          -1.39565
+        ],
+        "size": [
+          0.0028,
+          0.0028,
+          0.0007
+        ]
+      },
+      "material": "Automation / ControllerStatusLED"
+    },
+    "WiFiAPLED": {
+      "group": "WiFiAP",
+      "center": [
+        -9.55,
+        0.827,
+        -1.0494
+      ],
+      "bounds": {
+        "min": [
+          -9.5555,
+          0.826,
+          -1.0499
+        ],
+        "max": [
+          -9.5445,
+          0.828,
+          -1.0489
+        ],
+        "size": [
+          0.011,
+          0.002,
+          0.001
+        ]
+      },
+      "material": "Automation / WiFiAPLED"
+    },
+    "ThreadBorderRouterLED": {
+      "group": "ThreadBorderRouter",
+      "center": [
+        -9.149999,
+        0.8185,
+        -1.0494
+      ],
+      "bounds": {
+        "min": [
+          -9.155499,
+          0.8175,
+          -1.0499
+        ],
+        "max": [
+          -9.1445,
+          0.8195,
+          -1.0489
+        ],
+        "size": [
+          0.010999,
+          0.002,
+          0.001
+        ]
+      },
+      "material": "Automation / ThreadBorderRouterLED"
+    },
+    "ZigbeeBridgeLED": {
+      "group": "ZigbeeBridge",
+      "center": [
+        -8.75,
+        0.8185,
+        -1.0494
+      ],
+      "bounds": {
+        "min": [
+          -8.7555,
+          0.8175,
+          -1.0499
+        ],
+        "max": [
+          -8.7445,
+          0.8195,
+          -1.0489
+        ],
+        "size": [
+          0.011,
+          0.002,
+          0.001
+        ]
+      },
+      "material": "Automation / ZigbeeBridgeLED"
+    },
+    "ZigbeeSensorLED": {
+      "group": "ZigbeePresenceSensor",
+      "center": [
+        -10.149999,
+        2.748,
+        -0.939
+      ],
+      "bounds": {
+        "min": [
+          -10.151299,
+          2.7476,
+          -0.9403
+        ],
+        "max": [
+          -10.1487,
+          2.7484,
+          -0.9377
+        ],
+        "size": [
+          0.002599,
+          0.0008,
+          0.0026
+        ]
+      },
+      "material": "Automation / ZigbeeSensorLED"
+    },
+    "DoorHandle": {
+      "group": "StaffDoorHinge",
+      "center": [
+        -7.22,
+        1.05,
+        -1.426
+      ],
+      "bounds": {
+        "min": [
+          -7.2775,
+          1.041,
+          -1.435
+        ],
+        "max": [
+          -7.1625,
+          1.059,
+          -1.417
+        ],
+        "size": [
+          0.115,
+          0.018,
+          0.018
+        ]
+      },
+      "material": "Automation / satin brass"
+    }
+  },
+  "door": {
+    "node": "StaffDoorHinge",
+    "pivot": [
+      -8.02,
+      0,
+      -1.49
+    ],
+    "rotationAxis": "+Y",
+    "closedAngle": 0,
+    "openAngle": 1.42,
+    "passageCenter": [
+      -7.55,
+      0,
+      -1.49
+    ],
+    "swingDirection": "toward negative Z, behind automation wall"
+  },
+  "outputs": {
+    "WiFiPlug": "PromoDisplayFace",
+    "ThreadPlug": "LampDiffuser",
+    "ShellyRelay": "IlluminatedSignFace"
+  },
+  "lampLightPosition": [
+    -10.2,
+    1.116,
+    -1.14
+  ],
+  "sources": [
+    {
+      "device": "Wi-Fi Matter smart plug",
+      "url": "https://www.tp-link.com/en/home-networking/smart-plug/tapo-p110m/",
+      "note": "Generic housing inspired by 72 x 51 x 40 mm EU P110M dimensions, not a P125M replica."
+    },
+    {
+      "device": "Thread Matter smart plug",
+      "url": "https://www.evehome.com/en/eve-energy",
+      "note": "Generic European housing, 56 x 56 mm front, installed body excludes concealed rear pins."
+    },
+    {
+      "device": "Shelly Plus 1PM",
+      "url": "https://www.shelly.com/blogs/documentation/shelly-plus-1pm",
+      "note": "42 x 37 x 16 mm red module, illustrative enclosed installation."
+    },
+    {
+      "device": "Zigbee presence sensor",
+      "url": "https://support.sonoff.tech/snzb-06p-usermanual/",
+      "note": "Generic 44.2 x 44.2 x 59 mm radar sensor and separate bridge. Proposed illustrative adapter, not claimed app support."
+    }
+  ],
+  "notes": [
+    "Display/front planes have full 0..1 UVs and independent materials for runtime text and on/off changes.",
+    "All electrical wiring is a visual illustration behind an isolated cover, not an installation diagram.",
+    "Door opening swing avoids the existing leftmost gondola (its left edge is x=-6.6).",
+    "Hide the old oversized sensor/thermostat/lock models in the automation scenario to avoid duplicate equipment."
+  ],
+  "triangles": 42430,
+  "bytes": 1213196
+}

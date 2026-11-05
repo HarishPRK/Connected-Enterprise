@@ -8,6 +8,9 @@ import type { OfferingId, OfferingSceneProps } from './OfferingScene';
 import './OfferingScene.css';
 import OfferingStoryEffects from './OfferingStoryEffects';
 import { OfferingTwinWorkstation } from './OfferingTwinWorkstation';
+import { OfferingRoutingScreens } from './OfferingRoutingScreens';
+import { OfferingEagleConsole } from './OfferingEagleConsole';
+import { OfferingAutomationVisual } from './OfferingAutomationVisual';
 import { OfferingCinemaControls } from './OfferingCinemaControls';
 import { PARTS, GATEWAY_EXPLODE, type EquipmentSpec, type Vec } from './OfferingEquipment';
 import { OfferingConnections } from './OfferingConnections';
@@ -15,15 +18,16 @@ import { sampleStoryCamera, storyProgress, type StoryContext } from './OfferingS
 import { OfferingContactGrounding } from './OfferingStudioLighting';
 import { storeLightLevel } from './offeringLighting';
 import { OfferingStoryAnnotationLayer, OfferingStoryAnnotationSync, type StoryAnnotationNodes } from './OfferingStoryAnnotations';
+import { portraitStoryCamera } from './offeringPortraitCamera';
 
 interface Hotspot { id: string; label: string; at: Vec; color: string; number?: string; }
-const SKY = '#68d6ff', TEAL = '#8ce3c6', VIOLET = '#b4a5ff', AMBER = '#ffc885', CORAL = '#ff897a';
+const SKY = '#b2d8cc', TEAL = '#9dd9bb', VIOLET = '#c9badb', AMBER = '#efba7c', CORAL = '#ef9d83';
 // One permanent floor plan. Selecting a service changes its story and signals,
 // while the store, equipment and all other service areas stay in place.
 const SERVICE_SPOTS: (Hotspot & { id: OfferingId })[] = [
   { id: 'failover', label: 'Dynamic Failover', number: '01', at: [14.1, 5.8, -.6], color: SKY },
   { id: 'routing', label: 'Application routing', number: '02', at: [8, 2.6, 6.4], color: TEAL },
-  { id: 'twin', label: 'CPE digital twin', number: '03', at: [6.2, 3.65, -2.2], color: VIOLET },
+  { id: 'twin', label: 'CPE digital twin', number: '03', at: [6.45, 1.7, -2.65], color: VIOLET },
   { id: 'eagle', label: 'EA:GLE', number: '04', at: [10.1, 4.6, -7.5], color: SKY },
   { id: 'automation', label: 'Device automation', number: '05', at: [-10.5, 3.35, .25], color: VIOLET },
   { id: 'smart', label: 'Smart services', number: '06', at: [-5, 4.2, -7.9], color: AMBER },
@@ -31,14 +35,14 @@ const SERVICE_SPOTS: (Hotspot & { id: OfferingId })[] = [
 ];
 const FOCUS: Record<OfferingId, { target: Vec; span: number }> = {
   failover: { target: [10.8, 1.5, -2.2], span: 14 }, routing: { target: [7.1, .8, 4.7], span: 11.5 },
-  twin: { target: [6.7, 2.1, -3], span: 7.8 }, eagle: { target: [7.8, 1, -4.8], span: 14.5 },
+  twin: { target: [6.9, 1.15, -1.1], span: 3.6 }, eagle: { target: [7.8, 1, -4.8], span: 14.5 },
   automation: { target: [-9.9, .9, .15], span: 9.5 }, smart: { target: [-5.7, 1, -6.5], span: 18 },
   video: { target: [5.8, 1.3, 2.4], span: 17 },
 };
 const INSPECT: Record<OfferingId, string[]> = {
-  failover: ['fiber', '5g', 'gateway', 'analytics', 'pos'], routing: ['pos', 'voice', 'camera', 'analytics', 'gateway', 'fiber', '5g'],
+  failover: ['fiber', '5g', 'gateway', 'analytics', 'pos'], routing: ['pos', 'camera', 'analytics', 'gateway', 'fiber', '5g'],
   twin: ['housing', 'board', 'heatsink', 'ports', 'antennae'], eagle: ['gateway', 'fiber', '5g', 'it', 'ot'],
-  automation: ['sensor', 'thermostat', 'lock', 'light', 'gateway'], smart: ['hvac', 'cooler', 'energy', 'meter'],
+  automation: ['auto-wifi', 'auto-thread', 'auto-shelly', 'auto-presence', 'auto-controller'], smart: ['hvac', 'cooler', 'energy', 'meter'],
   video: ['camera', 'person', 'zone', 'crowd'],
 };
 const NAMES: Record<string, string> = { hvac: 'HVAC', cooler: 'Coolers', energy: 'Solar & energy', meter: 'Energy meter', it: 'IT devices', gateway: 'Gemtek OSPv2 gateway', analytics: 'Dell analytics server', fiber: 'Fiber', '5g': '5G', sensor: 'Occupancy sensor', thermostat: 'Thermostat', lock: 'Access control', light: 'Lighting', ot: 'OT sensor', pos: 'POS', voice: 'Voice', camera: 'Camera', person: 'Man-down', zone: 'Restricted zone', crowd: 'Crowd monitoring' };
@@ -66,7 +70,7 @@ function useReducedMotion() {
   useEffect(() => { const media = window.matchMedia('(prefers-reduced-motion: reduce)'); const update = () => setReduced(media.matches); media.addEventListener('change', update); return () => media.removeEventListener('change', update); }, []);
   return reduced;
 }
-function Architecture({ context, timeRef }: { context: StoryContext; timeRef: RefObject<number> }) {
+function Architecture({ context }: { context: StoryContext; timeRef: RefObject<number> }) {
   const model = useCinematicModel(cinematicAssets.store);
   const { gl } = useThree();
   useMemo(() => {
@@ -78,7 +82,7 @@ function Architecture({ context, timeRef }: { context: StoryContext; timeRef: Re
     return copy;
   }, [model,gl]);
   const diffusers=useMemo(()=>{const materials:MeshStandardMaterial[]=[];model.getObjectByName('LightingRig')?.traverse(object=>{if(object instanceof Mesh)(Array.isArray(object.material)?object.material:[object.material]).forEach(material=>{if(material instanceof MeshStandardMaterial&&material.emissiveIntensity>0)materials.push(material);});});return materials;},[model]);
-  useFrame(()=>{const level=storeLightLevel(context,timeRef.current);diffusers.forEach(material=>{material.emissiveIntensity=.12+level*1.6;});});
+  useFrame(()=>{const level=storeLightLevel(context);diffusers.forEach(material=>{material.emissiveIntensity=.12+level*1.6;});});
 
   return <primitive object={model} dispose={null} />;
 }
@@ -97,7 +101,7 @@ function Equipment({ spec, exploded = false, inspection = false, onSelect, conte
     for(const part of animated.parts){part.object.position.copy(part.origin);part.object.position.addScaledVector(part.move,amount);}
     if(animated.fan){const irregular=context.offering==='smart'&&context.variant==='hvac'&&t>=4;animated.fan.rotation.set(0,0,t*(irregular?2.1:6)+ (irregular?Math.sin(t*19)*.12:0));}
     if(animated.door)animated.door.rotation.set(0,context.offering==='smart'&&context.variant==='cooler'?-.55*storyProgress(t,2,5)*(1-storyProgress(t,21,24)):0,0);
-    if(animated.bulbs.length){const amount=context.offering==='automation'?(context.variant==='after-hours'?1-storyProgress(t,11,15):storyProgress(t,11,15)):.75;animated.bulbs.forEach(material=>dimLamp(material,amount));}
+    if(animated.bulbs.length)animated.bulbs.forEach(material=>dimLamp(material,.75));
   });
   useEffect(()=>invalidate(),[context,exploded,inspection,invalidate]);
   useEffect(() => () => setCursor(gl, ''), [gl]);
@@ -118,13 +122,12 @@ function FloorRing({ at, radius = 1, color = AMBER }: { at: Vec; radius?: number
   return <mesh position={at} rotation={[-Math.PI/2,0,0]}><ringGeometry args={[radius, radius+.018, 56]} /><meshBasicMaterial color={color} transparent opacity={.35} toneMapped={false} /></mesh>;
 }
 function PracticalDetails({ offering, variant, active, response }: Pick<OfferingSceneProps, 'offering' | 'variant' | 'active'> & { response: boolean }) {
-  const afterHours = offering === 'automation' && response && variant === 'after-hours';
   return <>
     {[[4.8,7.9],[11.4,-2.1]].map(([x,z]) => <group key={x}>
       <mesh position={[x,1.8,z]} castShadow><cylinderGeometry args={[.045,.065,3.6,10]} /><meshStandardMaterial color="#81929e" metalness={.7} roughness={.35} /></mesh>
       <mesh position={[x,.06,z]}><cylinderGeometry args={[.25,.3,.12,20]} /><meshStandardMaterial color="#435664" metalness={.7} roughness={.4} /></mesh>
     </group>)}
-    <pointLight position={[-10.5,2.25,1.6]} color={afterHours ? '#b5bbff' : '#ffe2a7'} intensity={afterHours ? .25 : 4.5} distance={7} decay={2} />
+    <pointLight position={[-10.5,2.25,1.6]} color="#ffe2a7" intensity={offering==='automation'?0:4.5} distance={7} decay={2} />
     <mesh position={[9.5,.035,-4.5]} rotation={[-Math.PI/2,0,0]}><planeGeometry args={[5.2,5]} /><meshBasicMaterial color={offering==='video' && variant==='intruder' && response ? CORAL : SKY} transparent opacity={offering==='video' && variant==='intruder' ? .065 : .018} depthWrite={false} /></mesh>
     <mesh position={[9.5,.045,-2]}><boxGeometry args={[5.2,.016,.035]} /><meshBasicMaterial color={offering==='video' && variant==='intruder' && response ? CORAL : '#6b97a5'} transparent opacity={.7} /></mesh>
     {offering==='smart' && active && <FloorRing at={variant==='hvac' ? [-9,.1,-6] : variant==='cooler' ? [0,.1,-7.6] : [-14.6,.1,-1.5]} radius={variant==='cooler' ? 2.4 : 1.8} color={response ? AMBER : SKY} />}
@@ -132,23 +135,24 @@ function PracticalDetails({ offering, variant, active, response }: Pick<Offering
   </>;
 }
 
-function equipmentSpots(offering: OfferingId, variant: string, active: boolean, response: boolean): Hotspot[] {
+function equipmentSpots(offering: OfferingId, variant: string, active: boolean): Hotspot[] {
+  if(offering==='automation')return [
+    {id:'auto-wifi',label:'Matter · Wi-Fi',at:[-11.25,1.5,-1.35],color:SKY},
+    {id:'auto-thread',label:'Matter · Thread',at:[-10.2,1.5,-1.35],color:TEAL},
+    {id:'auto-shelly',label:'Shelly · MQTT / Wi-Fi',at:[-9.1,1.5,-1.35],color:AMBER},
+    {id:'auto-presence',label:'Zigbee · presence',at:[-10.15,2.9,-.95],color:VIOLET},
+    {id:'auto-controller',label:'Close routine',at:[-10.2,2.1,-1.35],color:TEAL},
+  ];
   if (offering==='twin') {
-    const extra=variant==='exploded' ? 1.6 : 0;
-    return [
-      {id:'housing',label:'Chassis',at:[5,1.65+extra*.35,-2.5],color:SKY},
-      {id:'board',label:'Compute board',at:[8.35,1.65+extra*.12,-3.5],color:TEAL},
-      {id:'heatsink',label:'Thermal design',at:[6.1,2.35+extra*.8,-3],color:SKY},
-      {id:'ports',label:'Network I/O',at:[7.9,1.35,-1.8],color:AMBER},
-      {id:'antennae',label:'Radio interfaces',at:[7.8,3+extra*.5,-3.6],color:VIOLET},
-    ];
+    // Internal-part labels belong to the magnified twin, not empty space around
+    // the installed closed appliance. Keep its real interface identifiable.
+    return [{id:'ports',label:'Gateway · LAN 1',at:[6.48,1.45,-2.55],color:AMBER}];
   }
   const ids=offering==='video'?(variant==='intruder'?['camera-back','analytics','person','zone']:variant==='crowd'?['camera','analytics','crowd']:['camera','analytics','person']):INSPECT[offering];
   return ids.map(id => {
     const part = PARTS.find(item=>item.id===id);
     const fallback: Vec = id==='zone' ? [9.5,.2,-4.5] : id==='crowd' ? [-1,2.25,7] : variant==='intruder' ? active ? [9.8,2.1,-4.2] : [9.8,2.1,.7] : [.2,active && variant==='man-down' ? .7 : 2.1,6];
-    let label=id==='person' && variant==='intruder'?'Person':id==='camera-back'?'Camera':NAMES[id]||id;
-    if(offering==='automation'&&response){const states=variant==='after-hours'?{light:'Lighting · dimmed',lock:'Access · locked',thermostat:'Climate · setback'}:{light:'Lighting · on',lock:'Access · unlocked',thermostat:'Climate · comfort'};label=states[id as keyof typeof states]||label;}
+    const label=id==='person' && variant==='intruder'?'Person':id==='camera-back'?'Camera':NAMES[id]||id;
     return { id:id==='camera-back'?'camera':id, label, at: part ? [part.at[0],part.at[1]+part.size*.9+.25,part.at[2]] as Vec : fallback, color: id==='5g' || id==='camera' ? VIOLET : id==='energy' ? AMBER : SKY };
   });
 }
@@ -179,8 +183,10 @@ function CameraRig({ focusTarget, offering, variant, focused, inspection, reset,
     const orbit=controls.current;if(!orbit)return;
     orbit.minPolarAngle=inspection?.05:.32;orbit.maxPolarAngle=inspection?Math.PI-.05:1.38;
     if(followStory){
-      orbit.minDistance=1.1;
-      const time=timeRef.current,shot=sampleStoryCamera({offering,variant},time),target=new Vector3(...shot.target),aspect=size.width/Math.max(size.height,1);
+      orbit.minDistance=.35;
+      orbit.maxPolarAngle=offering==='automation'?2.2:1.38;
+      const time=timeRef.current,aspect=size.width/Math.max(size.height,1);
+      const shot=portraitStoryCamera({offering,variant},time,aspect,sampleStoryCamera({offering,variant},time)),target=new Vector3(...shot.target);
       const readingLaptop=offering==='twin'&&((time>=4&&time<9)||(time>=20&&time<=22));
       const frameWidth=readingLaptop?.95:shot.distance<3?.65:1.25;
       const distance=shot.distance*Math.max(1,frameWidth/Math.max(aspect,.4));
@@ -196,8 +202,8 @@ function CameraRig({ focusTarget, offering, variant, focused, inspection, reset,
     <mesh rotation={[-Math.PI/2,0,0]} position={[0,-.025,0]} receiveShadow><planeGeometry args={[200,200]}/><meshStandardMaterial color="#344454" roughness={.82} metalness={.05}/></mesh>
   </>;
   return <>
-    <color attach="background" args={['#162633']} /><fog attach="fog" args={['#162633',72,145]} />
-    <mesh rotation={[-Math.PI/2,0,0]} position={[0,-.36,0]}><planeGeometry args={[250,250]} /><meshBasicMaterial color="#162633" toneMapped={false} /></mesh>
+    <color attach="background" args={['#192e29']} /><fog attach="fog" args={['#192e29',72,145]} />
+    <mesh rotation={[-Math.PI/2,0,0]} position={[0,-.36,0]}><planeGeometry args={[250,250]} /><meshBasicMaterial color="#192e29" toneMapped={false} /></mesh>
     <mesh rotation={[-Math.PI/2,0,0]} position={[0,-.355,0]} receiveShadow><planeGeometry args={[250,250]} /><shadowMaterial transparent opacity={.28}/></mesh>
   </>;
 }
@@ -237,13 +243,13 @@ export default function OfferingSceneStore(props: OfferingSceneProps) {
   useEffect(()=>{if(!timeRef)fallbackClock.current=[0,7.5,14,22][phase];},[timeRef,phase]);
   const context=useMemo(()=>({offering,variant}),[offering,variant]);
   const focusTarget=useRef(new Vector3(7,1.8,-3));
-  const lightLevel=()=>storeLightLevel(context,clock.current);
+  const lightLevel=()=>storeLightLevel(context);
   const reduced=useReducedMotion(),response=active&&phase>=2,moving=!paused&&!reduced&&visible;
   const markReady=useCallback(()=>{setReady(true);onReady?.();},[onReady]);
 
-  const spots=useMemo(()=>focused?equipmentSpots(offering,variant,active,response):SERVICE_SPOTS,[focused,offering,variant,active,response]);
+  const spots=useMemo(()=>focused?equipmentSpots(offering,variant,active):SERVICE_SPOTS,[focused,offering,variant,active]);
   useEffect(()=>{
-    let inView=true;const update=()=>setVisible(inView&&!document.hidden),observer=new IntersectionObserver(entries=>{inView=entries.some(e=>e.isIntersecting);update();});
+    let inView=true;const update=()=>setVisible(inView&&!document.hidden),observer=new IntersectionObserver(entries=>{inView=entries[entries.length-1]?.isIntersecting??false;update();});
     if(host.current)observer.observe(host.current);document.addEventListener('visibilitychange',update);
     const fullscreen=()=>setExpanded(document.fullscreenElement===host.current);document.addEventListener('fullscreenchange',fullscreen);
     return()=>{observer.disconnect();document.removeEventListener('visibilitychange',update);document.removeEventListener('fullscreenchange',fullscreen);};
@@ -251,8 +257,9 @@ export default function OfferingSceneStore(props: OfferingSceneProps) {
   const resetView=()=>{onCameraInteraction?.();setFocused(false);setZoom(1);setRotation(0);setReset(v=>v+1);};
   const toggleExpanded=async()=>{try{setFullscreenError('');if(document.fullscreenElement)await document.exitFullscreen();else await host.current?.requestFullscreen();}catch{setFullscreenError('Fullscreen is unavailable in this browser.');}};
   return <div className="offering-scene offering-store-scene" ref={host} data-offering={offering} data-scenario-active={active} data-scene-view={inspection?'inspection':followStory?'story':focused?'focus':'whole'}>
+    <div className="offering-store-viewport">
     {!ready&&<div className="offering-scene-loading" role="status"><span/>Preparing the enterprise…</div>}
-    <OfferingCinematicCanvas focusTarget={focusTarget} lightLevel={lightLevel} cinematic={followStory&&!inspection} inspection={inspection} frameloop={moving?'always':'demand'} resize={{offsetSize:true}} events={sceneEvents} camera={{position:[30,32,42],fov:40,near:.1,far:250}}
+    <OfferingCinematicCanvas className="offering-render-surface" focusTarget={focusTarget} lightLevel={lightLevel} cinematic={followStory&&!inspection} inspection={inspection} frameloop={moving?'always':'demand'} resize={{offsetSize:true}} events={sceneEvents} camera={{position:[30,32,42],fov:40,near:.1,far:250}}
       tabIndex={0} role="group" aria-label="Connected enterprise store. All seven offerings share this building. Drag to orbit; use left and right arrow keys to rotate, plus and minus to zoom, or Home to reset."
       onKeyDown={event=>{if(event.target instanceof HTMLButtonElement)return;if(!['ArrowLeft','ArrowRight','+','=','-','Home'].includes(event.key))return;event.preventDefault();onCameraInteraction?.();if(event.key==='Home')resetView();else if(event.key==='ArrowLeft'||event.key==='ArrowRight')setRotation(v=>v+(event.key==='ArrowLeft'?-20:20));else setZoom(v=>Math.max(.65,Math.min(2.1,v+(event.key==='-'?-.15:.15))));}}>
       <CameraRig focusTarget={focusTarget} offering={offering} variant={variant} focused={focused} inspection={inspection} reset={reset} rotation={rotation} zoom={zoom} reduced={reduced} followStory={followStory&&!inspection} timeRef={clock} onCameraInteraction={onCameraInteraction}/>
@@ -261,8 +268,11 @@ export default function OfferingSceneStore(props: OfferingSceneProps) {
         {inspection ? <Equipment spec={{id:'gateway',model:'GatewayTwin',at:[0,0,0],size:2.4,yaw:-Math.PI/2+.3}} exploded={variant==='exploded'} inspection onSelect={onSelect} context={context} timeRef={clock}/> : <>
         <Architecture context={context} timeRef={clock}/>
         <OfferingContactGrounding context={context} timeRef={clock}/>
-        {PARTS.map(spec=><Equipment key={spec.id} spec={spec} exploded={false} onSelect={onSelect} context={context} timeRef={clock}/>)}
+        {PARTS.filter(spec=>(offering!=='routing'||spec.id!=='pos')&&(offering!=='automation'||!['sensor','thermostat','lock','light'].includes(spec.id))).map(spec=><Equipment key={spec.id} spec={spec} exploded={false} onSelect={onSelect} context={context} timeRef={clock}/>)}
+        {offering==='automation'&&<OfferingAutomationVisual timeRef={clock} variant={variant} onSelect={onSelect}/>}
         {offering==='twin'&&<OfferingTwinWorkstation timeRef={clock} variant={variant} onSelect={onSelect}/>}
+        {offering==='routing'&&<OfferingRoutingScreens timeRef={clock} onSelect={onSelect}/>}
+        {offering==='eagle'&&<OfferingEagleConsole timeRef={clock} variant={variant} onSelect={onSelect}/>}
         <OfferingConnections context={context} active={active} response={response} timeRef={clock}/>
         <OfferingStoryEffects offering={offering} variant={variant} timeRef={clock} onSelect={onSelect}/>
         <OfferingStoryAnnotationSync context={context} timeRef={clock} nodes={annotations} visible={ready&&!inspection&&(followStory||focused)} film={followStory}/>
@@ -286,6 +296,7 @@ export default function OfferingSceneStore(props: OfferingSceneProps) {
       </button>
       {inspection&&<div><strong>Gemtek OSPv2 gateway</strong><span>Drag to rotate 360° · Scroll to zoom</span></div>}
     </div>}
+    </div>
     <div className="offering-store-controls" aria-label="Enterprise view" onClick={event=>{const title=(event.target as HTMLElement).closest('button')?.getAttribute('title');if(title!=='Expand enterprise'&&title!=='Exit fullscreen')onCameraInteraction?.();}}>
       <div className="offering-store-control-group"><button type="button" aria-pressed={!inspection&&!followStory&&!focused} onClick={()=>{setInspectTwin(false);setFocused(false);setZoom(1);setReset(value=>value+1);}} title="Whole store"><Store size={15}/><span>Whole store</span></button><button type="button" aria-pressed={!inspection&&!followStory&&focused} onClick={()=>{setInspectTwin(false);setFocused(true);setZoom(1);setReset(value=>value+1);}} title="Focus selected area"><Focus size={15}/><span>Focus</span></button></div>
       <div className="offering-store-control-group"><button type="button" aria-label="Rotate left" title="Rotate left" onClick={()=>setRotation(v=>v-25)}><RotateCcw size={15}/></button><button type="button" aria-label="Rotate right" title="Rotate right" onClick={()=>setRotation(v=>v+25)}><RotateCw size={15}/></button><button type="button" aria-label="Zoom out" title="Zoom out" disabled={zoom<=.65} onClick={()=>setZoom(v=>Math.max(.65,v-.15))}><ZoomOut size={15}/></button><button type="button" aria-label="Zoom in" title="Zoom in" disabled={zoom>=2.1} onClick={()=>setZoom(v=>Math.min(2.1,v+.15))}><ZoomIn size={15}/></button></div>

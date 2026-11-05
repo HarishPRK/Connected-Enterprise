@@ -3,18 +3,20 @@ import { useFrame } from '@react-three/fiber';
 import { PerspectiveCamera, RenderTexture, RoundedBox } from '@react-three/drei';
 import { CanvasTexture, Group, MeshBasicMaterial, PerspectiveCamera as ThreePerspectiveCamera, Quaternion, SRGBColorSpace, Vector3 } from 'three';
 import { cinematicAssets, useCinematicModel } from './OfferingCinematicCanvas';
-import { GATEWAY_EXPLODE } from './OfferingEquipment';
+import { GATEWAY_EXPLODE, PARTS, SERVICE_CART } from './OfferingEquipment';
 import { gatewayPort } from './OfferingConnectionPaths';
 import { sampleTwin } from './OfferingTwinStory';
+import { clearLaptopDisplayGraphics } from './OfferingRoutingScreens';
 
-const LAPTOP_SCALE = 1.2 / 1.23;
+const LAPTOP_SCALE = SERVICE_CART.laptopWidth / 1.23;
 
 function PortMarker({ timeRef, miniature = false, onSelect }: { timeRef: RefObject<number>; miniature?: boolean; onSelect?: () => void }) {
   const marker = useRef<Group>(null), material = useRef<MeshBasicMaterial>(null);
   const socket = useMemo(() => gatewayPort('pos'), []);
   const at = useMemo(() => {
-    const p = new Vector3(...socket.point).addScaledVector(new Vector3(...socket.normal), .045);
-    if (miniature) p.sub(new Vector3(6.45,1.1,-3)).multiplyScalar(2.4/1.65);
+    const p = new Vector3(...socket.point).addScaledVector(new Vector3(...socket.normal), .003);
+    const gateway = PARTS.find(part => part.id === 'gateway')!;
+    if (miniature) p.sub(new Vector3(...gateway.at)).multiplyScalar(2.4/gateway.size);
     return p;
   }, [socket,miniature]);
   const orientation = useMemo(() => new Quaternion().setFromUnitVectors(new Vector3(0,0,1),new Vector3(...socket.normal)),[socket]);
@@ -24,7 +26,7 @@ function PortMarker({ timeRef, miniature = false, onSelect }: { timeRef: RefObje
     material.current?.color.set(state.color);
   });
   return <group ref={marker} position={at} quaternion={orientation} onClick={event=>{event.stopPropagation();if(event.delta<5)onSelect?.();}}>
-    <mesh><ringGeometry args={[miniature?.11:.078,miniature?.127:.09,48]}/><meshBasicMaterial ref={material} color="#ff897a" toneMapped={false} depthWrite={false}/></mesh>
+    <mesh><ringGeometry args={[miniature?.11:.014,miniature?.127:.016,48]}/><meshBasicMaterial ref={material} color="#ff897a" toneMapped={false} depthWrite={false}/></mesh>
   </group>;
 }
 
@@ -79,7 +81,9 @@ function paintDiagnostics(ctx: CanvasRenderingContext2D, texture: CanvasTexture,
 /** The operator's physical laptop displays the same Gemtek mesh as the CPE.
  * Log text is a high-resolution screen texture, not floating scene decoration. */
 export function OfferingTwinWorkstation({ timeRef, variant, onSelect }: { timeRef: RefObject<number>; variant: string; onSelect: (id:string)=>void }) {
-  const laptop=useCinematicModel(cinematicAssets.kit,'Laptop',1.2);
+  const laptop=useCinematicModel(cinematicAssets.kit,'Laptop',SERVICE_CART.laptopWidth);
+  const graphics=useMemo(()=>clearLaptopDisplayGraphics(laptop),[laptop]);
+  useEffect(()=>()=>graphics.forEach(geometry=>geometry.dispose()),[graphics]);
   const surface=useMemo(()=>{
     const canvas=document.createElement('canvas');canvas.width=1440;canvas.height=900;
     const texture=new CanvasTexture(canvas);texture.colorSpace=SRGBColorSpace;texture.anisotropy=16;
@@ -93,18 +97,18 @@ export function OfferingTwinWorkstation({ timeRef, variant, onSelect }: { timeRe
     paintDiagnostics(surface.paint,surface.texture,state);
   });
   return <group name="Gateway diagnosis workstation">
-    <group position={[7.1,0,.25]}>
-      <RoundedBox args={[1.4,.065,1.1]} radius={.025} position={[0,1.0675,0]} castShadow receiveShadow><meshStandardMaterial color="#8d9ca8" metalness={.5} roughness={.38}/></RoundedBox>
-      {[-.53,.53].flatMap(x=>[-.4,.4].map(z=><group key={`${x}/${z}`}>
-        <mesh position={[x,.57,z]} castShadow><boxGeometry args={[.045,.94,.045]}/><meshStandardMaterial color="#31434f" metalness={.7} roughness={.42}/></mesh>
-        <mesh position={[x,.075,z]} rotation={[0,0,Math.PI/2]} castShadow><cylinderGeometry args={[.075,.075,.05,20]}/><meshStandardMaterial color="#17252d" roughness={.8}/></mesh>
+    <group position={SERVICE_CART.at}>
+      <RoundedBox args={[SERVICE_CART.width,.05,SERVICE_CART.depth]} radius={.012} position={[0,SERVICE_CART.top-.025,0]} castShadow receiveShadow><meshStandardMaterial color="#8d9ca8" metalness={.5} roughness={.38}/></RoundedBox>
+      {[-.265,.265].flatMap(x=>[-.18,.18].map(z=><group key={`${x}/${z}`}>
+        <mesh position={[x,.565,z]} castShadow><boxGeometry args={[.03,.87,.03]}/><meshStandardMaterial color="#31434f" metalness={.7} roughness={.42}/></mesh>
+        <mesh position={[x,.06,z]} rotation={[0,0,Math.PI/2]} castShadow><cylinderGeometry args={[.05,.05,.03,20]}/><meshStandardMaterial color="#17252d" roughness={.8}/></mesh>
       </group>))}
-      <mesh position={[0,.24,0]} receiveShadow><boxGeometry args={[1.15,.035,.85]}/><meshStandardMaterial color="#40525f" metalness={.5} roughness={.5}/></mesh>
-      <group position={[0,1.1,0]}>
+      <mesh position={[0,.24,0]} receiveShadow><boxGeometry args={[.56,.025,.39]}/><meshStandardMaterial color="#40525f" metalness={.5} roughness={.5}/></mesh>
+      <group position={[0,SERVICE_CART.top,0]}>
         <primitive object={laptop} dispose={null}/>
         <group scale={LAPTOP_SCALE}>
-          <group position={[0,.49,-.265]} rotation={[-.13,0,0]}>
-            <mesh onClick={event=>{event.stopPropagation();if(event.delta<5)onSelect('ports');}}><planeGeometry args={[1.12,.7]}/><meshBasicMaterial map={surface.texture} toneMapped={false}/></mesh>
+          <group position={[0,.490972,-.321563]} rotation={[-.13,0,0]}>
+            <mesh onClick={event=>{event.stopPropagation();if(event.delta<5)onSelect('ports');}}><planeGeometry args={[1.10,.65]}/><meshBasicMaterial map={surface.texture} toneMapped={false}/></mesh>
             <mesh position={[-.29,-.025,.003]}><planeGeometry args={[.43,.46]}/><meshBasicMaterial toneMapped={false}>
               <RenderTexture attach="map" width={600} height={640} samples={4} generateMipmaps>
                 <LaptopTwin timeRef={timeRef} exploded={variant==='exploded'}/>

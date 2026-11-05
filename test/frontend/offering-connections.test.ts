@@ -24,12 +24,12 @@ test('the twin uses distinct modeled fiber, phone and LAN sockets, with an inter
   assert.equal(wired.length,5);
   assert.equal(new Set(wired.map(link=>link.from.point.join(','))).size,5);
   for(const link of wired){
-    assert.ok(link.from.point[1]>1.4&&link.from.point[1]<2.5);
+    assert.ok(link.from.point[1]>1.1&&link.from.point[1]<1.38,'socket belongs to the 28 cm appliance on its 1.10 m bench');
     assert.ok(link.from.normal[2]>.9,'the rotated rear port bay faces the cable exits');
   }
   const radio=connections.find(link=>link.id==='5g')!;
   assert.equal(radio.wireless,true);
-  assert.ok(radio.from.point[1]>2.4&&radio.to.point[1]>3.9);
+  assert.ok(radio.from.point[1]>1.3&&radio.from.point[1]<1.4&&radio.to.point[1]>3.9);
 });
 test('both independent camera feeds terminate at the analytics server, with its own CPE uplink',()=>{
   const connections=makeConnections({offering:'video',variant:'man-down'},true,true);
@@ -51,7 +51,11 @@ test('exploded gateway ports keep their cable ends attached while remote sockets
   const connections=makeConnections({offering:'twin',variant:'exploded'},true,true);
   for(const link of connections.filter(link=>link.from.device==='gateway')){
     const before=connectionCurve(link,0),after=connectionCurve(link,1);
-    if(link.wireless)assert.ok(after.getPoint(0).distanceTo(before.getPoint(0))>.3);
+    if(link.wireless){
+      const displacement=after.getPoint(0).sub(before.getPoint(0));
+      assert.ok(displacement.length()>.04&&displacement.length()<.1,'antenna separation stays in centimetres at installed scale');
+      assert.ok(displacement.normalize().dot(new Vector3(0,1,0))>.999);
+    }
     else assert.ok(after.getPoint(0).distanceTo(before.getPoint(0))<1e-6,'Gemtek ports remain on the fixed base frame');
     assert.ok(after.getPoint(1).distanceTo(before.getPoint(1))<1e-6);
   }

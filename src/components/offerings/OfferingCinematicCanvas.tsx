@@ -8,9 +8,9 @@ import {
   MeshPhysicalMaterial, MeshStandardMaterial, Object3D, PCFSoftShadowMap,
   SRGBColorSpace, Vector3, type DirectionalLight, type HemisphereLight, type SpotLight,
 } from 'three';
-import storeUrl from '../../assets/offerings/enterprise-store.glb?url';
+import storeUrl from '../../assets/offerings/enterprise-store.studio.glb?url';
 import kitUrl from '../../assets/offerings/offerings-kit.glb?url';
-import actorsUrl from '../../assets/offerings/enterprise-actors.glb?url';
+import actorsUrl from '../../assets/offerings/enterprise-actors.studio.glb?url';
 import twinUrl from '../../assets/offerings/gemtek-gateway.glb?url';
 import analyticsUrl from '../../assets/offerings/analytics-server.glb?url';
 import studioHdr from '../../assets/offerings/studio-small-03-1k.hdr?url';
@@ -86,10 +86,10 @@ function CinematicStage({ focusTarget, lightLevel, cinematic, inspection = false
   const subject = useMemo(() => { const object = new Object3D(); object.position.set(inspection ? 0 : 7, inspection ? 1.2 : 1.8, inspection ? 0 : -3); return object; }, [inspection]);
   useFrame(({ scene }) => {
     const level = inspection ? 1 : Math.max(0, Math.min(1, lightLevel()));
-    scene.environmentIntensity = inspection ? .28 : .1 + level * .22;
-    if (bounce.current) bounce.current.intensity = inspection ? .28 : .1 + level * .45;
-    if (key.current) key.current.intensity = inspection ? 1.05 : .35 + level * 1.1;
-    if (fill.current) fill.current.intensity = inspection ? .32 : .12 + level * .5;
+    scene.environmentIntensity = inspection ? .28 : .1 + level * .42;
+    if (bounce.current) bounce.current.intensity = inspection ? .28 : .18 + level * .44;
+    if (key.current) key.current.intensity = inspection ? 1.05 : .32 + level * 1.8;
+    if (fill.current) fill.current.intensity = inspection ? .32 : .12 + level * .36;
     if (rim.current) rim.current.intensity = inspection ? 35 : 18 + level * 47;
     if (dof.current) {
       dof.current.target?.copy(focusTarget.current);
@@ -104,19 +104,19 @@ function CinematicStage({ focusTarget, lightLevel, cinematic, inspection = false
   return <>
     <Environment files={studioHdr} background={false} environmentIntensity={.4} />
     <SoftShadows size={18} samples={12} focus={.3} />
-    <hemisphereLight ref={bounce} args={['#e7f2ff', '#9b9b94', .68]} />
+    <hemisphereLight ref={bounce} args={['#fff4e5', '#758c81', .62]} />
     <primitive object={subject} />
-    <directionalLight ref={key} position={inspection ? [-4, 7, 5] : [-12, 22, 16]} target={subject} color="#fff2df" intensity={1.55} castShadow
+    <directionalLight ref={key} position={inspection ? [-4, 7, 5] : [-12, 22, 16]} target={subject} color="#ffe3c7" intensity={2.12} castShadow
       shadow-mapSize={size.width < 700 ? [2048, 2048] : [4096, 4096]}
       shadow-camera-left={inspection ? -5 : -25} shadow-camera-right={inspection ? 5 : 25} shadow-camera-top={inspection ? 5 : 23} shadow-camera-bottom={inspection ? -5 : -23}
       shadow-camera-near={1} shadow-camera-far={85} shadow-bias={-.00008} shadow-normalBias={.014} shadow-radius={3} />
-    <directionalLight ref={fill} position={inspection ? [5, 3, 3] : [18, 9, 12]} target={subject} color="#d4e8ff" intensity={.8} />
-    <spotLight ref={rim} position={inspection ? [2, 5, -4] : [4, 11, -14]} target={subject} color="#e2f1ff" intensity={65}
+    <directionalLight ref={fill} position={inspection ? [5, 3, 3] : [18, 9, 12]} target={subject} color="#d4e9e4" intensity={.48} />
+    <spotLight ref={rim} position={inspection ? [2, 5, -4] : [4, 11, -14]} target={subject} color="#ffddb4" intensity={65}
       angle={.38} penumbra={.55} distance={40} decay={2} />
     <pointLight position={[6.5, 3.9, 4.8]} color="#ffdda6" intensity={4} distance={10} decay={2} />
     <pointLight position={[0, 2.8, -6.5]} color="#c1e7ee" intensity={3.5} distance={6} decay={2} />
     <EffectComposer multisampling={4} frameBufferType={HalfFloatType} enableNormalPass={false}>
-      <Bloom intensity={.16} luminanceThreshold={1.1} luminanceSmoothing={.35} mipmapBlur />
+      <Bloom intensity={.1} luminanceThreshold={1.4} luminanceSmoothing={.35} mipmapBlur />
       {/* focalLength is the supported legacy lens parameter; focusRange is the
           current world-space control and is updated with the actual shot target. */}
       <DepthOfField ref={dof} target={[7, 1.8, -3]} focusDistance={14} focalLength={.05}
@@ -148,7 +148,7 @@ export default function OfferingCinematicCanvas({ children, focusTarget, lightLe
     return () => { observer.disconnect(); window.removeEventListener('resize', measure); document.removeEventListener('fullscreenchange', measure); };
   }, []);
   return <Canvas {...props} ref={canvasRef} shadows="soft" dpr={dpr}
-    gl={{ antialias: false, alpha: false, powerPreference: 'high-performance', toneMapping: ACESFilmicToneMapping, toneMappingExposure: 1.15, outputColorSpace: SRGBColorSpace }}
+    gl={{ antialias: false, alpha: false, powerPreference: 'high-performance', toneMapping: ACESFilmicToneMapping, toneMappingExposure: .98, outputColorSpace: SRGBColorSpace }}
     onCreated={({ gl }) => { ColorManagement.enabled = true; gl.shadowMap.type = PCFSoftShadowMap; }}>
     <Suspense fallback={null}>
       {children}

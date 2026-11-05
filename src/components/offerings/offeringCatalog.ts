@@ -32,13 +32,13 @@ export const OFFERING_CHAPTERS: OfferingChapter[] = [
     },
     {
         id: 'routing', title: 'Application Traffic Routing', navTitle: 'Application Traffic Routing', category: 'Application experience', icon: ArrowLeftRight, color: '#9bcbff',
-        intro: 'Give each application a path that fits its purpose.',
-        scope: ['Application classes', 'Route policies', 'Fiber + 5G'],
+        intro: 'Keep checkout responsive while the camera archive uploads.',
+        scope: ['Application policies', 'Measured path quality', 'Both links online'],
         links: [{ label: 'Open Application Traffic Routing', href: '/app-routing' }],
         variants: [
-            { id: 'voice', label: 'Supplier call' },
-            { id: 'stock', label: 'Stock sync' },
-            { id: 'video', label: 'Camera archive' },
+            { id: 'payment', label: 'Checkout payment' },
+            { id: 'orders', label: 'Online orders' },
+            { id: 'archive', label: 'Camera archive' },
         ]
     },
     {
@@ -53,8 +53,8 @@ export const OFFERING_CHAPTERS: OfferingChapter[] = [
     },
     {
         id: 'eagle', title: 'EA:GLE', navTitle: 'EA:GLE', category: 'Connected operations', icon: Activity, color: '#8bdfcd',
-        intro: 'Follow health from the gateway to every connected layer.',
-        scope: ['Gateway hardware', 'Fiber network', '5G network', 'IT devices', 'OT devices', 'Device connectivity'],
+        intro: 'Check detector evidence, then inspect the device behind the slow response.',
+        scope: ['MSE & learned threshold', 'Detector flag & reason', 'Connection tracking', 'Physical inspection'],
         links: [{ label: 'Open EA:GLE monitoring', href: '/hardware-anomalies' }, { label: 'IT devices', href: '/it-devices' }, { label: 'OT devices', href: '/ot-devices' }],
         variants: [
             { id: 'gateway', label: 'Gateway HW' },
@@ -66,12 +66,12 @@ export const OFFERING_CHAPTERS: OfferingChapter[] = [
     },
     {
         id: 'automation', title: 'Enterprise Device Automation with Interoperability', navTitle: 'Enterprise Device Automation', category: 'Coordinated control', icon: CircuitBoard, color: '#e8bf92',
-        intro: 'Connect different devices to a common operational intent.',
-        scope: ['Interoperability', 'Occupancy', 'Lighting', 'Access', 'Climate'],
+        intro: 'Close the store. Confirm every load.',
+        scope: ['Matter over Wi-Fi', 'Matter over Thread', 'Shelly over MQTT', 'Presence check', 'State confirmation'],
         links: [{ label: 'Explore OT devices', href: '/ot-devices' }],
         variants: [
-            { id: 'open', label: 'Business hours' },
-            { id: 'after-hours', label: 'After hours' },
+            { id: 'after-hours', label: 'Close the store' },
+            { id: 'occupied', label: 'Someone is still inside' },
         ]
     },
     {
@@ -121,6 +121,12 @@ export const COMPONENT_DETAILS: Record<string, {
     light: { title: 'Connected lighting', detail: 'Lighting responds to an opening or after-hours routine.', signals: ['On / off', 'Dimming', 'Policy response'] },
     lock: { title: 'Access control', detail: 'A compatible lock participating in the example space routine.', signals: ['Access state', 'Command result', 'Policy response'] },
     thermostat: { title: 'Climate control', detail: 'The thermostat applies a comfort or setback state as part of the routine.', signals: ['Setpoint', 'Operating mode', 'Policy response'] },
+    'auto-wifi': { title: 'Display plug · Matter over Wi-Fi', detail: 'The display light connects to a Matter-compatible Wi-Fi plug. The illustrative routine sends an Off command, waits for its acknowledgement and then checks the reported switch state.', signals: ['Matter On/Off', 'Wi-Fi connection', 'Requested → acknowledged → observed'] },
+    'auto-thread': { title: 'Desk-lamp plug · Matter over Thread', detail: 'A separate Matter plug controls the desk lamp over the Thread mesh. A Thread border router connects that mesh to the IP network; the plug confirms its own switch state.', signals: ['Matter On/Off', 'Thread mesh', 'State confirmation'] },
+    'auto-shelly': { title: 'Sign relay · Shelly Plus 1PM', detail: 'The Shelly relay controls the illuminated sign through RPC over MQTT and Wi-Fi. The sign switches off, then its illustrative circuit reading settles from 120 W to 0 W. Shelly is the device brand, not a separate network protocol.', signals: ['Switch.Set over MQTT', 'Wi-Fi connection', 'Switch state + measured power'] },
+    'auto-presence': { title: 'Presence sensor · Zigbee', detail: 'The example sensor keeps the closing routine on hold while a colleague remains inside. A clear report and a compressed vacancy dwell are required before any load command is sent. This Zigbee input and presence rule illustrate a proposed integration.', signals: ['Occupied / clear', 'Vacancy dwell', 'Proposed integration'] },
+    'auto-controller': { title: 'Closing-routine console', detail: 'The colleague requests closure on the tablet; this wall console tracks each load separately. The illustrative orchestration waits for the presence check, then distinguishes command acknowledgement from observed state. Coolers, networking and walkway lighting are excluded.', signals: ['Tablet close request', 'Presence condition', 'Three independent confirmations'] },
+    'auto-bridge': { title: 'Thread border router + Zigbee bridge', detail: 'These are distinct functions: the Thread border router routes IP traffic for Matter devices; the proposed Zigbee bridge supplies presence information. The Shelly device uses its separate MQTT broker connection over Wi-Fi.', signals: ['Thread → IP routing', 'Zigbee presence bridge · proposed', 'Separate MQTT path'] },
     hvac: { title: 'HVAC equipment', detail: 'Condition and consumption signals help identify changes that merit investigation.', signals: ['Temperature', 'Vibration', 'Power pattern'] },
     cooler: { title: 'Commercial cooler', detail: 'Cooling behavior and temperature context support investigation of equipment drift.', signals: ['Temperature', 'Compressor activity', 'Door state'] },
     energy: { title: 'Energy & sustainability', detail: 'Metering connects equipment operation to demand and avoidable consumption.', signals: ['Demand', 'Operating schedule', 'Consumption pattern'] },
