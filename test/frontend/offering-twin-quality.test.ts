@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { Vector3 } from 'three';
+import { offeringPixelRatio } from '../../src/components/offerings/offeringRenderQuality.ts';
+import { sampleTwin } from '../../src/components/offerings/OfferingTwinStory.ts';
+import { sampleActor } from '../../src/components/offerings/OfferingStoryMotion.ts';
+import { connectionCurve, gatewayPort, makeConnections } from '../../src/components/offerings/OfferingConnectionPaths.ts';
+
+test('the raster covers CSS zoomed pixels at presentation density without unbounded 4K supersampling',()=>{
+  for(const [w,h,zoom,native] of [[1000,600,1.1,1],[1920,1080,1.18,1],[390,844,1,3],[3840,2160,1,1]]){
+    const ratio=offeringPixelRatio(w,h,w*zoom,h*zoom,native);
+    assert.ok(ratio>=zoom,'CSS enlargement must never stretch a smaller raster');
+    assert.ok(w*h*ratio*ratio<=8_294_401,'bounded render area');
+  }
+  assert.ok(Math.abs(offeringPixelRatio(1000,600,1300,780,1)-1.95)<1e-9);
+  assert.equal(offeringPixelRatio(390,844,390,844,3),2);
+});
+
+test('the twin log locates a port, a physical check precedes recovery, and reverse seeks restore the fault',()=>{
+  assert.equal(sampleTwin(5).stage,'log');
+  assert.equal(sampleTwin(8).highlight,true);
+  assert.equal(sampleTwin(14.3).unplug,1);
+  assert.equal(sampleTwin(15.4).unplug,0);
+  assert.equal(sampleTwin(16).stage,'verify');
+  assert.equal(sampleTwin(16).resolved,false);
+  assert.equal(sampleTwin(17).resolved,true);
+  const early=sampleTwin(5);sampleTwin(24);assert.deepEqual(sampleTwin(5),early);
+});
+
+test('the operator clears the service cart and workbench, and reaches the actual LAN 1 socket',()=>{
+  const port=gatewayPort('pos');
+  for(const variant of ['assembled','exploded'])for(let frame=0;frame<=480;frame++){
+    const time=frame/20,pose=sampleActor('technician',{offering:'twin',variant},time);
+    for(const [x0,x1,z0,z1] of [[6.4,7.8,-.3,.8],[5.3,8.7,-3.625,-2.375],[3.4,4.6,-1.5,3.5]]){
+      const dx=Math.max(x0-pose.at[0],0,pose.at[0]-x1),dz=Math.max(z0-pose.at[2],0,pose.at[2]-z1);
+      assert.ok(Math.hypot(dx,dz)>=.32,`operator intersects furniture at ${time}`);
+    }
+    if(sampleTwin(time).reach>.9){
+      const shoulder=new Vector3(pose.at[0]-.235,pose.at[1]+1.38,pose.at[2]);
+      assert.ok(shoulder.distanceTo(new Vector3(...port.point))<.6,'socket is within arm reach');
+    }
+  }
+});
+
+test('reseating moves only the local plug along its socket normal and preserves the remote cable end',()=>{
+  const link=makeConnections({offering:'twin',variant:'assembled'},true,true).find(link=>link.id==='pos')!;
+  const seated=connectionCurve(link),out=connectionCurve(link,0,1);
+  const delta=out.getPoint(0).sub(seated.getPoint(0));
+  assert.ok(Math.abs(delta.length()-.14)<1e-6);
+  assert.ok(delta.normalize().dot(new Vector3(...link.from.normal))>.999);
+  assert.ok(out.getPoint(1).distanceTo(seated.getPoint(1))<1e-6);
+});

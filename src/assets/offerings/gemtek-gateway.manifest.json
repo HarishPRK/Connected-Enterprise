@@ -1,0 +1,190 @@
+{
+  "prefabs": {
+    "GatewayTwin": {
+      "min": [
+        -0.853747611278393,
+        0.018999997526407242,
+        -0.5817031860351562
+      ],
+      "max": [
+        0.9069289619188979,
+        2.2799999713897705,
+        0.5817031860351562
+      ],
+      "size": [
+        1.760676573197291,
+        2.2609999738633633,
+        1.1634063720703125
+      ]
+    }
+  },
+  "parts": [
+    {
+      "name": "GatewayBase",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 2
+    },
+    {
+      "name": "GatewayHousingFront",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 2
+    },
+    {
+      "name": "GatewayHousingBack",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 2
+    },
+    {
+      "name": "GatewayCrown",
+      "at": [
+        0,
+        2.268,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 1
+    },
+    {
+      "name": "GatewayPorts",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 1
+    },
+    {
+      "name": "GatewayFrontPanel",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 1
+    },
+    {
+      "name": "GatewayBackplate",
+      "at": [
+        0,
+        0.99,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 0
+    },
+    {
+      "name": "GatewayBoard",
+      "at": [
+        0,
+        0.145,
+        0.125
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 1
+    },
+    {
+      "name": "GatewayRadio",
+      "at": [
+        0,
+        0.145,
+        -0.125
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 1
+    },
+    {
+      "name": "GatewayHeatsinkLeft",
+      "at": [
+        0,
+        0.145,
+        0.245
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 1
+    },
+    {
+      "name": "GatewayAntennae",
+      "at": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "visible": true,
+      "children": 1
+    }
+  ],
+  "source": "https://studio.connectedenterprise.app/",
+  "gateway": "Gemtek WGRTD-159BE-B OSPv2"
+}

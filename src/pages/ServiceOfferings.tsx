@@ -1,6 +1,6 @@
 import { lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Check, ChevronRight, CircleDot, Layers3, Pause, Play, RotateCcw, Route } from 'lucide-react';
+import { ArrowRight, Check, ChevronRight, CircleDot, Layers3, Maximize2, Pause, Play, RotateCcw, Route } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { StudioSceneBoundary } from '../ui/StudioSceneBoundary';
 import { COMPONENT_DETAILS, OFFERING_CHAPTERS, type OfferingId } from '../components/offerings/offeringCatalog';
@@ -74,6 +74,15 @@ export function ServiceOfferingsPage() {
     setFollowStory(!reducedMotion);
   }
 
+  function togglePlayback() { if(finished)seek(0);setPlaying(!playing);setTouring(false); }
+  function replayFilm() { seek(reducedMotion?BEAT_TIMES[0]:0);setFollowStory(true);setPlaying(!reducedMotion);setTouring(false); }
+  async function watchCinema() {
+    const scene=stageRef.current?.querySelector<HTMLElement>('.offering-scene');
+    // Request fullscreen directly from the click so browser gesture permission
+    // is retained. If unavailable, the same film plays in the embedded stage.
+    try { await scene?.requestFullscreen(); } catch { /* Embedded playback remains available. */ }
+    replayFilm();
+  }
   function watchStory() {
     seek(reducedMotion ? BEAT_TIMES[0] : 0);
     setFollowStory(true);
@@ -150,6 +159,7 @@ export function ServiceOfferingsPage() {
           <div className="enterprise-case-copy"><span>{useCase.setting}</span><h3>{useCase.title}</h3><p>{useCase.stakes}</p></div>
           <div className="enterprise-case-actions">
             <button type="button" className="enterprise-watch-story" onClick={watchStory}><Play size={17} aria-hidden="true" />{reducedMotion ? 'Explore the story' : 'Watch story'}<span>{reducedMotion ? '4 steps' : `${PLAYBACK_SECONDS} s`}</span></button>
+            <button type="button" className="enterprise-cinema" disabled={!sceneReady} onClick={()=>void watchCinema()}><Maximize2 size={16} aria-hidden="true"/>{reducedMotion?'Explore in cinema':'Watch in cinema'}</button>
             <button type="button" className="enterprise-follow-story" aria-pressed={followStory} onClick={() => setFollowStory(!followStory)}><Route size={14} aria-hidden="true" />{followStory ? 'Following the action' : 'Follow the action'}</button>
           </div>
         </div>
@@ -159,7 +169,7 @@ export function ServiceOfferingsPage() {
             <StudioSceneBoundary fallback={<EnterpriseFallback offering={offering.id} onOfferingSelect={selectOffering} onReady={onSceneReady} />}
               loading={<div className="enterprise-scene-loading"><Layers3 size={32} strokeWidth={1} aria-hidden="true" /><strong>Preparing the connected store</strong><span>Explore the scenarios while the 3D environment loads.</span></div>}>
               <OfferingScene offering={offering.id} variant={variant.id} active={active} phase={phase} paused={!running} selected={selected} onSelect={setSelected} onOfferingSelect={selectOffering}
-                timeRef={timeRef} revision={revision} followStory={followStory} onCameraInteraction={leaveStoryCamera} onReady={onSceneReady} />
+                timeRef={timeRef} revision={revision} followStory={followStory} onCameraInteraction={leaveStoryCamera} onReady={onSceneReady} finished={finished} onTogglePlayback={togglePlayback} onSeek={time=>{seek(time);setPlaying(false);setTouring(false);}} onReplay={replayFilm} />
             </StudioSceneBoundary>
           </div>
           <div className="showcase-scene-caption"><span className="showcase-status"><span />{beat.status}</span><span className="showcase-scene-format">Illustrative scenario</span></div>

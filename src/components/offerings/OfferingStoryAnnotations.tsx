@@ -3,10 +3,14 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { Vector3 } from 'three';
 import { sampleSignals, type StoryContext } from './OfferingStoryMotion';
 import { sampleFilmCue } from './OfferingFilmSequence';
+import { sampleCheckout } from './OfferingCheckoutStory';
+import { sampleRouting } from './OfferingRoutingStory';
 
 export interface StoryAnnotationNodes {
   labels: Map<number, HTMLDivElement>;
   caption: Map<'chapter' | 'title' | 'subtitle', HTMLElement>;
+  route: Map<'panel' | 'path' | 'status', HTMLElement>;
+  routing: Map<'panel' | 'voice' | 'video' | 'stock' | 'status', HTMLElement>;
 }
 
 export function OfferingStoryAnnotationLayer({ nodes, visible, film }: {
@@ -20,6 +24,19 @@ export function OfferingStoryAnnotationLayer({ nodes, visible, film }: {
       <span ref={node => { if (node) nodes.current.caption.set('chapter', node); else nodes.current.caption.delete('chapter'); }} />
       <h3 ref={node => { if (node) nodes.current.caption.set('title', node); else nodes.current.caption.delete('title'); }} />
       <p ref={node => { if (node) nodes.current.caption.set('subtitle', node); else nodes.current.caption.delete('subtitle'); }} />
+    </div>}
+    {film && <div className="offering-film-route" hidden ref={node => { if(node)nodes.current.route.set('panel',node);else nodes.current.route.delete('panel'); }}>
+      <strong>Where the payment goes</strong>
+      <ol><li>Checkout</li><li>Edge gateway</li><li ref={node => { if(node)nodes.current.route.set('path',node);else nodes.current.route.delete('path'); }}>Fiber</li><li>Payment service</li></ol>
+      <p ref={node => { if(node)nodes.current.route.set('status',node);else nodes.current.route.delete('status'); }} />
+    </div>}
+    {film && <div className="offering-film-route offering-routing-allocation" hidden ref={node => {if(node)nodes.current.routing.set('panel',node);else nodes.current.routing.delete('panel');}}>
+      <strong>Three jobs. Two healthy links.</strong><small>Fiber online · 5G online</small>
+      <dl>{(['voice','video','stock'] as const).map((id,index)=><div key={id} style={{'--flow-color':['#8ce3c6','#b4a5ff','#ffc885'][index]} as React.CSSProperties}>
+        <dt>{['Supplier call','Camera archive','Stock sync'][index]}</dt>
+        <dd ref={node=>{if(node)nodes.current.routing.set(id,node);else nodes.current.routing.delete(id);}}/>
+      </div>)}</dl>
+      <p ref={node=>{if(node)nodes.current.routing.set('status',node);else nodes.current.routing.delete('status');}}/>
     </div>}
   </div>;
 }
@@ -41,7 +58,7 @@ export function OfferingStoryAnnotationSync({ context, timeRef, nodes, visible, 
       if (!node) continue;
       // The film caption carries the narrative. Only multi-path stories need
       // additional labels in the shot; manual focus still identifies its asset.
-      const show = !!signal?.visible && (!film || context.offering === 'routing' || (context.offering === 'failover' && index === 1));
+      const show = !!signal?.visible && (!film || context.offering === 'routing' || context.offering === 'twin' || (context.offering === 'video' && timeRef.current >= 10.05 && timeRef.current < 13.05) || (context.offering === 'failover' && index === 1));
       node.style.visibility = show ? 'visible' : 'hidden';
       if (!show) continue;
       const text = node.lastElementChild;
@@ -59,6 +76,15 @@ export function OfferingStoryAnnotationSync({ context, timeRef, nodes, visible, 
       node.style.opacity = point.z < 1 ? '1' : '0';
     }
     if (!film) return;
+    const allocation=sampleRouting(timeRef.current);
+    const routing=nodes.current.routing;
+    const panel=routing.get('panel');if(panel)panel.hidden=context.offering!=='routing'||!allocation.visible;
+    for(const id of ['voice','video','stock','status'] as const){const node=routing.get(id);if(node&&node.textContent!==allocation[id])node.textContent=allocation[id];}
+    const payment=sampleCheckout(context,timeRef.current);
+    const route=nodes.current.route.get('panel'),path=nodes.current.route.get('path'),status=nodes.current.route.get('status');
+    if(route){route.hidden=!payment.networkShot;route.dataset.recovered=String(!payment.delayed||timeRef.current>=10);}
+    if(path&&path.textContent!==payment.route)path.textContent=payment.route;
+    if(status&&status.textContent!==payment.routeStatus)status.textContent=payment.routeStatus;
     const cue = sampleFilmCue(context, timeRef.current);
     const chapter = nodes.current.caption.get('chapter'), title = nodes.current.caption.get('title'), subtitle = nodes.current.caption.get('subtitle');
     if (chapter && chapter.textContent !== cue.chapter) chapter.textContent = cue.chapter;

@@ -1,3 +1,4 @@
+import { isCheckoutStory, sampleCheckout } from './OfferingCheckoutStory';
 import type { StoryContext } from './OfferingStoryMotion';
 
 export interface FilmCue { chapter: string; title: string; subtitle: string; }
@@ -22,37 +23,37 @@ const SEQUENCES: Record<StoryContext['offering'], Record<string, Sequence>> = {
     ],
   },
   routing: {
-    pos: [
-      ['Three jobs share the network', 'A payment, a supplier call and camera footage reach the gateway.'],
-      ['The customer is waiting', 'The payment needs its own route while other applications continue.'],
-      ['Give payments their own path', 'The gateway sends the payment over its configured 5G route.'],
-      ['One sale, separate decisions', 'The receipt prints. Voice and video retain their own routes.'],
-    ],
     voice: [
-      ['The supplier joins the call', 'A colleague arranges a delivery while the store keeps trading.'],
-      ['The conversation breaks up', 'The call needs a route suited to its connection requirements.'],
-      ['Move the call onto 5G', 'The gateway applies the voice policy. Other application paths remain separate.'],
-      ['The conversation can continue', 'The colleague continues the supplier call on the selected connection.'],
+      ['A delivery to confirm', 'The supplier joins the call. Camera footage and stock data begin uploading.'],
+      ['Could you repeat that?', 'Bulk transfers compete with the call. Both network links are healthy.'],
+      ['A route for every job', 'Voice takes 5G. The archive keeps fiber. The stock sync waits its turn.'],
+      ['Delivery confirmed', 'The colleague finishes the call while the scheduled stock update resumes.'],
+    ],
+    stock: [
+      ['The stock update begins', 'The inventory server shares fiber with the supplier call and camera archive.'],
+      ['Background work can wait', 'The stock transfer competes with a conversation that needs a prompt response.'],
+      ['Schedule the stock sync', 'Queue inventory, retain the archive on fiber, and put voice on 5G.'],
+      ['Now the stock job gets its turn', 'Inventory resumes on fiber. The delivery is confirmed.'],
     ],
     video: [
-      ['Footage leaves the store', 'The camera transfers video while staff take calls and payments.'],
-      ['The transfer needs a policy', 'Video needs an explicit route alongside the other store applications.'],
-      ['Keep video on fiber', 'The gateway assigns footage to fiber without moving every application.'],
-      ['Each application keeps its path', 'Video flows on fiber. Payments and calls retain separate routing decisions.'],
+      ['The cameras reach local analytics', 'Two feeds enter the Dell analytics server. Footage begins its archive upload.'],
+      ['The archive shares a busy path', 'A live supplier call and stock update compete with the upload.'],
+      ['Keep the archive on fiber', 'The call takes 5G while the stock sync waits for its window.'],
+      ['Keep recording. Keep working.', 'The archive continues, the delivery is confirmed, and inventory resumes.'],
     ],
   },
   twin: {
     assembled: [
-      ['Support joins the store colleague', 'A remote engineer and a colleague examine the same gateway.'],
-      ['Which connection needs checking?', 'The colleague needs to locate the interface the engineer means.'],
-      ['Find the physical interface', 'The shared CPE view connects the discussion to a specific port.'],
-      ['Agree the next check', 'The colleague can now check the identified interface and cable.'],
+      ['Open the gateway on the laptop', 'An operator investigates Checkout 01 connectivity using the Gemtek twin.'],
+      ['The log names the interface: LAN 1', 'Select the error. The on-screen twin locates the exact socket.'],
+      ['Check the port the twin identified', 'The operator walks to the gateway and reseats the LAN 1 connector.'],
+      ['Verify the connection before closing the issue', 'Link stable. Checkout reachable. The operator confirms the result on the laptop.'],
     ],
     exploded: [
-      ['A closer CPE inspection', 'A technician reviews the gateway before its thermal inspection.'],
-      ['Look beneath the enclosure', 'The layers separate to reveal the board and thermal assembly.'],
-      ['Follow the thermal assembly', 'The engineer identifies how the board, heatsink and enclosure fit together.'],
-      ['The inspection has a focus', 'The technician has the relevant components identified for the next check.'],
+      ['The service session begins on the laptop', 'The operator opens the twin and its interface error log.'],
+      ['Look inside the virtual port assembly', 'LAN 1 disconnects repeatedly. Only the on-screen twin is taken apart.'],
+      ['Match the digital assembly to the physical socket', 'The gateway stays assembled while the operator checks and reseats its LAN 1 cable.'],
+      ['The laptop confirms the repair', 'The link returns, passes its stability check, and reaches Checkout 01.'],
     ],
   },
   eagle: {
@@ -146,7 +147,28 @@ const SEQUENCES: Record<StoryContext['offering'], Record<string, Sequence>> = {
 const CHAPTERS = ['01 / The setting', '02 / The challenge', '03 / The response', '04 / The outcome'];
 
 export function sampleFilmCue(context: StoryContext, time: number): FilmCue {
+  if(context.offering==='video'&&time>=10.05&&time<13.05)return {chapter:'03 / LOCAL ANALYTICS',title:'The camera feeds arrive here',subtitle:'The Dell analytics server examines the footage and raises an event for operator review.'};
+  if(context.offering==='twin'&&time>=15.4&&time<17)return {chapter:'03 / VERIFY THE REPAIR',title:'Test the link after reseating',subtitle:'The connector is back in place. Check link stability and checkout reachability.'};
   const phase = time >= 17 ? 3 : time >= 10 ? 2 : time >= 4 ? 1 : 0;
+  if (isCheckoutStory(context)) {
+    const payment = sampleCheckout(context,time);
+    const beats: readonly [number,string,string][] = [
+      [0,'One customer. One ordinary sale.','A shopper reaches checkout while the next customers join the queue.'],
+      [1.25,'The cashier starts the payment','The basket is on the counter. The customer takes out a card.'],
+      [2.95,'A card. A tap. A decision.','Watch the reader as the customer presents their card.'],
+      [4,payment.delayed?'The payment meets an interruption':'The payment stays on fiber',payment.delayed?'The reader waits for a response. The purchase is not yet complete.':'The backup disappears, but the payment still has its working fiber path.'],
+      [5.4,payment.delayed?'The pause becomes personal':'The sale is still moving',payment.delayed?'Cashier: “One moment. The payment is still waiting.”':'The customer receives approval while the gateway flags the missing backup.'],
+      [8.35,context.offering==='routing'?'A payment needs its own path':'Behind the checkout',payment.delayed?'Follow the transaction from the counter to the shared edge gateway.':'The gateway keeps fiber active and flags the unavailable 5G backup.'],
+      [10.05,payment.delayed?'The gateway selects 5G':'Keep the working connection',payment.delayed?'The payment gets an available path. The cashier can retry.':'Fiber carries the transaction. The missing backup still needs attention.'],
+      [12.5,payment.delayed?'Back at the reader':'Back with the customer',payment.delayed?'The cashier retries over 5G. Watch for the terminal’s confirmation.':'The transaction is approved over fiber. The customer can collect their receipt.'],
+      [13,'Approved. The sale can continue.','Cashier: “That’s gone through. Here’s your receipt.”'],
+      [14.3,'The receipt is the payoff','Paper feeds from the printer. The customer collects it before leaving.'],
+      [16.95,'The next customer steps forward','The shopper leaves with the basket and receipt. The queue moves again.'],
+      [19.55,'The store keeps moving',payment.delayed?'A recovered connection becomes a completed sale and a shorter queue.':'Trading continues on fiber while the missing backup is investigated.'],
+    ];
+    const cue=[...beats].reverse().find(([start])=>time>=start)??beats[0];
+    return {chapter:CHAPTERS[phase],title:cue[1],subtitle:cue[2]};
+  }
   const variants = SEQUENCES[context.offering];
   const sequence = variants[context.variant] ?? Object.values(variants)[0];
   const [title, subtitle] = sequence[phase];

@@ -36,15 +36,15 @@ export const OFFERING_CHAPTERS: OfferingChapter[] = [
         scope: ['Application classes', 'Route policies', 'Fiber + 5G'],
         links: [{ label: 'Open Application Traffic Routing', href: '/app-routing' }],
         variants: [
-            { id: 'pos', label: 'Payments' },
-            { id: 'voice', label: 'Voice' },
-            { id: 'video', label: 'Video' },
+            { id: 'voice', label: 'Supplier call' },
+            { id: 'stock', label: 'Stock sync' },
+            { id: 'video', label: 'Camera archive' },
         ]
     },
     {
         id: 'twin', title: 'Digital Twin for CPE', navTitle: 'Digital Twin for CPE', category: 'Hardware visibility', icon: Box, color: '#b6b9ff',
-        intro: 'Move from a gateway on a diagram to the hardware inside it.',
-        scope: ['CPE assembly', 'Component inspection', 'Exploded view'],
+        intro: 'Trace an interface error from the laptop twin to the physical connection.',
+        scope: ['Interface error logs', 'Port inspection', 'Verified recovery', 'Exploded view'],
         links: [{ label: 'Open Gateway Twin', href: '/gateway-twin' }],
         variants: [
             { id: 'assembled', label: 'Assembled' },
@@ -103,6 +103,7 @@ export const COMPONENT_DETAILS: Record<string, {
     signals: string[];
 }> = {
     gateway: { title: 'Edge gateway / CPE', detail: 'The shared point for network policy, local processing and device context.', signals: ['Hardware health', 'Interfaces', 'Local services'] },
+    analytics: { title: 'Dell edge analytics server', detail: 'Both cameras feed this dedicated local analytics appliance. Its uplink reaches the shared CPE; detection events support operator review. The chassis is illustrative.', signals: ['Camera A + Camera B', 'Local inference', 'Gateway uplink'] },
     fiber: { title: 'Fiber network', detail: 'The wired uplink connecting the branch to upstream services.', signals: ['Link state', 'Loss & latency', 'Path policy'] },
     '5g': { title: '5G network', detail: 'A distinct cellular path for eligible branch traffic.', signals: ['Registration', 'Signal quality', 'Link state'] },
     cloud: { title: 'Upstream services', detail: 'External applications and services reached through the branch’s uplinks.', signals: ['Reachability', 'Application path'] },
@@ -115,7 +116,7 @@ export const COMPONENT_DETAILS: Record<string, {
     board: { title: 'Compute board', detail: 'Processing and memory supporting gateway software and local services.', signals: ['CPU', 'Memory', 'Local processing'] },
     heatsink: { title: 'Thermal assembly', detail: 'The finned surface carries heat away from the electronics through passive cooling.', signals: ['Temperature', 'Thermal condition'] },
     ports: { title: 'Network interfaces', detail: 'Physical connectivity to upstream links and local equipment.', signals: ['Link state', 'RX / TX', 'Interface role'] },
-    antennae: { title: 'Radio antennas', detail: 'External radio elements connecting the wireless interfaces to their networks.', signals: ['Wireless interface', 'Signal quality'] },
+    antennae: { title: 'Radio antennas', detail: 'The internal cellular antenna carrier connects the wireless interface to the backup network.', signals: ['Wireless interface', 'Signal quality'] },
     sensor: { title: 'Occupancy sensor', detail: 'Presence information provides an input to configured automations.', signals: ['Occupancy', 'Device state', 'Event input'] },
     light: { title: 'Connected lighting', detail: 'Lighting responds to an opening or after-hours routine.', signals: ['On / off', 'Dimming', 'Policy response'] },
     lock: { title: 'Access control', detail: 'A compatible lock participating in the example space routine.', signals: ['Access state', 'Command result', 'Policy response'] },

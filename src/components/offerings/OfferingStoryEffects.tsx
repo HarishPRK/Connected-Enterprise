@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
-import { useFrame, useLoader } from '@react-three/fiber';
-import { BoxGeometry, EdgesGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, type Object3D } from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { useFrame } from '@react-three/fiber';
+import { BoxGeometry, EdgesGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, Vector3, type Object3D } from 'three';
+import { useGLTF } from '@react-three/drei';
 import actorsUrl from '../../assets/offerings/enterprise-actors.glb?url';
 import { monitoredPoint, sampleActor, STORY_ACTORS, storyProgress, type ActorId, type ActorPose, type ActorRole, type StoryContext } from './OfferingStoryMotion';
 import { sampleActorRig } from './OfferingActorMotion';
+import { isCheckoutStory, sampleCheckout } from './OfferingCheckoutStory';
+import { sampleTwin } from './OfferingTwinStory';
+import { gatewayPort } from './OfferingConnectionPaths';
+import { OfferingPaymentTerminal } from './OfferingPaymentTerminal';
 
 export interface StoryEffectsProps extends StoryContext { timeRef: RefObject<number>; onSelect: (id:string)=>void; }
 type Joint={object:Object3D;y:number};
-const JOINTS=['Hips','Torso','Head','LeftUpperArm','LeftForearm','RightUpperArm','RightForearm','LeftThigh','LeftShin','LeftAnkle','RightThigh','RightShin','RightAnkle','Tablet','BagMount','Handset','Receipt'] as const;
+const JOINTS=['Hips','Torso','Head','LeftUpperArm','LeftForearm','RightUpperArm','RightForearm','LeftThigh','LeftShin','LeftAnkle','RightThigh','RightShin','RightAnkle','Tablet','BagMount','Handset','Receipt','PaymentCard'] as const;
 type Rig=Partial<Record<typeof JOINTS[number],Joint>>;
 function prepareActor(source:Object3D,role:ActorRole,id:ActorId){
   const object=source.clone(true),joints:Rig={},ownedMaterials:MeshStandardMaterial[]=[];
@@ -17,7 +21,12 @@ function prepareActor(source:Object3D,role:ActorRole,id:ActorId){
   for(const name of JOINTS){const joint=object.getObjectByName(`${role}_${name}`);if(joint)joints[name]={object:joint,y:joint.position.y};}
   const handset=new Mesh(new BoxGeometry(.065,.24,.055),new MeshStandardMaterial({color:'#17212b',roughness:.45}));handset.name=`${role}_Handset`;handset.position.set(.015,-.29,.025);handset.rotation.z=.12;joints.RightForearm?.object.add(handset);joints.Handset={object:handset,y:handset.position.y};
   const receipt=new Mesh(new BoxGeometry(.09,.17,.004),new MeshStandardMaterial({color:'#f6f0e5',roughness:.9}));receipt.position.set(0,-.36,.045);joints.LeftForearm?.object.add(receipt);joints.Receipt={object:receipt,y:receipt.position.y};
-  return {object,joints,handset,receipt,ownedMaterials};
+  const card=new Group();
+  const body=new Mesh(new BoxGeometry(.09,.057,.004),new MeshStandardMaterial({color:'#284a70',metalness:.5,roughness:.3}));
+  const chip=new Mesh(new BoxGeometry(.015,.013,.001),new MeshStandardMaterial({color:'#d8bd83',metalness:.8,roughness:.28}));
+  chip.position.set(-.025,.006,.003);card.add(body,chip);
+  card.position.set(0,-.34,.038);joints.RightForearm?.object.add(card);joints.PaymentCard={object:card,y:card.position.y};
+  return {object,joints,handset,receipt,card,ownedMaterials};
 }
 function setRig(rig:Rig,pose:ActorPose,time:number){
   for(const joint of Object.values(rig)){joint.object.rotation.set(0,0,0);joint.object.position.y=joint.y;}
@@ -37,37 +46,64 @@ function setRig(rig:Rig,pose:ActorPose,time:number){
   if(rig.Handset)rig.Handset.object.visible=pose.phone>.1;
   if(rig.Receipt)rig.Receipt.object.visible=pose.receipt>.55;
 }
+// Solve the two actual Blender arm pivots against a reader in world space.
+// Both rotations are rebuilt from the absolute pose, so reverse scrubs are safe.
+function reachReader(rig:Rig,weight:number,side:'Right'|'Left'='Right',destination:[number,number,number]=[7.2,1.64,5.065]){
+  const arm=rig[`${side}UpperArm`]?.object,forearm=rig[`${side}Forearm`]?.object;
+  if(!arm||!forearm||!arm.parent||weight<=0)return;
+  arm.parent.updateWorldMatrix(true,true);
+  const rest=forearm.position.clone(),hand=new Vector3(0,-.332,.013);
+  const target=arm.parent.worldToLocal(new Vector3(...destination)).sub(arm.position);
+  const lengthA=rest.length(),lengthB=hand.length(),distance=Math.min(target.length(),lengthA+lengthB-.001);
+  const direction=target.normalize();
+  const pole=new Vector3(.85,-.45,0).addScaledVector(direction,-new Vector3(.85,-.45,0).dot(direction)).normalize();
+  const along=(lengthA*lengthA-lengthB*lengthB+distance*distance)/(2*distance);
+  const elbow=direction.clone().multiplyScalar(along).addScaledVector(pole,Math.sqrt(Math.max(0,lengthA*lengthA-along*along)));
+  const upper=new Quaternion().setFromUnitVectors(rest.normalize(),elbow.clone().normalize());
+  const lowerDirection=direction.multiplyScalar(distance).sub(elbow).applyQuaternion(upper.clone().invert()).normalize();
+  const lower=new Quaternion().setFromUnitVectors(hand.normalize(),lowerDirection);
+  arm.quaternion.slerp(upper,weight);forearm.quaternion.slerp(lower,weight);
+}
 function Actor({id,role,context,timeRef,onSelect}:{id:ActorId;role:ActorRole;context:StoryContext;timeRef:RefObject<number>;onSelect:(id:string)=>void}){
-  const gltf=useLoader(GLTFLoader,actorsUrl),root=useRef<Group>(null),lean=useRef<Group>(null);
+  const gltf=useGLTF(actorsUrl,false),root=useRef<Group>(null),lean=useRef<Group>(null);
   const actor=useMemo(()=>{const source=gltf.scene.getObjectByName(role);if(!source)throw new Error(`Missing actor ${role}`);return prepareActor(source,role,id);},[gltf,role,id]);
-  useEffect(()=>()=>{for(const prop of [actor.handset,actor.receipt]){prop.geometry.dispose();(prop.material as MeshStandardMaterial).dispose();}actor.ownedMaterials.forEach(material=>material.dispose());},[actor]);
+  useEffect(()=>()=>{for(const prop of [actor.handset,actor.receipt]){prop.geometry.dispose();(prop.material as MeshStandardMaterial).dispose();}actor.card.traverse(object=>{if(object instanceof Mesh){object.geometry.dispose();(object.material as MeshStandardMaterial).dispose();}});actor.ownedMaterials.forEach(material=>material.dispose());},[actor]);
   useFrame(()=>{
     if(!root.current||!lean.current)return;const time=timeRef.current,pose=sampleActor(id,context,time);
     root.current.visible=pose.visible;root.current.position.set(...pose.at);root.current.rotation.y=pose.heading;lean.current.rotation.x=pose.fall*Math.PI/2;
     setRig(actor.joints,pose,time);
+    const checkout=sampleCheckout(context,time);
+    setVisibility(actor.card,id==='shopper'&&checkout.cardVisible);
+    if(id==='technician'&&context.offering==='twin'){
+      const twin=sampleTwin(time),socket=gatewayPort('pos');
+      const point=socket.point.map((value,i)=>value+socket.normal[i]*(.07+twin.unplug*.14)) as [number,number,number];
+      reachReader(actor.joints,twin.reach,'Right',point);
+      reachReader(actor.joints,twin.typing*.85,'Right',[7.05,1.15,.63]);
+    }
+    if(id==='shopper'&&isCheckoutStory(context)){
+      reachReader(actor.joints,checkout.cardReach);
+      const lift=storyProgress(time,15.9,16.3),lower=storyProgress(time,16.55,17.25);
+      reachReader(actor.joints,lift*lift*(3-2*lift)*(1-lower*lower*(3-2*lower)),'Left',[8.7,1.6,4.85]);
+    }
   });
   return <group ref={root} onClick={event=>{event.stopPropagation();if(event.delta<5)onSelect(context.offering==='video'&&context.variant==='crowd'?'crowd':'person');}}><group ref={lean}><primitive object={actor.object} dispose={null}/></group></group>;
 }
 
 function cloneProp(source:Object3D){const copy=source.clone(true);copy.traverse(node=>{if(node instanceof Mesh){node.castShadow=true;node.receiveShadow=true;node.material=Array.isArray(node.material)?node.material.map(m=>m.clone()):node.material.clone();}});return copy;}
-function paintDisplay(object:Object3D,color:string){object.traverse(child=>{if(child instanceof Mesh){const materials=Array.isArray(child.material)?child.material:[child.material];for(const material of materials)if(material instanceof MeshStandardMaterial){material.color.set(color);material.emissive.set(color);material.emissiveIntensity=.45;}}});}
 function setVisibility(object:Object3D,visible:boolean){object.visible=visible;}
 function CheckoutProps({context,timeRef}:{context:StoryContext;timeRef:RefObject<number>}){
-  const gltf=useLoader(GLTFLoader,actorsUrl);
+  const gltf=useGLTF(actorsUrl,false);
   const props=useMemo(()=>{
     const terminal=cloneProp(gltf.scene.getObjectByName('PaymentTerminal')!),printer=cloneProp(gltf.scene.getObjectByName('ReceiptPrinter')!),basket=cloneProp(gltf.scene.getObjectByName('ShoppingBasket')!);
-    return {terminal,printer,basket,display:terminal.getObjectByName('PaymentTerminal_Display'),paper:printer.getObjectByName('ReceiptPrinter_Receipt')};
+    const display=terminal.getObjectByName('PaymentTerminal_Display');if(display)display.visible=false;
+    return {terminal,printer,basket,paper:printer.getObjectByName('ReceiptPrinter_Receipt')};
   },[gltf]);
   useEffect(()=>()=>{for(const object of [props.terminal,props.printer,props.basket])object.traverse(child=>{if(child instanceof Mesh)(Array.isArray(child.material)?child.material:[child.material]).forEach(m=>m.dispose());});},[props]);
-  const last=useRef('');
   useFrame(()=>{
-    const t=timeRef.current,isPayment=['failover','routing'].includes(context.offering);
-    const slower=context.offering==='failover'?context.variant==='fiber':context.variant==='pos';
-    const blocked=isPayment&&t>=4&&t<13&&slower;
-    const approved=isPayment&&t>=(slower?13:6);const color=blocked?'#ffb34d':approved?'#54e8aa':'#42bdf3';
-    if(props.display&&last.current!==color){paintDisplay(props.display,color);last.current=color;}
+    const t=timeRef.current,isPayment=isCheckoutStory(context);
+    const checkout=sampleCheckout(context,t);
     const shopper=sampleActor('shopper',context,t),carry=isPayment?shopper.carry:0;
-    if(props.paper){props.paper.scale.setY(isPayment?storyProgress(t,slower?13.8:7,slower?15.2:8.4):.08);setVisibility(props.paper,shopper.receipt<.55);}
+    if(props.paper){props.paper.scale.setY(isPayment?checkout.paper:.08);setVisibility(props.paper,shopper.receipt<.55);}
     const handX=shopper.at[0]+Math.cos(shopper.heading)*.30+Math.sin(shopper.heading)*.04;
     const handZ=shopper.at[2]-Math.sin(shopper.heading)*.30+Math.cos(shopper.heading)*.04;
     const handY=.34+Math.sin(shopper.distance*9.8+shopper.phase)*.012*shopper.walk;
@@ -75,6 +111,7 @@ function CheckoutProps({context,timeRef}:{context:StoryContext;timeRef:RefObject
     props.basket.rotation.set(0,shopper.heading*carry,0);
   });
   return <>
+    <OfferingPaymentTerminal context={context} timeRef={timeRef}/>
     <primitive object={props.terminal} position={[7.2,1.15,4.95]} scale={1.25} dispose={null}/>
     <primitive object={props.printer} position={[8.7,1.15,4.6]} scale={1.35} dispose={null}/>
     <primitive object={props.basket} position={[6.65,1.15,4.45]} scale={1.15} dispose={null}/>
@@ -106,7 +143,7 @@ function EquipmentFeedback({context,timeRef}:{context:StoryContext;timeRef:RefOb
   useFrame(()=>{
     const t=timeRef.current,event=t>=4,response=t>=10;
     if(fault.current){const p=context.offering==='eagle'?monitoredPoint(context.variant):context.offering==='smart'?context.variant==='hvac'?[-9,1.9,-4.8]:context.variant==='cooler'?[-1.35,3.15,-7.6]:[-9.6,2,-1.1]:[14.6,2.3,-6];fault.current.visible=event&&['eagle','smart','failover'].includes(context.offering);fault.current.position.set(p[0],p[1]+.25,p[2]);fault.current.scale.setScalar(.8+.2*Math.sin(t*4));}
-    if(scan.current){scan.current.visible=t>8&&['eagle','twin','automation','smart'].includes(context.offering);const k=(t*.5)%1;scan.current.scale.setScalar(.3+k*1.7);if(scanMaterial.current)scanMaterial.current.opacity=.45*(1-k);}
+    if(scan.current){scan.current.visible=t>8&&['eagle','automation','smart'].includes(context.offering);const k=(t*.5)%1;scan.current.scale.setScalar(.3+k*1.7);if(scanMaterial.current)scanMaterial.current.opacity=.45*(1-k);}
     if(lock.current){lock.current.visible=context.offering==='automation'&&response;const mat=lock.current.material as MeshBasicMaterial;mat.color.set(context.variant==='after-hours'?'#8ce3c6':'#68d6ff');lock.current.rotation.z=context.variant==='after-hours'?0:-.9;}
     if(meter.current){meter.current.visible=context.offering==='smart'&&context.variant==='energy';meter.current.children.forEach((bar,i)=>{bar.scale.y=.3+(i%3)*.18;bar.position.y=bar.scale.y*.7;});}
   });

@@ -11,6 +11,10 @@ export interface OfferingSceneProps {
   followStory?: boolean;
   onCameraInteraction?: () => void;
   onReady?: () => void;
+  finished?: boolean;
+  onTogglePlayback?: () => void;
+  onSeek?: (time: number) => void;
+  onReplay?: () => void;
   onSelect: (id: string) => void;
   onOfferingSelect?: (id: OfferingId) => void;
 }
