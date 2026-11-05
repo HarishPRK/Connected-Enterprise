@@ -1,0 +1,414 @@
+{
+  "format": "GLB / glTF 2.0",
+  "up": "+Y",
+  "front": "+Z",
+  "units": "meters (illustrative equipment scale)",
+  "origin": "each prefab root is identity at origin; minimum Y is zero",
+  "prefabs": {
+    "Gateway": {
+      "size": [
+        1.86,
+        1.41,
+        1.102
+      ],
+      "min": [
+        -0.93,
+        0.0,
+        -0.55
+      ],
+      "max": [
+        0.93,
+        1.41,
+        0.552
+      ],
+      "groups": [
+        "GatewayAntennae",
+        "GatewayBoard",
+        "GatewayHeatsink",
+        "GatewayHousing",
+        "GatewayPorts"
+      ],
+      "triangles": 8776,
+      "meshes": 20
+    },
+    "FiberTerminal": {
+      "size": [
+        0.861,
+        1.12,
+        0.7146
+      ],
+      "min": [
+        -0.425,
+        0.0,
+        -0.25
+      ],
+      "max": [
+        0.436,
+        1.12,
+        0.4646
+      ],
+      "groups": [],
+      "triangles": 2884,
+      "meshes": 6
+    },
+    "CellularTower": {
+      "size": [
+        0.9,
+        2.165,
+        0.9
+      ],
+      "min": [
+        -0.45,
+        0.0,
+        -0.45
+      ],
+      "max": [
+        0.45,
+        2.165,
+        0.45
+      ],
+      "groups": [],
+      "triangles": 1436,
+      "meshes": 6
+    },
+    "Cloud": {
+      "size": [
+        1.6795,
+        1.1002,
+        0.7277
+      ],
+      "min": [
+        -0.8344,
+        0.0,
+        -0.3638
+      ],
+      "max": [
+        0.8451,
+        1.1002,
+        0.3638
+      ],
+      "groups": [],
+      "triangles": 1716,
+      "meshes": 3
+    },
+    "ServerRack": {
+      "size": [
+        1.061,
+        1.82,
+        0.988
+      ],
+      "min": [
+        -0.525,
+        0.0,
+        -0.435
+      ],
+      "max": [
+        0.536,
+        1.82,
+        0.553
+      ],
+      "groups": [],
+      "triangles": 14016,
+      "meshes": 8
+    },
+    "Laptop": {
+      "size": [
+        1.23,
+        0.8774,
+        0.88
+      ],
+      "min": [
+        -0.615,
+        0.0,
+        -0.365
+      ],
+      "max": [
+        0.615,
+        0.8774,
+        0.515
+      ],
+      "groups": [],
+      "triangles": 6588,
+      "meshes": 6
+    },
+    "Sensor": {
+      "size": [
+        0.5,
+        0.72,
+        0.439
+      ],
+      "min": [
+        -0.25,
+        0.0,
+        -0.18
+      ],
+      "max": [
+        0.25,
+        0.72,
+        0.259
+      ],
+      "groups": [],
+      "triangles": 1548,
+      "meshes": 6
+    },
+    "Lock": {
+      "size": [
+        0.585,
+        1.28,
+        0.365
+      ],
+      "min": [
+        -0.215,
+        0.0,
+        -0.11
+      ],
+      "max": [
+        0.37,
+        1.28,
+        0.255
+      ],
+      "groups": [],
+      "triangles": 808,
+      "meshes": 6
+    },
+    "Thermostat": {
+      "size": [
+        0.72,
+        0.72,
+        0.223
+      ],
+      "min": [
+        -0.36,
+        0.0,
+        -0.09
+      ],
+      "max": [
+        0.36,
+        0.72,
+        0.133
+      ],
+      "groups": [],
+      "triangles": 1688,
+      "meshes": 5
+    },
+    "Light": {
+      "size": [
+        0.46,
+        1.35,
+        0.46
+      ],
+      "min": [
+        -0.23,
+        0.0,
+        -0.23
+      ],
+      "max": [
+        0.23,
+        1.35,
+        0.23
+      ],
+      "groups": [],
+      "triangles": 1040,
+      "meshes": 5
+    },
+    "HVAC": {
+      "size": [
+        1.373,
+        1.23,
+        0.951
+      ],
+      "min": [
+        -0.68,
+        0.0,
+        -0.415
+      ],
+      "max": [
+        0.693,
+        1.23,
+        0.536
+      ],
+      "groups": [
+        "HVACFan"
+      ],
+      "triangles": 5892,
+      "meshes": 8
+    },
+    "Cooler": {
+      "size": [
+        1.29,
+        2.0,
+        0.943
+      ],
+      "min": [
+        -0.645,
+        0.0,
+        -0.415
+      ],
+      "max": [
+        0.645,
+        2.0,
+        0.528
+      ],
+      "groups": [
+        "CoolerLeftDoor",
+        "CoolerRightDoor"
+      ],
+      "triangles": 6588,
+      "meshes": 15
+    },
+    "Meter": {
+      "size": [
+        0.72,
+        1.06,
+        0.371
+      ],
+      "min": [
+        -0.36,
+        0.0,
+        -0.165
+      ],
+      "max": [
+        0.36,
+        1.06,
+        0.206
+      ],
+      "groups": [],
+      "triangles": 1304,
+      "meshes": 7
+    },
+    "Camera": {
+      "size": [
+        0.5,
+        0.775,
+        0.926
+      ],
+      "min": [
+        -0.25,
+        0.0,
+        -0.33
+      ],
+      "max": [
+        0.25,
+        0.775,
+        0.596
+      ],
+      "groups": [],
+      "triangles": 1220,
+      "meshes": 7
+    },
+    "Person": {
+      "size": [
+        0.664,
+        1.695,
+        0.275
+      ],
+      "min": [
+        -0.332,
+        0.0,
+        -0.105
+      ],
+      "max": [
+        0.332,
+        1.695,
+        0.17
+      ],
+      "groups": [],
+      "triangles": 3352,
+      "meshes": 4
+    },
+    "SolarPanel": {
+      "size": [
+        1.54,
+        1.2415,
+        0.74
+      ],
+      "min": [
+        -0.77,
+        0.0,
+        -0.49
+      ],
+      "max": [
+        0.77,
+        1.2415,
+        0.25
+      ],
+      "groups": [
+        "SolarArray"
+      ],
+      "triangles": 8384,
+      "meshes": 5
+    },
+    "DeskPhone": {
+      "size": [
+        1.1662,
+        0.5027,
+        0.82
+      ],
+      "min": [
+        -0.6562,
+        0.0,
+        -0.41
+      ],
+      "max": [
+        0.51,
+        0.5027,
+        0.41
+      ],
+      "groups": [],
+      "triangles": 4788,
+      "meshes": 8
+    },
+    "FallenPerson": {
+      "size": [
+        1.695,
+        0.275,
+        0.664
+      ],
+      "min": [
+        -0.85,
+        0.0,
+        -0.332
+      ],
+      "max": [
+        0.845,
+        0.275,
+        0.332
+      ],
+      "groups": [],
+      "triangles": 3352,
+      "meshes": 4
+    }
+  },
+  "articulation": {
+    "HVACFan": {
+      "parent": "HVAC",
+      "pivot": [
+        -0.18,
+        0.71,
+        0.478
+      ],
+      "axis": "Z",
+      "motion": "continuous rotor rotation"
+    },
+    "CoolerLeftDoor": {
+      "parent": "Cooler",
+      "pivot": [
+        -0.578,
+        0.26,
+        0.45
+      ],
+      "axis": "Y",
+      "openRadians": -1.05
+    },
+    "CoolerRightDoor": {
+      "parent": "Cooler",
+      "pivot": [
+        0.578,
+        0.26,
+        0.45
+      ],
+      "axis": "Y",
+      "openRadians": 1.05
+    }
+  }
+}

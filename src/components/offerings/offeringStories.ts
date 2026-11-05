@@ -1,0 +1,160 @@
+import type { OfferingChapter, OfferingId, OfferingVariant } from './offeringCatalog';
+
+export type StoryBeat = {
+  title: string;
+  description: string;
+  status: string;
+  signals: { label: string; value: string }[];
+};
+type Story = [StoryBeat, StoryBeat, StoryBeat, StoryBeat];
+type Signal = readonly [label: string, value: string];
+function beat(title: string, description: string, status: string, signals: [Signal, Signal, Signal]): StoryBeat {
+  return { title, description, status, signals: signals.map(([label, value]) => ({ label, value })) };
+}
+
+const FAILOVER: Record<string, Story> = {
+  fiber: [
+    beat('A customer taps their card.', 'It is the lunch rush. The cashier is serving a customer while the next shoppers wait. Checkout reaches the payment service through fiber.', 'Checkout in progress', [['Customer', 'Ready to pay'], ['Cashier', 'Processing payment'], ['Primary route', 'Fiber']]),
+    beat('The payment cannot get through.', 'The fiber connection drops before the payment completes. The customer stays at the terminal and the queue waits behind them.', 'Fiber interrupted · payment waiting', [['Payment', 'Waiting for a route'], ['Customer', 'Still at checkout'], ['Fiber', 'Connection lost']]),
+    beat('Give the cashier another route.', 'The CPE checks the cellular connection and selects it under the failover policy. The cashier retries the payment through 5G.', '5G selected · checkout resumes', [['CPE', 'Select healthy alternate'], ['Cashier', 'Retry payment'], ['Payment route', '5G']]),
+    beat('The receipt prints. The queue moves.', 'The payment completes over the alternate connection. The customer takes their receipt and leaves, and the cashier serves the next person. Fiber remains flagged for investigation.', 'Customer served · fiber fault remains open', [['Payment', 'Completed over 5G'], ['Customer', 'Receipt collected'], ['Fiber', 'Follow-up required']]),
+  ],
+  '5g': [
+    beat('The store is trading as usual.', 'A cashier serves the afternoon queue over the primary fiber connection. The cellular link is ready to provide an alternate route.', 'Checkout using fiber', [['Cashier', 'Serving customers'], ['Fiber', 'Primary route'], ['5G', 'Alternate available']]),
+    beat('The backup link disappears.', 'The cellular connection disconnects. The manager sees the lost backup while the current customer’s payment continues on fiber.', '5G unavailable · fiber still carries traffic', [['5G', 'Connection lost'], ['Payment', 'Still on fiber'], ['Manager', 'Backup issue visible']]),
+    beat('Protect the route that is still working.', 'The gateway keeps the eligible fiber route and removes the failed cellular path from consideration. The manager assigns the backup issue for investigation.', 'Working fiber route retained', [['CPE', 'Retain fiber'], ['Checkout', 'Continue service'], ['Support task', 'Investigate backup']]),
+    beat('Keep serving while support checks the backup.', 'The cashier completes the sale and calls the next customer forward. The technician has a separate cellular investigation; the branch is still operating with reduced redundancy.', 'Trade continues · backup review pending', [['Customer', 'Sale completed'], ['Technician', 'Check cellular path'], ['Redundancy', 'Reduced']]),
+  ],
+};
+
+const ROUTING: Record<string, Story> = {
+  pos: [
+    beat('Checkout shares the store network.', 'A customer arrives to pay while a supplier call and camera transfer are also using the CPE. The flows initially share the default fiber route.', 'Payments, calls and video share fiber', [['Customer', 'At checkout'], ['Other activity', 'Call + camera transfer'], ['Payment route', 'Default fiber']]),
+    beat('This payment needs its own decision.', 'The cashier is ready to complete the sale. The payment flow needs an explicit route policy while the other applications continue their work.', 'Payment policy needed', [['Cashier', 'Waiting to complete sale'], ['Payment class', 'Needs its own policy'], ['Other flows', 'Remain visible']]),
+    beat('Route the payment through 5G.', 'The CPE recognizes the payment application and applies its configured policy. That flow moves to 5G while the camera transfer stays on fiber.', 'Payment flow assigned to 5G', [['Classification', 'Payment traffic'], ['Selected route', '5G'], ['Camera transfer', 'Fiber retained']]),
+    beat('The cashier finishes the sale.', 'The payment follows its selected path and the customer collects the receipt. The supplier call and camera transfer retain their own routing decisions.', 'Customer served through the payment policy', [['Customer', 'Receipt collected'], ['Payment', '5G policy applied'], ['Other applications', 'Own routes retained']]),
+  ],
+  voice: [
+    beat('A colleague calls the supplier.', 'At the service desk, a member of staff is arranging the next delivery. Payments and a camera upload are active on the same store network.', 'Supplier conversation in progress', [['Colleague', 'Arranging a delivery'], ['Voice route', 'Default fiber'], ['Other activity', 'Payments + video']]),
+    beat('The supplier call starts breaking up.', 'The colleague struggles to continue the delivery conversation while voice shares the default path with video traffic. The operator needs a voice-specific routing decision.', 'Supplier call needs a different route', [['Voice class', 'Latency & jitter needs'], ['Camera transfer', 'Bandwidth demand'], ['Current routing', 'Shared default']]),
+    beat('Give the call its selected connection.', 'The CPE classifies the voice flow and applies the configured 5G policy. The camera transfer keeps its separate fiber route.', 'Voice flow assigned to 5G', [['CPE', 'Apply voice policy'], ['Voice path', '5G'], ['Video path', 'Fiber retained']]),
+    beat('The delivery conversation continues.', 'The colleague continues speaking with the supplier over the selected voice route. Checkout and camera traffic remain on their own policies.', 'Supplier call continues on its selected path', [['Colleague', 'Continues the conversation'], ['Voice route', '5G policy applied'], ['Other applications', 'Separate decisions']]),
+  ],
+  video: [
+    beat('The cameras transfer footage.', 'A camera stream reaches the CPE while staff take a supplier call and serve checkout customers. Each flow has a different purpose.', 'Camera transfer in progress', [['Camera', 'Sending footage'], ['Checkout', 'Serving customers'], ['Voice', 'Supplier call']]),
+    beat('Do all three flows need the same path?', 'The video transfer has sustained bandwidth needs. The operator separates its routing requirements from the payment and voice application classes.', 'Application classes need distinct policies', [['Video', 'Bandwidth-oriented flow'], ['Payments', 'Own continuity policy'], ['Voice', 'Own quality policy']]),
+    beat('Keep video on its explicit fiber policy.', 'The CPE identifies the camera flow and assigns the preferred fiber route. The other applications remain available for their own policy decisions.', 'Video policy selects fiber', [['Classification', 'Video traffic'], ['Preferred route', 'Fiber'], ['Other applications', 'Separate policies']]),
+    beat('Footage moves while the store keeps working.', 'The camera transfer continues over fiber. The cashier and service-desk colleague continue their tasks without changing every application to the video route.', 'Video transfer follows its own route', [['Camera transfer', 'Fiber policy applied'], ['Cashier', 'Continues serving'], ['Service desk', 'Continues the call']]),
+  ],
+};
+
+const TWIN: Record<string, Story> = {
+  assembled: [
+    beat('The store colleague calls remote support.', 'A colleague stands by the CPE while an engineer opens the same gateway view remotely. They need to identify the physical connection under investigation.', 'Remote support session begins', [['Store colleague', 'At the gateway'], ['Remote engineer', 'Reviewing the CPE'], ['Task', 'Identify the interface']]),
+    beat('Which port does the colleague need to check?', 'Several interfaces sit close together on the gateway. A verbal description is difficult to match to the equipment in front of the colleague.', 'Interface identification needs a shared view', [['Connection', 'Needs inspection'], ['Interfaces', 'Several physical ports'], ['Support call', 'Locate the same component']]),
+    beat('Point to the interface in the twin.', 'The engineer brings the front of the CPE into view and highlights the network interfaces. Both people now have the same physical reference.', 'Network interface located', [['Engineer', 'Highlights network I/O'], ['Colleague', 'Matches the physical port'], ['Shared reference', 'Assembled CPE']]),
+    beat('Agree the next check before touching equipment.', 'The colleague can identify the interface the engineer means. They agree the next cable or link-state check with the affected connection located.', 'The support team has a concrete next check', [['Interface', 'Identified together'], ['Next check', 'Cable & link state'], ['Investigation', 'Continues with context']]),
+  ],
+  exploded: [
+    beat('An engineer reviews a warm gateway.', 'The support team is investigating the CPE’s thermal behavior. The engineer starts with the complete equipment while a technician prepares to inspect it.', 'Thermal investigation begins', [['Engineer', 'Reviews thermal context'], ['Technician', 'Preparing inspection'], ['CPE', 'Complete assembly']]),
+    beat('The enclosure hides the thermal relationship.', 'The engineer needs to explain where the electronics, heatsink and enclosure meet. The outside view alone leaves that relationship unclear.', 'Internal assembly needs inspection', [['Electronics', 'Inside the chassis'], ['Heatsink', 'Thermal path'], ['Task', 'Locate the relevant assembly']]),
+    beat('Separate the assembly and follow the heat path.', 'The exploded view lifts the layers apart. The engineer highlights the board and thermal assembly so the technician can see how they relate.', 'Board and thermal assembly exposed', [['View', 'Exploded components'], ['Engineer', 'Identifies thermal assembly'], ['Technician', 'Follows the relationship']]),
+    beat('The technician has an inspection plan.', 'The technician approaches the gateway with the relevant parts identified. Hardware condition remains under investigation while the team carries out the agreed checks.', 'Thermal components identified for inspection', [['Technician', 'Inspect the CPE'], ['Relevant parts', 'Board + heatsink'], ['Condition', 'Under investigation']]),
+  ],
+};
+
+interface MonitoringCase {
+  setting: string;
+  baseline: string;
+  incident: string;
+  impact: string;
+  response: string;
+  outcome: string;
+  asset: string;
+  signal: string;
+  task: string;
+}
+const MONITORING: Record<string, MonitoringCase> = {
+  gateway: { setting: 'The store relies on one shared gateway.', baseline: 'The cashier, service desk and connected building equipment use the same CPE. A technician monitors the equipment room from the operations view.', incident: 'Several local responses slow together.', impact: 'An unusual hardware pattern appears at the shared CPE. Staff see delays in more than one place, so inspecting each endpoint separately would miss the common dependency.', response: 'EA:GLE connects the hardware event to the CPE and its dependent IT/OT connections. The operator directs the technician to the equipment room.', outcome: 'The technician approaches the shared gateway with the affected hardware context. The team investigates the resource or thermal condition before choosing an intervention.', asset: 'Shared CPE', signal: 'Hardware pattern', task: 'Inspect gateway hardware' },
+  fiber: { setting: 'The service desk reaches upstream services.', baseline: 'A colleague checks a supplier order while the cashier continues serving. Their applications reach upstream systems through the store’s wired uplink.', incident: 'The supplier request cannot get through.', impact: 'The fiber segment degrades. The store needs to determine whether the problem belongs to the business endpoint or the upstream connection.', response: 'EA:GLE associates the connectivity event with the fiber segment and keeps the local devices visible. The operator directs the investigation to the wired uplink.', outcome: 'The technician checks the fiber terminal and uplink context. Staff have an identified network issue to track while the condition remains open.', asset: 'Fiber terminal', signal: 'Uplink degradation', task: 'Inspect fiber connection' },
+  '5g': { setting: 'The cellular path stands behind the primary route.', baseline: 'Customers are being served while the operator checks that the branch’s alternate connection is available. The cellular interface has its own monitoring context.', incident: 'The cellular layer needs attention.', impact: 'The alternate path develops a signal or registration issue. The operator needs to separate this condition from a fiber problem or a disconnected endpoint.', response: 'EA:GLE highlights the cellular interface and its connection to the CPE. The technician receives the affected layer and the signal context together.', outcome: 'The technician checks the cellular interface and antenna connection. The unresolved backup issue stays visible while the team investigates.', asset: 'Cellular interface', signal: 'Registration & signal context', task: 'Inspect cellular connection' },
+  it: { setting: 'A colleague looks up stock for a customer.', baseline: 'At the service desk, a colleague checks the local inventory service. The IT rack and its connection to the shared gateway support that lookup.', incident: 'The stock lookup stops responding.', impact: 'The IT rack loses its local connection while the colleague is helping the customer. The operator needs to separate this IT segment from the store’s still-visible upstream links.', response: 'EA:GLE connects the missing IT asset to its local segment and CPE relationship. The technician is directed to the equipment rack.', outcome: 'The technician reaches the IT rack and checks its local connection. The service-desk colleague can follow a specific support task while the connection remains under investigation.', asset: 'Local IT rack', signal: 'IT segment disconnected', task: 'Check rack & local link' },
+  ot: { setting: 'The climate sensor sends its operating context.', baseline: 'Staff keep the shop comfortable while the OT sensor reports through the gateway. The HVAC equipment state and the sensor’s network connection provide different clues.', incident: 'The climate sensor stops reporting.', impact: 'The sensor’s connection is interrupted. Missing readings alone cannot tell staff whether the HVAC equipment or its communication path is at fault.', response: 'EA:GLE highlights the affected OT connection and its path to the CPE. The operator sends a technician to check the sensor and equipment together.', outcome: 'The technician checks the sensor connection beside the HVAC equipment. The team keeps the equipment and connectivity investigation linked until the cause is verified.', asset: 'Climate OT sensor', signal: 'OT connection interrupted', task: 'Check sensor & equipment' },
+};
+function monitoringStory(id: string): Story {
+  const item = MONITORING[id] ?? MONITORING.gateway;
+  return [
+    beat(item.setting, item.baseline, 'Store operations in progress', [['Store team', 'Serving customers'], ['Monitoring focus', item.asset], ['Context', 'Shared IT + OT topology']]),
+    beat(item.incident, item.impact, `${item.asset} needs investigation`, [['Event', item.signal], ['Affected asset', item.asset], ['Team', 'Needs fault context']]),
+    beat('Send support to the right place.', item.response, 'Affected layer identified for the technician', [['EA:GLE', 'Correlates the connection'], ['Technician task', item.task], ['Other layers', 'Remain visible']]),
+    beat('The technician investigates the affected asset.', item.outcome, 'Technician inspection · condition remains open', [['Technician', 'At the affected asset'], ['Next check', item.task], ['Condition', 'Under investigation']]),
+  ];
+}
+
+const AUTOMATION: Record<string, Story> = {
+  open: [
+    beat('The opening team arrives.', 'A colleague enters the store before the first customers. Lights, access control and climate equipment are present, each with its own device state.', 'Opening team enters the store', [['Colleague', 'Arriving for the shift'], ['Lighting', 'Awaiting the routine'], ['Access & climate', 'Independent controls']]),
+    beat('The space is not ready for customers yet.', 'The opening instruction needs to reach devices from different manufacturers and protocol families. Their shared location does not make them act together.', 'Opening routine needs coordinated device actions', [['Trigger', 'Opening instruction'], ['Devices', 'Different integrations'], ['Store', 'Preparing for customers']]),
+    beat('One routine reaches the compatible devices.', 'The gateway applies the opening policy through supported adapters. Lighting turns on, access is released and the thermostat moves to its comfort setting.', 'Lighting, access and climate respond together', [['Gateway', 'Applies opening policy'], ['Adapters', 'Translate supported actions'], ['Device requests', 'Light · access · climate']]),
+    beat('The first customer walks into a ready store.', 'The colleague can welcome the first customer into the lit space. Access and climate now reflect the same opening intent.', 'Store ready for the first customer', [['Lighting', 'On'], ['Access', 'Released'], ['Climate', 'Comfort setting']]),
+  ],
+  'after-hours': [
+    beat('The closing colleague finishes the shift.', 'The last member of staff walks toward the exit. Lighting, access and climate still reflect the day’s independent operating states.', 'Final closing tasks in progress', [['Colleague', 'Preparing to leave'], ['Lighting', 'Still on'], ['Climate', 'Daytime setting']]),
+    beat('The last person leaves. The loads stay on.', 'The store becomes vacant. The occupancy change needs a configured routine before the separate devices can coordinate a closing response.', 'Store vacant · closing response needed', [['Occupancy', 'No staff remaining'], ['Lighting', 'Running in an empty space'], ['Access & climate', 'Awaiting the routine']]),
+    beat('Apply the after-hours policy across the devices.', 'The gateway uses occupancy context and compatible integrations to dim lighting, secure access and request the thermostat setback.', 'Closing routine reaches the connected devices', [['Policy', 'After-hours routine'], ['Lighting request', 'Dim'], ['Access & climate', 'Secure · set back']]),
+    beat('The store settles into its after-hours state.', 'The lights dim as the colleague leaves. Access is secured and climate demand follows the setback, with each device contributing to the same closing routine.', 'Closing routine complete', [['Lighting', 'Dimmed'], ['Access', 'Secured'], ['Climate', 'Setback applied']]),
+  ],
+};
+
+const SMART: Record<string, Story> = {
+  hvac: [
+    beat('Customers shop while HVAC conditions the space.', 'The unit runs in the background as a colleague works on the sales floor. Temperature, vibration and power provide context for its operating condition.', 'HVAC serving the occupied store', [['Customers', 'Shopping'], ['HVAC', 'Operating'], ['Condition inputs', 'Temperature · vibration · power']]),
+    beat('The HVAC pattern begins to change.', 'The unit develops an unusual operating pattern while the store still appears normal. The colleague has no visible reason yet to call maintenance.', 'HVAC condition change needs attention', [['Equipment', 'Operating deviation'], ['Sales floor', 'Still in use'], ['Maintenance', 'Needs a focused signal']]),
+    beat('Give maintenance a reason to inspect.', 'Edge analysis flags the changed condition and identifies the HVAC unit. The operator sends the technician the equipment context and an inspection task.', 'HVAC condition flagged for maintenance', [['Analysis', 'Pattern deviation'], ['Affected equipment', 'HVAC unit'], ['Task', 'Inspect the condition']]),
+    beat('The technician reaches the unit with context.', 'The technician inspects the HVAC while the team reviews its operating history. The condition remains open until the cause and appropriate maintenance action are verified.', 'Technician at HVAC · investigation continues', [['Technician', 'Inspecting HVAC'], ['Condition', 'Under review'], ['Next decision', 'Maintenance action']]),
+  ],
+  cooler: [
+    beat('A colleague stocks the chilled section.', 'Customers browse nearby while the cooler holds the store’s chilled goods. Temperature, door activity and compressor behavior describe its operating context.', 'Cooler serving the chilled section', [['Colleague', 'Stocking chilled goods'], ['Cooler', 'Operating'], ['Context', 'Temperature · door · compressor']]),
+    beat('The cooler temperature starts to drift.', 'A temperature deviation develops while shopping continues. The team needs to investigate before the condition affects the chilled stock.', 'Cooler deviation puts stock at risk', [['Temperature', 'Drifting from its pattern'], ['Stock', 'Needs attention'], ['Cause', 'To be verified']]),
+    beat('Connect the alert to the right cooler.', 'The edge view associates the deviation with this cooler. The operator gives the colleague and technician a focused check of temperature, door activity and compressor condition.', 'Cooler maintenance task raised', [['Equipment', 'Affected cooler'], ['Team', 'Checks operating context'], ['Maintenance', 'Inspect the deviation']]),
+    beat('The team checks the cooler and protects the stock.', 'The technician inspects the cooler while store staff review the chilled goods and follow their handling procedure. Recovery remains to be verified.', 'Cooler inspection in progress', [['Technician', 'At the cooler'], ['Store colleague', 'Checks the stock'], ['Recovery', 'To be verified']]),
+  ],
+  energy: [
+    beat('The store reaches closing time.', 'The final colleague finishes work while lighting and HVAC serve the occupied space. The meter relates that demand to the equipment still operating.', 'Closing time · equipment still running', [['Colleague', 'Finishing the shift'], ['Lighting & HVAC', 'Operating'], ['Meter', 'Consumption context']]),
+    beat('The store is empty but demand continues.', 'The colleague leaves and the space becomes vacant. The lights and HVAC continue running beyond the store’s current needs.', 'After-hours loads need review', [['Occupancy', 'Store vacant'], ['Lighting & HVAC', 'Still running'], ['Demand context', 'Mismatch with occupancy']]),
+    beat('Show the manager where the demand comes from.', 'The energy view connects the meter to the equipment and occupancy state. The manager can identify which schedules or setpoints need review.', 'Equipment demand linked to the empty space', [['Analysis', 'Operating-context mismatch'], ['Review', 'Schedules & setpoints'], ['Owner', 'Store manager']]),
+    beat('Plan the adjustment and verify its effect.', 'The manager reviews the after-hours equipment plan with the team. An efficiency action is prepared for approval, with metering available to verify the result afterward.', 'Efficiency action prepared for review', [['Manager', 'Reviews equipment use'], ['Action', 'Schedule or setpoint change'], ['Verification', 'Monitor after adjustment']]),
+  ],
+};
+
+const VIDEO: Record<string, Story> = {
+  'man-down': [
+    beat('A customer walks through the aisle.', 'The customer moves along the sales floor while a member of staff works nearby. A camera covers the shared aisle.', 'Routine activity in the monitored aisle', [['Customer', 'Walking through the aisle'], ['Camera', 'Covers the area'], ['Nearby staff', 'Working elsewhere']]),
+    beat('The customer falls out of direct view.', 'The customer falls to the floor between the store fixtures. Nearby staff continue their tasks and may not immediately see what has happened.', 'Person down · assistance needed', [['Person', 'On the floor'], ['Nearby staff', 'Not yet alerted'], ['Location', 'Monitored aisle']]),
+    beat('The operator verifies the man-down alert.', 'Edge video analysis highlights the person on the floor. The operator checks the event and calls the nearby colleague to assist.', 'Possible man-down verified for response', [['Detection', 'Possible man-down'], ['Operator', 'Reviews the event'], ['Response', 'Colleague called']]),
+    beat('A colleague arrives to help.', 'The nearby colleague reaches the person and starts the site’s assistance procedure. The operator retains the incident context while help is coordinated.', 'Colleague assisting in the aisle', [['Responder', 'At the affected person'], ['Operator', 'Coordinates assistance'], ['Incident', 'Remains visible']]),
+  ],
+  intruder: [
+    beat('A person approaches the staff-only area.', 'The camera covers the boundary between the public space and the back office. A staff member is available to check access when needed.', 'Staff-only boundary monitored', [['Person', 'In the public area'], ['Boundary', 'Restricted access'], ['Camera', 'Covers the entry']]),
+    beat('The person crosses the restricted boundary.', 'The person moves into the staff-only area. The operator needs to check whether the entry is authorized before deciding the response.', 'Restricted-zone entry detected', [['Person', 'Inside the restricted zone'], ['Authorization', 'Needs verification'], ['Location', 'Back-office boundary']]),
+    beat('Give the operator the location and event.', 'The camera event highlights the crossing and the person involved. The operator reviews the entry and asks a staff member to check access.', 'Entry event sent for access verification', [['Edge analysis', 'Boundary crossing'], ['Operator', 'Checks the event'], ['Staff member', 'Sent to the boundary']]),
+    beat('A staff member checks the entry.', 'The staff member approaches and verifies the person’s authorization. The operator follows the site procedure with the location and event still visible.', 'Staff member verifying access', [['Staff member', 'At the restricted area'], ['Access', 'Authorization check'], ['Operator', 'Follows site procedure']]),
+  ],
+  crowd: [
+    beat('Customers form a checkout queue.', 'A small group waits while the cashier serves the next customer. Other shoppers can still move along the aisle.', 'Checkout queue moving normally', [['Cashier', 'Serving customers'], ['Queue', 'Contained near checkout'], ['Aisle', 'Available for movement']]),
+    beat('The queue starts blocking the aisle.', 'More customers gather and the waiting group extends into the shared space. Other shoppers have less room to pass.', 'Crowd build-up restricts the aisle', [['Queue', 'Growing into the aisle'], ['Shoppers', 'Movement constrained'], ['Staff', 'Needs congestion context']]),
+    beat('Show staff where the congestion is building.', 'Crowd monitoring highlights the concentrated group and affected aisle. The operator asks a colleague to help manage the flow.', 'Crowd concentration highlighted for staff', [['Monitoring', 'Affected area highlighted'], ['Operator', 'Reviews congestion'], ['Colleague', 'Moves to assist']]),
+    beat('Staff open space and guide the queue.', 'The colleague helps customers move into a clearer queue while checkout continues. The shared aisle opens up and the operator keeps monitoring the area.', 'Customer flow improves around the aisle', [['Colleague', 'Guides the queue'], ['Aisle', 'Clearer route through'], ['Checkout', 'Continues serving']]),
+  ],
+};
+
+const STORIES: Record<OfferingId, Record<string, Story>> = {
+  failover: FAILOVER, routing: ROUTING, twin: TWIN,
+  eagle: Object.fromEntries(Object.keys(MONITORING).map(id => [id, monitoringStory(id)])),
+  automation: AUTOMATION, smart: SMART, video: VIDEO,
+};
+
+/** One shared 24-second story: setting, incident, edge response, visible outcome. */
+export function getOfferingStory(chapter: OfferingChapter, variant: OfferingVariant): Story {
+  return STORIES[chapter.id][variant.id] ?? STORIES[chapter.id][chapter.variants[0].id];
+}

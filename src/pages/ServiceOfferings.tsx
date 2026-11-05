@@ -1,251 +1,208 @@
-import type { ComponentType } from 'react';
-import { Link } from 'react-router-dom';
+import { lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { ArrowRight, Check, ChevronRight, CircleDot, Layers3, Pause, Play, RotateCcw, Route } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
-import { Card } from '../components/Card';
-import { SolutionShowcase } from '../components/offerings/SolutionShowcase';
-import {
-  Activity, ArrowLeftRight, ArrowRight, Boxes, Cloud, GitBranch, Layers3, Leaf, Package,
-  Radio, Sparkles, Video, Zap,
-} from 'lucide-react';
+import { StudioSceneBoundary } from '../ui/StudioSceneBoundary';
+import { COMPONENT_DETAILS, OFFERING_CHAPTERS, type OfferingId } from '../components/offerings/offeringCatalog';
+import { getOfferingStory } from '../components/offerings/offeringStories';
+import { getOfferingUseCase } from '../components/offerings/offeringUseCases';
+import '../components/offerings/solution-showcase.css';
+import '../components/offerings/offerings-workbench.css';
 
-/* ─────────── Challenges / Offerings
- * Edge / Enterprise Gateway "smart services" — each capability ships as a
- * container (+ libraries) on the gateway's prplLCM container runtime and is
- * exposed northbound through consumer-facing APIs. These services share the
- * enterprise store illustrated in the unified digital twin. */
-
-interface Offering {
-  id: string;
-  name: string;
-  ml: boolean;                 // ships with ML libraries
-  icon: ComponentType<{ size?: number }>;
-  accent: string;              // css var string
-  rgbVar: string;              // matching -rgb token for tints
-  capabilities: string[];
-}
-
-const OFFERINGS: Offering[] = [
-  {
-    id: 'interoperability', name: 'Interoperability', ml: true,
-    icon: ArrowLeftRight, accent: 'var(--accent)', rgbVar: '--accent-rgb',
-    capabilities: [
-      'Conversion of various industry protocols (OPC-UA, MQTT, Modbus, BACnet)',
-    ],
-  },
-  {
-    id: 'eagle', name: 'EA:GLE — Edge Analytics', ml: true,
-    icon: Activity, accent: 'var(--accent-3)', rgbVar: '--accent-3-rgb',
-    capabilities: [
-      'Real-time data processing on the edge',
-      'Predictive analytics with self-healing',
-    ],
-  },
-  {
-    id: 'dynamic-failover', name: 'Dynamic Failover', ml: true,
-    icon: GitBranch, accent: 'var(--ok)', rgbVar: '--ok-rgb',
-    capabilities: [
-      'Automatic failover',
-      'Load balancing',
-      'Application-aware routing',
-      'Policy-based path control',
-      'SLA-based routing',
-    ],
-  },
-  {
-    id: 'greengrass', name: 'AWS Greengrass', ml: false,
-    icon: Cloud, accent: 'var(--warn)', rgbVar: '--warn-rgb',
-    capabilities: [
-      'Local edge data processing',
-      'Interface with AWS Cloud for device onboarding / provisioning',
-      'Remote device management',
-    ],
-  },
-  {
-    id: 'matter', name: 'Matter', ml: true,
-    icon: Boxes, accent: 'var(--accent-2)', rgbVar: '--accent-2-rgb',
-    capabilities: [
-      'Enterprise automation',
-      'Enterprise safety',
-      'Remote monitoring & control',
-    ],
-  },
-  {
-    id: 'thread-border-router', name: 'Thread Border Router', ml: false,
-    icon: Radio, accent: 'var(--accent-2)', rgbVar: '--accent-2-rgb',
-    capabilities: [
-      'Thread mesh backbone for Matter devices',
-      'Enterprise automation, safety, and remote monitoring & control',
-    ],
-  },
-  {
-    id: 'energy-prediction', name: 'Energy Prediction', ml: true,
-    icon: Zap, accent: 'var(--warn)', rgbVar: '--warn-rgb',
-    capabilities: [
-      'Monitoring, prediction and preventive maintenance of energy-consuming appliances',
-      'Anomaly detection — machine-learning based solution',
-    ],
-  },
-  {
-    id: 'sustainability', name: 'Sustainability', ml: true,
-    icon: Leaf, accent: 'var(--ok)', rgbVar: '--ok-rgb',
-    capabilities: [
-      'Irrigation systems',
-      'Blinds / shades',
-      'Thermostats',
-      'Power outlets',
-      'Leak detection',
-      'Indoor air quality',
-    ],
-  },
-  {
-    id: 'video-analytics', name: 'Video Analytics', ml: true,
-    icon: Video, accent: 'var(--accent-3)', rgbVar: '--accent-3-rgb',
-    capabilities: [
-      'Real-time video inference on edge GPU and NPU pipelines',
-      'Fall, intrusion, fire and weapon detection',
-      'PPE and hairnet compliance monitoring',
-      'Inventory, occupancy and crowd analytics',
-      'Live detection alerts for operators',
-    ],
-  },
-];
-
-const STACK: { group: string; note: string; items: string[] }[] = [
-  { group: 'Solution layer', note: 'Consumer-facing capabilities', items: ['Edge Analytics', 'AI / ML', 'Generative AI', 'Agentic AI', 'Store automation'] },
-  { group: 'Standards & protocols', note: 'Interoperability foundation', items: ['Matter', 'mDNS / DNS-SD', 'MQTT', 'Modbus', 'OPC UA', 'BACnet'] },
-  { group: 'Connectivity', note: 'Wireless + wired transport', items: ['Wi-Fi 7', '5G', 'Fiber', 'Thread', 'LoRaWAN', 'Bluetooth'] },
-  { group: 'OS platforms', note: 'Gateway operating environment', items: ['Linux', 'OpenWrt'] },
-  { group: 'Silicon', note: 'Hardware foundation', items: ['MaxLinear', 'Quectel', 'Silicon Labs'] },
-];
+const OfferingScene = lazy(() => import('../components/offerings/OfferingScene'));
+const BEATS = ['Business as usual', 'The incident', 'Edge response', 'The outcome'];
+const BEAT_TIMES = [2.5, 7.5, 14, 22];
+const DURATION = 24;
+const PLAYBACK_SECONDS = 36;
+const OFFERING_TONES = { failover: 'cyan', routing: 'blue', twin: 'lilac', eagle: 'mint', automation: 'amber', smart: 'mint', video: 'coral' } as const;
+const phaseAt = (time: number): 0 | 1 | 2 | 3 => time >= 17 ? 3 : time >= 10 ? 2 : time >= 4 ? 1 : 0;
 
 export function ServiceOfferingsPage() {
-  const mlCount = OFFERINGS.filter((o) => o.ml).length;
+  const [params, setParams] = useSearchParams();
+  const offering = OFFERING_CHAPTERS.find(item => item.id === params.get('offering')) ?? OFFERING_CHAPTERS[0];
+  const index = OFFERING_CHAPTERS.indexOf(offering);
+  const [variantId, setVariantId] = useState(offering.variants[0].id);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [phase, setPhase] = useState<0 | 1 | 2 | 3>(0);
+  const [playing, setPlaying] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [followStory, setFollowStory] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [sceneReady, setSceneReady] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [touring, setTouring] = useState(false);
+  const [finished, setFinished] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [visible, setVisible] = useState(true);
+  const hostRef = useRef<HTMLElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const timeRef = useRef(0);
+  const phaseRef = useRef(0);
+  const progressRef = useRef<HTMLDivElement>(null);
+  const rangeRef = useRef<HTMLInputElement>(null);
+  const variant = offering.variants.find(item => item.id === variantId) ?? offering.variants[0];
+  const story = getOfferingStory(offering, variant);
+  const useCase = getOfferingUseCase(offering, variant);
+  const beat = story[phase];
+  const detail = selected ? COMPONENT_DETAILS[selected] : undefined;
+  const active = phase >= 1;
 
-  return (
-    <div className="service-offerings-page">
-      <PageHeader
-        title="Challenges / Offerings"
-        subtitle="Connected services for one enterprise store — coordinated through a shared edge gateway and consumer-facing APIs."
-        right={<span className="badge ok"><span className="dot ok" />{OFFERINGS.length}/{OFFERINGS.length} available</span>}
-      />
+  const seek = useCallback((time: number) => {
+    timeRef.current = time;
+    phaseRef.current = phaseAt(time);
+    setPhase(phaseAt(time));
+    setFinished(time >= DURATION);
+    setRevision(value => value + 1);
+    if (progressRef.current) progressRef.current.style.transform = `scaleX(${time / DURATION})`;
+    if (rangeRef.current) rangeRef.current.value = String(time);
+  }, []);
 
-      <SolutionShowcase />
+  const changeOffering = useCallback((id: OfferingId) => {
+    const nextOffering = OFFERING_CHAPTERS.find(item => item.id === id)!;
+    setParams(previous => {
+      const next = new URLSearchParams(previous);
+      next.set('offering', id);
+      return next;
+    }, { replace: true, preventScrollReset: true });
+    setVariantId(nextOffering.variants[0].id);
+    setSelected(null);
+    seek(0);
+  }, [setParams, seek]);
 
-      <div className="kpi-strip service-offerings-kpis">
-        <SoKpi label="Containers available" value={`${OFFERINGS.length} / ${OFFERINGS.length}`}
-          sub="ready on the gateway today" icon={Package} accent="var(--ok)" rgbVar="--ok-rgb" />
-        <SoKpi label="ML-powered services" value={String(mlCount)}
-          sub="ship with ML libraries on the edge" icon={Sparkles} accent="var(--accent-3)" rgbVar="--accent-3-rgb" />
-        <SoKpi label="Container runtime" value="prplLCM"
-          sub="lifecycle-managed containers on prplOS" icon={Layers3} accent="var(--accent)" rgbVar="--accent-rgb" />
-        <SoKpi label="Northbound delivery" value="Consumer APIs"
-          sub="every service exposed as an API" icon={Cloud} accent="var(--accent-2)" rgbVar="--accent-2-rgb" />
+  function selectOffering(id: OfferingId) {
+    changeOffering(id);
+    setTouring(false);
+    setPlaying(!reducedMotion);
+    setFollowStory(!reducedMotion);
+  }
+
+  function watchStory() {
+    seek(reducedMotion ? BEAT_TIMES[0] : 0);
+    setFollowStory(true);
+    setTouring(false);
+    setPlaying(!reducedMotion);
+    stageRef.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+  }
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updateMotion = () => { setReducedMotion(media.matches); if (media.matches) { setPlaying(false); setTouring(false); } };
+    let inView = true;
+    const updateVisibility = () => setVisible(inView && !document.hidden);
+    const observer = new IntersectionObserver(([entry]) => { inView = entry.isIntersecting; updateVisibility(); });
+    if (hostRef.current) observer.observe(hostRef.current);
+    media.addEventListener('change', updateMotion);
+    document.addEventListener('visibilitychange', updateVisibility);
+    return () => { observer.disconnect(); media.removeEventListener('change', updateMotion); document.removeEventListener('visibilitychange', updateVisibility); };
+  }, []);
+
+  const onSceneReady = useCallback(() => setSceneReady(true), []);
+  const leaveStoryCamera = useCallback(() => setFollowStory(false), []);
+  const running = playing && sceneReady && visible && !reducedMotion && !finished;
+  useEffect(() => {
+    if (!running) return;
+    let frame = 0;
+    let previous: number | undefined;
+    const tick = (now: number) => {
+      const delta = previous === undefined ? 0 : Math.min((now - previous) / 1000, .1);
+      previous = now;
+      const time = Math.min(DURATION, timeRef.current + delta * DURATION / PLAYBACK_SECONDS);
+      timeRef.current = time;
+      if (progressRef.current) progressRef.current.style.transform = `scaleX(${time / DURATION})`;
+      if (rangeRef.current) rangeRef.current.value = String(time);
+      const nextPhase = phaseAt(time);
+      if (nextPhase !== phaseRef.current) { phaseRef.current = nextPhase; setPhase(nextPhase); }
+      if (time >= DURATION) {
+        if (touring && index < OFFERING_CHAPTERS.length - 1) changeOffering(OFFERING_CHAPTERS[index + 1].id);
+        else { setFinished(true); setPlaying(false); setTouring(false); }
+        return;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [running, touring, index, changeOffering]);
+
+  function selectPhase(next: number) { setPlaying(false); setTouring(false); seek(BEAT_TIMES[next]); }
+  function toggleTour() {
+    if (touring) { setTouring(false); setPlaying(false); return; }
+    changeOffering(OFFERING_CHAPTERS[0].id);
+    setFollowStory(true);
+    setTouring(true); setPlaying(true);
+  }
+
+  return <div className="service-offerings-page enterprise-offerings-page">
+    <PageHeader title="Challenges / Offerings" subtitle="Real-world challenges, played out in one connected enterprise."
+      right={<span className="enterprise-capability-count"><Layers3 size={15} aria-hidden="true" />7 offerings</span>} />
+    <section className="solution-showcase enterprise-showcase" ref={hostRef} aria-labelledby="enterprise-showcase-title" data-color={OFFERING_TONES[offering.id]}>
+      <div className="showcase-heading"><div><h2 id="enterprise-showcase-title">A working day at the connected store</h2><p className="enterprise-heading-sub">Follow the customers, the equipment and the response when something changes.</p></div>
+        <div className="showcase-heading-actions"><span className="showcase-disclosure">{touring ? `Tour ${index + 1} / 7` : 'One store · 7 offerings'}</span>
+          {!reducedMotion && <button type="button" className="showcase-tour" aria-pressed={touring} onClick={toggleTour}>{touring ? <Pause size={15} aria-hidden="true" /> : <Play size={15} aria-hidden="true" />}{touring ? 'End tour' : 'Play store tour'}</button>}
+        </div>
       </div>
-
-      <div className="grid">
-        <div className="col-12">
-          <Card
-            title="Smart services on the edge / enterprise gateway"
-            sub="Each offering runs as an isolated container with its libraries — consumed from above through APIs, managed below by prplLCM."
-            right={
-              <div className="so-brand-lockup">
-                <img src="/capgemini.jpg" alt="Capgemini" />
-                <span>Capgemini</span>
-              </div>
-            }
-          >
-            {/* APIs above, service containers in the middle, runtime below. */}
-            <div className="so-arch-band">Consumer-facing APIs</div>
-            <div className="so-grid">
-              {OFFERINGS.map((o, index) => <OfferingCard key={o.id} o={o} container={index + 1} />)}
-            </div>
-            <div className="so-arch-band so-arch-band-bottom">prplLCM · container lifecycle manager</div>
-          </Card>
+      <div className="showcase-frame"><div className="showcase-panel">
+        <nav className="showcase-scenarios" aria-label="Offerings in priority order">{OFFERING_CHAPTERS.map((item, i) => {
+          const Icon = item.icon;
+          return <button type="button" key={item.id} aria-pressed={offering.id === item.id} aria-label={`${i + 1}. ${item.title}`} onClick={() => selectOffering(item.id)}
+            data-color={OFFERING_TONES[item.id]}>
+            <span className="enterprise-offering-number">{String(i + 1).padStart(2, '0')}</span><Icon size={18} aria-hidden="true" /><span>{item.navTitle}</span>
+          </button>;
+        })}</nav>
+        <div className="enterprise-case-summary">
+          <div className="enterprise-case-copy"><span>{useCase.setting}</span><h3>{useCase.title}</h3><p>{useCase.stakes}</p></div>
+          <div className="enterprise-case-actions">
+            <button type="button" className="enterprise-watch-story" onClick={watchStory}><Play size={17} aria-hidden="true" />{reducedMotion ? 'Explore the story' : 'Watch story'}<span>{reducedMotion ? '4 steps' : `${PLAYBACK_SECONDS} s`}</span></button>
+            <button type="button" className="enterprise-follow-story" aria-pressed={followStory} onClick={() => setFollowStory(!followStory)}><Route size={14} aria-hidden="true" />{followStory ? 'Following the action' : 'Follow the action'}</button>
+          </div>
         </div>
-
-        <div className="col-12">
-          <Link className="so-savings-link" to="/cost-insights">
-            <span><strong>See the outcome: Cost Savings</strong><small>Measure avoided truck rolls, support effort, energy use, and service disruption.</small></span>
-            <ArrowRight size={18} aria-hidden="true" />
-          </Link>
+        <div className="showcase-visual" ref={stageRef}>
+          <div className="showcase-scene-heading"><span><strong>{offering.title}</strong><span className="showcase-location">{offering.category}</span></span><span className="showcase-scene-mode">{!sceneReady ? 'Preparing scene' : running ? 'Story playing' : finished ? 'Story complete' : 'Story paused'} · {BEATS[phase]}</span></div>
+          <div className="showcase-canvas-wrap enterprise-canvas-wrap">
+            <StudioSceneBoundary fallback={<EnterpriseFallback offering={offering.id} onOfferingSelect={selectOffering} onReady={onSceneReady} />}
+              loading={<div className="enterprise-scene-loading"><Layers3 size={32} strokeWidth={1} aria-hidden="true" /><strong>Preparing the connected store</strong><span>Explore the scenarios while the 3D environment loads.</span></div>}>
+              <OfferingScene offering={offering.id} variant={variant.id} active={active} phase={phase} paused={!running} selected={selected} onSelect={setSelected} onOfferingSelect={selectOffering}
+                timeRef={timeRef} revision={revision} followStory={followStory} onCameraInteraction={leaveStoryCamera} onReady={onSceneReady} />
+            </StudioSceneBoundary>
+          </div>
+          <div className="showcase-scene-caption"><span className="showcase-status"><span />{beat.status}</span><span className="showcase-scene-format">Illustrative scenario</span></div>
         </div>
-
-        <div className="col-12">
-          <Card
-            title="Gateway technology stack"
-            sub="What the offerings are built on — protocols, connectivity, standards, platforms and silicon."
-          >
-            <div className="so-pyramid" aria-label="Gateway technology hierarchy">
-              <svg className="so-pyramid-guide" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                <polygon points="50,0 100,100 0,100" />
-                <line x1="36" y1="28.3" x2="64" y2="28.3" />
-                <line x1="27" y1="46.2" x2="73" y2="46.2" />
-                <line x1="18" y1="64.1" x2="82" y2="64.1" />
-                <line x1="9" y1="82.1" x2="91" y2="82.1" />
-              </svg>
-              {STACK.map((row, index) => (
-                <div key={row.group} className={`so-pyramid-layer so-pyramid-layer-${index + 1}`}>
-                  <div className="so-pyramid-copy"><strong>{row.group}</strong><span>{row.note}</span></div>
-                  <div className="so-stack-chips">
-                    {row.items.map((it) => <span key={it} className="so-chip">{it}</span>)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
+        <aside className="showcase-sensors" aria-label="Offering story and activity">
+          <div className="enterprise-variant-picker" role="group" aria-label={`${offering.title} scenarios`}>{offering.variants.map(item => <button type="button" key={item.id} aria-pressed={variant.id === item.id}
+            onClick={() => { setVariantId(item.id); setSelected(null); setTouring(false); setPlaying(!reducedMotion); setFollowStory(!reducedMotion); seek(0); }}>{item.label}</button>)}</div>
+          <div className="showcase-narrative" aria-live="polite" aria-atomic="true"><div className="showcase-chapter-label"><span>{phase + 1}</span>{BEATS[phase]}</div><h3>{beat.title}</h3><p>{beat.description}</p></div>
+          <div className="showcase-sensor-readings"><h3>Scenario activity</h3><ul>{beat.signals.map(signal => <li key={signal.label}><span className="showcase-sensor-dot" /><div><strong>{signal.label}</strong></div><em>{signal.value}</em></li>)}</ul></div>
+          <div className="enterprise-business-outcome"><span>{phase === 3 ? 'Business outcome' : 'What is at stake'}</span><p>{phase === 3 ? useCase.outcome : useCase.trigger}</p></div>
+          {detail && <div className="enterprise-component-inspector" aria-live="polite"><span><CircleDot size={13} aria-hidden="true" />Component focus</span><h4>{detail.title}</h4><p>{detail.detail}</p><div>{detail.signals.map(signal => <small key={signal}>{signal}</small>)}</div><button type="button" onClick={() => setSelected(null)}>Clear selection</button></div>}
+          <div className="showcase-service"><div className="showcase-service-heading"><offering.icon size={16} aria-hidden="true" /><span>{offering.category}</span></div>
+            {offering.links.map(link => <Link key={link.href} to={link.href}>{link.label}<ArrowRight size={14} aria-hidden="true" /></Link>)}
+          </div>
+        </aside>
+        <div className="showcase-transport">
+          <div className="showcase-playback">
+            {reducedMotion ? <button type="button" className="showcase-play" onClick={() => selectPhase((phase + 1) % 4)}><ChevronRight size={16} aria-hidden="true" />Next step</button>
+              : <button type="button" className="showcase-play" aria-label={finished ? 'Replay scenario' : playing ? 'Pause scenario' : 'Play scenario'} onClick={() => { if (finished) seek(0); setPlaying(!playing); setTouring(false); }}>{playing ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}{finished ? 'Replay' : playing ? 'Pause' : 'Play'}</button>}
+            <button type="button" className="showcase-restart" aria-label="Reset scenario" title="Reset scenario" onClick={() => { seek(0); setPlaying(false); setTouring(false); }}><RotateCcw size={16} aria-hidden="true" /></button><span className="showcase-chapter-count">{phase + 1} / 4</span>
+          </div>
+          <div className="showcase-timeline"><div className="showcase-progress-track"><div ref={progressRef} style={{ transform: 'scaleX(0)' }} /></div>
+            <input ref={rangeRef} type="range" min={0} max={DURATION} step={.1} defaultValue={0} aria-label="Scenario progress" aria-valuetext={`${BEATS[phase]}: ${beat.status}`}
+              onChange={event => { seek(Number(event.target.value)); setPlaying(false); setTouring(false); }} />
+            <div className="showcase-chapters" aria-label="Story steps">{BEATS.map((name, i) => <button type="button" key={name} aria-current={phase === i ? 'step' : undefined} onClick={() => selectPhase(i)}><span className="showcase-step-number">{phase > i ? <Check size={12} aria-hidden="true" /> : i + 1}</span>{name}</button>)}</div>
+          </div>
         </div>
-      </div>
-    </div>
-  );
+      </div></div>
+      <p className="showcase-footnote">{reducedMotion ? 'Reduced motion is on. Choose a story step to see its settled scene. ' : 'Watch follows the action; drag the scene to explore freely. ' }Illustrative business scenarios. These controls do not operate connected equipment.</p>
+    </section>
+    <section className="enterprise-capabilities" aria-labelledby="enterprise-capabilities-title">
+      <div className="enterprise-capabilities-heading"><h2 id="enterprise-capabilities-title">Stories from the store</h2><p>Seven offerings. Specific problems, visible responses.</p></div>
+      <ol>{OFFERING_CHAPTERS.map((item, i) => {
+        const example = getOfferingUseCase(item, item.variants[0]);
+        return <li key={item.id}>
+          <span className="enterprise-capability-number">{String(i + 1).padStart(2, '0')}</span><div><span className="enterprise-case-offering">{item.title}</span><button type="button" onClick={() => { selectOffering(item.id); hostRef.current?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' }); }}>{example.title}<ArrowRight size={14} aria-hidden="true" /></button><p>{example.setting} · {example.stakes}</p><ul>{item.scope.map(scope => <li key={scope}>{scope}</li>)}</ul></div>
+        </li>;
+      })}</ol>
+    </section>
+  </div>;
 }
 
-/* ─────────── Offering card ─────────── */
-
-function OfferingCard({ o, container }: { o: Offering; container: number }) {
-  const Icon = o.icon;
-  return (
-    <div className="so-card" id={`offering-${o.id}`} tabIndex={-1}>
-      <div className="so-card-head">
-        <span className="so-icon" style={{ color: o.accent, background: `linear-gradient(135deg, rgba(var(${o.rgbVar}) / 0.16), transparent)` }}>
-          <Icon size={16} />
-        </span>
-        <span className="so-name">{o.name}</span>
-        <span className="badge ok" style={{ marginLeft: 'auto' }}>Available</span>
-      </div>
-      <div className="so-container-tag mono">
-        Container {container} · + libraries{o.ml ? ' (ML)' : ''}
-      </div>
-      <ul className="so-caps">
-        {o.capabilities.map((cap) => (
-          <li key={cap}><span className="so-cap-dot" style={{ background: o.accent }} />{cap}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/* ─────────── KPI tile ─────────── */
-
-function SoKpi({ label, value, sub, icon: Icon, accent, rgbVar }: {
-  label: string;
-  value: string;
-  sub: string;
-  icon: ComponentType<{ size?: number }>;
-  accent: string;
-  rgbVar: string;
-}) {
-  return (
-    <div className="kpi-card">
-      <div className="kpi-top">
-        <div className="kpi-icon" style={{ color: accent, background: `linear-gradient(135deg, rgba(var(${rgbVar}) / 0.18), transparent)` }}>
-          <Icon size={16} />
-        </div>
-        <div className="kpi-label">{label}</div>
-      </div>
-      <div className="kpi-mid">
-        <div className="kpi-value" style={{ color: accent }}>{value}</div>
-      </div>
-      <div className="kpi-trend-sub" style={{ fontSize: 11 }}>{sub}</div>
-    </div>
-  );
+function EnterpriseFallback({ offering, onOfferingSelect, onReady }: { offering: OfferingId; onOfferingSelect: (id: OfferingId) => void; onReady: () => void }) {
+  useEffect(onReady, [onReady]);
+  return <div className="enterprise-fallback"><Layers3 size={34} strokeWidth={1} aria-hidden="true" /><h3>The connected enterprise</h3><p>3D is unavailable. Explore the same offerings and their stories below.</p><div>{OFFERING_CHAPTERS.map((item, i) => <button type="button" key={item.id} aria-pressed={item.id === offering} onClick={() => onOfferingSelect(item.id)}><span>{String(i + 1).padStart(2, '0')}</span><item.icon size={19} aria-hidden="true" />{item.navTitle}</button>)}</div></div>;
 }

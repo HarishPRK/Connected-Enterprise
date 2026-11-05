@@ -1,0 +1,58 @@
+.offering-scene { width: 100%; height: 100%; min-height: 400px; position: relative; isolation: isolate; background: #0c1827; overflow: hidden; }
+.offering-scene > div:first-child:not(.offering-scene-loading) { position: absolute !important; inset: 0; }
+.offering-scene canvas { display: block; }
+.offering-story-annotations { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.offering-story-annotations[hidden] { display: none; }
+.offering-story-pin { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 7px; max-width: 220px; padding: 6px 9px; border: 1px solid #93afbf40; border-radius: 4px; background: #101e2aeb; color: #e0edf5; font-size: 10px; font-weight: 500; white-space: nowrap; opacity: 0; box-shadow: 0 3px 9px #08111a33; }
+.offering-story-pin i { width: 5px; height: 5px; border-radius: 50%; background: var(--pin-color); flex: 0 0 auto; }
+.offering-story-pin span { overflow: hidden; text-overflow: ellipsis; }
+.offering-film-caption { position: absolute; bottom: 0; left: 0; right: 0; padding: 72px 26px 26px; background: linear-gradient(transparent, #06111be8); color: #edf5f8; }
+.offering-film-caption > span { display: block; color: #91cbdc; font-size: 9px; font-weight: 600; letter-spacing: .13em; text-transform: uppercase; margin-bottom: 9px; }
+.offering-film-caption h3 { color: #f0f6f7; font-size: clamp(18px, 2cqw, 25px); font-weight: 500; letter-spacing: -.035em; line-height: 1.2; margin: 0 0 7px; max-width: 65%; }
+.offering-film-caption p { color: #c1d3de; font-size: 12px; line-height: 1.5; margin: 0; max-width: 58%; }
+.offering-scene[data-scene-view=story] .offering-store-controls { left: auto; right: 17px; bottom: 22px; transform: none; gap: 5px; }
+.offering-scene[data-scene-view=story] .offering-store-control-group:first-child button span { display: none; }
+.offering-scene[data-scene-view=story] .offering-store-control-group { border-color: #57768c38; background: #101f2ebf; }
+.offering-scene-hotspots { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.offering-scene .offering-scene-hotspot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -100%); display: flex; align-items: center; gap: 7px; min-height: 29px; padding: 5px 9px; border: 1px solid #829eb238; border-radius: 5px; background: #101e2ae8; color: #dcebf5; font-size: 10px; line-height: 1.2; font-weight: 600; white-space: nowrap; pointer-events: auto; cursor: pointer; box-shadow: 0 3px 12px #030b1366; backdrop-filter: blur(8px); transition: background .15s, border-color .15s; }
+.offering-scene-hotspot::after { content: ''; position: absolute; height: 11px; width: 1px; background: #769bb578; top: 100%; left: 50%; }
+.offering-scene-hotspot i { display: block; width: 5px; height: 5px; border-radius: 50%; background: var(--hotspot-color); flex: 0 0 auto; box-shadow: 0 0 7px color-mix(in srgb, var(--hotspot-color) 35%, transparent); }
+.offering-scene .offering-scene-hotspot:hover, .offering-scene .offering-scene-hotspot:active, .offering-scene .offering-scene-hotspot.is-selected { transform: translate(-50%, -100%); background: #193447; border-color: var(--hotspot-color); color: #fff; }
+.offering-scene-hotspot.has-event { border-color: #ff897a80; }
+.offering-scene-hotspot:focus-visible, .offering-scene-reset:focus-visible { outline: 2px solid #8addff; outline-offset: 3px; }
+.offering-scene-camera { position: absolute; bottom: 16px; left: 18px; display: flex; align-items: center; gap: 7px; font-size: 10px; color: #9ab1c1; pointer-events: none; padding: 5px 7px; border-radius: 4px; background: #0c182799; }
+.offering-scene-reset { position: absolute; z-index: 3; bottom: 16px; right: 18px; display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #57718766; border-radius: 5px; background: #132333cc; color: #c6dae9; cursor: pointer; }
+.offering-scene-reset:hover { border-color: #8addff; color: white; }
+.offering-scene-loading { position: absolute; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center; gap: 12px; color: #a8c6d7; background: #0c1827; font-size: 13px; }
+.offering-scene-loading span { width: 7px; height: 7px; background: #68d6ff; border-radius: 50%; box-shadow: 0 0 16px #68d6ff60; }
+.offering-store-scene:fullscreen { width: 100vw; height: 100vh; min-height: 100vh; }
+.offering-scene .offering-scene-hotspot b { padding-right: 6px; border-right: 1px solid #7097ad55; color: var(--hotspot-color); font: 600 10px ui-monospace, monospace; }
+.offering-store-controls { position: absolute; left: 50%; bottom: 17px; z-index: 5; transform: translateX(-50%); display: flex; gap: 8px; max-width: calc(100% - 20px); }
+.offering-store-control-group { display: flex; gap: 3px; padding: 4px; border: 1px solid #58758a77; border-radius: 7px; background: #101f2ee8; box-shadow: 0 5px 18px #07111a55; }
+.offering-store-controls .offering-store-control-group button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 32px; min-width: 31px; padding: 0 8px; border: 0; background: transparent; color: #adc5d7; border-radius: 4px; font-size: 11px; white-space: nowrap; cursor: pointer; transform: none; }
+.offering-store-controls .offering-store-control-group button[aria-pressed=true] { background: #24506a; color: #e2f5ff; }
+.offering-store-controls .offering-store-control-group button:hover { background: #294354; color: white; transform: none; }
+.offering-store-controls .offering-store-control-group button:disabled { opacity: .4; cursor: default; }
+.offering-store-controls .offering-store-control-group button:focus-visible { outline: 2px solid #8addff; outline-offset: 1px; }
+.offering-scene-error { position: absolute; bottom: 70px; left: 12px; right: 12px; padding: 8px; background: #182c3e; color: #e9f5ff; font-size: 12px; }
+@media (max-width: 650px) {
+  .offering-film-caption { padding: 56px 16px 69px; }
+  .offering-film-caption h3, .offering-film-caption p { max-width: 100%; }
+  .offering-film-caption h3 { font-size: 20px; }
+  .offering-film-caption p { font-size: 11px; }
+  .offering-film-caption > span { font-size: 8px; margin-bottom: 7px; }
+  .offering-story-pin { font-size: 9px; max-width: 190px; padding: 5px 7px; }
+  .offering-scene[data-scene-view=story] .offering-store-controls { left: 50%; right: auto; bottom: 10px; transform: translateX(-50%); }
+  .offering-scene { min-height: 390px; }
+  .offering-scene .offering-scene-hotspot { font-size: 9px; min-height: 28px; padding: 5px 6px; gap: 5px; max-width: 125px; white-space: normal; text-align: left; }
+  .offering-scene .offering-scene-hotspot.is-service { min-width: 30px; justify-content: center; padding: 6px; }
+  .offering-scene .offering-scene-hotspot.is-service > span { display: none; }
+  .offering-scene .offering-scene-hotspot.is-service > b { padding: 0; border: 0; font-size: 11px; }
+  .offering-scene-camera { left: 9px; bottom: 10px; }
+  .offering-scene-reset { right: 10px; bottom: 10px; }
+  .offering-store-controls { bottom: 10px; gap: 4px; }
+  .offering-store-control-group { padding: 3px; gap: 0; }
+  .offering-store-controls .offering-store-control-group button { padding: 0 5px; min-width: 27px; height: 29px; font-size: 10px; gap: 4px; }
+  .offering-store-controls .offering-store-control-group button svg { width: 13px; height: 13px; }
+  .offering-store-controls .offering-store-control-group:first-child button span { display: none; }
+}

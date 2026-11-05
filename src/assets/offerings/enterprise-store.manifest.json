@@ -1,0 +1,112 @@
+{
+  "root": "EnterpriseStore",
+  "up": "+Y",
+  "front": "+Z",
+  "units": "meters",
+  "interiorSize": [
+    26,
+    5.105,
+    20
+  ],
+  "siteSize": [
+    32,
+    5.425,
+    24
+  ],
+  "floorY": 0,
+  "groups": [
+    "FloorShell",
+    "RearElevation",
+    "CutawayWalls",
+    "Storefront",
+    "RetailAisles",
+    "CheckoutFixtures",
+    "ServiceArchitecture",
+    "LightingRig",
+    "Planting",
+    "Wayfinding"
+  ],
+  "triangles": 60304,
+  "meshes": 69,
+  "actualBounds": {
+    "min": [
+      -16.0,
+      -0.32,
+      -12.0
+    ],
+    "max": [
+      16.0,
+      5.105,
+      12.0
+    ]
+  },
+  "surfaceMaps": [
+    "Original smoked oak grain \u00b7 192 \u00d7 512 \u00b7 embedded PNG"
+  ],
+  "equipmentIncluded": false,
+  "anchors": {
+    "Gateway": [
+      7,
+      1.1,
+      -3
+    ],
+    "ServerRack": [
+      10,
+      0,
+      -6
+    ],
+    "HVAC": [
+      -9,
+      0,
+      -6
+    ],
+    "Cooler": [
+      0,
+      0,
+      -7.5
+    ],
+    "FiberTerminal": [
+      14.5,
+      0,
+      -6
+    ],
+    "CellularTower": [
+      14.5,
+      0,
+      2
+    ],
+    "SolarPanel": [
+      -15,
+      0,
+      -6
+    ],
+    "AutomationWall": [
+      -10,
+      1.5,
+      -1.45
+    ],
+    "CustomerPath": [
+      1,
+      0,
+      6
+    ],
+    "Entrance": [
+      1,
+      0,
+      9.86
+    ],
+    "CheckoutCountertops": [
+      [
+        8,
+        1.15,
+        4.5
+      ],
+      [
+        8,
+        1.15,
+        7
+      ]
+    ]
+  },
+  "clearances": "Shelf aisles at x=-6,-1,4 span z=-1.43..3.43. Customer path z=6 is clear from x=-2..5. The front entrance opening spans x=-.68..2.68."
+}

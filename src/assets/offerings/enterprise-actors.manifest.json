@@ -1,0 +1,419 @@
+{
+  "up": "+Y",
+  "front": "+Z",
+  "units": "meters",
+  "roots": {
+    "Customer": {
+      "min": [
+        -0.336,
+        0.0,
+        -0.124
+      ],
+      "max": [
+        0.336,
+        1.75,
+        0.1855
+      ],
+      "size": [
+        0.672,
+        1.75,
+        0.3095
+      ],
+      "joints": [
+        "Customer_ActorRoot",
+        "Customer_Hips",
+        "Customer_LeftThigh",
+        "Customer_LeftShin",
+        "Customer_LeftAnkle",
+        "Customer_RightThigh",
+        "Customer_RightShin",
+        "Customer_RightAnkle",
+        "Customer_Torso",
+        "Customer_Head",
+        "Customer_LeftUpperArm",
+        "Customer_LeftForearm",
+        "Customer_TabletMount",
+        "Customer_Tablet",
+        "Customer_RightUpperArm",
+        "Customer_RightForearm",
+        "Customer_BagMount"
+      ]
+    },
+    "Staff": {
+      "min": [
+        -0.37,
+        0.0,
+        -0.124
+      ],
+      "max": [
+        0.336,
+        1.75,
+        0.1855
+      ],
+      "size": [
+        0.706,
+        1.75,
+        0.3095
+      ],
+      "joints": [
+        "Staff_ActorRoot",
+        "Staff_Hips",
+        "Staff_LeftThigh",
+        "Staff_LeftShin",
+        "Staff_LeftAnkle",
+        "Staff_RightThigh",
+        "Staff_RightShin",
+        "Staff_RightAnkle",
+        "Staff_Torso",
+        "Staff_Head",
+        "Staff_LeftUpperArm",
+        "Staff_LeftForearm",
+        "Staff_TabletMount",
+        "Staff_Tablet",
+        "Staff_RightUpperArm",
+        "Staff_RightForearm",
+        "Staff_BagMount"
+      ]
+    },
+    "Technician": {
+      "min": [
+        -0.37,
+        0.0,
+        -0.124
+      ],
+      "max": [
+        0.56,
+        1.75,
+        0.1855
+      ],
+      "size": [
+        0.93,
+        1.75,
+        0.3095
+      ],
+      "joints": [
+        "Technician_ActorRoot",
+        "Technician_Hips",
+        "Technician_LeftThigh",
+        "Technician_LeftShin",
+        "Technician_LeftAnkle",
+        "Technician_RightThigh",
+        "Technician_RightShin",
+        "Technician_RightAnkle",
+        "Technician_Torso",
+        "Technician_Head",
+        "Technician_LeftUpperArm",
+        "Technician_LeftForearm",
+        "Technician_TabletMount",
+        "Technician_Tablet",
+        "Technician_RightUpperArm",
+        "Technician_RightForearm",
+        "Technician_BagMount"
+      ]
+    },
+    "Security": {
+      "min": [
+        -0.336,
+        0.0,
+        -0.124
+      ],
+      "max": [
+        0.336,
+        1.75,
+        0.1855
+      ],
+      "size": [
+        0.672,
+        1.75,
+        0.3095
+      ],
+      "joints": [
+        "Security_ActorRoot",
+        "Security_Hips",
+        "Security_LeftThigh",
+        "Security_LeftShin",
+        "Security_LeftAnkle",
+        "Security_RightThigh",
+        "Security_RightShin",
+        "Security_RightAnkle",
+        "Security_Torso",
+        "Security_Head",
+        "Security_LeftUpperArm",
+        "Security_LeftForearm",
+        "Security_TabletMount",
+        "Security_Tablet",
+        "Security_RightUpperArm",
+        "Security_RightForearm",
+        "Security_BagMount"
+      ]
+    },
+    "PaymentTerminal": {
+      "min": [
+        -0.135,
+        0.0,
+        -0.125
+      ],
+      "max": [
+        0.135,
+        0.435,
+        0.125
+      ],
+      "size": [
+        0.27,
+        0.435,
+        0.25
+      ],
+      "joints": [
+        "PaymentTerminal_Body",
+        "PaymentTerminal_Display",
+        "PaymentTerminal_TapZone"
+      ]
+    },
+    "ReceiptPrinter": {
+      "min": [
+        -0.18,
+        0.0,
+        -0.15
+      ],
+      "max": [
+        0.18,
+        0.482,
+        0.15
+      ],
+      "size": [
+        0.36,
+        0.482,
+        0.3
+      ],
+      "joints": [
+        "ReceiptPrinter_Body",
+        "ReceiptPrinter_Receipt"
+      ]
+    },
+    "ShoppingBasket": {
+      "min": [
+        -0.2375,
+        0.0,
+        -0.1725
+      ],
+      "max": [
+        0.2375,
+        0.52154,
+        0.1725
+      ],
+      "size": [
+        0.475,
+        0.52154,
+        0.345
+      ],
+      "joints": [
+        "ShoppingBasket_Body",
+        "ShoppingBasket_Grip"
+      ]
+    },
+    "Tablet": {
+      "min": [
+        -0.105,
+        0.0,
+        -0.015
+      ],
+      "max": [
+        0.105,
+        0.3,
+        0.0255
+      ],
+      "size": [
+        0.21,
+        0.3,
+        0.0405
+      ],
+      "joints": [
+        "Tablet_Body"
+      ]
+    },
+    "Toolbox": {
+      "min": [
+        -0.18,
+        0.0,
+        -0.12
+      ],
+      "max": [
+        0.18,
+        0.34205,
+        0.128
+      ],
+      "size": [
+        0.36,
+        0.34205,
+        0.248
+      ],
+      "joints": [
+        "Toolbox_Body"
+      ]
+    },
+    "AlertBeacon": {
+      "min": [
+        -0.12,
+        0.0,
+        -0.12
+      ],
+      "max": [
+        0.12,
+        0.26,
+        0.12
+      ],
+      "size": [
+        0.24,
+        0.26,
+        0.24
+      ],
+      "joints": [
+        "AlertBeacon_Body",
+        "AlertBeacon_Lens"
+      ]
+    }
+  },
+  "rigNaming": "Role_Joint; e.g. Customer_LeftForearm",
+  "pivotWorld": {
+    "ActorRoot": [
+      null,
+      [
+        0,
+        0,
+        0
+      ]
+    ],
+    "Hips": [
+      "ActorRoot",
+      [
+        0,
+        0.9,
+        0
+      ]
+    ],
+    "Torso": [
+      "Hips",
+      [
+        0,
+        1.0,
+        0
+      ]
+    ],
+    "Head": [
+      "Torso",
+      [
+        0,
+        1.49,
+        0
+      ]
+    ],
+    "LeftUpperArm": [
+      "Torso",
+      [
+        -0.235,
+        1.38,
+        0
+      ]
+    ],
+    "LeftForearm": [
+      "LeftUpperArm",
+      [
+        -0.265,
+        1.115,
+        0
+      ]
+    ],
+    "RightUpperArm": [
+      "Torso",
+      [
+        0.235,
+        1.38,
+        0
+      ]
+    ],
+    "RightForearm": [
+      "RightUpperArm",
+      [
+        0.265,
+        1.115,
+        0
+      ]
+    ],
+    "LeftThigh": [
+      "Hips",
+      [
+        -0.095,
+        0.89,
+        0
+      ]
+    ],
+    "LeftShin": [
+      "LeftThigh",
+      [
+        -0.095,
+        0.47,
+        0
+      ]
+    ],
+    "LeftAnkle": [
+      "LeftShin",
+      [
+        -0.095,
+        0.075,
+        0.055
+      ]
+    ],
+    "RightThigh": [
+      "Hips",
+      [
+        0.095,
+        0.89,
+        0
+      ]
+    ],
+    "RightShin": [
+      "RightThigh",
+      [
+        0.095,
+        0.47,
+        0
+      ]
+    ],
+    "RightAnkle": [
+      "RightShin",
+      [
+        0.095,
+        0.075,
+        0.055
+      ]
+    ],
+    "TabletMount": [
+      "LeftForearm",
+      [
+        -0.265,
+        0.79,
+        0.09
+      ]
+    ],
+    "Tablet": [
+      "TabletMount",
+      [
+        -0.265,
+        0.79,
+        0.09
+      ]
+    ],
+    "BagMount": [
+      "RightForearm",
+      [
+        0.265,
+        0.755,
+        0.025
+      ]
+    ]
+  },
+  "animation": "Rigid semantic pivots. Negative local X lifts arms forward; knees flex with positive X. Preserve original joint positions. No baked animations or armature required.",
+  "bytes": 974616,
+  "triangles": 49380,
+  "meshes": 209
+}
