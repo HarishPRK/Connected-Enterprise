@@ -17,10 +17,18 @@ export interface StoryEffectsProps extends StoryContext { timeRef: RefObject<num
 function Actor({id,role,context,timeRef,onSelect}:{id:ActorId;role:ActorRole;context:StoryContext;timeRef:RefObject<number>;onSelect:(id:string)=>void}){
   const gltf=useGLTF(actorsUrl,false),root=useRef<Group>(null),lean=useRef<Group>(null);
   const actor=useMemo(()=>{const source=gltf.scene.getObjectByName(role);if(!source)throw new Error(`Missing actor ${role}`);return prepareActor(source,role,id,gltf.scene);},[gltf,role,id]);
+  const previous=useRef<{time:number;context:StoryContext;actor:typeof actor}|null>(null);
   useEffect(()=>()=>{for(const prop of [actor.handset,actor.receipt]){prop.geometry.dispose();(prop.material as MeshStandardMaterial).dispose();}actor.card.traverse(object=>{if(object instanceof Mesh){object.geometry.dispose();(object.material as MeshStandardMaterial).dispose();}});actor.ownedMaterials.forEach(material=>material.dispose());const skeletons=new Set<SkinnedMesh['skeleton']>();actor.object.traverse(node=>{if(node instanceof SkinnedMesh)skeletons.add(node.skeleton);});skeletons.forEach(skeleton=>skeleton.dispose());},[actor]);
   useFrame(()=>{
-    if(!root.current||!lean.current)return;const time=timeRef.current,pose=sampleActor(id,context,time);
-    root.current.visible=pose.visible;root.current.position.set(...pose.at);root.current.rotation.y=pose.heading;lean.current.rotation.x=pose.fall*Math.PI/2;
+    if(!root.current||!lean.current)return;
+    const time=timeRef.current,last=previous.current;
+    // Orbiting a paused scene does not change any absolute-clock actor pose.
+    if(last?.time===time&&last.context===context&&last.actor===actor)return;
+    previous.current={time,context,actor};
+    const pose=sampleActor(id,context,time);
+    root.current.visible=pose.visible;
+    if(!pose.visible)return;
+    root.current.position.set(...pose.at);root.current.rotation.y=pose.heading;lean.current.rotation.x=pose.fall*Math.PI/2;
     setRig(actor.joints,pose,time);
     if(context.offering==='routing')poseRoutingContact(actor.joints,id,context.variant,time);
     if(context.offering==='smart')poseSmartContact(actor.joints,id,context.variant,time);
@@ -48,6 +56,7 @@ function cloneProp(source:Object3D){const copy=source.clone(true);copy.traverse(
 function setVisibility(object:Object3D,visible:boolean){object.visible=visible;}
 function CheckoutProps({context,timeRef}:{context:StoryContext;timeRef:RefObject<number>}){
   const gltf=useGLTF(actorsUrl,false);
+  const previous=useRef<{time:number;context:StoryContext}|null>(null);
   const props=useMemo(()=>{
     const terminal=cloneProp(gltf.scene.getObjectByName('PaymentTerminal')!),printer=cloneProp(gltf.scene.getObjectByName('ReceiptPrinter')!),basket=cloneProp(gltf.scene.getObjectByName('ShoppingBasket')!);
     const display=terminal.getObjectByName('PaymentTerminal_Display');if(display)display.visible=false;
@@ -56,6 +65,13 @@ function CheckoutProps({context,timeRef}:{context:StoryContext;timeRef:RefObject
   useEffect(()=>()=>{for(const object of [props.terminal,props.printer,props.basket])object.traverse(child=>{if(child instanceof Mesh)(Array.isArray(child.material)?child.material:[child.material]).forEach(m=>m.dispose());});},[props]);
   useFrame(()=>{
     const t=timeRef.current,isPayment=isCheckoutStory(context);
+    const last=previous.current;
+    if(last?.context===context&&(!isPayment||last.time===t))return;
+    previous.current={time:t,context};
+    if(!isPayment){
+      if(props.paper){props.paper.scale.setY(.08);setVisibility(props.paper,true);}
+      props.basket.position.set(6.65,1.15,4.45);props.basket.rotation.set(0,0,0);return;
+    }
     const checkout=sampleCheckout(context,t);
     const shopper=sampleActor('shopper',context,t),carry=isPayment?shopper.carry:0;
     if(props.paper){props.paper.scale.setY(isPayment?checkout.paper:.08);setVisibility(props.paper,shopper.receipt<.55);}
@@ -104,6 +120,7 @@ export default function OfferingStoryEffects({offering,variant,timeRef,onSelect}
   return <>
     {STORY_ACTORS.map(actor=><Actor key={actor.id} id={actor.id} role={(offering==='automation'&&actor.id==='shopper'||offering==='routing'&&actor.id==='queue1')?'Staff':actor.role} context={context} timeRef={timeRef} onSelect={onSelect}/>)}
     {offering!=='routing'&&<CheckoutProps context={context} timeRef={timeRef}/>}
-    <Detection context={context} timeRef={timeRef}/><EquipmentFeedback context={context} timeRef={timeRef}/>
+    {offering==='video'&&<Detection context={context} timeRef={timeRef}/>}
+    {offering==='failover'&&<EquipmentFeedback context={context} timeRef={timeRef}/>}
   </>;
 }

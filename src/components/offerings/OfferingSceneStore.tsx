@@ -13,6 +13,7 @@ import { OfferingEagleConsole } from './OfferingEagleConsole';
 import { OfferingAutomationVisual } from './OfferingAutomationVisual';
 import { OfferingSmartVisual } from './OfferingSmartVisual';
 import { sampleSmart } from './OfferingSmartStory';
+import { STORY_PLAYBACK_SECONDS } from './OfferingPlayback';
 import { OfferingCinemaControls } from './OfferingCinemaControls';
 import { PARTS, GATEWAY_EXPLODE, type EquipmentSpec, type Vec } from './OfferingEquipment';
 import { OfferingConnections } from './OfferingConnections';
@@ -316,7 +317,7 @@ export default function OfferingSceneStore(props: OfferingSceneProps) {
       <div className="offering-store-control-group"><button type="button" aria-label="Reset scene camera" title="Reset view" onClick={resetView}><Scan size={15}/></button><button type="button" aria-label={expanded?'Exit fullscreen':'Expand enterprise'} title={expanded?'Exit fullscreen':'Expand enterprise'} onClick={()=>void toggleExpanded()}>{expanded?<Minimize size={15}/>:<Expand size={15}/>}</button></div>
     </div>
     {expanded&&!inspection&&<>
-      <div className="offering-cinema-heading"><strong>A working day at the connected store</strong><span>Illustrative story · {['eagle','smart'].includes(offering)?72:['automation','routing'].includes(offering)?60:36} seconds</span></div>
+      <div className="offering-cinema-heading"><strong>A working day at the connected store</strong><span>Illustrative story · {STORY_PLAYBACK_SECONDS} seconds</span></div>
       <OfferingCinemaControls timeRef={clock} paused={paused} finished={finished} reduced={reduced} revision={revision} onToggle={onTogglePlayback} onSeek={onSeek} onReplay={onReplay}/>
     </>}
     {fullscreenError&&<p className="offering-scene-error" role="status">{fullscreenError}</p>}

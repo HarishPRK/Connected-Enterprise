@@ -7,13 +7,12 @@ import { COMPONENT_DETAILS, OFFERING_CHAPTERS, type OfferingId } from '../compon
 import { getOfferingStory } from '../components/offerings/offeringStories';
 import { getOfferingUseCase } from '../components/offerings/offeringUseCases';
 import { OfferingDeviceGuide, OfferingRoutingReadout } from '../components/offerings/OfferingDeviceGuide';
+import { advanceStoryClock, clampStoryTime, STORY_DURATION as DURATION, STORY_PLAYBACK_SECONDS } from '../components/offerings/OfferingPlayback';
 import '../components/offerings/enterprise-field-guide.css';
 
 const OfferingScene = lazy(() => import('../components/offerings/OfferingScene'));
 const BEATS = ['Business as usual', 'The incident', 'Edge response', 'The outcome'];
 const BEAT_TIMES = [2.5, 7.5, 14, 22];
-const DURATION = 24;
-const PLAYBACK_SECONDS = 36;
 const OFFERING_TONES = { failover: 'cyan', routing: 'blue', twin: 'lilac', eagle: 'mint', automation: 'amber', smart: 'mint', video: 'coral' } as const;
 const phaseAt = (time: number, offering: OfferingId): 0 | 1 | 2 | 3 => offering === 'smart'
   ? time >= 18 ? 3 : time >= 10.5 ? 2 : time >= 4 ? 1 : 0
@@ -24,7 +23,6 @@ export function ServiceOfferingsPage() {
   const [params, setParams] = useSearchParams();
   const offering = OFFERING_CHAPTERS.find(item => item.id === params.get('offering')) ?? OFFERING_CHAPTERS[0];
   const index = OFFERING_CHAPTERS.indexOf(offering);
-  const playbackSeconds = ['eagle','smart'].includes(offering.id) ? 72 : ['automation','routing'].includes(offering.id) ? 60 : PLAYBACK_SECONDS;
   const beatTimes = offering.id === 'smart' ? [2.5,8.5,16.8,23] : offering.id === 'eagle' ? [1,10.5,17.5,23] : BEAT_TIMES;
   const [variantId, setVariantId] = useState(offering.variants[0].id);
   const [selected, setSelected] = useState<string | null>(null);
@@ -40,6 +38,7 @@ export function ServiceOfferingsPage() {
   const hostRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const timeRef = useRef(0);
+  const previousFrameRef = useRef<number | null>(null);
   const phaseRef = useRef(0);
   const progressRef = useRef<HTMLDivElement>(null);
   const rangeRef = useRef<HTMLInputElement>(null);
@@ -51,6 +50,8 @@ export function ServiceOfferingsPage() {
   const active = phase >= 1;
 
   const seek = useCallback((time: number, chapter: OfferingId = 'failover') => {
+    time = clampStoryTime(time);
+    previousFrameRef.current = null;
     timeRef.current = time;
     phaseRef.current = phaseAt(time,chapter);
     setPhase(phaseAt(time,chapter));
@@ -104,7 +105,12 @@ export function ServiceOfferingsPage() {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     const updateMotion = () => { setReducedMotion(media.matches); if (media.matches) { setPlaying(false); setTouring(false); } };
     let inView = true;
-    const updateVisibility = () => setVisible(inView && !document.hidden);
+    const updateVisibility = () => {
+      const active = inView && !document.hidden;
+      // Clear synchronously, including a hide/show pair between React renders.
+      if (!active) previousFrameRef.current = null;
+      setVisible(active);
+    };
     const observer = new IntersectionObserver(entries => { inView = entries[entries.length - 1]?.isIntersecting ?? false; updateVisibility(); });
     if (hostRef.current) observer.observe(hostRef.current);
     media.addEventListener('change', updateMotion);
@@ -116,13 +122,17 @@ export function ServiceOfferingsPage() {
   const leaveStoryCamera = useCallback(() => setFollowStory(false), []);
   const running = playing && sceneReady && visible && !reducedMotion && !finished;
   useEffect(() => {
+    previousFrameRef.current = null;
     if (!running) return;
     let frame = 0;
-    let previous: number | undefined;
     const tick = (now: number) => {
-      const delta = previous === undefined ? 0 : Math.min((now - previous) / 1000, .1);
-      previous = now;
-      const time = Math.min(DURATION, timeRef.current + delta * DURATION / playbackSeconds);
+      if (document.hidden) {
+        previousFrameRef.current = null;
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+      const time = advanceStoryClock(timeRef.current, previousFrameRef.current, now);
+      previousFrameRef.current = now;
       timeRef.current = time;
       if (progressRef.current) progressRef.current.style.transform = `scaleX(${time / DURATION})`;
       if (rangeRef.current) rangeRef.current.value = String(time);
@@ -136,8 +146,8 @@ export function ServiceOfferingsPage() {
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [running, touring, index, changeOffering, playbackSeconds, offering.id]);
+    return () => { cancelAnimationFrame(frame); previousFrameRef.current = null; };
+  }, [running, touring, index, changeOffering, offering.id]);
 
   function selectPhase(next: number) { setPlaying(false); setTouring(false); setFollowStory(true); seek(beatTimes[next],offering.id); }
   function toggleTour() {
@@ -168,7 +178,7 @@ export function ServiceOfferingsPage() {
           <div className="enterprise-brief-index"><span>Field briefing</span><span>{String(index + 1).padStart(2, '0')} / 07</span></div>
           <div className="enterprise-case-copy"><span>{useCase.setting}</span><h3>{useCase.title}</h3><p>{useCase.stakes}</p></div>
           <div className="enterprise-case-actions">
-            <button type="button" className="enterprise-watch-story" onClick={watchStory}><Play size={17} aria-hidden="true" />{reducedMotion ? 'Explore the story' : 'Watch story'}<span>{reducedMotion ? '4 steps' : `${playbackSeconds} s`}</span></button>
+            <button type="button" className="enterprise-watch-story" onClick={watchStory}><Play size={17} aria-hidden="true" />{reducedMotion ? 'Explore the story' : 'Watch story'}<span>{reducedMotion ? '4 steps' : `${STORY_PLAYBACK_SECONDS} s`}</span></button>
             <button type="button" className="enterprise-cinema" disabled={!sceneReady} onClick={()=>void watchCinema()}><Maximize2 size={16} aria-hidden="true"/>{reducedMotion?'Explore in cinema':'Watch in cinema'}</button>
             <button type="button" className="enterprise-follow-story" aria-pressed={followStory} onClick={() => setFollowStory(!followStory)}><Route size={14} aria-hidden="true" />{followStory ? 'Following the action' : 'Follow the action'}</button>
           </div>

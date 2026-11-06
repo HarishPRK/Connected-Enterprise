@@ -84,6 +84,6 @@ export function poseSmartContact(rig: Rig, id: ActorId, variant: string, time: n
   if (touch) posePointGrip(rig, contact.side, contact.weight);
   else {
     const hand = rig.RightHand?.object;
-    if (hand) { hand.updateWorldMatrix(true, true); poseHandleGrip(rig, Math.min(1, contact.weight * 2), radius, hand.worldToLocal(new Vector3(...contact.at))); }
+    if (hand) poseHandleGrip(rig, Math.min(1, contact.weight * 2), radius, hand.worldToLocal(new Vector3(...contact.at)));
   }
 }

@@ -3,7 +3,7 @@ export type AutomationDeviceId = 'display' | 'lamp' | 'sign';
 export type AutomationStage = 'baseline' | 'guard-hold' | 'vacancy-check' | 'switching' | 'verifying' | 'complete';
 export type AutomationDeviceStage = 'on' | 'requested' | 'acknowledged' | 'observed-off' | 'confirmed';
 
-/** Absolute story units. The film player maps 24 units to 60 real seconds.
+/** Absolute story units. The film player maps 24 units to 20 real seconds.
  * Vacancy dwell and device responses are illustrative, compressed examples. */
 export const AUTOMATION_TIMING = {
   closeRequested: 3,

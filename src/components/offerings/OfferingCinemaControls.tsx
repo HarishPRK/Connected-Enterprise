@@ -1,5 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { Pause, Play, RotateCcw, SkipForward } from 'lucide-react';
+import { clampStoryTime, formatStoryElapsed, STORY_DURATION } from './OfferingPlayback';
 
 export function OfferingCinemaControls({ timeRef, paused, finished, reduced, revision, onToggle, onSeek, onReplay }: {
   timeRef: RefObject<number>; paused: boolean; finished: boolean; reduced: boolean; revision: number;
@@ -9,9 +10,9 @@ export function OfferingCinemaControls({ timeRef, paused, finished, reduced, rev
   useEffect(()=>{
     let frame=0;
     const sync=()=>{
-      const time=Math.min(24,Math.max(0,timeRef.current));
-      if(slider.current){slider.current.value=String(time);slider.current.style.setProperty('--elapsed',`${time/24*100}%`);}
-      if(elapsed.current)elapsed.current.textContent=`0:${String(Math.floor(time*1.5)).padStart(2,'0')} / 0:36`;
+      const time=clampStoryTime(timeRef.current);
+      if(slider.current){slider.current.value=String(time);slider.current.style.setProperty('--elapsed',`${time/STORY_DURATION*100}%`);}
+      if(elapsed.current)elapsed.current.textContent=formatStoryElapsed(time);
       if(!paused)frame=requestAnimationFrame(sync);
     };
     sync();return()=>cancelAnimationFrame(frame);
@@ -22,7 +23,7 @@ export function OfferingCinemaControls({ timeRef, paused, finished, reduced, rev
       {reduced?<SkipForward size={18}/>:paused?<Play size={18}/>:<Pause size={18}/>}<span>{reduced?'Next step':finished?'Replay':paused?'Play':'Pause'}</span>
     </button>
     <button type="button" aria-label="Restart film" title="Restart film" onClick={onReplay}><RotateCcw size={16}/></button>
-    <input ref={slider} type="range" min={0} max={24} step={.1} defaultValue={0} aria-label="Film progress" onChange={event=>onSeek?.(Number(event.target.value))}/>
-    <output ref={elapsed} aria-label="Film elapsed time">0:00 / 0:36</output>
+    <input ref={slider} type="range" min={0} max={STORY_DURATION} step={.1} defaultValue={0} aria-label="Film progress" onChange={event=>onSeek?.(Number(event.target.value))}/>
+    <output ref={elapsed} aria-label="Film elapsed time">{formatStoryElapsed(0)}</output>
   </div>;
 }

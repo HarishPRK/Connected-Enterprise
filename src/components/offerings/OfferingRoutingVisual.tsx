@@ -9,6 +9,8 @@ import { cinematicAssets, useCinematicModel } from './OfferingCinematicCanvas';
 import { clearLaptopDisplayGraphics } from './OfferingRoutingScreens';
 import { sampleRouting } from './OfferingRoutingStory';
 import { SERVICE_CART } from './OfferingEquipment';
+import { shareActorSkeletons } from './OfferingSkinnedActor';
+import { useAnimatedScreenFrames } from './OfferingScreenFrames';
 
 type RoutingState=ReturnType<typeof sampleRouting>;
 const W=1440,H=850;
@@ -100,18 +102,24 @@ function uploadTexture(texture:CanvasTexture){texture.needsUpdate=true;}
 function lightRing(materials:MeshStandardMaterial[],on:boolean){for(const material of materials){material.emissive.set(on?MINT:'#102525');material.emissiveIntensity=on?.8:0;}}
 function animateSpeaker(joints:{head:Object3D|undefined;arm:Object3D|undefined;forearm:Object3D|undefined},t:number){if(joints.head)joints.head.rotation.y=Math.sin(t*1.8)*.12;if(joints.arm)joints.arm.rotation.x=-.22-Math.sin(t*1.5)*.13;if(joints.forearm)joints.forearm.rotation.x=-.5-Math.sin(t*1.9)*.1;}
 
-function useSurface(paint:(ctx:CanvasRenderingContext2D,state:RoutingState,t:number)=>void,timeRef:RefObject<number>,variant:string){
+function useSurface(paint:(ctx:CanvasRenderingContext2D,state:RoutingState,t:number)=>void,timeRef:RefObject<number>,variant:string,contentKey?:(state:RoutingState,t:number)=>string|number){
   const surface=useMemo(()=>{const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;const ctx=canvas.getContext('2d')!;const texture=new CanvasTexture(canvas);texture.colorSpace=SRGBColorSpace;texture.anisotropy=8;return {ctx,texture};},[]);
   const tick=useRef(-1);
-  useEffect(()=>{tick.current=-1;},[variant]);
+  const painted=useRef<string|number|undefined>(undefined);
+  useEffect(()=>{tick.current=-1;painted.current=undefined;},[variant]);
   useEffect(()=>()=>surface.texture.dispose(),[surface]);
-  useFrame(()=>{const t=timeRef.current,next=Math.floor(t*12);if(tick.current===next)return;tick.current=next;paint(surface.ctx,sampleRouting(t,variant),t);uploadTexture(surface.texture);});
+  useFrame(()=>{
+    const t=timeRef.current,next=Math.floor(t*12);if(tick.current===next)return;tick.current=next;
+    const state=sampleRouting(t,variant),key=contentKey?contentKey(state,t):next;
+    if(painted.current===key)return;
+    painted.current=key;paint(surface.ctx,state,t);uploadTexture(surface.texture);
+  });
   return surface.texture;
 }
 
 function MeetingSpeaker({timeRef,variant}:{timeRef:RefObject<number>;variant:string}){
   const cast=useGLTF(actorsUrl,false);
-  const person=useMemo(()=>clone(cast.scene.getObjectByName('Staff')!),[cast]);
+  const person=useMemo(()=>{const actor=clone(cast.scene.getObjectByName('Staff')!);shareActorSkeletons(actor);return actor;},[cast]);
   useEffect(()=>()=>{const skeletons=new Set<SkinnedMesh['skeleton']>();person.traverse(node=>{if(node instanceof SkinnedMesh)skeletons.add(node.skeleton);});skeletons.forEach(skeleton=>skeleton.dispose());},[person]);
   const joints=useMemo(()=>({head:person.getObjectByName('Staff_Head'),arm:person.getObjectByName('Staff_RightUpperArm'),forearm:person.getObjectByName('Staff_RightForearm')}),[person]);
   const rotation=useMemo(()=>{const camera=new ThreeCamera();camera.position.set(0,1.53,1.65);camera.lookAt(0,1.43,0);return camera.quaternion.clone();},[]);
@@ -135,12 +143,13 @@ function LaptopConsole({timeRef,variant,onSelect}:{timeRef:RefObject<number>;var
 function hide(model:Object3D,name:string){const object=model.getObjectByName(name);if(object)object.visible=false;}
 export function OfferingRoutingVisual({timeRef,variant,onSelect}:{timeRef:RefObject<number>;variant:string;onSelect:(id:string)=>void}){
   const model=useCinematicModel(kitUrl);
+  const meetingFrames=useAnimatedScreenFrames(()=>sampleRouting(timeRef.current,variant).teams.motionTime);
   const rings=useMemo(()=>{hide(model,'TeamsMonitorScreen');hide(model,'VoipPhoneScreen');const result:MeshStandardMaterial[]=[];model.getObjectByName('SpeakerphoneStatusRing')?.traverse(o=>{if(o instanceof Mesh)(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if(m instanceof MeshStandardMaterial)result.push(m);});});return result;},[model]);
-  const teams=useSurface(meeting,timeRef,variant),archive=useSurface(surveillance,timeRef,variant),voice=useSurface(phone,timeRef,variant);
+  const teams=useSurface(meeting,timeRef,variant,s=>`${s.teams.state}/${s.teams.route}`),archive=useSurface(surveillance,timeRef,variant),voice=useSurface(phone,timeRef,variant,(s,t)=>s.voice.state==='connected'?t:s.voice.state);
   useFrame(()=>{const on=sampleRouting(timeRef.current,variant).voice.newCallStarted;lightRing(rings,on);});
   return <group name="Application routing studio">
     <primitive object={model} dispose={null}/>
-    <mesh position={SCREEN.teams} onClick={e=>{e.stopPropagation();if(e.delta<5)onSelect('route-front-desk');}}><planeGeometry args={[.60,.3375]}/><meshBasicMaterial toneMapped={false}><RenderTexture attach="map" width={960} height={540} samples={0}><MeetingSpeaker timeRef={timeRef} variant={variant}/></RenderTexture></meshBasicMaterial></mesh>
+    <mesh position={SCREEN.teams} onClick={e=>{e.stopPropagation();if(e.delta<5)onSelect('route-front-desk');}}><planeGeometry args={[.60,.3375]}/><meshBasicMaterial toneMapped={false}><RenderTexture attach="map" width={960} height={540} samples={0} frames={meetingFrames}><MeetingSpeaker timeRef={timeRef} variant={variant}/></RenderTexture></meshBasicMaterial></mesh>
     <mesh position={[8,1.5,4.512]}><planeGeometry args={[.60,.3375]}/><meshBasicMaterial transparent map={teams} toneMapped={false} depthWrite={false}/></mesh>
     <mesh position={SCREEN.voice} onClick={e=>{e.stopPropagation();if(e.delta<5)onSelect('route-meeting-room');}}><planeGeometry args={[.145,.076]}/><meshBasicMaterial map={voice} toneMapped={false}/></mesh>
     <group position={SCREEN.archive} onClick={e=>{e.stopPropagation();if(e.delta<5)onSelect('route-back-office');}}><mesh position={[0,0,-.025]} castShadow><boxGeometry args={[.72,.45,.045]}/><meshStandardMaterial color="#203b39" metalness={.5} roughness={.35}/></mesh><mesh position={[0,0,.001]}><planeGeometry args={[.69,.407]}/><meshBasicMaterial map={archive} toneMapped={false}/></mesh></group>

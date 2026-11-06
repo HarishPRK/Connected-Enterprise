@@ -34,6 +34,11 @@ test('anatomical cast keeps independent skeletons and the established CE contact
   assert.ok(skinA.isSkinnedMesh&&skinB.isSkinnedMesh);
   assert.notEqual(skinA.skeleton,skinB.skeleton);
   assert.notEqual(skinA.skeleton.bones[0],skinB.skeleton.bones[0]);
+  for(const actor of [a,b]){
+    const skeletons=new Set();
+    actor.object.traverse(node=>{if(node instanceof SkinnedMesh)skeletons.add(node.skeleton);});
+    assert.equal(skeletons.size,1,'compatible skin, clothing and eye surfaces share one bone upload within this actor');
+  }
   assert.equal(skinA.geometry,skinB.geometry,'clones share immutable geometry');
   a.object.updateMatrixWorld(true);
   const elbow=a.joints.RightForearm!.object.getWorldPosition(new Vector3());

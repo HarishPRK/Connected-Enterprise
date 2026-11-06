@@ -7,6 +7,7 @@ import { GATEWAY_EXPLODE, PARTS, SERVICE_CART } from './OfferingEquipment';
 import { gatewayPort } from './OfferingConnectionPaths';
 import { sampleTwin } from './OfferingTwinStory';
 import { clearLaptopDisplayGraphics } from './OfferingRoutingScreens';
+import { useAnimatedScreenFrames } from './OfferingScreenFrames';
 
 const LAPTOP_SCALE = SERVICE_CART.laptopWidth / 1.23;
 
@@ -81,6 +82,10 @@ function paintDiagnostics(ctx: CanvasRenderingContext2D, texture: CanvasTexture,
 /** The operator's physical laptop displays the same Gemtek mesh as the CPE.
  * Log text is a high-resolution screen texture, not floating scene decoration. */
 export function OfferingTwinWorkstation({ timeRef, variant, onSelect }: { timeRef: RefObject<number>; variant: string; onSelect: (id:string)=>void }) {
+  const twinFrames=useAnimatedScreenFrames(()=>{
+    const state=sampleTwin(timeRef.current);
+    return `${variant==='exploded'?state.virtualExplode:0}/${state.highlight}/${state.color}`;
+  });
   const laptop=useCinematicModel(cinematicAssets.kit,'Laptop',SERVICE_CART.laptopWidth);
   const graphics=useMemo(()=>clearLaptopDisplayGraphics(laptop),[laptop]);
   useEffect(()=>()=>graphics.forEach(geometry=>geometry.dispose()),[graphics]);
@@ -110,7 +115,7 @@ export function OfferingTwinWorkstation({ timeRef, variant, onSelect }: { timeRe
           <group position={[0,.490972,-.321563]} rotation={[-.13,0,0]}>
             <mesh onClick={event=>{event.stopPropagation();if(event.delta<5)onSelect('ports');}}><planeGeometry args={[1.10,.65]}/><meshBasicMaterial map={surface.texture} toneMapped={false}/></mesh>
             <mesh position={[-.29,-.025,.003]}><planeGeometry args={[.43,.46]}/><meshBasicMaterial toneMapped={false}>
-              <RenderTexture attach="map" width={600} height={640} samples={4} generateMipmaps>
+              <RenderTexture attach="map" width={600} height={640} samples={4} generateMipmaps frames={twinFrames}>
                 <LaptopTwin timeRef={timeRef} exploded={variant==='exploded'}/>
               </RenderTexture>
             </meshBasicMaterial></mesh>

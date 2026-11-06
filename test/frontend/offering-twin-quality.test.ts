@@ -7,14 +7,17 @@ import { sampleActor } from '../../src/components/offerings/OfferingStoryMotion.
 import { connectionCurve, gatewayPort, makeConnections } from '../../src/components/offerings/OfferingConnectionPaths.ts';
 import { CONNECTOR_WITHDRAWAL, SERVICE_CART } from '../../src/components/offerings/OfferingEquipment.ts';
 
-test('the raster covers CSS zoomed pixels at presentation density without unbounded 4K supersampling',()=>{
-  for(const [w,h,zoom,native] of [[1000,600,1.1,1],[1920,1080,1.18,1],[390,844,1,3],[3840,2160,1,1]]){
-    const ratio=offeringPixelRatio(w,h,w*zoom,h*zoom,native);
-    assert.ok(ratio>=zoom,'CSS enlargement must never stretch a smaller raster');
-    assert.ok(w*h*ratio*ratio<=8_294_401,'bounded render area');
+test('the raster uses native desktop density, bounded HiDPI and CSS zoom within a 1080p pixel budget',()=>{
+  assert.equal(offeringPixelRatio(1000,600,1000,600,1),1);
+  assert.equal(offeringPixelRatio(1920,1080,1920,1080,1),1);
+  assert.equal(offeringPixelRatio(390,844,390,844,3),1.5);
+  assert.ok(Math.abs(offeringPixelRatio(1000,600,1300,780,1)-1.3)<1e-9,'CSS zoom is compensated without mandatory supersampling');
+  assert.equal(offeringPixelRatio(3840,2160,3840,2160,1),.5,'4K surfaces respect the same 1080p budget');
+  for(const [w,h,dw,dh,native] of [[1000,600,1100,660,1],[1920,1080,2265.6,1274.4,1],[390,844,390,844,3],[3840,2160,3840,2160,2],[1000,600,2000,600,1],[10000,100,10000,100,2]]){
+    const ratio=offeringPixelRatio(w,h,dw,dh,native);
+    assert.ok(w*h*ratio*ratio<=2_073_600+1e-6,'render area stays within2.0736MP even under nonuniform CSS enlargement');
+    assert.ok(Math.max(w,h)*ratio<=4096+1e-6,'extreme aspect ratios also respect the texture-dimension limit');
   }
-  assert.ok(Math.abs(offeringPixelRatio(1000,600,1300,780,1)-1.95)<1e-9);
-  assert.equal(offeringPixelRatio(390,844,390,844,3),2);
 });
 
 test('the twin log locates a port, a physical check precedes recovery, and reverse seeks restore the fault',()=>{

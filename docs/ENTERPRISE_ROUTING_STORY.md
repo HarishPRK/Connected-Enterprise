@@ -1,6 +1,6 @@
 # Application traffic routing: client placement
 
-The offerings sequence illustrates the existing application steering patchboard in a store. It runs for 60 seconds (24 internal story units), uses five sample clients and four online IPsec tunnels, and sends no live routing commands. It replaces the earlier checkout/payment story. Dynamic Failover is a separate, unchanged offering.
+The offerings sequence illustrates the existing application steering patchboard in a store. It runs for 20 seconds (24 internal story units), uses five sample clients and four online IPsec tunnels, and sends no live routing commands. It replaces the earlier checkout/payment story. Dynamic Failover is a separate, unchanged offering.
 
 ## Scenarios
 

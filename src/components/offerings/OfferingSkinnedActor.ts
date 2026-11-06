@@ -1,4 +1,4 @@
-import { BoxGeometry, Color, Group, Mesh, MeshStandardMaterial, Quaternion, SkinnedMesh, Vector3, type Object3D } from 'three';
+import { BoxGeometry, Color, Group, Mesh, MeshStandardMaterial, Quaternion, SkinnedMesh, Vector3, type Object3D, type Skeleton } from 'three';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { ActorId, ActorPose, ActorRole } from './OfferingStoryMotion';
 import { sampleActorRig } from './OfferingActorMotion';
@@ -9,8 +9,26 @@ import { DIGITS, PHALANGES, fingerGripPose, poseFingerGrip } from './OfferingFin
 type Joint={object:Object3D;y:number};
 const JOINTS=['Hips','Torso','Head','LeftUpperArm','LeftForearm','LeftHand','RightUpperArm','RightForearm','RightHand','LeftThigh','LeftShin','LeftAnkle','RightThigh','RightShin','RightAnkle','Tablet','BagMount','Handset','Receipt','PaymentCard'] as const;
 export type Rig=Partial<Record<string,Joint>>;
+const resetJoints=new WeakMap<Rig,{joint:Joint;resetRotation:boolean}[]>();
+
+/** SkeletonUtils gives each material mesh a separate Skeleton even when all
+ * seven surfaces use identical bones and inverse binds. Share only within this
+ * private actor clone: one bone-texture upload serves skin, clothes and eyes.
+ * Each mesh retains its own bindMatrix and every other performer stays isolated. */
+export function shareActorSkeletons(actor:Object3D) {
+  const compatible=new Map<string,Skeleton>();
+  actor.traverse(node=>{
+    if(!(node instanceof SkinnedMesh))return;
+    const skeleton=node.skeleton;
+    const key=skeleton.bones.map(bone=>bone.uuid).join('/')+'|'+skeleton.boneInverses.map(matrix=>matrix.elements.join(',')).join('/');
+    const shared=compatible.get(key);
+    if(shared)node.skeleton=shared;
+    else compatible.set(key,skeleton);
+  });
+}
 export function prepareActor(source:Object3D,role:ActorRole,id:ActorId,cast?:Object3D){
   const object=cloneSkeleton(source),joints:Rig={},ownedMaterials:MeshStandardMaterial[]=[];
+  shareActorSkeletons(object);
   const shirts:Record<string,string>={shopper:'#39899a',queue1:'#aa6752',queue2:'#66876b',crowd1:'#a48d47',crowd2:'#715a89',crowd3:'#4f718d',crowd4:'#9a756c'};
   const complexions:Partial<Record<ActorId,string>>={queue1:'Staff_Skin_crew',queue2:'Technician_Skin_chef',crowd1:'Security_Skin_customer',crowd2:'Staff_Skin_crew',crowd3:'Technician_Skin_chef',crowd4:'Security_Skin_customer'};
   const skin=complexions[id]?cast?.getObjectByName(complexions[id]) as Mesh:undefined;
@@ -41,7 +59,13 @@ export function prepareActor(source:Object3D,role:ActorRole,id:ActorId,cast?:Obj
   return {object,joints,handset,receipt,card,ownedMaterials};
 }
 export function setRig(rig:Rig,pose:ActorPose,time:number){
-  for(const [name,joint] of Object.entries(rig)){if(!joint)continue;if(!['Receipt','PaymentCard'].includes(name))joint.object.rotation.set(0,0,0);joint.object.position.y=joint.y;}
+  let reset=resetJoints.get(rig);
+  if(!reset){reset=Object.entries(rig).flatMap(([name,joint])=>joint?[{joint,resetRotation:name!=='Receipt'&&name!=='PaymentCard'}]:[]);resetJoints.set(rig,reset);}
+  for(const {joint,resetRotation} of reset){
+    const rotation=joint.object.rotation;
+    if(resetRotation&&(rotation.x!==0||rotation.y!==0||rotation.z!==0))rotation.set(0,0,0);
+    joint.object.position.y=joint.y;
+  }
   const x=(name:keyof Rig,value:number)=>{const joint=rig[name];if(joint)joint.object.rotation.x=value;};
   const state=sampleActorRig(pose,time);
   x('LeftThigh',state.leftThigh);x('RightThigh',state.rightThigh);
@@ -68,7 +92,10 @@ export function setRig(rig:Rig,pose:ActorPose,time:number){
 export function reachReader(rig:Rig,weight:number,side:'Right'|'Left'='Right',destination:[number,number,number]=[7.2,1.64,5.065]){
   const arm=rig[`${side}UpperArm`]?.object,forearm=rig[`${side}Forearm`]?.object;
   if(!arm||!forearm||!arm.parent||weight<=0)return;
-  arm.parent.updateWorldMatrix(true,true);
+  // Only the ancestor chain is needed for this local-space solve. Recursing
+  // through both arms, every finger and every prop here repeated the renderer's
+  // skeleton walk for each contact in the same frame.
+  arm.parent.updateWorldMatrix(true,false);
   const rest=forearm.position.clone(),hand=new Vector3(0,-.332,.013);
   const target=arm.parent.worldToLocal(new Vector3(...destination)).sub(arm.position);
   const lengthA=rest.length(),lengthB=hand.length(),distance=Math.min(target.length(),lengthA+lengthB-.001);
@@ -88,7 +115,7 @@ export function reachReader(rig:Rig,weight:number,side:'Right'|'Left'='Right',de
 export function reachWrist(rig:Rig,weight:number,side:'Right'|'Left',destination:Vector3,orientation:Quaternion) {
   const arm=rig[`${side}UpperArm`]?.object,forearm=rig[`${side}Forearm`]?.object,hand=rig[`${side}Hand`]?.object;
   if(!arm?.parent||!forearm||!hand||weight<=0)return;
-  arm.parent.updateWorldMatrix(true,true);
+  arm.parent.updateWorldMatrix(true,false);
   const rest=forearm.position.clone(),wrist=hand.position.clone();
   const target=arm.parent.worldToLocal(destination.clone()).sub(arm.position);
   const lengthA=rest.length(),lengthB=wrist.length(),distance=Math.max(.025,Math.min(target.length(),lengthA+lengthB-.005));
@@ -100,7 +127,8 @@ export function reachWrist(rig:Rig,weight:number,side:'Right'|'Left',destination
   const lowerDirection=direction.multiplyScalar(distance).sub(elbow).applyQuaternion(upper.clone().invert()).normalize();
   const lower=new Quaternion().setFromUnitVectors(wrist.normalize(),lowerDirection);
   arm.quaternion.slerp(upper,weight);forearm.quaternion.slerp(lower,weight);
-  forearm.updateWorldMatrix(true,true);
+  // getWorldQuaternion refreshes this chain itself; descendants are unrelated
+  // to the palm orientation and will be updated by rendering/contact queries.
   const local=forearm.getWorldQuaternion(new Quaternion()).invert().multiply(orientation);
   hand.quaternion.slerp(local,weight);
 }
