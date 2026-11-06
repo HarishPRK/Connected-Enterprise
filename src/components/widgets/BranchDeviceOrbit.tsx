@@ -15,7 +15,6 @@ interface Props {
 }
 const labels: Record<Status, string> = { ok: 'Healthy', warn: 'Attention', err: 'Offline', off: 'Inactive' };
 const stateOrder: Status[] = ['ok', 'warn', 'err', 'off'];
-const nodeColors = ['#43d6ff', '#42ecc0', '#9391ff', '#ffac65', '#dc81ff', '#ffdb65'];
 const nameOf = (device: Device) => device.name?.trim() || device.mac || device.ip || device.id;
 
 function constellation(count: number) {
@@ -124,7 +123,7 @@ const OrbitDomain = memo(function OrbitDomain({ domain, devices, onDevice, onDom
         const point = positions.points[index];
         const Glyph = device.kind === 'generic' ? Box : kinds[device.kind]?.icon ?? Box;
         return <button type="button" className="orbit-node" key={device.id}
-          style={{ left: `${point.x / size * 100}%`, top: `${point.y / size * 100}%`, width: `${32 / size * 100}%`, height: `${32 / size * 100}%`, '--node-color': nodeColors[index % nodeColors.length] } as CSSProperties}
+          style={{ left: `${point.x / size * 100}%`, top: `${point.y / size * 100}%`, width: `${32 / size * 100}%`, height: `${32 / size * 100}%` }}
           data-device-id={device.id} data-domain={domain} data-kind={device.kind} data-status={device.status}
           data-highlighted={active?.id === device.id || activeKind === device.kind}
           data-dimmed={!!(active ? active.id !== device.id : activeKind && activeKind !== device.kind)}

@@ -7,24 +7,24 @@
 .orbit-motion-controls button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 5px 9px; color: var(--text-dim); background: transparent; border: 1px solid var(--border); border-radius: 6px; font-size: 10px; box-shadow: none; transform: none; }
 .orbit-motion-controls button:hover { color: var(--text); border-color: var(--text-muted); }
 .orbit-network { display: grid; grid-template-columns: minmax(0,1fr) 96px minmax(0,1fr); grid-template-rows: auto auto auto auto auto; column-gap: 2px; padding: 12px 0 0; }
-.orbit-domain { --orbit-accent: #67dcff; --orbit-rgb: 103 220 255; --orbit-planet: url('../../assets/device-studio/orbit-planet-it.png'); --orbit-direction: normal; --orbit-counter-direction: reverse; display: grid; grid-template-rows: subgrid; grid-row: 1 / 6; grid-column: 1; min-width: 0; }
-.orbit-domain[data-device-domain='OT'] { --orbit-accent: #bf9eff; --orbit-rgb: 191 158 255; --orbit-planet: url('../../assets/device-studio/orbit-planet-ot.png'); --orbit-direction: reverse; --orbit-counter-direction: normal; grid-column: 3; }
+.orbit-domain { --orbit-accent: #9db8c8; --orbit-rgb: 157 184 200; --node-color: #829ba8; --orbit-planet: url('../../assets/device-studio/orbit-planet-it.png'); --orbit-direction: normal; --orbit-counter-direction: reverse; display: grid; grid-template-rows: subgrid; grid-row: 1 / 6; grid-column: 1; min-width: 0; }
+.orbit-domain[data-device-domain='OT'] { --orbit-accent: #aba8c0; --orbit-rgb: 171 168 192; --node-color: #9693a7; --orbit-planet: url('../../assets/device-studio/orbit-planet-ot.png'); --orbit-direction: reverse; --orbit-counter-direction: normal; grid-column: 3; }
 .orbit-title { display: flex; justify-content: center; padding: 0 0 6px; }
 .orbit-title button { display: inline-flex; align-items: center; gap: 9px; min-height: 28px; padding: 2px 6px; border: 0; background: transparent; color: var(--orbit-accent); font-size: 13px; font-weight: 600; box-shadow: none; transform: none; }
 .orbit-title svg { color: var(--text-muted); width: 12px; }
 .orbit-field { position: relative; min-width: 0; width: 100%; aspect-ratio: 1; align-self: center; isolation: isolate; }
 .orbit-field:is(:hover,:focus-within) { --orbit-play-state: paused; }
 .orbit-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; color: var(--orbit-accent); fill: none; }
-.orbit-tracks { stroke: currentColor; stroke-opacity: .2; stroke-width: .7; }
-.orbit-perimeter { stroke: currentColor; stroke-width: 1; stroke-dasharray: 21 29; stroke-opacity: .45; transform: rotate(-94deg); transform-origin: center; }
+.orbit-tracks { stroke: currentColor; stroke-opacity: .16; stroke-width: .7; }
+.orbit-perimeter { stroke: currentColor; stroke-width: .8; stroke-dasharray: 21 29; stroke-opacity: .3; transform: rotate(-94deg); transform-origin: center; }
 .orbit-track-beacon { fill: currentColor; }
 .orbit-association { stroke: currentColor; stroke-opacity: .45; stroke-width: .8; }
 .orbit-core-outline { stroke: currentColor; stroke-opacity: .16; stroke-width: .7; }
-.orbit-planet { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); background: var(--orbit-planet) center / contain no-repeat; pointer-events: none; z-index: 2; filter: drop-shadow(0 0 8px rgb(var(--orbit-rgb) / .24)); }
-.orbit-planet-rings { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; fill: none; color: var(--orbit-accent); stroke: currentColor; stroke-width: 2.5; stroke-opacity: .8; }
-.orbit-planet-rings-back { z-index: 1; stroke-opacity: .4; }
+.orbit-planet { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); background: var(--orbit-planet) center / contain no-repeat; pointer-events: none; z-index: 2; filter: saturate(.35) brightness(.9) contrast(.9) drop-shadow(0 4px 4px #0003); }
+.orbit-planet-rings { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; fill: none; color: var(--orbit-accent); stroke: currentColor; stroke-width: 1.5; stroke-opacity: .55; }
+.orbit-planet-rings-back { z-index: 1; stroke-opacity: .28; }
 .orbit-planet-rings-front { z-index: 3; }
-.orbit-planet-rings .orbit-ring-fine { stroke-width: .8; stroke-opacity: .55; }
+.orbit-planet-rings .orbit-ring-fine { stroke-width: .7; stroke-opacity: .35; }
 .orbit-moons { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .orbit-moon-upright { position: absolute; inset: 0; }
 .orbit-moons,.orbit-association-motion { animation: device-orbit-revolve 180s linear infinite var(--orbit-direction); }
@@ -50,7 +50,7 @@
   min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 50%; color: var(--orbit-accent);
   background: transparent; box-shadow: none; transition: opacity .15s; z-index: 1; pointer-events: auto;
 }
-.orbit-node-metal { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%; background: var(--node-color) url('../../assets/device-studio/orbit-moon.png') center / contain no-repeat; background-blend-mode: luminosity; border: 1px solid color-mix(in srgb, var(--node-color), #fff 35%); box-shadow: 0 0 7px color-mix(in srgb, var(--node-color) 40%, transparent), inset -3px -4px 5px #06152970; transition: transform .15s; }
+.orbit-node-metal { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%; background: var(--node-color) url('../../assets/device-studio/orbit-moon.png') center / contain no-repeat; background-blend-mode: luminosity; border: 1px solid color-mix(in srgb, var(--node-color), #fff 12%); box-shadow: 0 2px 3px #0003, inset -3px -4px 5px #06152950; transition: transform .15s; }
 .orbit-device-glyph { width: 46%; height: 46%; transform: translateY(-7%); color: #062133; stroke-width: 1.9; filter: drop-shadow(0 1px 1px #ffffff70); }
 .branch-device-orbit [data-status='ok'] { --orbit-status: #8bc5b0; }
 .branch-device-orbit [data-status='warn'] { --orbit-status: var(--warn); }
@@ -59,7 +59,7 @@
 .orbit-device-status { position: absolute; left: 50%; bottom: 15%; display: grid; place-items: center; width: 4px; height: 4px; transform: translateX(-50%); border-radius: 50%; background: #14363b; border: 1px solid var(--orbit-status); }
 .orbit-device-status > svg { width: 8px; height: 8px; stroke-width: 2.1; }
 .orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) { color: var(--orbit-status); }
-.orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) .orbit-node-metal { background-color: var(--orbit-status); border-color: var(--orbit-status); box-shadow: 0 0 7px color-mix(in srgb, var(--orbit-status) 35%, transparent); }
+.orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) .orbit-node-metal { background-color: color-mix(in srgb, var(--node-color) 80%, var(--orbit-status)); border-color: color-mix(in srgb, var(--node-color) 60%, var(--orbit-status)); }
 .orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) .orbit-device-status { left: auto; right: 0; bottom: 0; transform: none; width: 12px; height: 12px; border-radius: 50%; color: var(--orbit-status); background: #192631; border: 1px solid currentColor; }
 .orbit-field .orbit-node[data-dimmed='true'] { opacity: .56; }
 .orbit-field .orbit-node:is([data-highlighted='true'],:hover,:focus-visible) { opacity: 1; z-index: 2; outline: 1px solid var(--orbit-accent); outline-offset: 2px; }
@@ -95,8 +95,8 @@
 .orbit-bridge i:last-child { transform: rotate(180deg); background: linear-gradient(90deg,transparent,#aa99d15e); }
 .orbit-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .branch-device-orbit button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-[data-theme='light'] .orbit-domain { --orbit-accent: #8bd5ef; --orbit-rgb: 25 122 162; }
-[data-theme='light'] .orbit-domain[data-device-domain='OT'] { --orbit-accent: #c6b2f2; --orbit-rgb: 124 81 170; }
+[data-theme='light'] .orbit-domain { --orbit-accent: #58778b; --orbit-rgb: 88 119 139; }
+[data-theme='light'] .orbit-domain[data-device-domain='OT'] { --orbit-accent: #76718d; --orbit-rgb: 118 113 141; }
 [data-theme='light'] .orbit-title button,[data-theme='light'] .orbit-categories button > svg:first-child { color: rgb(var(--orbit-rgb)); }
 [data-theme='light'] .orbit-lines { color: rgb(var(--orbit-rgb)); }
 @container device-orbit (min-width: 960px) {
