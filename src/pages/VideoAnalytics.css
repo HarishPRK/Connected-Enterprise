@@ -1,0 +1,33 @@
+.va-alert-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text-dim);
+}
+.va-alert-controls > svg { flex-shrink: 0; color: var(--accent); }
+.va-alert-controls-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
+.va-alert-controls-copy strong { color: var(--text); font-size: 13px; font-weight: 600; }
+.va-alert-controls-copy span { font-size: 12px; line-height: 1.5; }
+.va-alert-controls button {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--panel-raised, var(--panel));
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.va-alert-controls button:hover { border-color: var(--accent); color: var(--accent); }
+.va-alert-controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 600px) {
+  .va-alert-controls { flex-wrap: wrap; align-items: flex-start; }
+  .va-alert-controls-copy { flex-basis: calc(100% - 36px); }
+  .va-alert-controls button { margin-left: 31px; }
+}

@@ -3,10 +3,13 @@ import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
 import { useToast } from '../ui/Toast';
 import { useVideoAlerts } from '../ui/useVideoAlerts';
-import { buildVideoAlertToast } from '../features/videoAnalytics/videoAlertCopy';
+import { buildVideoAlertToast, VIDEO_ALERT_TOAST_PREFIX } from '../features/videoAnalytics/videoAlertCopy';
+import { useVideoAlertPause } from '../features/videoAnalytics/useVideoAlertPause';
+import { canNotifyVideoAlert, videoAlertEventKey } from '../features/videoAnalytics/videoAlertNotifications';
 import {
-  AlertCircle, Cpu, Loader2, Maximize2, Minimize2, Play, RefreshCw, Siren, Square, Video, Wifi,
+  AlertCircle, Bell, BellOff, Cpu, Loader2, Maximize2, Minimize2, Play, RefreshCw, Siren, Square, Video, Wifi,
 } from 'lucide-react';
+import './VideoAnalytics.css';
 
 type StreamGroup = 'Nvidia' | 'Hailo';
 
@@ -49,8 +52,10 @@ const GROUP_META: Record<StreamGroup, { color: string; sub: string }> = {
 export function VideoAnalyticsPage() {
   const nvidia = useMemo(() => STREAMS.filter((s) => s.group === 'Nvidia'), []);
   const hailo  = useMemo(() => STREAMS.filter((s) => s.group === 'Hailo'),  []);
-  const { push } = useToast();
+  const { push, dismissByPrefix } = useToast();
+  const { paused: alertsPaused, resumedAt, setPaused: setAlertsPaused } = useVideoAlertPause();
   const relay = useVideoAlerts();
+  const handledEvents = useRef(new Set<string>());
   const activeStreamRef = useRef<VideoStream | null>(null);
   const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
   const activeStream = useMemo(
@@ -72,11 +77,25 @@ export function VideoAnalyticsPage() {
 
   useEffect(() => {
     const event = relay.lastLiveEvent;
+    const key = videoAlertEventKey(event);
+    if (!event || !key || handledEvents.current.has(key)) return;
+    // Consume events while paused as well, so Resume never replays the last
+    // suppressed notification. The relay subscription stays connected.
+    handledEvents.current.add(key);
+    // Match the server's 256-event recovery window without unbounded growth.
+    if (handledEvents.current.size > 256) {
+      const oldest = handledEvents.current.values().next().value;
+      if (oldest) handledEvents.current.delete(oldest);
+    }
     // OFF messages clear server state without creating noisy resolution
     // toasts. Retained messages are excluded by useVideoAlerts.
-    if (!event || event.state !== 'ON') return;
+    if (!canNotifyVideoAlert(event, alertsPaused, resumedAt)) return;
     push(buildVideoAlertToast(event, activeStreamRef.current ?? undefined));
-  }, [push, relay.lastLiveEvent]);
+  }, [alertsPaused, resumedAt, push, relay.lastLiveEvent]);
+
+  useEffect(() => {
+    if (alertsPaused) dismissByPrefix(VIDEO_ALERT_TOAST_PREFIX);
+  }, [alertsPaused, dismissByPrefix]);
 
   return (
     <>
@@ -84,6 +103,21 @@ export function VideoAnalyticsPage() {
         title="Video Analytics"
         subtitle="Live inference feeds from edge GPU and NPU pipelines. Each tile shows a preview — click Open to start the stream in fullscreen."
       />
+
+      <section className="va-alert-controls" aria-label="Video alert notifications" data-paused={alertsPaused}>
+        {alertsPaused ? <BellOff size={19} aria-hidden="true" /> : <Bell size={19} aria-hidden="true" />}
+        <div className="va-alert-controls-copy" aria-live="polite">
+          <strong>{alertsPaused ? 'Video alert pop-ups paused' : 'Video alert pop-ups on'}</strong>
+          <span>{alertsPaused
+            ? 'Paused until you resume. Live feeds and relay monitoring continue.'
+            : 'New relay events appear as notifications. You can pause them at any time.'}</span>
+        </div>
+        <button type="button" onClick={() => {
+          const key = videoAlertEventKey(relay.lastLiveEvent);
+          if (key) handledEvents.current.add(key);
+          setAlertsPaused(!alertsPaused);
+        }}>{alertsPaused ? 'Resume alerts' : 'Pause alerts'}</button>
+      </section>
 
       <div className="kpi-strip">
         <Kpi label="Active pipelines" value={String(STREAMS.length)} sub={`${nvidia.length} Nvidia · ${hailo.length} Hailo`} icon={Video} accent="var(--accent)" />

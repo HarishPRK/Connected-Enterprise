@@ -1,5 +1,7 @@
 import type { VideoRelayEvent } from '../../ui/useVideoAlerts';
 
+export const VIDEO_ALERT_TOAST_PREFIX = 'video-relay-';
+
 export interface VideoAlertStreamContext {
   id: string;
   name: string;
@@ -71,7 +73,7 @@ export function buildVideoAlertToast(
   const safety = stream ? STREAM_SAFETY_COPY[stream.id] ?? GENERIC_SAFETY_COPY : GENERIC_SAFETY_COPY;
   const streamName = stream?.name ?? 'Video Analytics';
   const source = `${event.topic} ${event.code}`;
-  const dedupeKey = `video-relay-${event.channel}-${stream?.id ?? 'unassigned'}`;
+  const dedupeKey = `${VIDEO_ALERT_TOAST_PREFIX}${event.channel}-${stream?.id ?? 'unassigned'}`;
   const recovery = event.replayed ? ' Recovered after the live alert connection resumed.' : '';
   const context = stream
     ? `${source} was received.${recovery} Current verified feed: ${streamName}. The relay payload does not identify which detector originated the event. `

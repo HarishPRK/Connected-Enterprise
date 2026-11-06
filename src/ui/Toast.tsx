@@ -16,6 +16,7 @@ interface Toast {
 
 interface ToastCtx {
   push: (t: Omit<Toast, 'id'>) => void;
+  dismissByPrefix: (prefix: string) => void;
 }
 const Ctx = createContext<ToastCtx | null>(null);
 
@@ -63,7 +64,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const durationMs = t.durationMs ?? (t.kind === 'critical' ? 10_000 : 4_200);
     setTimeout(() => setItems((items) => items.filter((item) => item.id !== id)), durationMs);
   }, []);
-  const context = useMemo(() => ({ push }), [push]);
+  const dismissByPrefix = useCallback((prefix: string) => {
+    if (!prefix) return;
+    setItems((items) => {
+      const remaining = items.filter((item) => !item.dedupeKey?.startsWith(prefix));
+      return remaining.length === items.length ? items : remaining;
+    });
+  }, []);
+  const context = useMemo(() => ({ push, dismissByPrefix }), [push, dismissByPrefix]);
 
   const toastStack = (
     <div className="toast-stack" aria-live="polite">
