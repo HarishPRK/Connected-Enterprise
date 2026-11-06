@@ -1,7 +1,7 @@
 # Gateway Digital Twin Studio
 
 The `/gateway-twin` page embeds Gemtek Digital Twin Studio from
-`https://studio.connectedenterprise.app/`. This HTTPS origin serves the same
+`https://studio.connectedenterprise.app/?application=ce`. This HTTPS origin serves the same
 application as the requested source:
 `http://ce-public-alb-1719524608.us-east-1.elb.amazonaws.com:8080/`.
 HTTPS is required when embedding inside `https://connectedenterprise.app`.
@@ -11,6 +11,20 @@ not implement the former `gw-twin` postMessage API. The dashboard therefore
 provides reload, open-in-new-tab and fullscreen controls, and leaves branch
 selection independent of the studio's own gateway feed. Ctrl/Cmd+K opens the
 dashboard command palette consistently on this page.
+
+## Connected Enterprise display name
+
+The explicit `application=ce` parameter names the Gemtek gateway **prpl / Edge
+Gateway** inside this embed, including its navigation, model heading, device
+chooser and document title. The open-in-new-tab link retains the same context,
+as does switching devices inside the studio. The BGW720 model keeps its name.
+Branding is URL-scoped and is never saved as a shared preference: standalone
+visits still show **prpl Gateway**, and `application=ccri` still shows
+**Restaurant Gateway**. Telemetry identifiers and prplOS names are unchanged.
+
+The shared studio source is Sites project
+`appgprj_6aa3709a467081918af199646cf6a6c9`, hosted at
+`https://gemtek.connectedenterprise.app`. The proxy forwards the query string.
 
 ## Hosting
 

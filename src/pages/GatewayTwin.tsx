@@ -6,7 +6,9 @@ import { useToast } from '../ui/Toast';
 // HTTPS host routes to the same target as the supplied public ALB :8080 URL.
 // The studio owns its telemetry and controls; it does not implement the old
 // gw-twin postMessage contract or the dashboard's branch-selection protocol.
-const STUDIO_URL = 'https://studio.connectedenterprise.app/';
+// Only the CE entry point opts into this display name; shared studio defaults
+// and other applications keep their own gateway branding.
+const STUDIO_URL = 'https://studio.connectedenterprise.app/?application=ce';
 const LOAD_TIMEOUT_MS = 20_000;
 
 export function GatewayTwinPage() {
@@ -79,7 +81,7 @@ export function GatewayTwinPage() {
     <div ref={pageRef} className={`gateway-twin-page${isFullscreen ? ' is-fullscreen' : ''}`}>
       <PageHeader
         title="GW Digital Twin"
-        subtitle="prpl Gateway · Explore gateway hardware, live operations and network simulations"
+        subtitle="prpl / Edge Gateway · Explore gateway hardware, live operations and network simulations"
         right={
           <div className="gateway-twin-toolbar">
             <button type="button" className="gateway-twin-fullscreen-button" onClick={reloadStudio}>
@@ -113,7 +115,7 @@ export function GatewayTwinPage() {
         <iframe
           key={frameAttempt}
           src={STUDIO_URL}
-          title="prpl Gateway Digital Twin"
+          title="prpl / Edge Gateway Digital Twin"
           onLoad={() => { setLoaded(true); setLoadTimedOut(false); }}
           onError={() => { setLoaded(false); setLoadTimedOut(true); }}
           style={{ border: 0, width: '100%', height: '100%', display: 'block', background: '#060709' }}
