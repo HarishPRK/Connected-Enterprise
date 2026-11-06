@@ -1,0 +1,22 @@
+.enterprise-architecture { margin: 32px 0; scroll-margin-top: 24px; }
+.enterprise-architecture-heading { margin-bottom: 20px; }
+.enterprise-architecture-heading h2 { margin: 0 0 6px; font-size: 20px; color: var(--text); }
+.enterprise-architecture-heading p { margin: 0; font-size: 13px; color: var(--text-muted); }
+.enterprise-architecture .card-title h3 { margin: 0; font: inherit; }
+.enterprise-architecture .service-offerings-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 20px; }
+.enterprise-page-sections { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 16px; }
+.enterprise-page-sections a { color: var(--text-dim); font-size: 13px; text-underline-offset: 4px; }
+.enterprise-page-sections a:hover { color: var(--accent); }
+.enterprise-page-sections a:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+@media (max-width: 900px) {
+  .enterprise-architecture .so-pyramid-guide { display: none; }
+  .enterprise-architecture .so-pyramid { gap: 8px; }
+}
+@media (max-width: 760px) {
+  .enterprise-architecture .service-offerings-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .enterprise-architecture .kpi-top { align-items: flex-start; gap: 8px; }
+  .enterprise-architecture .kpi-label { white-space: normal; overflow: visible; font-size: 10px; line-height: 1.4; }
+  .enterprise-architecture .kpi-value { min-width: 0; font-size: 20px; white-space: normal; overflow-wrap: anywhere; }
+  .enterprise-architecture .card-head { flex-wrap: wrap; }
+  .enterprise-architecture .so-card-head { flex-wrap: wrap; }
+}

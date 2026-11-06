@@ -7,6 +7,7 @@ import { COMPONENT_DETAILS, OFFERING_CHAPTERS, type OfferingId } from '../compon
 import { getOfferingStory } from '../components/offerings/offeringStories';
 import { getOfferingUseCase } from '../components/offerings/offeringUseCases';
 import { OfferingDeviceGuide, OfferingRoutingReadout } from '../components/offerings/OfferingDeviceGuide';
+import { OfferingArchitecture } from '../components/offerings/OfferingArchitecture';
 import { advanceStoryClock, clampStoryTime, STORY_DURATION as DURATION, STORY_PLAYBACK_SECONDS } from '../components/offerings/OfferingPlayback';
 import '../components/offerings/enterprise-field-guide.css';
 
@@ -160,6 +161,10 @@ export function ServiceOfferingsPage() {
   return <div className="service-offerings-page enterprise-offerings-page">
     <PageHeader title="Challenges / Offerings" subtitle="Real-world challenges, played out in one connected enterprise."
       right={<span className="enterprise-capability-count"><Layers3 size={15} aria-hidden="true" />7 offerings</span>} />
+    <nav className="enterprise-page-sections" aria-label="Page sections">
+      <a href="#enterprise-showcase-title">3D stories</a>
+      <a href="#architecture-offerings">Architecture &amp; offerings</a>
+    </nav>
     <section className="solution-showcase enterprise-showcase" ref={hostRef} aria-labelledby="enterprise-showcase-title" data-color={OFFERING_TONES[offering.id]}>
       <div className="showcase-heading"><div><span className="enterprise-guide-kicker"><Layers3 size={14} aria-hidden="true" />Enterprise field guide</span><h2 id="enterprise-showcase-title">Inside the connected store</h2><p className="enterprise-heading-sub">People, equipment, and the services that keep the day moving.</p></div>
         <div className="showcase-heading-actions"><span className="showcase-disclosure">{touring ? `Tour ${index + 1} / 7` : 'One store · 7 offerings'}</span>
@@ -222,6 +227,7 @@ export function ServiceOfferingsPage() {
       </div></div>
       <p className="showcase-footnote">{reducedMotion ? 'Reduced motion is on. Choose a story step to see its settled scene. ' : 'Watch follows the action; drag the scene to explore freely. ' }Illustrative business scenarios. These controls do not operate connected equipment.</p>
     </section>
+    <OfferingArchitecture />
     <section className="enterprise-capabilities" aria-labelledby="enterprise-capabilities-title">
       <div className="enterprise-capabilities-heading"><h2 id="enterprise-capabilities-title">Stories from the store</h2><p>Seven offerings. Specific problems, visible responses.</p></div>
       <ol>{OFFERING_CHAPTERS.map((item, i) => {
