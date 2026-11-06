@@ -1,6 +1,6 @@
-/** Every authored sequence keeps its 24-unit choreography and plays in 20 s. */
+/** Every authored sequence keeps its 24-unit choreography and plays in 30 s. */
 export const STORY_DURATION = 24;
-export const STORY_PLAYBACK_SECONDS = 20;
+export const STORY_PLAYBACK_SECONDS = 30;
 export const STORY_UNITS_PER_SECOND = STORY_DURATION / STORY_PLAYBACK_SECONDS;
 
 export function clampStoryTime(time: number): number {

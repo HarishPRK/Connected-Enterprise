@@ -3,7 +3,7 @@ export type RoutingClientId = 'front-desk' | 'back-office' | 'meeting-room' | 'k
 export type RoutingTunnelId = 'vti-fiber1' | 'vti-fiber2' | 'vti-cell1' | 'vti-cell2';
 export type RoutingStage = 'baseline' | 'symptom' | 'review' | 'locked-preview' | 'selecting' | 'ready-to-publish' | 'publishing' | 'broker-accepted' | 'illustrating' | 'outcome';
 
-/** Absolute story units; the player maps 24 units to 20 real seconds. */
+/** Absolute story units; the player maps 24 units to 30 real seconds. */
 export const ROUTING_TIMING = {
   symptoms: 4, review: 6, blockedPreview: 6, unlock: 7,
   selectionStart: 9, selectionComplete: 10.5, publish: 11,

@@ -1,7 +1,7 @@
 export type SmartVariant = 'hvac' | 'cooler' | 'energy';
 export type SmartStage = 'baseline' | 'symptom' | 'review' | 'approach' | 'action' | 'verification';
 
-/** Absolute story units; the player maps 24 units to 20 real seconds.
+/** Absolute story units; the player maps 24 units to 30 real seconds.
  * Temperatures, circuit loads and elapsed trend windows are illustrative. */
 export const SMART_TIMING = {
   symptom: 4,
