@@ -159,7 +159,7 @@ export function GatewayInventory({
     { id: 'activating' as const, label: 'Activating' },
     { id: 'ready' as const, label: 'Ready' },
     { id: 'attention' as const, label: 'Needs attention' },
-    ...(entries.some(entry => entry.journey.group === 'retired') ? [{ id: 'retired' as const, label: 'Retired' }] : []),
+    ...(entries.some(entry => entry.journey.group === 'retired') ? [{ id: 'retired' as const, label: 'Retiring / retired' }] : []),
   ];
   const filteredEntries = entries.filter(({ gateway, journey }) => {
     const needle = gatewayQuery.trim().toLowerCase();

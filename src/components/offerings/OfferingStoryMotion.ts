@@ -149,14 +149,16 @@ export function sampleStoryCamera(context:StoryContext,time:number):{target:Stor
       {t:3,at:point,distance:close,yaw,pitch,cut:true},
       {t:5.5,at:point,distance:close*.97,yaw,pitch},
       {t:5.6,at:[7.25,1.25,.45],distance:2.6,yaw:-1.2,pitch:.28,cut:true},
-      {t:6,at:[7.1,1.1934,.156],distance:.77,yaw:-.8,pitch:.30,cut:true},
-      {t:13.9,at:[7.1,1.1934,.156],distance:.74,yaw:-.8,pitch:.30},
+      // Look past the operator's left side: the previous shallow angle put
+      // the wide-frame lens behind the technician's shoulder and shirt.
+      {t:6,at:[7.1,1.1934,.156],distance:.77,yaw:-1.42,pitch:.30,cut:true},
+      {t:13.9,at:[7.1,1.1934,.156],distance:.74,yaw:-1.42,pitch:.30},
       {t:14,at:point,distance:close,yaw,pitch,cut:true},
       ...(variant==='voice'?[{t:15.8,at:point,distance:close,yaw,pitch},{t:16,at:[8.025,1.238,6.953] as StoryPoint,distance:.46,yaw:-.8,pitch:.22,cut:true},{t:18.2,at:[8.025,1.238,6.953] as StoryPoint,distance:.45,yaw:-.8,pitch:.22}]:[{t:18.2,at:point,distance:close*.97,yaw,pitch}]),
       {t:18.3,at:[point[0],1.2,point[2]+.35],distance:3.3,yaw:-1.2,pitch:.22,cut:true},
       {t:20.6,at:[point[0],1.2,point[2]+.35],distance:3.1,yaw:-1.2,pitch:.22},
-      {t:20.7,at:[7.1,1.1934,.156],distance:.77,yaw:-.8,pitch:.30,cut:true},
-      {t:24,at:[7.1,1.1934,.156],distance:.77,yaw:-.8,pitch:.30},
+      {t:20.7,at:[7.1,1.1934,.156],distance:.77,yaw:-1.42,pitch:.30,cut:true},
+      {t:24,at:[7.1,1.1934,.156],distance:.77,yaw:-1.42,pitch:.30},
     ];
   }
   else if(isCheckoutStory(context))stops=CHECKOUT_SHOTS;

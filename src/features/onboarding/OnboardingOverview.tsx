@@ -6,7 +6,7 @@ const GROUPS=[
   {id:'ready',label:'Health confirmed'},
   {id:'activating',label:'Activating'},
   {id:'attention',label:'Needs attention'},
-  {id:'retired',label:'Retired'},
+  {id:'retired',label:'Retiring / retired'},
 ] as const;
 const operationType={ONBOARD:'Gateway onboarding',PROFILE_DEPLOY:'Profile deployment',DECOMMISSION:'Gateway retirement'};
 function dateLabel(value:string) {

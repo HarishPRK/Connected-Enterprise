@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import { RoundedBox } from '@react-three/drei';
 import { CanvasTexture, Group, InstancedMesh, Mesh, MeshStandardMaterial, Object3D, PointLight, SRGBColorSpace } from 'three';
 import { sampleSmart, type SmartStoryState } from './OfferingSmartStory';
-import { SMART_POINTS, smartTrolleyPoint } from './OfferingSmartMotion';
+import { SMART_POINTS, SMART_THERMOSTAT_RADIUS, smartTrolleyPoint } from './OfferingSmartMotion';
 
 const INK = '#f4efde', MUTED = '#a9c2b5', MINT = '#a3e4c4', AMBER = '#f1c184';
 const WIDTH = 1280, HEIGHT = 800;
@@ -135,6 +135,28 @@ function SelectedDisplay({ timeRef }: { timeRef: RefObject<number> }) {
   </group>;
 }
 
+function paintSetpoint(ctx: CanvasRenderingContext2D, texture: CanvasTexture, value: number) {
+  ctx.fillStyle = '#071918'; ctx.fillRect(0, 0, 512, 512);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#a7d9d8'; ctx.font = '600 39px sans-serif'; ctx.fillText('SETPOINT', 256, 141);
+  ctx.font = '500 165px sans-serif'; ctx.fillText(`${value}°`, 256, 314);
+  ctx.fillStyle = '#7dafa6'; ctx.font = '27px sans-serif'; ctx.fillText('ILLUSTRATIVE', 256, 385);
+  texture.needsUpdate = true;
+}
+
+function ThermostatSetpoint({ timeRef }: { timeRef: RefObject<number> }) {
+  const surface = useMemo(() => makeSurface(512, 512), []), last = useRef<number>(NaN);
+  useEffect(() => () => surface.texture.dispose(), [surface]);
+  useFrame(() => {
+    const value = sampleSmart('energy', timeRef.current).energy.setpointC;
+    if (last.current === value) return;
+    last.current = value; paintSetpoint(surface.ctx, surface.texture, value);
+  });
+  return <mesh name="Smart thermostat live setpoint" position={SMART_POINTS.thermostat}>
+    <circleGeometry args={[SMART_THERMOSTAT_RADIUS, 64]} />
+    <meshBasicMaterial map={surface.texture} toneMapped={false} />
+  </mesh>;
+}
+
 /** Physical telemetry on the existing rack and a local sensor display.
  * Actual HVAC rotor/door/lamp groups are driven by the shared sampler in Equipment. */
 export function OfferingSmartVisual({ timeRef, variant, onSelect }: { timeRef: RefObject<number>; variant: string; onSelect?: (id: string) => void }) {
@@ -163,6 +185,6 @@ export function OfferingSmartVisual({ timeRef, variant, onSelect }: { timeRef: R
     </group>
     {variant === 'hvac' && <PackingTrolley timeRef={timeRef} />}
     {variant !== 'energy' && <Airflow timeRef={timeRef} variant={variant} />}
-    {variant === 'energy' && <SelectedDisplay timeRef={timeRef} />}
+    {variant === 'energy' && <><SelectedDisplay timeRef={timeRef} /><ThermostatSetpoint timeRef={timeRef} /></>}
   </group>;
 }

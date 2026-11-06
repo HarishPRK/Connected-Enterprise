@@ -28,9 +28,14 @@ export const SMART_POINTS = {
   coolerReadout: [-1.35, 2.96, -6.87] as StoryPoint,
   energy: [-10.6, 1.3, .55] as StoryPoint,
   energyDisplay: [-12.2, 1.45, .2] as StoryPoint,
+  // Cover the static GLB digits on the recessed round face, 3 mm beyond its
+  // foremost inlay. The separate label makes this a setpoint, not room air.
+  thermostat: installedPoint('thermostat', [0, .36, .136]),
   energyStand: [-9.5, .04, -.2] as StoryPoint,
   meter: installedPoint('meter', [0, .70, .216]),
 } as const;
+
+export const SMART_THERMOSTAT_RADIUS = .275 * PARTS.find(part => part.id === 'thermostat')!.size / Math.max(...manifest.prefabs.Thermostat.size);
 
 export function smartTrolleyPoint(time: number): StoryPoint {
   return [SMART_POINTS.trolley[0] - 2.2 * sampleSmart('hvac', time).hvac.obstructionProgress, .04, SMART_POINTS.trolley[2]];

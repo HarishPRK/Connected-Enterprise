@@ -53,6 +53,8 @@ test('after-hours request affects selected loads only and power follows their re
   }
   assert.equal(sampleSmart('energy', 16).energy.requested, true);
   assert.equal(sampleSmart('energy', 16).energy.totalKw, 9.4);
+  assert.equal(sampleSmart('energy', 16.99).energy.setpointC, 22, 'a request alone does not change the displayed setting');
+  assert.equal(sampleSmart('energy', 17).energy.setpointC, 26, 'physical thermostat and console share the applied example setting');
   const transition = sampleSmart('energy', 18);
   assert(transition.energy.lightingLevel < 1 && transition.energy.lightingLevel > .2);
   assert.equal(transition.actionComplete, false);
