@@ -122,6 +122,52 @@ it('requires bounded expiry, fixed development Lambda and explicit origins', () 
   ]) assert.throws(() => publicOnboardingConfig({ ...configuredEnv, ...invalid }, initialTime));
 });
 
+it('persistent development access is explicit, tenant-scoped and revocable without changing Cognito', async () => {
+  const persistentEnv = { ...configuredEnv, ONBOARDING_PUBLIC_AWS_ACCESS_MODE: 'persistent-development' };
+  let clock = initialTime + 365 * 86400_000;
+  const received: string[] = [];
+  const factory: typeof createOnboardingAwsBridge = config => {
+    assert.equal(config.fixedTenantId, 'tenant-test');
+    assert.equal(config.fixedSubject, 'anonymous-ec2-onboarding-dev');
+    assert.equal(config.apiFunctionArn, configuredEnv.ONBOARDING_PUBLIC_AWS_FUNCTION_ARN);
+    return {
+      resolvePrincipal: () => ({ subject: config.fixedSubject, tenantId: config.fixedTenantId, role: 'tenant_admin' }),
+      forward: async request => { received.push(request.path); return { statusCode: 200, headers: { 'content-type': 'application/json' }, body: Buffer.from('{"mode":"aws"}') }; },
+    };
+  };
+  const app = express();app.use(express.json());
+  app.use('/persistent', createPublicOnboardingRouter({ env: persistentEnv, now: () => clock, bridgeFactory: factory }));
+  app.use('/revoked', createPublicOnboardingRouter({ env: { ...persistentEnv, ONBOARDING_PUBLIC_AWS_ENABLED: 'false' }, now: () => clock, bridgeFactory: () => { throw new Error('Disabled must not create AWS client'); } }));
+  const server = await new Promise<Server>(resolve => { const listener=app.listen(0,'127.0.0.1',()=>resolve(listener)); });
+  const base=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const mode = await fetch(`${base}/persistent/access-mode`);
+    assert.equal(mode.headers.get('cache-control'), 'no-store');
+    assert.equal(mode.headers.get('set-cookie'), null);
+    assert.deepEqual(await mode.json(), { mode: 'public-development-aws', expiresAt: null,
+      user: { subject: 'anonymous-ec2-onboarding-dev', tenantId: 'tenant-test', tenantRole: 'tenant_admin' } });
+    assert.equal((await fetch(`${base}/persistent/live/snapshot`)).status, 200);
+    clock += 365 * 86400_000;
+    assert.equal((await fetch(`${base}/persistent/live/snapshot`)).status, 200);
+    for(const suppliedOrigin of [undefined,'https://another.example']) {
+      assert.equal((await fetch(`${base}/persistent/live/profiles`, { method: 'POST', headers: { 'Content-Type':'application/json', ...(suppliedOrigin?{Origin:suppliedOrigin}:{}) }, body:'{}' })).status, 403);
+    }
+    assert.equal(received.length,2,'blocked origins must never invoke AWS');
+    assert.equal((await fetch(`${base}/persistent/live/profiles`, { method:'POST', headers: { Origin:origin,'Content-Type':'application/json' },body:'{}' })).status,200);
+    assert.deepEqual(await (await fetch(`${base}/revoked/access-mode`)).json(),{mode:'cognito'});
+    assert.equal((await fetch(`${base}/revoked/live/snapshot`)).status,503);
+  } finally { await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
+  for(const invalid of [
+    { ONBOARDING_PUBLIC_AWS_ACCESS_MODE:'persistent' },
+    { ONBOARDING_PUBLIC_AWS_ORIGINS:'*' },
+    { ONBOARDING_PUBLIC_AWS_ORIGINS:'' },
+    { ONBOARDING_PUBLIC_AWS_TENANT_ID:'../another-tenant' },
+    { ONBOARDING_PUBLIC_AWS_FUNCTION_ARN:'arn:aws:lambda:us-east-1:123456789012:function:production-api' },
+    { ONBOARDING_PUBLIC_AWS_REGION:'us-west-2' },
+  ]) assert.throws(()=>publicOnboardingConfig({...persistentEnv,...invalid},clock));
+  assert.equal(publicOnboardingConfig({...persistentEnv,ONBOARDING_PUBLIC_AWS_ENABLED:'false'},clock),undefined);
+});
+
 it('initiates a managed gateway with an empty request and never accepts uploaded credentials or browser assignments', async () => {
   const app = express(); app.use(express.json());
   const operation = { id: 'op-managed', gatewayId: 'gw-managed', serialNumber: 'MOCK-ROUTE', type: 'ONBOARD', status: 'IN_PROGRESS', siteId: 'site-one', profileVersionId: 'profile-one', deploymentGeneration: 5 };

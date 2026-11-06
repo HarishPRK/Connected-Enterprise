@@ -21,7 +21,7 @@ function paintLookup(c:CanvasRenderingContext2D,texture:CanvasTexture,state:Retu
 function paintTerminal(c:CanvasRenderingContext2D,texture:CanvasTexture,state:ReturnType<typeof sampleCheckout>){
     c.fillStyle = '#0a1a24'; c.fillRect(0, 0, 768, 480);
     c.textAlign = 'center'; c.fillStyle = '#adc6d0'; c.font = '500 35px sans-serif';
-    c.fillText('MARKET · CHECKOUT 01', 384, 56);
+    c.fillText('CHECKOUT 01', 384, 56);
     c.fillStyle = '#f2f7fa'; c.font = '600 115px sans-serif'; c.fillText('$24.80', 384, 190);
     c.fillStyle = state.color; c.fillRect(38, 228, 692, 3);
     c.font = '600 70px sans-serif'; c.fillText(state.title, 384, 324);

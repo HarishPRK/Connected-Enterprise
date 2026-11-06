@@ -12,58 +12,73 @@ const SCALE = RACK.size / Math.max(...SOURCE.size);
 const FRONT = (SOURCE.max[2] - (SOURCE.min[2] + SOURCE.max[2]) / 2) * SCALE;
 const WIDTH = 1280, HEIGHT = 800;
 
+function wrapped(ctx:CanvasRenderingContext2D,text:string,x:number,y:number,width:number,lineHeight:number,maxLines=2) {
+  const words=text.split(' ');let line='',row=0;
+  for(const word of words){
+    const next=line?line+' '+word:word;
+    if(ctx.measureText(next).width>width&&line){ctx.fillText(line,x,y+row*lineHeight);line=word;if(++row>=maxLines)return;}
+    else line=next;
+  }
+  if(row<maxLines)ctx.fillText(line,x,y+row*lineHeight);
+}
+
 function paintConsole(ctx: CanvasRenderingContext2D, texture: CanvasTexture, variant: string, time: number) {
-  const state = sampleEagle(variant, time);
-  const mint = '#91e3c5', amber = '#f2ca91', rose = '#ed95b3', ink = '#eeeadd', muted = '#acc3bf';
-  ctx.fillStyle = '#112629'; ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  ctx.fillStyle = ink; ctx.font = '700 48px sans-serif'; ctx.fillText('EA:GLE', 48, 59);
-  ctx.textAlign = 'right'; ctx.font = '26px sans-serif'; ctx.fillStyle = muted;
-  ctx.fillText('ILLUSTRATIVE CPE / HARDWARE + CONNECTIONS', 1230, 58); ctx.textAlign = 'left';
-  ctx.fillStyle = '#355258'; ctx.fillRect(48, 82, 1184, 2);
-  ctx.fillStyle = muted; ctx.font = '27px sans-serif'; ctx.fillText('RECONSTRUCTION ERROR / LEARNED THRESHOLD', 50, 126);
-  ctx.fillStyle = state.thresholdCrossed ? amber : mint; ctx.font = '600 55px sans-serif';
-  ctx.fillText(`${state.anomalyMse.toFixed(3)} / ${state.anomalyThreshold.toFixed(3)}`, 50, 191);
-  ctx.fillStyle = state.anomalyFlag ? '#ffab9d' : mint; ctx.font = '600 36px sans-serif';
-  ctx.fillText(`FLAG ${state.anomalyFlag ? '1' : '0'}  ·  CODE ${state.reasonCode}`, 795, 159);
-  ctx.font = '29px sans-serif'; ctx.fillText(state.reasonLabel, 795, 202);
-  ctx.fillStyle = muted; ctx.font = '25px sans-serif'; ctx.fillText(state.diagnosticStatus, 50, 231);
-  const x = 78, y = 266, width = 1124, height = 215;
-  for (const value of [0, 1, 2]) {
-    const at = y + height * (1 - value / 2);
-    ctx.strokeStyle = '#344e54'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, at); ctx.lineTo(x + width, at); ctx.stroke();
-    ctx.fillStyle = muted; ctx.font = '22px sans-serif'; ctx.fillText(String(value), 43, at + 7);
+  const state=sampleEagle(variant,time);
+  const mint='#91e3c5',amber='#f2ca91',rose='#ed95b3',ink='#eeeadd',muted='#acc3bf';
+  ctx.textAlign='left';ctx.fillStyle='#112629';ctx.fillRect(0,0,WIDTH,HEIGHT);
+  ctx.fillStyle=ink;ctx.font='700 48px sans-serif';ctx.fillText('EA:GLE',48,58);
+  ctx.textAlign='right';ctx.fillStyle=muted;ctx.font='24px sans-serif';ctx.fillText('ILLUSTRATIVE INVESTIGATION / '+state.deviceLabel.toUpperCase(),1230,55);ctx.textAlign='left';
+  ctx.fillStyle='#355258';ctx.fillRect(48,80,1184,2);
+  ctx.font='25px sans-serif';ctx.fillStyle=muted;ctx.fillText('MSE / LEARNED THRESHOLD',50,119);
+  ctx.fillStyle=state.thresholdCrossed?amber:mint;ctx.font='600 48px sans-serif';
+  ctx.fillText(state.anomalyMse.toFixed(3)+' / '+state.anomalyThreshold.toFixed(3),50,171);
+  ctx.fillStyle=state.anomalyFlag?'#ffab9d':mint;ctx.font='600 30px sans-serif';
+  ctx.fillText('RECEIVED FLAG '+(state.anomalyFlag?'1':'0')+' / CODE '+state.reasonCode,750,120);
+  ctx.font='28px sans-serif';ctx.fillText(state.reasonLabel,750,162);
+  ctx.fillStyle=muted;ctx.font='23px sans-serif';ctx.fillText(state.diagnosticStatus,50,205);
+  const x=76,y=238,width=620,height=180;
+  for(const value of [0,1,2]){
+    const at=y+height*(1-value/2);ctx.strokeStyle='#344e54';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,at);ctx.lineTo(x+width,at);ctx.stroke();
+    ctx.fillStyle=muted;ctx.font='21px sans-serif';ctx.fillText(String(value),45,at+7);
   }
-  const thresholdY = y + height * (1 - state.anomalyThreshold / 2);
-  ctx.fillStyle = '#64415630'; ctx.fillRect(x, y, width, thresholdY - y);
-  ctx.strokeStyle = rose; ctx.lineWidth = 3; ctx.setLineDash([13, 9]);
-  ctx.beginPath(); ctx.moveTo(x, thresholdY); ctx.lineTo(x + width, thresholdY); ctx.stroke(); ctx.setLineDash([]);
-  ctx.strokeStyle = mint; ctx.lineWidth = 4; ctx.beginPath();
-  for (let index = 0; index <= 64; index++) {
-    const sample = sampleEagle(variant, Math.max(0, time - 8 + index / 8));
-    const px = x + width * index / 64;
-    const py = y + height * (1 - sample.anomalyMse / 2);
-    if (index === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  }
-  ctx.stroke();
-  ctx.fillStyle = state.anomalyFlag ? '#ffab9d' : mint;
-  ctx.beginPath(); ctx.arc(x + width, y + height * (1 - state.anomalyMse / 2), 7, 0, Math.PI * 2); ctx.fill();
-  if (state.operatorAtConsole && state.reviewAction !== 'review-chart') {
-    ctx.strokeStyle = amber; ctx.lineWidth = 2; ctx.strokeRect(x - 6, y - 6, width + 12, height + 12);
-  }
-  ctx.fillStyle = mint; ctx.font = '24px sans-serif'; ctx.fillText('MSE', 78, 518);
-  ctx.fillStyle = rose; ctx.fillText('Learned threshold', 190, 518);
-  ctx.fillStyle = muted; ctx.textAlign = 'right'; ctx.fillText('0–2 fixed scale · example windows', 1200, 518); ctx.textAlign = 'left';
-  ctx.fillStyle = state.reviewAction === 'compare-connections' ? '#2a4b45' : '#1d373a'; ctx.fillRect(48, 541, 1184, 111);
-  ctx.fillStyle = ink; ctx.font = '600 35px sans-serif'; ctx.fillText(`CONNTRACK   ${state.conntrack.total} connections`, 68, 587);
-  ctx.fillStyle = muted; ctx.font = '28px sans-serif';
-  ctx.fillText(`TCP ${state.conntrack.tcp}     UDP ${state.conntrack.udp}     ICMP ${state.conntrack.icmp}     OTHER ${state.conntrack.other}`, 68, 630);
-  ctx.fillStyle = state.symptom ? amber : mint; ctx.font = '600 31px sans-serif';
-  ctx.fillText(`${state.endpointLabel.toUpperCase()}: ${(state.endpointDelayMs / 1000).toFixed(2)} s`, 50, 700);
-  ctx.fillStyle = muted; ctx.font = '25px sans-serif';
-  ctx.fillText(state.diagnosticReviewed ? state.inspectionTask : state.operatorAtConsole ? 'Operator reviewing detector and connection evidence' : 'Separate service check · baseline 0.18 s', 50, 741);
-  ctx.fillStyle = '#92aaa8'; ctx.font = '22px sans-serif';
-  ctx.fillText('Illustrative samples · compressed time · investigation remains open', 50, 782);
-  texture.needsUpdate = true;
+  const thresholdY=y+height*(1-state.anomalyThreshold/2);
+  ctx.fillStyle='#64415630';ctx.fillRect(x,y,width,thresholdY-y);ctx.strokeStyle=rose;ctx.lineWidth=3;ctx.setLineDash([11,8]);
+  ctx.beginPath();ctx.moveTo(x,thresholdY);ctx.lineTo(x+width,thresholdY);ctx.stroke();ctx.setLineDash([]);
+  ctx.strokeStyle=mint;ctx.lineWidth=3;ctx.beginPath();
+  state.windows.forEach((window,index)=>{
+    const px=x+width*window.index/12,py=y+height*(1-window.mse/2);
+    if(index===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);
+  });ctx.stroke();
+  state.windows.forEach(window=>{
+    const px=x+width*window.index/12,py=y+height*(1-window.mse/2);
+    ctx.fillStyle=window.flag?'#ffab9d':mint;ctx.beginPath();ctx.arc(px,py,window.index===state.selectedWindow?6:4,0,Math.PI*2);ctx.fill();
+    if(window.index===state.selectedWindow&&time>=10&&time<12.5){ctx.strokeStyle=amber;ctx.lineWidth=2;ctx.strokeRect(px-11,y-9,22,height+18);}
+  });
+  ctx.fillStyle=muted;ctx.font='21px sans-serif';ctx.fillText('0–2 fixed scale / '+state.windows.length+' received windows',76,450);
+  ctx.fillStyle=rose;ctx.fillText('Threshold',545,450);
+  ctx.fillStyle=muted;ctx.font='24px sans-serif';ctx.fillText('CONNECTED WORKLOADS / PENDING',750,212);
+  state.endpointQueues.forEach((queue,index)=>{
+    const row=256+index*67;ctx.fillStyle=ink;ctx.font='25px sans-serif';ctx.fillText(queue.label,750,row);
+    ctx.textAlign='right';ctx.fillStyle=queue.pending?amber:mint;ctx.font='600 27px sans-serif';ctx.fillText(queue.pending?String(queue.pending)+' waiting':'Current',1225,row);ctx.textAlign='left';
+    for(let block=0;block<12;block++){ctx.fillStyle=block<queue.pending?amber:'#294347';ctx.fillRect(750+block*39,row+13,33,9);}
+  });
+  ctx.fillStyle=state.reviewAction==='compare-connections'?'#2a4b45':'#1d373a';ctx.fillRect(48,474,1184,45);
+  ctx.fillStyle=ink;ctx.font='26px sans-serif';
+  ctx.fillText('CONNTRACK '+state.conntrack.total+'  / TCP '+state.conntrack.tcp+'  UDP '+state.conntrack.udp+'  ICMP '+state.conntrack.icmp+'  OTHER '+state.conntrack.other,66,505);
+  // The control centre maps to the existing index-pad contact near world
+  // [9.98,1.39,-5.34], keeping the physical touch and visible action aligned.
+  ctx.fillStyle=state.actionAttempted?'#386650':'#365052';ctx.fillRect(400,530,400,60);
+  ctx.fillStyle=ink;ctx.font='600 29px sans-serif';ctx.textAlign='center';
+  const action=time>=22?'REVIEW RESULT':time>=18?'WAIT FOR NEW WINDOWS':time>=17?'EXAMPLE ACTION STARTED':time>=16.5?'RUN EXAMPLE ACTION':time>=11.2&&time<12.5?'COMPARE CONNECTIONS':'SELECT EVIDENCE WINDOW';
+  ctx.fillText(action,600,568);ctx.textAlign='left';
+  ctx.font='600 27px sans-serif';ctx.fillStyle=state.recoveryVerified?mint:amber;
+  wrapped(ctx,time>=18?state.verificationStatus:time>=12.5?state.actionLabel:state.inspectionTask,50,625,1180,32);
+  ctx.font='25px sans-serif';ctx.fillStyle=ink;
+  ctx.fillText(state.endpointLabel+': '+state.endpointDelayMs+' ms  / baseline 180 ms',50,704);
+  ctx.fillStyle=muted;ctx.font='23px sans-serif';
+  ctx.fillText(time>=18?'Fresh windows '+state.freshWindows+'/2  / detector '+(state.anomalyFlag?'flag still set':'not flagged')+'  / investigation remains open':state.inspectionStarted?'Physical inspection recorded / next: a specific example action':'Connection counts are context, not a root-cause verdict.',50,744);
+  ctx.fillStyle='#92aaa8';ctx.font='20px sans-serif';ctx.fillText('Scripted samples and actions / five-minute windows compressed / no live device command',50,782);
+  texture.needsUpdate=true;
 }
 
 /** A real-size, bracket-mounted diagnostic monitor on the existing IT rack.

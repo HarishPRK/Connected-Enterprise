@@ -13,6 +13,7 @@ import { currentProfiles } from './profileSelection';
 import { OnboardingNavigation, type WorkspaceSurface } from './OnboardingNavigation';
 import './activation-workspace.css';
 import { onboardingGatewaySimulatorAvailable } from './auth';
+import { OnboardingOverview } from './OnboardingOverview';
 
 type Surface = WorkspaceSurface | 'operation';
 
@@ -36,7 +37,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
     upsertOperation,
     upsertProfile,
     upsertController,
-  } = useOnboardingData({ enabled: authenticationStatus === 'authenticated' });
+  } = useOnboardingData({ enabled: authenticationStatus === 'authenticated' || authenticationStatus === 'public' });
   const localSimulator = snapshot?.mode === 'local-simulator';
   const tenantRole = user?.tenantRole;
   const canOperate = localSimulator || tenantRole === 'platform_admin' || tenantRole === 'tenant_admin' || tenantRole === 'operator';
@@ -91,6 +92,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
           <div className="ce-onb-page-context">
             {snapshot && <span><ShieldCheck size={13} aria-hidden="true" />{snapshot.tenant.name}</span>}
             {preferredSite && <span><MapPin size={13} aria-hidden="true" />{preferredSite.name}</span>}
+            {authenticationStatus === 'public' && <span className="ce-onb-shared-access"><ShieldCheck size={13} aria-hidden="true" />Shared development access</span>}
             {needsSignIn && <>
               <span role="status">{checkingSignIn ? 'Checking session…' : 'Session required for live data'}</span>
               <button type="button" className="ce-onb-signout" onClick={signIn} disabled={checkingSignIn}>
@@ -104,10 +106,6 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
             )}
           </div>
       </header>
-
-      {authenticationError && <div className="ce-onb-alert is-warning" role="status">
-        <TriangleAlert size={17} aria-hidden="true" /><span>{authenticationError}</span>
-      </div>}
 
       {!snapshot ? (
         <div className="ce-onb-workspace" ref={workspaceRef}>
@@ -126,7 +124,7 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
                   <span>{checkingSignIn ? 'Connecting to onboarding…' : 'Retrieving tenant inventory…'}</span>
                 </> : needsSignIn ? <>
                   <ShieldCheck size={17} aria-hidden="true" />
-                  <span>Tenant data and controls become available after sign-in.</span>
+                  <span>{authenticationError ?? 'Tenant data and controls become available after sign-in.'}</span>
                 </> : <>
                   <TriangleAlert size={17} aria-hidden="true" />
                   <span>{authenticationError ?? error ?? 'The service did not return an onboarding snapshot.'}</span>
@@ -143,11 +141,14 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
         </div>
       ) : (
         <>
-          {error && (
+          {(authenticationError || error) && (
             <div className="ce-onb-alert is-warning" role="status">
               <TriangleAlert size={17} aria-hidden="true" />
-              <span>{error} Showing the most recently received inventory.</span>
-              <button type="button" onClick={() => void refresh()} disabled={refreshing}>Retry</button>
+              <span>{authenticationError ?? error} Showing the most recently received inventory.</span>
+              <button type="button" onClick={() => {
+                if (authenticationStatus === 'error' && accessMode !== 'cognito') window.location.reload();
+                else void refresh();
+              }} disabled={refreshing}>Retry</button>
             </div>
           )}
 
@@ -161,6 +162,9 @@ export function OnboardingExperience({ preferredSiteId }: { preferredSiteId?: st
 
               {surface === 'gateways' && (
                 <div id="ce-onb-gateways-panel">
+                  <OnboardingOverview snapshot={snapshot} preferredSiteId={preferredSiteId} canOperate={Boolean(canOperate)}
+                    onStart={() => navigateWorkspace('bootstrap')} onProfiles={() => navigate('profiles')} onController={() => navigate('controller')}
+                    onOperation={operation => { setOperationId(operation.id); setFlowLaunchError(undefined); navigate('operation'); }} />
                   <GatewayInventory
                     gateways={snapshot.gateways}
                     sites={snapshot.sites}

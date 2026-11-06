@@ -1,76 +1,77 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ANOMALY_REASON_LABELS } from '../../shared/eagleTelemetry.ts';
-import { EAGLE_CASES, EAGLE_TIMING, sampleEagle } from '../../src/components/offerings/OfferingEagleStory.ts';
-import { sampleFilmCue } from '../../src/components/offerings/OfferingFilmSequence.ts';
+import { EAGLE_CASES, eaglePacketClock, sampleEagle } from '../../src/components/offerings/OfferingEagleStory.ts';
 
-test('the visible response slows before review; every investigation remains unresolved', () => {
+test('connected queues accumulate before investigation, without an instant recovery', () => {
   for (const variant of Object.keys(EAGLE_CASES)) {
-    const before = sampleEagle(variant, 3.9);
-    const delayed = sampleEagle(variant, 6);
-    const outcome = sampleEagle(variant, 24);
-    assert.equal(before.endpointDelayMs, before.baselineResponseMs);
-    assert.equal(before.symptom, false);
-    assert.ok(delayed.endpointDelayMs >= 2200);
-    assert.equal(delayed.symptom, true);
-    assert.equal(delayed.operatorAtConsole, false);
-    assert.equal(delayed.diagnosticReviewed, false);
-    assert.equal(sampleEagle(variant, EAGLE_TIMING.review).operatorAtConsole, true);
-    assert.equal(sampleEagle(variant, EAGLE_TIMING.dispatch).diagnosticReviewed, true);
-    assert.equal(outcome.endpointDelayMs, delayed.endpointDelayMs, 'inspection must not silently repair the delay');
-    assert.equal(outcome.resolved, false);
-    assert.equal(outcome.inspectionStarted, true);
-    assert.equal(sampleEagle(variant, 17).inspectionStarted, false);
-    assert.equal(sampleEagle(variant, 18).inspectionStarted, variant !== 'ot');
+    const baseline=sampleEagle(variant,2.9),delayed=sampleEagle(variant,6),attempt=sampleEagle(variant,17.8);
+    assert.equal(baseline.endpointDelayMs,180);
+    assert.equal(baseline.endpointQueues.reduce((sum,q)=>sum+q.pending,0),0);
+    assert.ok(delayed.endpointDelayMs>=2200);
+    assert.ok(delayed.endpointQueues.some(q=>q.pending>0));
+    assert.equal(delayed.actionAttempted,false);
+    assert.equal(attempt.actionAttempted,true);
+    assert.equal(attempt.recoveryObserved,false);
+    assert.equal(attempt.endpointDelayMs,delayed.endpointDelayMs,'pressing a console control is not evidence of recovery');
   }
 });
 
-test('a hardware threshold crossing and received detector flag remain distinct', () => {
-  const crossing = sampleEagle('gateway', 5.5);
-  assert.equal(crossing.thresholdCrossed, true);
-  assert.equal(crossing.anomalyFlag, false);
-  assert.equal(crossing.diagnosticStatus, 'Crossing; flag pending');
-  const flagged = sampleEagle('gateway', 6);
-  assert.equal(flagged.anomalyMse, 1.48);
-  assert.equal(flagged.anomalyThreshold, 1.122);
-  assert.equal(flagged.anomalyFlag, true);
-  assert.equal(flagged.reasonCode, 2);
-  assert.equal(flagged.reasonLabel, ANOMALY_REASON_LABELS[2]);
-  for (const variant of ['fiber', '5g', 'it', 'ot']) {
-    const state = sampleEagle(variant, 24);
-    assert.ok(state.anomalyMse < state.anomalyThreshold);
-    assert.equal(state.anomalyFlag, false, 'a slow interface/service is not automatically a hardware anomaly');
-    assert.equal(state.reasonCode, 0);
-    assert.equal(state.reasonLabel, 'Normal');
-    assert.ok(state.endpointDelayMs > state.baselineResponseMs);
-  }
-  assert.equal(sampleEagle('5g', 24).checkoutAffected, false);
-  assert.equal(sampleEagle('ot', 24).checkoutAffected, false);
+test('received flags and fresh windows remain independent of mathematical crossings', () => {
+  const crossing=sampleEagle('gateway',6),flagged=sampleEagle('gateway',8),improving=sampleEagle('gateway',20),verified=sampleEagle('gateway',22);
+  assert.equal(crossing.thresholdCrossed,true);assert.equal(crossing.anomalyFlag,false);
+  assert.equal(flagged.reasonLabel,ANOMALY_REASON_LABELS[2]);assert.equal(flagged.anomalyFlag,true);
+  assert.ok(improving.anomalyMse<improving.anomalyThreshold);
+  assert.equal(improving.anomalyFlag,true,'lower MSE must not silently clear the received flag');
+  assert.equal(improving.freshWindows,1);assert.equal(improving.recoveryVerified,false);
+  assert.equal(verified.freshWindows,2);assert.equal(verified.anomalyFlag,false);
+  assert.equal(verified.recoveryVerified,true);
+  assert.equal(verified.resolved,false,'observed illustrative recovery does not auto-close an actual investigation');
 });
 
-test('connection totals are protocol sums and timeline seeking restores diagnostic evidence', () => {
-  for (const variant of Object.keys(EAGLE_CASES)) for (let frame = 0; frame <= 240; frame++) {
-    const state = sampleEagle(variant, frame / 10);
-    const { total, tcp, udp, icmp, other } = state.conntrack;
-    assert.equal(total, tcp + udp + icmp + other);
-    assert.equal(state.illustrative, true);
-    assert.equal(state.resolved, false);
+test('only the gateway case receives Memory Pressure; fiber attempts do not guarantee success', () => {
+  for (const variant of ['fiber','5g','it','ot']) for (let t=0;t<=24;t+=.5) {
+    const s=sampleEagle(variant,t);assert.ok(s.anomalyMse<s.anomalyThreshold);
+    assert.equal(s.anomalyFlag,false);assert.equal(s.reasonLabel,'Normal');
   }
-  const before = sampleEagle('gateway', 4.8);
-  sampleEagle('gateway', 24);
-  assert.deepEqual(sampleEagle('gateway', 4.8), before);
-  assert.deepEqual(sampleEagle('unknown', 10), sampleEagle('gateway', 10));
-  assert.deepEqual(sampleEagle('constructor', 10), sampleEagle('gateway', 10));
+  const fiber=sampleEagle('fiber',24);
+  assert.equal(fiber.actionComplete,true);assert.equal(fiber.recoveryObserved,false);
+  assert.equal(fiber.endpointDelayMs,2200);assert.match(fiber.status,/escalate/);
+  for (const variant of ['gateway','5g','it','ot']) {
+    const state=sampleEagle(variant,24);
+    assert.equal(state.recoveryVerified,true);assert.ok(state.endpointDelayMs<500);
+    assert.equal(state.endpointQueues.reduce((sum,q)=>sum+q.pending,0),0);
+  }
+  assert.equal(sampleEagle('5g',6).checkoutAffected,false);
+  assert.equal(sampleEagle('ot',6).checkoutAffected,false);
 });
 
-test('all five films show an operator reviewing the real EA:GLE fields before physical inspection', () => {
+test('backwards seeking restores all evidence and malformed times are bounded', () => {
+  for (const variant of Object.keys(EAGLE_CASES)) for (let frame=0;frame<=240;frame++) {
+    const s=sampleEagle(variant,frame/10),{total,tcp,udp,icmp,other}=s.conntrack;
+    assert.equal(total,tcp+udp+icmp+other);
+    assert.equal(s.illustrative,true);assert.equal(s.productionCommandIssued,false);
+    assert.equal(s.investigationOpen,true);
+    assert.ok(s.windows.every(w=>w.at<=s.time));
+    if(s.recoveryVerified)assert.ok(s.freshWindows>=2&&!s.anomalyFlag&&!s.thresholdCrossed);
+  }
+  const early=sampleEagle('gateway',5.2);sampleEagle('gateway',24);
+  assert.deepEqual(sampleEagle('gateway',5.2),early);
+  assert.deepEqual(sampleEagle('constructor',10),sampleEagle('gateway',10));
+  assert.deepEqual(sampleEagle('gateway',NaN),sampleEagle('gateway',0));
+  assert.deepEqual(sampleEagle('gateway',Infinity),sampleEagle('gateway',24));
+  assert.deepEqual(sampleEagle('gateway',-5),sampleEagle('gateway',0));
+});
+
+test('packet progress is continuous and speeds up only after observed intervention', () => {
   for (const variant of Object.keys(EAGLE_CASES)) {
-    const context = { offering: 'eagle' as const, variant };
-    assert.match(sampleFilmCue(context, 7).subtitle, /diagnostic console.*IT rack/);
-    assert.match(sampleFilmCue(context, 9).title, /reconstruction error.*threshold/);
-    assert.match(sampleFilmCue(context, 10.5).title, /flag and reason/);
-    assert.match(sampleFilmCue(context, 12).subtitle, /TCP.*UDP.*ICMP/);
-    assert.match(sampleFilmCue(context, 14).subtitle, /leaves the console/);
-    assert.match(sampleFilmCue(context, 23).title, /Investigation stays open/);
+    let previous=0;
+    for(let frame=0;frame<=240;frame++){
+      const clock=eaglePacketClock(variant,frame/10);assert.ok(clock>=previous-1e-8);previous=clock;
+    }
+    const slow=eaglePacketClock(variant,17)-eaglePacketClock(variant,16);
+    const after=eaglePacketClock(variant,24)-eaglePacketClock(variant,23);
+    if(variant==='fiber')assert.ok(Math.abs(after-slow)<.001);
+    else assert.ok(after>slow*4);
   }
 });

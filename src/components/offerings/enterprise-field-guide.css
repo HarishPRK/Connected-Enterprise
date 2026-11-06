@@ -230,3 +230,24 @@
     z-index:3;
   }
 }
+/* Explanations stay below the scene, leaving people and equipment unobscured. */
+.enterprise-device-guide, .enterprise-routing-readout { padding: 18px 22px; background: #1d332d; color: #f1ead9; border-top: 1px solid #3c5148; }
+.enterprise-device-guide > div { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.enterprise-device-guide > div > span, .enterprise-device-guide p { color: #b9c9be; font-size: 12px; line-height: 1.5; }
+.enterprise-device-guide ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); list-style: none; padding: 0; margin: 12px 0 0; gap: 8px; }
+.enterprise-device-guide button { display: flex; width: 100%; height: 100%; gap: 9px; padding: 10px; border: 1px solid #4e6559; border-radius: 6px; text-align: left; color: inherit; background: #263e34; cursor: pointer; }
+.enterprise-device-guide button:hover { background: #365144; }
+.enterprise-device-guide button:focus-visible { outline: 2px solid #efba7c; outline-offset: 3px; }
+.enterprise-device-guide button i { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+.enterprise-device-guide button span { display: grid; gap: 3px; font-size: 11px; color: #c8d5ca; }
+.enterprise-device-guide button strong { font-size: 12px; color: #f1ead9; }
+.enterprise-device-guide p { margin: 12px 0 0; }
+.enterprise-routing-readout { display: grid; gap: 5px; font-size: 12px; line-height: 1.5; }
+.enterprise-routing-readout > :first-child { font-weight: 700; color: #efd0a0; }
+.enterprise-routing-readout > :last-child { color: #b9c9be; }
+@container (max-width: 1000px) {
+  .showcase-visual:has(.enterprise-device-guide), .showcase-visual:has(.enterprise-routing-readout) { height: auto; }
+  .showcase-visual:has(.enterprise-device-guide) .enterprise-canvas-wrap:not(:has([data-scene-view=story])),
+  .showcase-visual:has(.enterprise-routing-readout) .enterprise-canvas-wrap:not(:has([data-scene-view=story])) { flex: none; height: 420px; }
+}
+@media (max-width: 600px) { .enterprise-device-guide, .enterprise-routing-readout { padding: 14px; } .enterprise-device-guide ul { grid-template-columns: 1fr 1fr; } }

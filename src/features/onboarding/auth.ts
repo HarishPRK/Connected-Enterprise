@@ -31,10 +31,17 @@ export interface TemporaryPublicOnboardingAccess {
   expiresAt: string;
 }
 
-export type OnboardingAccessMode = { mode: 'cognito' } | TemporaryPublicOnboardingAccess;
+export interface PersistentPublicOnboardingAccess {
+  mode: 'public-development-aws';
+  simulatorAvailable?: boolean;
+  user: OnboardingUser & { tenantId: string; tenantRole: 'tenant_admin' };
+  expiresAt: null;
+}
+type PublicOnboardingAccess = TemporaryPublicOnboardingAccess | PersistentPublicOnboardingAccess;
+export type OnboardingAccessMode = { mode: 'cognito' } | PublicOnboardingAccess;
 export const ONBOARDING_ACCESS_EXPIRED_EVENT = 'ce:onboarding-access-expired';
 
-let temporaryPublicAccess: TemporaryPublicOnboardingAccess | undefined;
+let publicAccess: PublicOnboardingAccess | undefined;
 let publicAccessFailure: string | undefined;
 
 export class OnboardingAuthenticationError extends Error {
@@ -72,12 +79,18 @@ function parseAccessMode(value: unknown): OnboardingAccessMode {
   if (!value || typeof value !== 'object') throw new OnboardingAuthenticationError('The onboarding service returned an invalid access configuration.');
   const payload = value as Record<string, unknown>;
   if (payload.mode === 'cognito') return { mode: 'cognito' };
-  if (payload.mode !== 'temporary-public-aws') throw new OnboardingAuthenticationError('The onboarding service returned an unsupported access mode.');
+  if (payload.mode !== 'temporary-public-aws' && payload.mode !== 'public-development-aws') throw new OnboardingAuthenticationError('The onboarding service returned an unsupported access mode.');
   const user = payload.user && typeof payload.user === 'object' ? payload.user as Record<string, unknown> : undefined;
   if (!user || typeof user.subject !== 'string' || !safeAccessIdentifier.test(user.subject)
     || typeof user.tenantId !== 'string' || !safeAccessIdentifier.test(user.tenantId)
     || user.tenantRole !== 'tenant_admin') {
-    throw new OnboardingAuthenticationError('Temporary live onboarding access has no valid tenant configuration.');
+    throw new OnboardingAuthenticationError('Live onboarding access has no valid tenant configuration.');
+  }
+  const principal = { subject: user.subject, tenantId: user.tenantId, tenantRole: 'tenant_admin' as const };
+  const simulator = payload.simulatorAvailable === true ? { simulatorAvailable: true } : {};
+  if (payload.mode === 'public-development-aws') {
+    if (payload.expiresAt !== null) throw new OnboardingAuthenticationError('Development onboarding access has an invalid configuration.');
+    return { mode: 'public-development-aws', user: principal, expiresAt: null, ...simulator };
   }
   if (typeof payload.expiresAt !== 'string' || !isoDateTime.test(payload.expiresAt)
     || !Number.isFinite(Date.parse(payload.expiresAt)) || Date.parse(payload.expiresAt) <= Date.now()) {
@@ -85,15 +98,15 @@ function parseAccessMode(value: unknown): OnboardingAccessMode {
   }
   return {
     mode: 'temporary-public-aws',
-    user: { subject: user.subject, tenantId: user.tenantId, tenantRole: 'tenant_admin' },
+    user: principal,
     expiresAt: new Date(payload.expiresAt).toISOString(),
-    ...(payload.simulatorAvailable === true ? { simulatorAvailable: true } : {}),
+    ...simulator,
   };
 }
 
 /** The same-origin server chooses access mode; browser storage never enables it. */
 export async function discoverOnboardingAccessMode(): Promise<OnboardingAccessMode> {
-  temporaryPublicAccess = undefined;
+  publicAccess = undefined;
   publicAccessFailure = 'The onboarding access configuration has not been confirmed.';
   try {
     const response = await fetch('/api/onboarding/access-mode', {
@@ -120,7 +133,7 @@ export async function discoverOnboardingAccessMode(): Promise<OnboardingAccessMo
     }
     if (!response.ok) throw new OnboardingAuthenticationError('The onboarding service could not confirm its access configuration. Retry loading the page.');
     const access = parseAccessMode(await response.json());
-    temporaryPublicAccess = access.mode === 'temporary-public-aws' ? access : undefined;
+    publicAccess = access.mode !== 'cognito' ? access : undefined;
     publicAccessFailure = undefined;
     return access;
   } catch (cause) {
@@ -130,14 +143,14 @@ export async function discoverOnboardingAccessMode(): Promise<OnboardingAccessMo
   }
 }
 
-function requireCurrentPublicAccess(): TemporaryPublicOnboardingAccess | undefined {
+function requireCurrentPublicAccess(): PublicOnboardingAccess | undefined {
   if (publicAccessFailure) throw new OnboardingAuthenticationError(publicAccessFailure);
-  if (temporaryPublicAccess && Date.parse(temporaryPublicAccess.expiresAt) <= Date.now()) {
+  if (publicAccess?.mode === 'temporary-public-aws' && Date.parse(publicAccess.expiresAt) <= Date.now()) {
     publicAccessFailure = 'Temporary live onboarding access has expired. Reload the page to check availability.';
     if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(ONBOARDING_ACCESS_EXPIRED_EVENT, { detail: publicAccessFailure }));
     throw new OnboardingAuthenticationError(publicAccessFailure);
   }
-  return temporaryPublicAccess;
+  return publicAccess;
 }
 
 function secureBrowserUrl(value: string, allowPath = true): boolean {
@@ -156,7 +169,7 @@ function secureBrowserUrl(value: string, allowPath = true): boolean {
 }
 
 export function onboardingConfigurationError(): string | undefined {
-  if (temporaryPublicAccess) return publicAccessFailure;
+  if (publicAccess) return publicAccessFailure;
   if (!onboardingUsesRemoteApi && !cognitoDomain && !cognitoClientId) return undefined;
   if (!apiBaseUrl) return 'VITE_ONBOARDING_API_URL is required when Cognito onboarding authentication is enabled.';
   if (!cognitoDomain) return 'VITE_ONBOARDING_COGNITO_DOMAIN is required for the AWS onboarding API.';
@@ -177,7 +190,7 @@ export function onboardingConfigurationError(): string | undefined {
 }
 
 export function onboardingApiUrl(path: string): string {
-  if (temporaryPublicAccess) {
+  if (publicAccess) {
     if (!path.startsWith('/api/onboarding/')) throw new OnboardingAuthenticationError('This endpoint is unavailable through live onboarding access.');
     return `/api/onboarding/live/${path.slice('/api/onboarding/'.length)}`;
   }
@@ -185,16 +198,16 @@ export function onboardingApiUrl(path: string): string {
 }
 
 export function onboardingRequestCredentials(): RequestCredentials {
-  return temporaryPublicAccess ? 'omit' : 'same-origin';
+  return publicAccess ? 'omit' : 'same-origin';
 }
 
 export function onboardingGatewaySimulatorAvailable(): boolean {
-  return Boolean(temporaryPublicAccess?.simulatorAvailable && !publicAccessFailure
-    && Date.parse(temporaryPublicAccess.expiresAt) > Date.now());
+  return Boolean(publicAccess?.simulatorAvailable && !publicAccessFailure
+    && (publicAccess.expiresAt === null || Date.parse(publicAccess.expiresAt) > Date.now()));
 }
 
 export function onboardingSseEnabled(): boolean {
-  return !temporaryPublicAccess && !publicAccessFailure && !onboardingUsesRemoteApi && browserEnvironment?.VITE_ONBOARDING_DISABLE_SSE !== 'true';
+  return !publicAccess && !publicAccessFailure && !onboardingUsesRemoteApi && browserEnvironment?.VITE_ONBOARDING_DISABLE_SSE !== 'true';
 }
 
 function randomUrlSafe(byteLength = 32): string {
@@ -363,8 +376,8 @@ function decodeClaims(token: string): Record<string, unknown> {
 
 export function currentOnboardingUser(): OnboardingUser | undefined {
   if (publicAccessFailure) return undefined;
-  if (temporaryPublicAccess) {
-    return Date.parse(temporaryPublicAccess.expiresAt) > Date.now() ? temporaryPublicAccess.user : undefined;
+  if (publicAccess) {
+    return publicAccess.expiresAt === null || Date.parse(publicAccess.expiresAt) > Date.now() ? publicAccess.user : undefined;
   }
   if (!onboardingAuthEnabled) return undefined;
   const session = readSession();
@@ -380,7 +393,7 @@ export function currentOnboardingUser(): OnboardingUser | undefined {
 }
 
 export function signOutOnboarding(): void {
-  if (temporaryPublicAccess || publicAccessFailure) return;
+  if (publicAccess || publicAccessFailure) return;
   sessionStorage.removeItem(SESSION_KEY);
   clearOAuthAttempt();
   if (!onboardingAuthEnabled) return;

@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { events, useFrame, useThree, type RootState, type ThreeEvent } from '@react-three/fiber';
-import { Mesh, MeshStandardMaterial, PerspectiveCamera, Vector3, type Camera, type WebGLRenderer } from 'three';
+import { Mesh, MeshStandardMaterial, PerspectiveCamera, Vector3, type Camera, type PointLight, type WebGLRenderer } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Expand, Focus, Minimize, RotateCcw, RotateCw, Scan, Store, ZoomIn, ZoomOut } from 'lucide-react';
 import OfferingCinematicCanvas, { cinematicAssets, useCinematicModel } from './OfferingCinematicCanvas';
@@ -8,9 +8,11 @@ import type { OfferingId, OfferingSceneProps } from './OfferingScene';
 import './OfferingScene.css';
 import OfferingStoryEffects from './OfferingStoryEffects';
 import { OfferingTwinWorkstation } from './OfferingTwinWorkstation';
-import { OfferingRoutingScreens } from './OfferingRoutingScreens';
+import { OfferingRoutingVisual } from './OfferingRoutingVisual';
 import { OfferingEagleConsole } from './OfferingEagleConsole';
 import { OfferingAutomationVisual } from './OfferingAutomationVisual';
+import { OfferingSmartVisual } from './OfferingSmartVisual';
+import { sampleSmart } from './OfferingSmartStory';
 import { OfferingCinemaControls } from './OfferingCinemaControls';
 import { PARTS, GATEWAY_EXPLODE, type EquipmentSpec, type Vec } from './OfferingEquipment';
 import { OfferingConnections } from './OfferingConnections';
@@ -34,7 +36,7 @@ const SERVICE_SPOTS: (Hotspot & { id: OfferingId })[] = [
   { id: 'video', label: 'Video analytics', number: '07', at: [.6, 2.55, 6.7], color: TEAL },
 ];
 const FOCUS: Record<OfferingId, { target: Vec; span: number }> = {
-  failover: { target: [10.8, 1.5, -2.2], span: 14 }, routing: { target: [7.1, .8, 4.7], span: 11.5 },
+  failover: { target: [10.8, 1.5, -2.2], span: 14 }, routing: { target: [8, 1.1, 2.6], span: 9.5 },
   twin: { target: [6.9, 1.15, -1.1], span: 3.6 }, eagle: { target: [7.8, 1, -4.8], span: 14.5 },
   automation: { target: [-9.9, .9, .15], span: 9.5 }, smart: { target: [-5.7, 1, -6.5], span: 18 },
   video: { target: [5.8, 1.3, 2.4], span: 17 },
@@ -81,6 +83,7 @@ function Architecture({ context }: { context: StoryContext; timeRef: RefObject<n
     copy.traverse(object=>{if(object instanceof Mesh)(Array.isArray(object.material)?object.material:[object.material]).forEach(material=>{if(material instanceof MeshStandardMaterial&&material.map)material.map.anisotropy=Math.min(16,gl.capabilities.getMaxAnisotropy());});});
     return copy;
   }, [model,gl]);
+  useLayoutEffect(()=>{const checkout=model.getObjectByName('CheckoutFixtures');if(checkout)checkout.visible=context.offering!=='routing';},[model,context.offering]);
   const diffusers=useMemo(()=>{const materials:MeshStandardMaterial[]=[];model.getObjectByName('LightingRig')?.traverse(object=>{if(object instanceof Mesh)(Array.isArray(object.material)?object.material:[object.material]).forEach(material=>{if(material instanceof MeshStandardMaterial&&material.emissiveIntensity>0)materials.push(material);});});return materials;},[model]);
   useFrame(()=>{const level=storeLightLevel(context);diffusers.forEach(material=>{material.emissiveIntensity=.12+level*1.6;});});
 
@@ -99,9 +102,10 @@ function Equipment({ spec, exploded = false, inspection = false, onSelect, conte
   useFrame(()=>{
     const t=timeRef.current,amount=exploded?(inspection?1:storyProgress(t,3,9)):0;
     for(const part of animated.parts){part.object.position.copy(part.origin);part.object.position.addScaledVector(part.move,amount);}
-    if(animated.fan){const irregular=context.offering==='smart'&&context.variant==='hvac'&&t>=4;animated.fan.rotation.set(0,0,t*(irregular?2.1:6)+ (irregular?Math.sin(t*19)*.12:0));}
-    if(animated.door)animated.door.rotation.set(0,context.offering==='smart'&&context.variant==='cooler'?-.55*storyProgress(t,2,5)*(1-storyProgress(t,21,24)):0,0);
-    if(animated.bulbs.length)animated.bulbs.forEach(material=>dimLamp(material,.75));
+    const smart=context.offering==='smart'?sampleSmart(context.variant,t):null;
+    if(animated.fan)animated.fan.rotation.set(0,0,smart?(context.variant==='energy'?smart.energy.hvacFanAngle:smart.hvac.fanAngle):t*6);
+    if(animated.door)animated.door.rotation.set(0,smart&&context.variant==='cooler'&&spec.id==='cooler'?smart.cooler.doorAngle:0,0);
+    if(animated.bulbs.length)animated.bulbs.forEach(material=>dimLamp(material,smart&&context.variant==='energy'?smart.energy.lightingLevel:.75));
   });
   useEffect(()=>invalidate(),[context,exploded,inspection,invalidate]);
   useEffect(() => () => setCursor(gl, ''), [gl]);
@@ -121,13 +125,15 @@ function Equipment({ spec, exploded = false, inspection = false, onSelect, conte
 function FloorRing({ at, radius = 1, color = AMBER }: { at: Vec; radius?: number; color?: string }) {
   return <mesh position={at} rotation={[-Math.PI/2,0,0]}><ringGeometry args={[radius, radius+.018, 56]} /><meshBasicMaterial color={color} transparent opacity={.35} toneMapped={false} /></mesh>;
 }
-function PracticalDetails({ offering, variant, active, response }: Pick<OfferingSceneProps, 'offering' | 'variant' | 'active'> & { response: boolean }) {
+function PracticalDetails({ offering, variant, active, response, timeRef }: Pick<OfferingSceneProps, 'offering' | 'variant' | 'active'> & { response: boolean; timeRef: RefObject<number> }) {
+  const taskLight=useRef<PointLight>(null);
+  useFrame(()=>{if(taskLight.current)taskLight.current.intensity=offering==='automation'?0:4.5*(offering==='smart'&&variant==='energy'?sampleSmart(variant,timeRef.current).energy.lightingLevel:1);});
   return <>
     {[[4.8,7.9],[11.4,-2.1]].map(([x,z]) => <group key={x}>
       <mesh position={[x,1.8,z]} castShadow><cylinderGeometry args={[.045,.065,3.6,10]} /><meshStandardMaterial color="#81929e" metalness={.7} roughness={.35} /></mesh>
       <mesh position={[x,.06,z]}><cylinderGeometry args={[.25,.3,.12,20]} /><meshStandardMaterial color="#435664" metalness={.7} roughness={.4} /></mesh>
     </group>)}
-    <pointLight position={[-10.5,2.25,1.6]} color="#ffe2a7" intensity={offering==='automation'?0:4.5} distance={7} decay={2} />
+    <pointLight ref={taskLight} position={[-10.5,2.25,1.6]} color="#ffe2a7" intensity={4.5} distance={7} decay={2} />
     <mesh position={[9.5,.035,-4.5]} rotation={[-Math.PI/2,0,0]}><planeGeometry args={[5.2,5]} /><meshBasicMaterial color={offering==='video' && variant==='intruder' && response ? CORAL : SKY} transparent opacity={offering==='video' && variant==='intruder' ? .065 : .018} depthWrite={false} /></mesh>
     <mesh position={[9.5,.045,-2]}><boxGeometry args={[5.2,.016,.035]} /><meshBasicMaterial color={offering==='video' && variant==='intruder' && response ? CORAL : '#6b97a5'} transparent opacity={.7} /></mesh>
     {offering==='smart' && active && <FloorRing at={variant==='hvac' ? [-9,.1,-6] : variant==='cooler' ? [0,.1,-7.6] : [-14.6,.1,-1.5]} radius={variant==='cooler' ? 2.4 : 1.8} color={response ? AMBER : SKY} />}
@@ -142,6 +148,12 @@ function equipmentSpots(offering: OfferingId, variant: string, active: boolean):
     {id:'auto-shelly',label:'Shelly · MQTT / Wi-Fi',at:[-9.1,1.5,-1.35],color:AMBER},
     {id:'auto-presence',label:'Zigbee · presence',at:[-10.15,2.9,-.95],color:VIOLET},
     {id:'auto-controller',label:'Close routine',at:[-10.2,2.1,-1.35],color:TEAL},
+  ];
+  if (offering==='routing') return [
+    {id:'route-front-desk',label:'Front desk · Teams',at:[8,1.95,4.5],color:VIOLET},
+    {id:'route-meeting-room',label:'Meeting room · VoIP',at:[8,1.55,7],color:SKY},
+    {id:'route-back-office',label:'Back office · surveillance',at:[10,1.9,-5.39],color:AMBER},
+    {id:'route-console',label:'Application patchboard',at:[7.1,1.5,.25],color:TEAL},
   ];
   if (offering==='twin') {
     // Internal-part labels belong to the magnified twin, not empty space around
@@ -239,7 +251,7 @@ export default function OfferingSceneStore(props: OfferingSceneProps) {
   const inspection=inspectTwin&&offering==='twin';
   const [visible,setVisible]=useState(!document.hidden),host=useRef<HTMLDivElement>(null),refs=useRef(new Map<string,HTMLButtonElement>());
   const fallbackClock=useRef(0),clock=timeRef??fallbackClock;
-  const annotations=useRef<StoryAnnotationNodes>({labels:new Map(),caption:new Map(),route:new Map(),routing:new Map()});
+  const annotations=useRef<StoryAnnotationNodes>({labels:new Map(),caption:new Map(),route:new Map()});
   useEffect(()=>{if(!timeRef)fallbackClock.current=[0,7.5,14,22][phase];},[timeRef,phase]);
   const context=useMemo(()=>({offering,variant}),[offering,variant]);
   const focusTarget=useRef(new Vector3(7,1.8,-3));
@@ -268,15 +280,16 @@ export default function OfferingSceneStore(props: OfferingSceneProps) {
         {inspection ? <Equipment spec={{id:'gateway',model:'GatewayTwin',at:[0,0,0],size:2.4,yaw:-Math.PI/2+.3}} exploded={variant==='exploded'} inspection onSelect={onSelect} context={context} timeRef={clock}/> : <>
         <Architecture context={context} timeRef={clock}/>
         <OfferingContactGrounding context={context} timeRef={clock}/>
-        {PARTS.filter(spec=>(offering!=='routing'||spec.id!=='pos')&&(offering!=='automation'||!['sensor','thermostat','lock','light'].includes(spec.id))).map(spec=><Equipment key={spec.id} spec={spec} exploded={false} onSelect={onSelect} context={context} timeRef={clock}/>)}
+        {PARTS.filter(spec=>(offering!=='routing'||!['pos','voice'].includes(spec.id))&&(offering!=='automation'||!['sensor','thermostat','lock','light'].includes(spec.id))).map(spec=><Equipment key={spec.id} spec={spec} exploded={false} onSelect={onSelect} context={context} timeRef={clock}/>)}
         {offering==='automation'&&<OfferingAutomationVisual timeRef={clock} variant={variant} onSelect={onSelect}/>}
         {offering==='twin'&&<OfferingTwinWorkstation timeRef={clock} variant={variant} onSelect={onSelect}/>}
-        {offering==='routing'&&<OfferingRoutingScreens timeRef={clock} onSelect={onSelect}/>}
+        {offering==='routing'&&<OfferingRoutingVisual timeRef={clock} variant={variant} onSelect={onSelect}/>}
         {offering==='eagle'&&<OfferingEagleConsole timeRef={clock} variant={variant} onSelect={onSelect}/>}
+        {offering==='smart'&&<OfferingSmartVisual timeRef={clock} variant={variant} onSelect={onSelect}/>}
         <OfferingConnections context={context} active={active} response={response} timeRef={clock}/>
         <OfferingStoryEffects offering={offering} variant={variant} timeRef={clock} onSelect={onSelect}/>
         <OfferingStoryAnnotationSync context={context} timeRef={clock} nodes={annotations} visible={ready&&!inspection&&(followStory||focused)} film={followStory}/>
-        <PracticalDetails offering={offering} variant={variant} active={active} response={response}/>
+        <PracticalDetails offering={offering} variant={variant} active={active} response={response} timeRef={clock}/>
         <ProjectHotspots spots={spots} refs={refs}/></>}<Ready onReady={markReady}/>
       </Suspense>
     </OfferingCinematicCanvas>
@@ -303,7 +316,7 @@ export default function OfferingSceneStore(props: OfferingSceneProps) {
       <div className="offering-store-control-group"><button type="button" aria-label="Reset scene camera" title="Reset view" onClick={resetView}><Scan size={15}/></button><button type="button" aria-label={expanded?'Exit fullscreen':'Expand enterprise'} title={expanded?'Exit fullscreen':'Expand enterprise'} onClick={()=>void toggleExpanded()}>{expanded?<Minimize size={15}/>:<Expand size={15}/>}</button></div>
     </div>
     {expanded&&!inspection&&<>
-      <div className="offering-cinema-heading"><strong>A working day at the connected store</strong><span>Illustrative story · 36 seconds</span></div>
+      <div className="offering-cinema-heading"><strong>A working day at the connected store</strong><span>Illustrative story · {['eagle','smart'].includes(offering)?72:['automation','routing'].includes(offering)?60:36} seconds</span></div>
       <OfferingCinemaControls timeRef={clock} paused={paused} finished={finished} reduced={reduced} revision={revision} onToggle={onTogglePlayback} onSeek={onSeek} onReplay={onReplay}/>
     </>}
     {fullscreenError&&<p className="offering-scene-error" role="status">{fullscreenError}</p>}

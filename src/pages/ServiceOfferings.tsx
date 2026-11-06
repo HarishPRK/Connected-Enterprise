@@ -6,6 +6,7 @@ import { StudioSceneBoundary } from '../ui/StudioSceneBoundary';
 import { COMPONENT_DETAILS, OFFERING_CHAPTERS, type OfferingId } from '../components/offerings/offeringCatalog';
 import { getOfferingStory } from '../components/offerings/offeringStories';
 import { getOfferingUseCase } from '../components/offerings/offeringUseCases';
+import { OfferingDeviceGuide, OfferingRoutingReadout } from '../components/offerings/OfferingDeviceGuide';
 import '../components/offerings/enterprise-field-guide.css';
 
 const OfferingScene = lazy(() => import('../components/offerings/OfferingScene'));
@@ -14,13 +15,17 @@ const BEAT_TIMES = [2.5, 7.5, 14, 22];
 const DURATION = 24;
 const PLAYBACK_SECONDS = 36;
 const OFFERING_TONES = { failover: 'cyan', routing: 'blue', twin: 'lilac', eagle: 'mint', automation: 'amber', smart: 'mint', video: 'coral' } as const;
-const phaseAt = (time: number): 0 | 1 | 2 | 3 => time >= 17 ? 3 : time >= 10 ? 2 : time >= 4 ? 1 : 0;
+const phaseAt = (time: number, offering: OfferingId): 0 | 1 | 2 | 3 => offering === 'smart'
+  ? time >= 18 ? 3 : time >= 10.5 ? 2 : time >= 4 ? 1 : 0
+  : offering === 'eagle' ? time >= 18 ? 3 : time >= 12.5 ? 2 : time >= 3 ? 1 : 0
+  : time >= 17 ? 3 : time >= 10 ? 2 : time >= 4 ? 1 : 0;
 
 export function ServiceOfferingsPage() {
   const [params, setParams] = useSearchParams();
   const offering = OFFERING_CHAPTERS.find(item => item.id === params.get('offering')) ?? OFFERING_CHAPTERS[0];
   const index = OFFERING_CHAPTERS.indexOf(offering);
-  const playbackSeconds = offering.id === 'automation' ? 60 : PLAYBACK_SECONDS;
+  const playbackSeconds = ['eagle','smart'].includes(offering.id) ? 72 : ['automation','routing'].includes(offering.id) ? 60 : PLAYBACK_SECONDS;
+  const beatTimes = offering.id === 'smart' ? [2.5,8.5,16.8,23] : offering.id === 'eagle' ? [1,10.5,17.5,23] : BEAT_TIMES;
   const [variantId, setVariantId] = useState(offering.variants[0].id);
   const [selected, setSelected] = useState<string | null>(null);
   const [phase, setPhase] = useState<0 | 1 | 2 | 3>(0);
@@ -45,10 +50,10 @@ export function ServiceOfferingsPage() {
   const detail = selected ? COMPONENT_DETAILS[selected] : undefined;
   const active = phase >= 1;
 
-  const seek = useCallback((time: number) => {
+  const seek = useCallback((time: number, chapter: OfferingId = 'failover') => {
     timeRef.current = time;
-    phaseRef.current = phaseAt(time);
-    setPhase(phaseAt(time));
+    phaseRef.current = phaseAt(time,chapter);
+    setPhase(phaseAt(time,chapter));
     setFinished(time >= DURATION);
     setRevision(value => value + 1);
     if (progressRef.current) progressRef.current.style.transform = `scaleX(${time / DURATION})`;
@@ -65,7 +70,7 @@ export function ServiceOfferingsPage() {
     setVariantId(nextOffering.variants[0].id);
     setSelected(null);
     seek(0);
-  }, [setParams, seek]);
+  }, [setParams, seek, setSelected, setVariantId]);
 
   function selectOffering(id: OfferingId) {
     changeOffering(id);
@@ -79,7 +84,7 @@ export function ServiceOfferingsPage() {
     if(!playing&&offering.id==='twin')setFollowStory(true);
     setPlaying(!playing);setTouring(false);
   }
-  function replayFilm() { seek(reducedMotion?BEAT_TIMES[0]:0);setFollowStory(true);setPlaying(!reducedMotion);setTouring(false); }
+  function replayFilm() { seek(reducedMotion?beatTimes[0]:0,offering.id);setFollowStory(true);setPlaying(!reducedMotion);setTouring(false); }
   async function watchCinema() {
     const scene=stageRef.current?.querySelector<HTMLElement>('.offering-scene');
     // Request fullscreen directly from the click so browser gesture permission
@@ -88,7 +93,7 @@ export function ServiceOfferingsPage() {
     replayFilm();
   }
   function watchStory() {
-    seek(reducedMotion ? BEAT_TIMES[0] : 0);
+    seek(reducedMotion ? beatTimes[0] : 0,offering.id);
     setFollowStory(true);
     setTouring(false);
     setPlaying(!reducedMotion);
@@ -121,7 +126,7 @@ export function ServiceOfferingsPage() {
       timeRef.current = time;
       if (progressRef.current) progressRef.current.style.transform = `scaleX(${time / DURATION})`;
       if (rangeRef.current) rangeRef.current.value = String(time);
-      const nextPhase = phaseAt(time);
+      const nextPhase = phaseAt(time,offering.id);
       if (nextPhase !== phaseRef.current) { phaseRef.current = nextPhase; setPhase(nextPhase); }
       if (time >= DURATION) {
         if (touring && index < OFFERING_CHAPTERS.length - 1) changeOffering(OFFERING_CHAPTERS[index + 1].id);
@@ -132,9 +137,9 @@ export function ServiceOfferingsPage() {
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [running, touring, index, changeOffering, playbackSeconds]);
+  }, [running, touring, index, changeOffering, playbackSeconds, offering.id]);
 
-  function selectPhase(next: number) { setPlaying(false); setTouring(false); setFollowStory(true); seek(BEAT_TIMES[next]); }
+  function selectPhase(next: number) { setPlaying(false); setTouring(false); setFollowStory(true); seek(beatTimes[next],offering.id); }
   function toggleTour() {
     if (touring) { setTouring(false); setPlaying(false); return; }
     changeOffering(OFFERING_CHAPTERS[0].id);
@@ -174,10 +179,12 @@ export function ServiceOfferingsPage() {
             <StudioSceneBoundary fallback={<EnterpriseFallback offering={offering.id} onOfferingSelect={selectOffering} onReady={onSceneReady} />}
               loading={<div className="enterprise-scene-loading"><Layers3 size={32} strokeWidth={1} aria-hidden="true" /><strong>Preparing the connected store</strong><span>Explore the scenarios while the 3D environment loads.</span></div>}>
               <OfferingScene offering={offering.id} variant={variant.id} active={active} phase={phase} paused={!running} selected={selected} onSelect={setSelected} onOfferingSelect={selectOffering}
-                timeRef={timeRef} revision={revision} followStory={followStory} onCameraInteraction={leaveStoryCamera} onReady={onSceneReady} finished={finished} onTogglePlayback={togglePlayback} onSeek={time=>{seek(time);setPlaying(false);setTouring(false);}} onReplay={replayFilm} />
+                timeRef={timeRef} revision={revision} followStory={followStory} onCameraInteraction={leaveStoryCamera} onReady={onSceneReady} finished={finished} onTogglePlayback={togglePlayback} onSeek={time=>{seek(time,offering.id);setPlaying(false);setTouring(false);}} onReplay={replayFilm} />
             </StudioSceneBoundary>
           </div>
           <div className="showcase-scene-caption"><span className="showcase-status"><span />{beat.status}</span><span className="showcase-scene-format">Illustrative scenario</span></div>
+          {offering.id === 'automation' && <OfferingDeviceGuide onSelect={setSelected}/>}
+          {offering.id === 'routing' && <OfferingRoutingReadout timeRef={timeRef} variant={variant.id} revision={revision} running={running}/>}
         </div>
         <aside className="showcase-sensors" aria-label="Offering story and activity">
           <div className="enterprise-variant-picker" role="group" aria-label={`${offering.title} scenarios`}>{offering.variants.map(item => <button type="button" key={item.id} aria-pressed={variant.id === item.id}
@@ -198,7 +205,7 @@ export function ServiceOfferingsPage() {
           </div>
           <div className="showcase-timeline"><div className="showcase-progress-track"><div ref={progressRef} style={{ transform: 'scaleX(0)' }} /></div>
             <input ref={rangeRef} type="range" min={0} max={DURATION} step={.1} defaultValue={0} aria-label="Scenario progress" aria-valuetext={`${BEATS[phase]}: ${beat.status}`}
-              onChange={event => { seek(Number(event.target.value)); setPlaying(false); setTouring(false); }} />
+              onChange={event => { seek(Number(event.target.value),offering.id); setPlaying(false); setTouring(false); }} />
             <div className="showcase-chapters" aria-label="Story steps">{BEATS.map((name, i) => <button type="button" key={name} aria-current={phase === i ? 'step' : undefined} onClick={() => selectPhase(i)}><span className="showcase-step-number">{phase > i ? <Check size={12} aria-hidden="true" /> : i + 1}</span>{name}</button>)}</div>
           </div>
         </div>

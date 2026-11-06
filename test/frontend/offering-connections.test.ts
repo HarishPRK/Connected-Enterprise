@@ -24,12 +24,12 @@ test('the twin uses distinct modeled fiber, phone and LAN sockets, with an inter
   assert.equal(wired.length,5);
   assert.equal(new Set(wired.map(link=>link.from.point.join(','))).size,5);
   for(const link of wired){
-    assert.ok(link.from.point[1]>1.1&&link.from.point[1]<1.38,'socket belongs to the 28 cm appliance on its 1.10 m bench');
+    assert.ok(link.from.point[1]>1.1&&link.from.point[1]<1.48,'socket belongs to the 38 cm appliance on its 1.10 m bench');
     assert.ok(link.from.normal[2]>.9,'the rotated rear port bay faces the cable exits');
   }
   const radio=connections.find(link=>link.id==='5g')!;
   assert.equal(radio.wireless,true);
-  assert.ok(radio.from.point[1]>1.3&&radio.from.point[1]<1.4&&radio.to.point[1]>3.9);
+  assert.ok(radio.from.point[1]>1.4&&radio.from.point[1]<1.49&&radio.to.point[1]>3.9);
 });
 test('both independent camera feeds terminate at the analytics server, with its own CPE uplink',()=>{
   const connections=makeConnections({offering:'video',variant:'man-down'},true,true);

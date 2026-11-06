@@ -1,6 +1,7 @@
 import { isCheckoutStory, sampleCheckout } from './OfferingCheckoutStory';
-import { ROUTING_TIMING } from './OfferingRoutingStory';
-import { EAGLE_TIMING, sampleEagle } from './OfferingEagleStory';
+import { sampleRouting } from './OfferingRoutingStory';
+import { sampleEagleCue } from './OfferingEagleMotion';
+import { sampleSmart } from './OfferingSmartStory';
 import { AUTOMATION_TIMING, sampleAutomation } from './OfferingAutomationStory';
 import type { StoryContext } from './OfferingStoryMotion';
 
@@ -26,23 +27,23 @@ const SEQUENCES: Record<StoryContext['offering'], Record<string, Sequence>> = {
     ],
   },
   routing: {
-    payment: [
-      ['One customer. Three applications.', 'Checkout, online orders and the camera archive share the store gateway.'],
-      ['The upload holds up the next sale', 'Checkout holds the new authorization before submission. Both uplinks remain online.'],
-      ['Choose the path before sending', 'Current measurements select 5G for new business requests. The archive stays on fiber.'],
-      ['The sale completes. The queue moves.', 'The shopper collects the receipt. The order is accepted and the archive keeps uploading.'],
-    ],
-    orders: [
-      ['The next order is ready to arrive', 'The service desk prepares a new order request while a customer reaches checkout.'],
-      ['The business requests wait', 'A bulk footage upload loads fiber. The new order and payment have not been sent yet.'],
-      ['A business policy for both requests', '5G has less measured delay in this example. New order and payment requests use it.'],
-      ['Order received. Customer served.', 'The service desk has the order. At checkout, the receipt prints and the queue advances.'],
+    teams: [
+      ['The regional briefing begins', 'A colleague opens Teams at the front desk. Five applications use four online tunnels.'],
+      ['The picture pauses', 'The colleague waits for the next part of the briefing. The operator reviews the application route.'],
+      ['Choose a route for Teams', 'Move the front-desk client to vti-fiber1. The other four assignments stay in place.'],
+      ['The briefing moves again', 'The example rejoins with a new media flow. Actual gateway application still needs evidence.'],
     ],
     archive: [
-      ['Record locally. Archive upstream.', 'The camera server records footage and uploads an archive over fiber.'],
-      ['The archive loads the shared path', 'The illustrative upload reaches 28 Mb/s. Checkout and online orders wait before sending.'],
-      ['Keep the archive on its own route', 'An uploader cap manages the footage transfer. New business requests take the selected 5G path.'],
-      ['Keep recording. Keep serving.', 'The archive continues on fiber while the payment and online order complete.'],
+      ['Send the loading-bay clip', 'The back office exports a recorded segment while the local cameras keep recording.'],
+      ['Review where the archive is going', 'Surveillance shares vti-fiber1 with another application. The operator opens its route.'],
+      ['Give this application another tunnel', 'Move only the back-office client to vti-fiber2. Both fiber tunnels remain online.'],
+      ['The next upload segment continues', 'A new-flow example uses the selected tunnel. Local recording never stops.'],
+    ],
+    voice: [
+      ['Prepare the supplier call', 'The colleague waits at the meeting-room speakerphone. Its route is locked.'],
+      ['A locked client cannot move', 'The operator must release this route lock before selecting another tunnel.'],
+      ['Choose the next call’s route', 'Preview vti-fiber2 for the meeting-room client, then publish the selection.'],
+      ['Place the next call', 'The colleague presses the speakerphone. This example starts a new call on the chosen path.'],
     ],
   },
   twin: {
@@ -194,48 +195,30 @@ export function sampleFilmCue(context: StoryContext, time: number): FilmCue {
     const cue = [...cues].reverse().find(([start]) => time >= start) ?? cues[0];
     return { chapter: time >= AUTOMATION_TIMING.complete ? '04 / CONFIRMED' : CHAPTERS[phase], title: cue[1], subtitle: cue[2] };
   }
-  if (context.offering === 'eagle') {
-    const state = sampleEagle(context.variant, time);
-    const sequence = SEQUENCES.eagle[context.variant] ?? SEQUENCES.eagle.gateway;
-    const inspectionTime = context.variant === 'ot' ? EAGLE_TIMING.farInspect : EAGLE_TIMING.inspect;
-    const cues: readonly [number, string, string][] = [
-      [0, ...sequence[0]],
-      [EAGLE_TIMING.symptom, `${state.endpointLabel} now takes ${(state.endpointDelayMs / 1000).toFixed(1)} seconds`, sequence[1][1]],
-      [EAGLE_TIMING.approach, 'The operator goes to EA:GLE', 'Follow the operator to the diagnostic console mounted on the IT rack.'],
-      [EAGLE_TIMING.review, 'Compare reconstruction error with the threshold', `Illustrative MSE ${state.anomalyMse.toFixed(3)}; learned threshold ${state.anomalyThreshold.toFixed(3)}. ${state.diagnosticStatus}.`],
-      [EAGLE_TIMING.selectWindow, 'Read the detector flag and reason', `Flag ${state.anomalyFlag ? '1' : '0'} · code ${state.reasonCode}: ${state.reasonLabel}. The operator checks the selected window.`],
-      [EAGLE_TIMING.connections, 'Compare the connection counts too', `${state.conntrack.total} tracked connections: TCP ${state.conntrack.tcp}, UDP ${state.conntrack.udp}, ICMP ${state.conntrack.icmp}, other ${state.conntrack.other}. Counts provide context, not a root-cause verdict.`],
-      [12.5, 'Choose the next physical check', state.evidence],
-      [EAGLE_TIMING.dispatch, `Follow up at the ${state.deviceLabel.toLowerCase()}`, 'The operator leaves the console with a specific inspection task. The delayed response is still present.'],
-      [inspectionTime, ...sequence[3]],
-      [22.5, 'Investigation stays open', 'The operator is inspecting the selected equipment. A diagnosis and repair still need verification.'],
-    ];
-    const cue = [...cues].reverse().find(([start]) => time >= start) ?? cues[0];
-    return { chapter: CHAPTERS[phase], title: cue[1], subtitle: cue[2] };
+  if (context.offering === 'eagle') return sampleEagleCue(context.variant,time);
+  if (context.offering === 'smart') {
+    const state=sampleSmart(context.variant,time);
+    return {chapter:state.stage==='verification'?'05 / VERIFY':state.stage==='action'?'04 / ACT':state.stage==='approach'?'03 / INSPECT':state.stage==='review'?'02 / REVIEW':'01 / OBSERVE',title:state.status,subtitle:state.detail};
   }
   if (context.offering === 'routing') {
-    if (context.variant === 'orders' && time >= 17 && time < 19.4) {
-      return { chapter: CHAPTERS[phase], title: 'The store has order #1042', subtitle: 'Accepted over the selected 5G path. Its fulfillment ticket is ready for picking.' };
-    }
-    const sequence = SEQUENCES.routing[context.variant] ?? SEQUENCES.routing.payment;
-    const cues: readonly [number, string, string][] = [
-      [0, ...sequence[0]],
-      [1.25, 'A customer reaches the reader', 'The cashier prepares the sale while the other applications share the gateway.'],
-      [2.95, 'The customer taps once', 'Checkout prepares a new authorization. The next shoppers wait behind the customer.'],
-      [ROUTING_TIMING.congestion, ...sequence[1]],
-      [5.4, 'Follow the bulk upload', 'Camera footage travels from the local server to its archive. Local recording continues.'],
-      [8.35, 'Compare the paths that are available', 'Illustrative RTT: fiber 96 ms; 5G 32 ms. Both links are online with no packet loss.'],
-      [ROUTING_TIMING.policy, ...sequence[2]],
-      [11.1, 'Two routes. Different jobs.', 'The archive uploader limits itself to 12 Mb/s on fiber. New business requests are assigned to 5G.'],
-      [ROUTING_TIMING.authorization, 'Send one authorization', 'The new payment request leaves on its selected 5G path.'],
-      [ROUTING_TIMING.approval, 'Approved. The customer can finish.', 'Confirmation reaches the reader. The cashier prepares the receipt.'],
-      [ROUTING_TIMING.orderAccepted, context.variant === 'orders' ? 'The online order is accepted too' : 'The business requests are through', 'The order is accepted over 5G while the archive continues on fiber.'],
-      [ROUTING_TIMING.receipt, 'The receipt is the result', 'The printer feeds the receipt. The customer collects it before leaving.'],
-      [ROUTING_TIMING.queueResumes, 'The next shopper steps forward', 'The sale is complete. The cashier can serve the next customer.'],
-      [19.55, ...sequence[3]],
+    const state=sampleRouting(time,context.variant),sequence=SEQUENCES.routing[state.variant];
+    const client=state.clients.find(item=>item.selected)!;
+    const cues: readonly [number,string,string][]=[
+      [0,...sequence[0]],
+      [4,...sequence[1]],
+      [5.6,'Follow the operator to the patchboard','The laptop lists five clients and four reachable logical tunnels.'],
+      [6,state.previewBlocked?'VoIP is locked. The move is blocked.':'Compare the client and available tunnels',state.previewBlocked?'The blocked preview changes no assignment.':'These are illustrative RTT readings, not a guarantee of application quality.'],
+      [7,state.variant==='voice'?'Release the VoIP route lock':'Keep the other applications in place','POS and OT remain locked. Only the selected application can move.'],
+      [9,`Move ${client.app} to ${state.targetRoute}`,'Watch the selected wire move. This is a preview, not a published change.'],
+      [10.5,'The preview is ready','The selected route is staged. Other clients still have their original assignments.'],
+      [11,'Publish this application’s route','The operator sends the selected assignment through the patchboard.'],
+      [12,'Published to the broker','Publication is confirmed. Gateway application has no acknowledgement yet.'],
+      [14,...sequence[3]],
+      [16,state.variant==='teams'?'The remote colleague is moving again':state.variant==='voice'?'The new call is connected':'The archive keeps transferring',state.variant==='teams'?'The illustration rejoins Teams with a new media flow, rather than moving an existing call.':state.variant==='voice'?'Watch the speaker indicator and voice waveform. This is an illustrated new call.':'The progress bar advances and the camera feed keeps recording. No bandwidth cap is being claimed.'],
+      [20.7,'One application selected. Four left in place.',`${client.app}: ${client.initialRoute} → ${state.targetRoute}. Publication confirmed; gateway evidence pending.`],
     ];
-    const cue = [...cues].reverse().find(([start]) => time >= start) ?? cues[0];
-    return { chapter: CHAPTERS[phase], title: cue[1], subtitle: cue[2] };
+    const cue=[...cues].reverse().find(([start])=>time>=start)??cues[0];
+    return {chapter:time>=14?'04 / ILLUSTRATED NEW FLOW':time>=12?'PUBLISHED / EVIDENCE PENDING':CHAPTERS[phase],title:cue[1],subtitle:cue[2]};
   }
   if (isCheckoutStory(context)) {
     const payment = sampleCheckout(context,time);

@@ -8,6 +8,7 @@ import {
   onboardingAuthorizationHeaders,
   onboardingRequestCredentials,
   onboardingSseEnabled,
+  onboardingGatewaySimulatorAvailable,
 } from '../../src/features/onboarding/auth';
 import { fetchOnboardingSnapshot, generateBootstrapPackage, verifyFactorySerial } from '../../src/features/onboarding/api';
 import type { BootstrapPackageInput } from '../../src/features/onboarding/types';
@@ -47,6 +48,31 @@ test('server-selected public AWS access works without browser globals, tokens, c
   assert.throws(() => onboardingApiUrl('/other-api'), /unavailable/);
   assert.equal(onboardingRequestCredentials(), 'omit');
   assert.equal(onboardingSseEnabled(), false);
+});
+
+test('explicit persistent development access survives elapsed time and uses only the live tenant bridge', async () => {
+  const start=Date.now();
+  globalThis.fetch=async()=>json({mode:'public-development-aws',user:principal,expiresAt:null,simulatorAvailable:true});
+  const access=await discoverOnboardingAccessMode();
+  assert.equal(access.mode,'public-development-aws');
+  Date.now=()=>start+365*86400_000;
+  assert.deepEqual(currentOnboardingUser(),principal);
+  assert.deepEqual(await onboardingAuthorizationHeaders(),{});
+  assert.equal(onboardingGatewaySimulatorAvailable(),true);
+  assert.equal(onboardingSseEnabled(),false);
+  assert.equal(onboardingRequestCredentials(),'omit');
+  globalThis.fetch=async(input,init)=>{
+    assert.equal(input,'/api/onboarding/live/snapshot');
+    assert.equal(init?.credentials,'omit');
+    assert.equal(new Headers(init?.headers).get('authorization'),null);
+    return json({data:{mode:'aws'}});
+  };
+  assert.deepEqual(await fetchOnboardingSnapshot(),{mode:'aws'});
+  globalThis.fetch=async()=>json({mode:'cognito'});
+  await discoverOnboardingAccessMode();
+  assert.equal(currentOnboardingUser(),undefined);
+  assert.equal(onboardingGatewaySimulatorAvailable(),false);
+  assert.equal(onboardingApiUrl('/api/onboarding/snapshot'),'/api/onboarding/snapshot');
 });
 
 test('public API reads and mutations preserve business input and idempotency without Bearer headers', async () => {
@@ -131,6 +157,10 @@ test('malformed, expired, or elevated public principals fail closed instead of e
     { ...valid, user: { ...principal, tenantId: '../another-tenant' } },
     { ...valid, user: { ...principal, subject: '' } },
     { ...valid, user: undefined },
+    { mode:'public-development-aws',user:principal },
+    { mode:'public-development-aws',user:principal,expiresAt:valid.expiresAt },
+    { mode:'public-development-aws',user:{...principal,tenantRole:'platform_admin'},expiresAt:null },
+    { mode:'public-development-aws',user:{...principal,tenantId:'../another-tenant'},expiresAt:null },
     { mode: 'unknown' },
   ];
   for (const payload of invalid) {

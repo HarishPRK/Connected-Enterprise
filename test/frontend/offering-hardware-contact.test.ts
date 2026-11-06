@@ -14,7 +14,7 @@ const directory=new URL('../../src/assets/offerings/',import.meta.url);
 const cast=loadGeometryGlb(new URL('enterprise-actors.studio.glb',directory));
 
 test('installed hardware uses metre-scale dimensions against the unchanged cast',async()=>{
-  for(const [id,file,height] of [['gateway','gemtek-gateway.glb',.28],['analytics','analytics-server.glb',.42]] as const){
+  for(const [id,file,height] of [['gateway','gemtek-gateway.glb',.38],['analytics','analytics-server.glb',.57]] as const){
     const gltf=await loadGeometryGlb(new URL(file,directory));
     const part=PARTS.find(p=>p.id===id)!,source=gltf.scene.getObjectByName(part.model)!;
     const box=new Box3().setFromObject(source),size=box.getSize(new Vector3()),wrapper=new Group();

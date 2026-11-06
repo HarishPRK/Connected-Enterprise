@@ -8,11 +8,12 @@ export function portraitStoryCamera(context: StoryContext, time: number, aspect:
   // at intermediate aspect ratios crosses the storefront and clips the helper.
   const weight = aspect < 1.4 ? 1 : 0;
   if (!weight) return shot;
+  if(context.offering==='routing'&&((time>=6&&time<14)||time>=20.7))return {...shot,distance:shot.distance*.75};
   if(context.offering==='automation'){
     const controller=time>=3&&time<(context.variant==='occupied'?4.6:4.3)||context.variant==='occupied'&&time>=12&&time<17||context.variant!=='occupied'&&time>=16.4&&time<18.3;
     if(controller)return {...shot,distance:Math.max(.35,shot.distance*.6)};
   }
-  if ((context.offering === 'failover' || context.offering === 'routing') && time >= 1.25 && time < 2.95) {
+  if (context.offering === 'failover' && time >= 1.25 && time < 2.95) {
     // Widening this checkout shot put the lens through the brass pendant post.
     // A consistent alternate side angle clears both posts throughout the take.
     return {...shot, yaw:shot.yaw + .32 * weight};

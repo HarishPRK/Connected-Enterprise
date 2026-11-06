@@ -13,6 +13,10 @@ const PROTOCOLS = [
   {at:[-11.25,1.55,-1.37] as Point,title:'MATTER / WI-FI',sub:'DISPLAY PLUG'},
   {at:[-10.2,1.55,-1.37] as Point,title:'MATTER / THREAD',sub:'DESK LAMP PLUG'},
   {at:[-9.1,1.55,-1.37] as Point,title:'SHELLY PLUS 1PM',sub:'MQTT OVER WI-FI'},
+  {at:[-10.15,2.98,-.95] as Point,title:'ZIGBEE',sub:'PRESENCE SENSOR'},
+  {at:[-9.55,1.05,-.98] as Point,title:'WI-FI',sub:'ACCESS POINT'},
+  {at:[-9.15,1.05,-.98] as Point,title:'THREAD',sub:'BORDER ROUTER'},
+  {at:[-8.75,1.05,-.98] as Point,title:'ZIGBEE',sub:'BRIDGE'},
 ];
 function makeSurface(width:number,height:number){
   const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
@@ -44,12 +48,12 @@ function paintPromotion(ctx:CanvasRenderingContext2D,on:boolean,texture:CanvasTe
   texture.needsUpdate=true;
   ctx.fillStyle=on?'#d8a46d':'#111b1c';ctx.fillRect(0,0,870,510);if(!on)return;
   ctx.fillStyle='#16392e';ctx.fillRect(24,24,822,462);
-  ctx.fillStyle=CREAM;ctx.font='600 40px sans-serif';ctx.fillText('CONNECTED MARKET',60,97);
+  ctx.fillStyle=CREAM;ctx.font='600 40px sans-serif';ctx.fillText('TODAY IN STORE',60,97);
   ctx.fillStyle='#edbc7d';ctx.font='700 94px sans-serif';ctx.fillText('Fresh finds.',60,225);ctx.fillText('Every day.',60,325);
   ctx.fillStyle='#b4d4be';ctx.font='31px sans-serif';ctx.fillText('DISCOVER SOMETHING GOOD',60,433);
 }
 function paintSign(surface:ReturnType<typeof makeSurface>,on:boolean){
-  const c=surface.ctx;c.fillStyle=on?'#efd1a1':'#1d2926';c.fillRect(0,0,990,330);c.fillStyle=on?INK:'#45524a';c.font='700 85px sans-serif';c.textAlign='center';c.fillText('CONNECTED',495,148);c.font='44px sans-serif';c.fillText('MARKET  /  EST. 2026',495,233);surface.texture.needsUpdate=true;
+  const c=surface.ctx;c.fillStyle=on?'#efd1a1':'#1d2926';c.fillRect(0,0,990,330);c.fillStyle=on?INK:'#45524a';c.font='700 85px sans-serif';c.textAlign='center';c.fillText('OPEN',495,148);c.font='44px sans-serif';c.fillText('WELCOME IN',495,233);surface.texture.needsUpdate=true;
 }
 function Surface({at,size,texture}:{at:Point;size:[number,number];texture:CanvasTexture}){
   return <mesh position={at}><planeGeometry args={size}/><meshBasicMaterial map={texture} toneMapped={false}/></mesh>;
@@ -57,7 +61,7 @@ function Surface({at,size,texture}:{at:Point;size:[number,number];texture:Canvas
 function ProtocolPlaque({at,title,sub}:typeof PROTOCOLS[number]){
   const surface=useMemo(()=>{const s=makeSurface(700,190);s.ctx.fillStyle='#e8e1ca';s.ctx.fillRect(0,0,700,190);s.ctx.fillStyle=INK;s.ctx.font='600 43px sans-serif';s.ctx.fillText(title,24,72);s.ctx.font='28px sans-serif';s.ctx.fillText(sub,24,133);s.texture.needsUpdate=true;return s;},[title,sub]);
   useEffect(()=>()=>surface.texture.dispose(),[surface]);
-  return <Surface at={at} size={[.28,.076]} texture={surface.texture}/>;
+  return <Surface at={at} size={[.35,.095]} texture={surface.texture}/>;
 }
 const ROUTES:{id:AutomationDeviceId;points:Point[];color:string}[]=[
   {id:'display',points:[[-10.2,1.88,-1.31],[-9.55,.98,-.98],[-10.4,1.65,-.91],[-11.25,1.42,-1.33]],color:'#83c4dd'},
@@ -79,6 +83,19 @@ function CommandTrace({spec,timeRef,variant}:{spec:typeof ROUTES[number];timeRef
     packet.current.visible=t<timing.observed;
   });
   return <group ref={root}><Line points={spec.points} color={spec.color} lineWidth={1.1} dashed dashSize={.04} gapSize={.04} transparent opacity={.6}/><mesh ref={packet}><sphereGeometry args={[.013,12,8]}/><meshBasicMaterial color={spec.color} toneMapped={false}/></mesh></group>;
+}
+
+function PresenceCoverage({timeRef,variant}:{timeRef:RefObject<number>;variant:string}){
+  const root=useRef<Group>(null),material=useRef<MeshStandardMaterial>(null);
+  useFrame(()=>{
+    const state=sampleAutomation(variant,timeRef.current);
+    if(root.current)root.current.visible=state.requestClose&&!state.allVerified;
+    if(material.current){material.current.color.set(state.presence?'#cfb8e3':MINT);material.current.emissive.set(state.presence?'#cfb8e3':MINT);}
+  });
+  return <group ref={root} position={[-8.85,.045,.35]}>
+    <mesh rotation={[-Math.PI/2,0,0]}><ringGeometry args={[1.2,1.23,72]}/><meshStandardMaterial ref={material} transparent opacity={.5} depthWrite={false} emissiveIntensity={.5}/></mesh>
+    <Line points={[[0,0,0],[-1.3,2.72,-1.3]]} color="#cfb8e3" dashed dashSize={.06} gapSize={.08} lineWidth={1} transparent opacity={.35}/>
+  </group>;
 }
 
 export function OfferingAutomationVisual({timeRef,variant,onSelect}:{timeRef:RefObject<number>;variant:string;onSelect:(id:string)=>void}){
@@ -116,6 +133,7 @@ export function OfferingAutomationVisual({timeRef,variant,onSelect}:{timeRef:Ref
     <Surface at={[-9.1,2.05,-1.396]} size={[.66,.22]} texture={surfaces.sign.texture}/>
     {PROTOCOLS.map(spec=><ProtocolPlaque key={spec.title} {...spec}/>)}
     {ROUTES.map(spec=><CommandTrace key={spec.id} spec={spec} timeRef={timeRef} variant={variant}/>)}
+    <PresenceCoverage timeRef={timeRef} variant={variant}/>
     <primitive object={lampTarget}/>
     <spotLight ref={lampLight} target={lampTarget} position={[-10.2,1.116,-1.14]} color="#ffe4a7" distance={1.2} angle={1} penumbra={.85} decay={2}/>
     <pointLight ref={displayLight} position={[-11.25,1.9,-1.05]} color="#edc192" distance={2} decay={2}/>

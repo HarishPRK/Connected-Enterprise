@@ -3,10 +3,10 @@ import type { OnboardingUser } from './auth';
 
 export interface OnboardingAuthContextValue {
   user?: OnboardingUser;
-  status: 'checking' | 'authenticated' | 'anonymous' | 'error';
+  status: 'checking' | 'authenticated' | 'public' | 'anonymous' | 'error';
   authenticationRequired: boolean;
   authenticationError?: string;
-  accessMode: 'checking' | 'cognito' | 'temporary-public-aws' | 'unavailable';
+  accessMode: 'checking' | 'cognito' | 'temporary-public-aws' | 'public-development-aws' | 'unavailable';
   signIn: () => void;
   signOut: () => void;
 }

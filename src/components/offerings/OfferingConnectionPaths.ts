@@ -36,7 +36,7 @@ export function makeConnections(context:StoryContext,active:boolean,response:boo
   const {offering,variant}=context;
   const fiberDown=offering==='failover'&&active&&variant==='fiber';
   const cellDown=offering==='failover'&&active&&variant==='5g';
-  const cellPolicy=offering==='routing'&&response;
+  const cellPolicy=offering==='routing';
   const switched=fiberDown&&response||cellPolicy;
   const cpe=gatewayPort('fiber'),pos=gatewayPort('pos'),voice=gatewayPort('voice'),lan=gatewayPort('it');
   const fiber=equipmentSocket('fiber',[-.19,.57,.332]);

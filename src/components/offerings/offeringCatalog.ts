@@ -32,13 +32,13 @@ export const OFFERING_CHAPTERS: OfferingChapter[] = [
     },
     {
         id: 'routing', title: 'Application Traffic Routing', navTitle: 'Application Traffic Routing', category: 'Application experience', icon: ArrowLeftRight, color: '#9bcbff',
-        intro: 'Keep checkout responsive while the camera archive uploads.',
-        scope: ['Application policies', 'Measured path quality', 'Both links online'],
+        intro: 'Choose the route for the next meeting, upload or call.',
+        scope: ['Five client applications', 'Four online tunnels', 'Per-client locks', 'Operator-directed routing'],
         links: [{ label: 'Open Application Traffic Routing', href: '/app-routing' }],
         variants: [
-            { id: 'payment', label: 'Checkout payment' },
-            { id: 'orders', label: 'Online orders' },
-            { id: 'archive', label: 'Camera archive' },
+            { id: 'teams', label: 'Teams briefing' },
+            { id: 'archive', label: 'Surveillance transfer' },
+            { id: 'voice', label: 'VoIP call' },
         ]
     },
     {
@@ -53,8 +53,8 @@ export const OFFERING_CHAPTERS: OfferingChapter[] = [
     },
     {
         id: 'eagle', title: 'EA:GLE', navTitle: 'EA:GLE', category: 'Connected operations', icon: Activity, color: '#8bdfcd',
-        intro: 'Check detector evidence, then inspect the device behind the slow response.',
-        scope: ['MSE & learned threshold', 'Detector flag & reason', 'Connection tracking', 'Physical inspection'],
+        intro: 'Follow a slow response from connected devices to evidence, physical investigation and fresh verification.',
+        scope: ['Accumulating detector windows', 'Flags & reason codes', 'Workload queues', 'Physical investigation', 'Attempt & verify'],
         links: [{ label: 'Open EA:GLE monitoring', href: '/hardware-anomalies' }, { label: 'IT devices', href: '/it-devices' }, { label: 'OT devices', href: '/ot-devices' }],
         variants: [
             { id: 'gateway', label: 'Gateway HW' },
@@ -76,13 +76,13 @@ export const OFFERING_CHAPTERS: OfferingChapter[] = [
     },
     {
         id: 'smart', title: 'Smart Services', navTitle: 'Smart Services', category: 'Equipment & sustainability', icon: Leaf, color: '#a9d9a0',
-        intro: 'Turn equipment signals into earlier, more useful action.',
-        scope: ['HVAC predictive maintenance', 'Cooler predictive maintenance', 'Sustainability'],
+        intro: 'Find the cause. Act on the equipment. Watch the result.',
+        scope: ['Physical inspection', 'Temperature trends', 'Visible intervention', 'Measured follow-up'],
         links: [{ label: 'Explore connected OT equipment', href: '/ot-devices' }],
         variants: [
-            { id: 'hvac', label: 'HVAC maintenance' },
-            { id: 'cooler', label: 'Cooler maintenance' },
-            { id: 'energy', label: 'Sustainability' },
+            { id: 'hvac', label: 'Clear the air intake' },
+            { id: 'cooler', label: 'Close the cooler door' },
+            { id: 'energy', label: 'Reduce closing-time demand' },
         ]
     },
     {
@@ -112,6 +112,16 @@ export const COMPONENT_DETAILS: Record<string, {
     pos: { title: 'Payment traffic', detail: 'An application class whose path can be selected through its own routing policy.', signals: ['Application class', 'Eligible paths', 'Route policy'] },
     voice: { title: 'Voice traffic', detail: 'Communication with a route policy informed by link quality and application needs.', signals: ['Latency', 'Jitter', 'Route policy'] },
     video: { title: 'Video traffic', detail: 'A bandwidth-oriented flow with its own policy and preferred connection.', signals: ['Bandwidth', 'Application class', 'Route policy'] },
+    'route-front-desk': { title: 'front-desk · Microsoft Teams', detail: 'The colleague pauses a choppy briefing while the operator reviews this client’s route. The example selects vti-fiber1 instead of vti-cell1 for the next meeting connection. The rejoined session is illustrative, not evidence that the published command was applied.', signals: ['Microsoft Teams', 'vti-cell1 → vti-fiber1', 'New connection illustrated'] },
+    'route-back-office': { title: 'back-office · Surveillance', detail: 'The workstation transfers recorded camera footage while recording continues locally. The operator selects vti-fiber2 instead of vti-fiber1 for its next upload segment. The example does not impose a bandwidth cap or move every client.', signals: ['Recorded-footage transfer', 'vti-fiber1 → vti-fiber2', 'Local recording continues'] },
+    'route-meeting-room': { title: 'meeting-room · VoIP', detail: 'This client starts with its route locked to vti-cell2. The operator must release the lock before selecting vti-fiber2. The colleague places a new call after publication; the story does not migrate an active call.', signals: ['Unlock before selection', 'vti-cell2 → vti-fiber2', 'Next call illustrated'] },
+    'route-kitchen-pos': { title: 'kitchen-pos · POS Payments', detail: 'The payment client provides context on the routing board. Its existing binding stays locked while the operator changes a different client. This sequence does not perform or reroute a payment.', signals: ['Binding retained', 'Routing lock on', 'No payment action'] },
+    'route-dock-door': { title: 'dock-door · OT Telemetry', detail: 'The operational telemetry client remains on its existing, locked binding throughout the selected application’s route change.', signals: ['OT Telemetry', 'Binding retained', 'Routing lock on'] },
+    'route-console': { title: 'Application steering patchboard', detail: 'The operator reviews a client and reachable tunnel, previews a placement and publishes an AppRouteCommand. Broker acceptance confirms publication only. The current integration has no correlated gateway acknowledgement; the film’s subsequent flows are explicitly illustrative.', signals: ['Client → gateway → tunnel', 'Preview → publish → broker accepted', 'Gateway evidence pending'] },
+    'route-fiber1': { title: 'vti-fiber1 · Fiber tunnel 1', detail: 'One of four online IPsec tunnels in this illustrative branch. The Teams example selects this path using the displayed measurements; other clients retain their own bindings.', signals: ['Online throughout', 'Measured latency', 'Independent client bindings'] },
+    'route-fiber2': { title: 'vti-fiber2 · Fiber tunnel 2', detail: 'A separate online IPsec tunnel. The surveillance and VoIP examples select it for the next flow after operator review. Selecting this logical path does not require moving a physical cable.', signals: ['Online throughout', 'Measured latency', 'Logical tunnel selection'] },
+    'route-cell1': { title: 'vti-cell1 · Cellular tunnel 1', detail: 'The front-desk meeting starts on this online cellular tunnel. It remains available after the operator selects a different path for that client; no link failure is depicted.', signals: ['Online throughout', 'Measured latency', 'Available after selection'] },
+    'route-cell2': { title: 'vti-cell2 · Cellular tunnel 2', detail: 'The meeting-room VoIP client starts locked to this online cellular tunnel. Releasing that client’s lock allows a new selection without disconnecting the tunnel or changing unrelated clients.', signals: ['Online throughout', 'Per-client lock', 'Other bindings retained'] },
     housing: { title: 'Gateway enclosure', detail: 'The chassis supports the internal assembly and external interfaces.', signals: ['Mechanical assembly', 'Service access'] },
     board: { title: 'Compute board', detail: 'Processing and memory supporting gateway software and local services.', signals: ['CPU', 'Memory', 'Local processing'] },
     heatsink: { title: 'Thermal assembly', detail: 'The finned surface carries heat away from the electronics through passive cooling.', signals: ['Temperature', 'Thermal condition'] },

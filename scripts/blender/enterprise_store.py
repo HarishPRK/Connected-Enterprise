@@ -343,8 +343,6 @@ for x in (-12.6, -7.4, 5.6, 12.5):
     box("Rear structural column", (x, 2.2, -9.65), (.16, 4.4, .18), steel, .012)
 box("Fresh wall blue enamel", (-.5, 1.53, -9.73), (8.2, 2.66, .09), glaze if STUDIO else teal, .02)
 box("Rear brand strip", (-.5, 3.05, -9.70), (9.4, .65, .12), powder, .025)
-text("CONNECTED MARKET", (-.5, 2.94, -9.615), .37)
-text("FRESH  /  EVERYDAY  /  CONNECTED", (-.5, 2.48, -9.66), .13)
 for x in (-11.5, -10.75, -10, -9.25, -8.5):
     box("Climate bay wall panel", (x, 1.55, -9.72), (.68, 2.75, .06), concrete, .01)
 text("BUILDING SERVICES", (-10, 3.0, -9.64), .18, ink)
@@ -385,7 +383,6 @@ for x in (-1.2, 3.2):
     box("Entrance steel jamb", (x, 1.65, 9.86), (.10, 3.3, .14), powder, .008)
 box("Entrance header", (1, 3.3, 9.86), (4.5, .14, .24), powder, .012)
 box("Entrance oak fascia", (1, 3.51, 9.86), (4.65, .28, .28), wood, .015)
-text("MARKET", (1, 3.44, 10.015), .20, ink)
 for x in (-.9, 2.9):
     box("Fixed sidelight", (x, 1.65, 9.86), (.43, 3.1, .025), glass, .005)
     box("Sidelight stile", (x + (.22 if x < 0 else -.22), 1.65, 9.86), (.045, 3.1, .08), steel, .005)
@@ -618,6 +615,9 @@ bpy.ops.export_scene.gltf(filepath=str(OUT / (STEM + ".glb")), export_format="GL
                          use_selection=True, export_yup=True, export_materials="EXPORT",
                          export_cameras=False, export_lights=False)
 print("STORE_EXPORTED", json.dumps(manifest), flush=True)
+
+if "--skip-proof" in arguments:
+    raise SystemExit(0)
 
 # Optional proof staging with the actual reusable equipment. These are never exported.
 kit = OUT / "offerings-kit.glb"

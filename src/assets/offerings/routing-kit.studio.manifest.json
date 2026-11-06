@@ -1,0 +1,500 @@
+{
+  "root": "RoutingKit",
+  "units": "meters",
+  "up": "+Y",
+  "front": "+Z",
+  "placement": "World coordinates. Render with identity transform and unit scale.",
+  "architectureHideGroup": "CheckoutFixtures",
+  "bounds": {
+    "min": [
+      7.25,
+      0.0,
+      4.08
+    ],
+    "max": [
+      8.75,
+      1.7225,
+      7.3575
+    ],
+    "size": [
+      1.5,
+      1.7225,
+      3.2775
+    ]
+  },
+  "groups": {
+    "BriefingStandingDesk": {
+      "origin": [
+        8.0,
+        0.0,
+        4.5
+      ],
+      "bounds": {
+        "min": [
+          7.25,
+          0.0,
+          4.08
+        ],
+        "max": [
+          8.75,
+          1.1025,
+          4.9275
+        ],
+        "size": [
+          1.5,
+          1.1025,
+          0.8475
+        ]
+      }
+    },
+    "VoiceStandingCounter": {
+      "origin": [
+        8.0,
+        0.0,
+        7.0
+      ],
+      "bounds": {
+        "min": [
+          7.3,
+          0.0,
+          6.65
+        ],
+        "max": [
+          8.7,
+          1.1025,
+          7.3575
+        ],
+        "size": [
+          1.4,
+          1.1025,
+          0.7075
+        ]
+      }
+    },
+    "TeamsWorkstation": {
+      "origin": [
+        8.0,
+        1.1,
+        4.5
+      ],
+      "bounds": {
+        "min": [
+          7.69,
+          0.96,
+          4.179248
+        ],
+        "max": [
+          8.599555,
+          1.7225,
+          4.52
+        ],
+        "size": [
+          0.909555,
+          0.7625,
+          0.340752
+        ]
+      }
+    },
+    "DeskKeyboard": {
+      "origin": [
+        8.0,
+        1.1,
+        4.78
+      ],
+      "bounds": {
+        "min": [
+          7.7915,
+          1.1,
+          4.189331
+        ],
+        "max": [
+          8.581562,
+          1.1264,
+          4.8485
+        ],
+        "size": [
+          0.790062,
+          0.0264,
+          0.659169
+        ]
+      }
+    },
+    "DeskMouse": {
+      "origin": [
+        8.37,
+        1.1,
+        4.79
+      ],
+      "bounds": {
+        "min": [
+          8.304999,
+          1.099,
+          4.675
+        ],
+        "max": [
+          8.495,
+          1.142,
+          4.865
+        ],
+        "size": [
+          0.190001,
+          0.043,
+          0.19
+        ]
+      }
+    },
+    "DeskPersonalObjects": {
+      "origin": [
+        7.45,
+        1.1,
+        4.5
+      ],
+      "bounds": {
+        "min": [
+          7.313725,
+          1.1,
+          4.180403
+        ],
+        "max": [
+          7.548,
+          1.329,
+          4.82
+        ],
+        "size": [
+          0.234275,
+          0.229,
+          0.639597
+        ]
+      }
+    },
+    "VoipDeskPhone": {
+      "origin": [
+        8.0,
+        1.1,
+        7.0
+      ],
+      "bounds": {
+        "min": [
+          7.865,
+          1.1,
+          6.89
+        ],
+        "max": [
+          8.135,
+          1.2835,
+          7.11
+        ],
+        "size": [
+          0.27,
+          0.1835,
+          0.22
+        ]
+      }
+    },
+    "VoipHandset": {
+      "origin": [
+        7.912,
+        1.19,
+        7.0
+      ],
+      "bounds": {
+        "min": [
+          7.847003,
+          1.103176,
+          6.874
+        ],
+        "max": [
+          7.947,
+          1.215,
+          7.126
+        ],
+        "size": [
+          0.099997,
+          0.111824,
+          0.252
+        ]
+      }
+    },
+    "VoipDeskPhoneControls": {
+      "origin": [
+        8.0,
+        1.1,
+        7.0
+      ],
+      "bounds": {
+        "min": [
+          8.005,
+          0.96,
+          6.75342
+        ],
+        "max": [
+          8.539576,
+          1.1592,
+          7.099
+        ],
+        "size": [
+          0.534576,
+          0.1992,
+          0.34558
+        ]
+      }
+    },
+    "ConferenceSpeakerphone": {
+      "origin": [
+        8.42,
+        1.1,
+        7.02
+      ],
+      "bounds": {
+        "min": [
+          8.356,
+          1.1,
+          6.759308
+        ],
+        "max": [
+          8.521662,
+          1.1394,
+          7.084
+        ],
+        "size": [
+          0.165662,
+          0.0394,
+          0.324692
+        ]
+      }
+    }
+  },
+  "animatedNodes": {
+    "TeamsMonitorScreen": {
+      "group": "TeamsWorkstation",
+      "center": [
+        8.0,
+        1.5,
+        4.511
+      ],
+      "bounds": {
+        "min": [
+          7.7,
+          1.33125,
+          4.511
+        ],
+        "max": [
+          8.3,
+          1.66875,
+          4.511
+        ],
+        "size": [
+          0.6,
+          0.3375,
+          0.0
+        ]
+      },
+      "material": "Routing / TeamsMonitorScreen"
+    },
+    "MonitorStatusLED": {
+      "group": "TeamsWorkstation",
+      "center": [
+        8.287,
+        1.327,
+        4.512
+      ],
+      "bounds": {
+        "min": [
+          8.2858,
+          1.3258,
+          4.5116
+        ],
+        "max": [
+          8.288199,
+          1.3282,
+          4.5124
+        ],
+        "size": [
+          0.002399,
+          0.0024,
+          0.0008
+        ]
+      },
+      "material": "Routing / MonitorStatusLED"
+    },
+    "WebcamStatusLED": {
+      "group": "TeamsWorkstation",
+      "center": [
+        8.017,
+        1.708,
+        4.509
+      ],
+      "bounds": {
+        "min": [
+          8.0158,
+          1.7068,
+          4.5085
+        ],
+        "max": [
+          8.0182,
+          1.7092,
+          4.5095
+        ],
+        "size": [
+          0.0024,
+          0.0024,
+          0.001
+        ]
+      },
+      "material": "Routing / WebcamStatusLED"
+    },
+    "VoipPhoneScreen": {
+      "group": "VoipDeskPhone",
+      "center": [
+        8.025,
+        1.238,
+        6.9525
+      ],
+      "bounds": {
+        "min": [
+          7.9525,
+          1.2,
+          6.9525
+        ],
+        "max": [
+          8.0975,
+          1.276,
+          6.9525
+        ],
+        "size": [
+          0.145,
+          0.076,
+          0.0
+        ]
+      },
+      "material": "Routing / VoipPhoneScreen"
+    },
+    "VoipStatusLED": {
+      "group": "VoipDeskPhone",
+      "center": [
+        8.096,
+        1.282,
+        6.953
+      ],
+      "bounds": {
+        "min": [
+          8.0945,
+          1.2805,
+          6.9526
+        ],
+        "max": [
+          8.0975,
+          1.2835,
+          6.9534
+        ],
+        "size": [
+          0.003,
+          0.003,
+          0.0008
+        ]
+      },
+      "material": "Routing / VoipStatusLED"
+    },
+    "SpeakerphoneStatusRing": {
+      "group": "ConferenceSpeakerphone",
+      "center": [
+        8.42,
+        1.137,
+        7.02
+      ],
+      "bounds": {
+        "min": [
+          8.3607,
+          1.1357,
+          6.9607
+        ],
+        "max": [
+          8.4793,
+          1.1383,
+          7.0793
+        ],
+        "size": [
+          0.1186,
+          0.0026,
+          0.1186
+        ]
+      },
+      "material": "Routing / SpeakerphoneStatusRing"
+    }
+  },
+  "surfaces": {
+    "TeamsMonitorScreen": {
+      "center": [
+        8,
+        1.5,
+        4.511
+      ],
+      "size": [
+        0.6,
+        0.3375
+      ],
+      "frontNormal": [
+        0,
+        0,
+        1
+      ]
+    },
+    "VoipPhoneScreen": {
+      "center": [
+        8.025,
+        1.238,
+        6.9525
+      ],
+      "size": [
+        0.145,
+        0.076
+      ],
+      "frontNormal": [
+        0,
+        0,
+        1
+      ]
+    }
+  },
+  "actorPositions": {
+    "briefing": {
+      "root": [
+        8,
+        0,
+        5.35
+      ],
+      "facing": [
+        0,
+        0,
+        -1
+      ],
+      "keyboardTarget": [
+        8,
+        1.125,
+        4.78
+      ]
+    },
+    "voice": {
+      "root": [
+        8,
+        0,
+        7.75
+      ],
+      "facing": [
+        0,
+        0,
+        -1
+      ]
+    }
+  },
+  "notes": [
+    "Hide only CheckoutFixtures when routing. All original architecture remains unchanged for other scenarios.",
+    "27-inch-class display is 620 mm across its housing; 600 x 337.5 mm screen. Generic branded-free hardware.",
+    "Standing desk surfaces are 1.10 m above floor. Conference phone footprint 270 x 220 mm; speakerphone diameter 128 mm.",
+    "Screen meshes have full 0..1 UVs and front +Z normals. Hide each named screen and add runtime surfaces at z +0.0005.",
+    "No external textures, downloaded models, animations or embedded lights. Equipment detail is authored in Blender."
+  ],
+  "triangles": 60464,
+  "bytes": 1771828,
+  "meshCount": 51
+}

@@ -46,15 +46,22 @@ test('the fall precedes the human response and assistance reaches the affected c
   assert.ok(sampleActor('shopper', context, 22).fall > .9, 'arrival of help must not instantly erase the incident');
 });
 
-test('each EA:GLE investigation brings the technician to the selected asset', () => {
+test('EA:GLE follows physical inspection with a console attempt and fresh verification', () => {
   for (const variant of ['gateway', 'fiber', '5g', 'it', 'ot']) {
     const context: StoryContext = { offering: 'eagle', variant };
-    const asset = monitoredPoint(variant);
-    const beforeDispatch = sampleActor('technician', context, 6);
-    const inspecting = sampleActor('technician', context, 22);
-    assert.ok(inspecting.visible && inspecting.tablet > 0, `${variant}: the technician has the inspection context`);
-    assert.ok(floorDistance(inspecting.at, asset) < 2.5, `${variant}: the technician reaches the selected equipment`);
-    assert.ok(floorDistance(inspecting.at, asset) < floorDistance(beforeDispatch.at, asset), `${variant}: dispatch moves toward the affected asset`);
+    const local = variant === 'gateway' || variant === 'it';
+    const inspector = local ? 'technician' : 'staff';
+    const asset: [number, number, number] = local ? [8.05, 1.1, -2.9] : monitoredPoint(variant);
+    const beforeDispatch = sampleActor(inspector, context, 6);
+    const inspecting = sampleActor(inspector, context, 14.5);
+    assert.ok(inspecting.visible && inspecting.tablet > 0, `${variant}: the inspector carries the investigation context`);
+    assert.ok(floorDistance(inspecting.at, asset) < 2.5, `${variant}: a colleague reaches the selected equipment`);
+    assert.ok(floorDistance(inspecting.at, asset) < floorDistance(beforeDispatch.at, asset));
+    for (const time of [17.5, 22]) {
+      const operator = sampleActor('technician', context, time);
+      assert.deepEqual(operator.at, [9.82, .04, -4.84]);
+      assert.equal(operator.tablet, 0, 'the console hand is free for action and verification');
+    }
   }
 });
 

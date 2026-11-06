@@ -1,6 +1,5 @@
 import { sampleTwin } from './OfferingTwinStory';
-import { sampleRouting } from './OfferingRoutingStory';
-import { EAGLE_CASES, sampleEagle } from './OfferingEagleStory';
+import { eaglePacketClock, sampleEagle } from './OfferingEagleStory';
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { BufferGeometry, Color, Group, Line, LineDashedMaterial, Mesh, MeshBasicMaterial, MeshStandardMaterial, Quaternion, TubeGeometry, Vector3 } from 'three';
@@ -46,29 +45,11 @@ function ConnectionLink({spec,context,timeRef}:{spec:Connection;context:StoryCon
     followExplodedPorts(resources,spec,0,twin?.unplug??0);
     if(twin&&cable.current)cable.current.color.set(twin.resolved?'#6c9688':failed?'#8e5c52':'#647f90');
     if(startPlug.current){resources.curve.getPoint(0,point);startPlug.current.position.copy(point);}
-    const routing=context.offering==='routing',allocation=sampleRouting(t);
-    const held=routing&&(spec.id==='pos'&&!allocation.authorizationSent||spec.id==='it'&&!allocation.orderSent);
-    const speed = routing && spec.id==='fiber' ? allocation.archiveMbps / 120 : .16;
     const eagle=context.offering==='eagle'?sampleEagle(context.variant,t):null;
     const slow=eagle&&(spec.id===context.variant||context.variant==='gateway'&&spec.from.device==='gateway'||spec.id==='pos'&&eagle.checkoutAffected);
-    let elapsed=t;
-    if(slow&&t>4){
-      // Integrate the deceleration, rather than multiplying absolute time by
-      // a changing speed (which makes packets jump backwards at onset).
-      const ratio=eagle.baselineResponseMs/EAGLE_CASES[eagle.variant].delay;
-      const d=Math.min(1.5,t-4),u=d/1.5;
-      elapsed=4+d-(1-ratio)*1.5*(u*u*u-.5*u*u*u*u)+Math.max(0,t-5.5)*ratio;
-    }
+    const elapsed=slow?eaglePacketClock(context.variant,t):t;
     packets.current?.children.forEach((packet,index)=>{
-      let progress=failed ? .12+index*.055 : (elapsed*speed+index/packetCount)%1;
-      if(routing&&(spec.id==='pos'||spec.id==='it')){
-        const sentAt=spec.id==='pos'?12.5:12.6;
-        const travel=Math.max(0,Math.min(1,(t-sentAt)/.5));
-        // One newly submitted request, moving from its local endpoint to CPE.
-        // Do not depict a repeated charge or migrate an in-flight transaction.
-        progress=1-travel;
-        packet.visible=!held&&index===0&&t<sentAt+.5;
-      }
+      const progress=failed ? .12+index*.055 : (elapsed*.16+index/packetCount)%1;
       resources.curve.getPointAt(progress,point);packet.position.copy(point);
       if(twin)((packet as Mesh).material as MeshBasicMaterial).color.set(twin.color);
       packet.scale.setScalar(Math.min(1,Math.max(.05,point.distanceTo(camera.position)/7)));
@@ -85,6 +66,6 @@ function ConnectionLink({spec,context,timeRef}:{spec:Connection;context:StoryCon
   </group>;
 }
 export function OfferingConnections({context,active,response,timeRef}:{context:StoryContext;active:boolean;response:boolean;timeRef:RefObject<number>}){
-  const connections=useMemo(()=>makeConnections(context,active,response).filter(spec=>context.offering!=='automation'||!spec.wireless),[context,active,response]);
+  const connections=useMemo(()=>makeConnections(context,active,response).filter(spec=>(context.offering!=='automation'||!spec.wireless)&&(context.offering!=='routing'||!['pos','voice'].includes(spec.id))),[context,active,response]);
   return <>{connections.map(spec=><ConnectionLink key={spec.id} spec={spec} context={context} timeRef={timeRef}/>)}</>;
 }

@@ -23,8 +23,8 @@ async function initializeAccess(): Promise<AccessState> {
       authenticationError: cause instanceof Error ? cause.message : 'Unable to confirm onboarding access.',
     };
   }
-  if (access.mode === 'temporary-public-aws') {
-    return { accessMode: access.mode, status: 'authenticated', authenticationRequired: false, user: access.user };
+  if (access.mode === 'temporary-public-aws' || access.mode === 'public-development-aws') {
+    return { accessMode: access.mode, status: 'public', authenticationRequired: false, user: access.user };
   }
   const configurationError = onboardingConfigurationError();
   if (configurationError) {
@@ -83,7 +83,7 @@ export function OnboardingAuthBoundary({ children }: { children: ReactNode }) {
     });
   }, []);
   const value = useMemo<OnboardingAuthContextValue>(() => ({
-    ...access, user: access.status === 'authenticated' ? access.user : undefined,
+    ...access, user: access.status === 'authenticated' || access.status === 'public' ? access.user : undefined,
     signIn, signOut: signOutOnboarding,
   }), [access, signIn]);
 

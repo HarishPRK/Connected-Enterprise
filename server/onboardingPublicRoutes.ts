@@ -8,11 +8,12 @@ const PUBLIC_ACTOR = 'anonymous-ec2-onboarding-dev';
 const MAX_ACCESS_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface PublicOnboardingConfig {
+  accessMode: 'temporary-public-aws' | 'public-development-aws';
   apiFunctionArn: string;
   region: string;
   fixedTenantId: string;
   fixedSubject: string;
-  expiresAt: number;
+  expiresAt: number | null;
   allowedOrigins: Set<string>;
 }
 
@@ -21,27 +22,32 @@ export function publicOnboardingConfig(
   now = Date.now(),
 ): PublicOnboardingConfig | undefined {
   if (env.ONBOARDING_PUBLIC_AWS_ENABLED !== 'true') return undefined;
-  const expiresAt = Date.parse(env.ONBOARDING_PUBLIC_AWS_EXPIRES_AT ?? '');
-  if (!Number.isFinite(expiresAt) || expiresAt > now + MAX_ACCESS_DURATION_MS) {
+  const configuredMode = env.ONBOARDING_PUBLIC_AWS_ACCESS_MODE ?? 'temporary';
+  if (configuredMode !== 'temporary' && configuredMode !== 'persistent-development') {
+    throw new Error('Public onboarding access mode must be temporary or persistent-development.');
+  }
+  const persistent = configuredMode === 'persistent-development';
+  const expiresAt = persistent ? null : Date.parse(env.ONBOARDING_PUBLIC_AWS_EXPIRES_AT ?? '');
+  if (!persistent && (!Number.isFinite(expiresAt) || expiresAt! > now + MAX_ACCESS_DURATION_MS)) {
     throw new Error('Temporary onboarding requires an explicit expiry within seven days.');
   }
   const allowedOrigins = new Set((env.ONBOARDING_PUBLIC_AWS_ORIGINS ?? '').split(',').filter(Boolean).map((value) => {
     const url = new URL(value.trim());
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
-      throw new Error('Temporary onboarding origins must be exact HTTP(S) origins.');
+      throw new Error('Public onboarding origins must be exact HTTP(S) origins.');
     }
     return url.origin;
   }));
-  if (!allowedOrigins.size) throw new Error('Temporary onboarding requires explicit browser origins.');
+  if (!allowedOrigins.size) throw new Error('Public onboarding requires explicit browser origins.');
   const region = env.ONBOARDING_PUBLIC_AWS_REGION ?? 'us-east-1';
   const apiFunctionArn = env.ONBOARDING_PUBLIC_AWS_FUNCTION_ARN ?? '';
   const fixedTenantId = env.ONBOARDING_PUBLIC_AWS_TENANT_ID ?? '';
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(fixedTenantId)
     || !/^arn:aws:lambda:[a-z0-9-]+:\d{12}:function:connected-enterprise-onboarding-dev-api$/.test(apiFunctionArn)
     || apiFunctionArn.split(':')[3] !== region) {
-    throw new Error('Temporary onboarding requires a fixed tenant and the development API Lambda ARN.');
+    throw new Error('Public onboarding requires a fixed tenant and the development API Lambda ARN.');
   }
-  return { apiFunctionArn, region, fixedTenantId, fixedSubject: PUBLIC_ACTOR, expiresAt, allowedOrigins };
+  return { accessMode: persistent ? 'public-development-aws' : 'temporary-public-aws', apiFunctionArn, region, fixedTenantId, fixedSubject: PUBLIC_ACTOR, expiresAt, allowedOrigins };
 }
 
 interface RouterOptions {
@@ -52,7 +58,7 @@ interface RouterOptions {
   packageStoreFactory?: typeof createManagedBootstrapStore;
 }
 
-// This explicit temporary mode delegates one tenant's live operations to a
+// These explicitly enabled development modes delegate one tenant's operations to a
 // shared service actor. It is intentionally anonymous; it is not a simulator
 // and must never inherit tenant, role, or Lambda metadata from the browser.
 export function createPublicOnboardingRouter(options: RouterOptions = {}): express.Router {
@@ -66,9 +72,9 @@ export function createPublicOnboardingRouter(options: RouterOptions = {}): expre
     if (config) bridge = (options.bridgeFactory ?? createOnboardingAwsBridge)(config);
   } catch {
     configurationFailed = true;
-    console.error('[onboarding] temporary AWS access configuration is invalid; access is disabled.');
+    console.error('[onboarding] public AWS access configuration is invalid; access is disabled.');
   }
-  const enabled = () => Boolean(config && bridge && config.expiresAt > now());
+  const enabled = () => Boolean(config && bridge && (config.expiresAt === null || config.expiresAt > now()));
   const simulatorEnabled = (options.env ?? process.env).ONBOARDING_AWS_SIMULATOR_ENABLED === 'true' && config?.fixedTenantId === 'ce-test';
   const simulator = simulatorEnabled ? (options.simulatorFactory ?? createOnboardingSimulator)() : undefined;
   const packages = simulator ? (options.packageStoreFactory ?? createManagedBootstrapStore)() : undefined;
@@ -82,15 +88,15 @@ export function createPublicOnboardingRouter(options: RouterOptions = {}): expre
 
   router.get('/access-mode', noStore, (_req, res) => {
     if (configurationFailed) {
-      res.status(503).json({ error: { code: 'ONBOARDING_CONFIGURATION_ERROR', message: 'Temporary onboarding access is not configured correctly.' } });
+      res.status(503).json({ error: { code: 'ONBOARDING_CONFIGURATION_ERROR', message: 'Onboarding access is not configured correctly. Ask the deployment administrator to check the development access settings.' } });
       return;
     }
     if (!enabled()) { res.json({ mode: 'cognito' }); return; }
     const principal = bridge!.resolvePrincipal();
     res.json({
-      mode: 'temporary-public-aws',
+      mode: config!.accessMode,
       user: { subject: principal.subject, tenantId: principal.tenantId, tenantRole: principal.role },
-      expiresAt: new Date(config!.expiresAt).toISOString(),
+      expiresAt: config!.expiresAt === null ? null : new Date(config!.expiresAt).toISOString(),
       ...(simulatorEnabled ? { simulatorAvailable: true } : {}),
     });
   });

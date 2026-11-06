@@ -33,7 +33,7 @@ DynamoDB and S3 are authoritative. The named Shadow contains only a small conver
 ## Security invariants
 
 - The browser never receives AWS credentials, bootstrap private keys, ownership tokens, device private keys, or profile secret values.
-- Tenant and role come only from signed Cognito claims backed by an active DynamoDB membership. Tenant IDs in request payloads are ignored.
+- In the authenticated flow, tenant and role come only from signed Cognito claims backed by an active DynamoDB membership. The explicit shared development bridge below instead supplies a fixed server-side service principal. Neither flow trusts tenant IDs or roles from browser payloads.
 - Every mutation requires an `Idempotency-Key`; gateway deployments use a monotonic generation.
 - Every operational certificate uses a device-specific key. The production gateway generates that key locally and submits a CSR; the current gateway integration test may exercise AWS certificate/key creation while its persistence and recovery behavior is validated.
 - The Fleet Provisioning hook accepts only an unexpired server-side enrollment reservation, the expected template, and the exact active unique bootstrap certificate already bound to that serial.
@@ -57,6 +57,29 @@ npm run dev:full
 ```
 
 Open `http://localhost:5174/onboarding`. Local seed inventory is development-only and must never be copied into AWS manufacturing inventory.
+
+## Shared development access on EC2
+
+The development onboarding dashboard can use the same-origin Express bridge without a Cognito sign-in. This is **anonymous shared access to real AWS operations for one configured tenant**. It is not a signed-in user session or a local simulator. The interface labels it “Shared development access”; the service principal remains `anonymous-ec2-onboarding-dev` with that tenant's administrator role.
+
+Public access stays disabled unless `ONBOARDING_PUBLIC_AWS_ENABLED=true`. Choose the access lifetime explicitly:
+
+```dotenv
+ONBOARDING_PUBLIC_AWS_ENABLED=true
+ONBOARDING_PUBLIC_AWS_ACCESS_MODE=persistent-development
+ONBOARDING_PUBLIC_AWS_REGION=us-east-1
+ONBOARDING_PUBLIC_AWS_FUNCTION_ARN=arn:aws:lambda:us-east-1:<account-id>:function:connected-enterprise-onboarding-dev-api
+ONBOARDING_PUBLIC_AWS_TENANT_ID=<development-tenant-id>
+ONBOARDING_PUBLIC_AWS_ORIGINS=https://connectedenterprise.app
+```
+
+`persistent-development` does not expire, including when an old `ONBOARDING_PUBLIC_AWS_EXPIRES_AT` remains in the environment. The server reports `mode: public-development-aws` and `expiresAt: null`. This is a deliberate operator setting, never a browser preference or a fallback after an expired session.
+
+Omitting the access-mode setting, or setting it to `temporary`, preserves the original behavior: `ONBOARDING_PUBLIC_AWS_EXPIRES_AT` must be a valid ISO timestamp no more than seven days ahead and is enforced on each request. Unknown mode names disable the bridge. An expired temporary mode does not silently become persistent.
+
+Both public modes keep the exact development Lambda ARN and matching region restriction, fixed tenant/service actor, route allowlist, idempotency checks, JSON mutation bodies, configured-origin checks, response sanitization, and concurrency limit. Browser requests cannot choose another Lambda, tenant, or role. The EC2 IAM role must still permit only the configured development API invocation. Managed gateway simulation remains a separate opt-in restricted to `ce-test` and `MOCK-` identities.
+
+After changing these server environment settings, restart the Express service. Verify `GET /api/onboarding/access-mode`, then `GET /api/onboarding/live/snapshot`; the latter must return the actual AWS snapshot. Disable shared access by setting `ONBOARDING_PUBLIC_AWS_ENABLED=false` and restarting. The live bridge then returns 503 and access discovery returns `cognito`; the existing Cognito configuration remains intact.
 
 ## Synthesize and deploy the dev control plane
 

@@ -3,9 +3,11 @@ import { useFrame } from '@react-three/fiber';
 import { BoxGeometry, EdgesGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, SkinnedMesh, type Object3D } from 'three';
 import { useGLTF } from '@react-three/drei';
 import actorsUrl from '../../assets/offerings/enterprise-actors.studio.glb?url';
-import { monitoredPoint, sampleActor, STORY_ACTORS, storyProgress, type ActorId, type ActorRole, type StoryContext } from './OfferingStoryMotion';
+import { sampleActor, STORY_ACTORS, storyProgress, type ActorId, type ActorRole, type StoryContext } from './OfferingStoryMotion';
 import { prepareActor, setRig, reachReader } from './OfferingSkinnedActor';
 import { isCheckoutStory, sampleCheckout } from './OfferingCheckoutStory';
+import { poseRoutingContact } from './OfferingRoutingContact';
+import { poseSmartContact } from './OfferingSmartContact';
 import { poseTwinContact } from './OfferingTwinContact';
 import { poseCardGrip } from './OfferingFingerGrip';
 import { poseConsoleContact } from './OfferingConsoleContact';
@@ -20,14 +22,19 @@ function Actor({id,role,context,timeRef,onSelect}:{id:ActorId;role:ActorRole;con
     if(!root.current||!lean.current)return;const time=timeRef.current,pose=sampleActor(id,context,time);
     root.current.visible=pose.visible;root.current.position.set(...pose.at);root.current.rotation.y=pose.heading;lean.current.rotation.x=pose.fall*Math.PI/2;
     setRig(actor.joints,pose,time);
+    if(context.offering==='routing')poseRoutingContact(actor.joints,id,context.variant,time);
+    if(context.offering==='smart')poseSmartContact(actor.joints,id,context.variant,time);
     const checkout=sampleCheckout(context,time);
     setVisibility(actor.card,id==='shopper'&&checkout.cardVisible);
-    if(actor.joints.BagMount)setVisibility(actor.joints.BagMount.object,!(id==='technician'&&(context.offering==='twin'||context.offering==='eagle'&&time>=8.5&&time<13.5)));
+    if(actor.joints.BagMount)setVisibility(actor.joints.BagMount.object,!(context.offering==='routing'||id==='technician'&&(context.offering==='twin'||['eagle','smart'].includes(context.offering)&&pose.tablet<.1)));
     if(id==='shopper'&&checkout.cardVisible)poseCardGrip(actor.joints);
     if(id==='technician'&&context.offering==='twin'){
       poseTwinContact(actor.joints,time);
     }
-    if(id==='technician'&&context.offering==='eagle'&&time>=8.5&&time<13.5)poseConsoleContact(actor.joints,time);
+    if(id==='technician'&&context.offering==='eagle'){
+      if(time>=10&&time<=12)poseConsoleContact(actor.joints,9.3+(time-10)*1.75);
+      if(time>=17&&time<=18)poseConsoleContact(actor.joints,9.3+(time-17)*3.5);
+    }
     if(id==='shopper'&&isCheckoutStory(context)){
       reachReader(actor.joints,checkout.cardReach);
       const lift=storyProgress(time,15.9,16.3),lower=storyProgress(time,16.55,17.25);
@@ -87,27 +94,16 @@ function Detection({context,timeRef}:{context:StoryContext;timeRef:RefObject<num
   </>;
 }
 function EquipmentFeedback({context,timeRef}:{context:StoryContext;timeRef:RefObject<number>}){
-  const fault=useRef<Mesh>(null),scan=useRef<Mesh>(null),scanMaterial=useRef<MeshBasicMaterial>(null),meter=useRef<Group>(null),lock=useRef<Mesh>(null);
-  useFrame(()=>{
-    const t=timeRef.current,event=t>=4;
-    if(fault.current){const p=context.offering==='eagle'?monitoredPoint(context.variant):context.offering==='smart'?context.variant==='hvac'?[-9,1.9,-4.8]:context.variant==='cooler'?[-1.35,3.15,-7.6]:[-9.6,2,-1.1]:[14.6,2.3,-6];fault.current.visible=event&&['eagle','smart','failover'].includes(context.offering);fault.current.position.set(p[0],p[1]+.25,p[2]);fault.current.scale.setScalar(.8+.2*Math.sin(t*4));}
-    if(scan.current){scan.current.visible=t>8&&['eagle','smart'].includes(context.offering);const k=(t*.5)%1;scan.current.scale.setScalar(.3+k*1.7);if(scanMaterial.current)scanMaterial.current.opacity=.45*(1-k);}
-    if(lock.current)lock.current.visible=false;
-    if(meter.current){meter.current.visible=context.offering==='smart'&&context.variant==='energy';meter.current.children.forEach((bar,i)=>{bar.scale.y=.3+(i%3)*.18;bar.position.y=bar.scale.y*.7;});}
-  });
-  return <>
-    <mesh ref={fault}><sphereGeometry args={[.13,16,12]}/><meshBasicMaterial color="#ff8871" toneMapped={false}/></mesh>
-    <mesh ref={scan} position={[6.7,1.15,-3]} rotation={[-Math.PI/2,0,0]}><ringGeometry args={[1,1.025,56]}/><meshBasicMaterial ref={scanMaterial} color="#69d9ff" transparent opacity={.3} depthWrite={false}/></mesh>
-    <mesh ref={lock} position={[-8.55,1.55,-.91]}><boxGeometry args={[.25,.12,.04]}/><meshBasicMaterial color="#8ce3c6" toneMapped={false}/></mesh>
-    <group ref={meter} position={[-9.6,1.1,-.9]}>{[0,1,2,3].map(i=><mesh key={i} position={[i*.11-.16,.4,0]}><boxGeometry args={[.07,1.4,.025]}/><meshBasicMaterial color={i<2?'#8ce3c6':'#ffca79'} toneMapped={false}/></mesh>)}</group>
-  </>;
+  const fault=useRef<Mesh>(null);
+  useFrame(()=>{if(fault.current)fault.current.visible=context.offering==='failover'&&timeRef.current>=4;});
+  return <mesh ref={fault} position={[14.6,2.55,-6]}><sphereGeometry args={[.13,16,12]}/><meshBasicMaterial color="#ff8871" toneMapped={false}/></mesh>;
 }
 
 export default function OfferingStoryEffects({offering,variant,timeRef,onSelect}:StoryEffectsProps){
   const context=useMemo(()=>({offering,variant}),[offering,variant]);
   return <>
-    {STORY_ACTORS.map(actor=><Actor key={actor.id} id={actor.id} role={offering==='automation'&&actor.id==='shopper'?'Staff':actor.role} context={context} timeRef={timeRef} onSelect={onSelect}/>)}
-    <CheckoutProps context={context} timeRef={timeRef}/>
+    {STORY_ACTORS.map(actor=><Actor key={actor.id} id={actor.id} role={(offering==='automation'&&actor.id==='shopper'||offering==='routing'&&actor.id==='queue1')?'Staff':actor.role} context={context} timeRef={timeRef} onSelect={onSelect}/>)}
+    {offering!=='routing'&&<CheckoutProps context={context} timeRef={timeRef}/>}
     <Detection context={context} timeRef={timeRef}/><EquipmentFeedback context={context} timeRef={timeRef}/>
   </>;
 }
