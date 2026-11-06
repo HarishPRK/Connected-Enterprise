@@ -1,46 +1,67 @@
 .branch-device-orbit {
-  --orbit-metal: url('../../assets/device-studio/inventory-node.png');
+  --orbit-play-state: paused;
   container: device-orbit / inline-size; min-width: 0; color: var(--text);
 }
+.branch-device-orbit[data-motion='running'] { --orbit-play-state: running; }
+.orbit-motion-controls { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; min-height: 30px; margin-bottom: 8px; color: var(--text-muted); font-size: 10px; }
+.orbit-motion-controls button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 5px 9px; color: var(--text-dim); background: transparent; border: 1px solid var(--border); border-radius: 6px; font-size: 10px; box-shadow: none; transform: none; }
+.orbit-motion-controls button:hover { color: var(--text); border-color: var(--text-muted); }
 .orbit-network { display: grid; grid-template-columns: minmax(0,1fr) 96px minmax(0,1fr); grid-template-rows: auto auto auto auto auto; column-gap: 2px; padding: 12px 0 0; }
-.orbit-domain { --orbit-accent: #88d5ef; --orbit-rgb: 136 213 239; display: grid; grid-template-rows: subgrid; grid-row: 1 / 6; grid-column: 1; min-width: 0; }
-.orbit-domain[data-device-domain='OT'] { --orbit-accent: #c0aff2; --orbit-rgb: 192 175 242; grid-column: 3; }
+.orbit-domain { --orbit-accent: #67dcff; --orbit-rgb: 103 220 255; --orbit-planet: url('../../assets/device-studio/orbit-planet-it.png'); --orbit-direction: normal; --orbit-counter-direction: reverse; display: grid; grid-template-rows: subgrid; grid-row: 1 / 6; grid-column: 1; min-width: 0; }
+.orbit-domain[data-device-domain='OT'] { --orbit-accent: #bf9eff; --orbit-rgb: 191 158 255; --orbit-planet: url('../../assets/device-studio/orbit-planet-ot.png'); --orbit-direction: reverse; --orbit-counter-direction: normal; grid-column: 3; }
 .orbit-title { display: flex; justify-content: center; padding: 0 0 6px; }
 .orbit-title button { display: inline-flex; align-items: center; gap: 9px; min-height: 28px; padding: 2px 6px; border: 0; background: transparent; color: var(--orbit-accent); font-size: 13px; font-weight: 600; box-shadow: none; transform: none; }
 .orbit-title svg { color: var(--text-muted); width: 12px; }
 .orbit-field { position: relative; min-width: 0; width: 100%; aspect-ratio: 1; align-self: center; isolation: isolate; }
+.orbit-field:is(:hover,:focus-within) { --orbit-play-state: paused; }
 .orbit-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; color: var(--orbit-accent); fill: none; }
-.orbit-tracks { stroke: currentColor; stroke-opacity: .105; stroke-width: .7; }
-.orbit-perimeter { stroke: currentColor; stroke-width: .8; stroke-dasharray: 21 29; stroke-opacity: .18; transform: rotate(-94deg); transform-origin: center; }
+.orbit-tracks { stroke: currentColor; stroke-opacity: .2; stroke-width: .7; }
+.orbit-perimeter { stroke: currentColor; stroke-width: 1; stroke-dasharray: 21 29; stroke-opacity: .45; transform: rotate(-94deg); transform-origin: center; }
+.orbit-track-beacon { fill: currentColor; }
 .orbit-association { stroke: currentColor; stroke-opacity: .45; stroke-width: .8; }
-.orbit-core-outline { stroke: currentColor; stroke-opacity: .3; stroke-width: .7; }
+.orbit-core-outline { stroke: currentColor; stroke-opacity: .16; stroke-width: .7; }
+.orbit-planet { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); background: var(--orbit-planet) center / contain no-repeat; pointer-events: none; z-index: 2; filter: drop-shadow(0 0 8px rgb(var(--orbit-rgb) / .24)); }
+.orbit-planet-rings { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; fill: none; color: var(--orbit-accent); stroke: currentColor; stroke-width: 2.5; stroke-opacity: .8; }
+.orbit-planet-rings-back { z-index: 1; stroke-opacity: .4; }
+.orbit-planet-rings-front { z-index: 3; }
+.orbit-planet-rings .orbit-ring-fine { stroke-width: .8; stroke-opacity: .55; }
+.orbit-moons { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.orbit-moon-upright { position: absolute; inset: 0; }
+.orbit-moons,.orbit-association-motion { animation: device-orbit-revolve 180s linear infinite var(--orbit-direction); }
+.orbit-moon-upright { animation: device-orbit-revolve 180s linear infinite var(--orbit-counter-direction); }
+.orbit-perimeter-motion { animation: device-orbit-revolve 75s linear infinite var(--orbit-counter-direction); }
+.orbit-ring-precession { animation: device-orbit-tilt 18s ease-in-out infinite alternate; }
+.orbit-association-motion,.orbit-perimeter-motion,.orbit-ring-precession { transform-box: view-box; transform-origin: center; }
+.orbit-moons,.orbit-moon-upright,.orbit-association-motion,.orbit-perimeter-motion,.orbit-ring-precession { animation-play-state: var(--orbit-play-state); }
+@keyframes device-orbit-revolve { to { transform: rotate(360deg); } }
+@keyframes device-orbit-tilt { from { transform: rotate(-7deg); } to { transform: rotate(7deg); } }
 .orbit-core {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%) !important;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
   min-width: 0; padding: 0 0 3px; border: 0; border-radius: 50%;
-  background: var(--orbit-metal) center / 100% 100% no-repeat; color: #f3f7fa;
-  box-shadow: none; filter: drop-shadow(0 5px 4px #0005);
+  background: transparent; color: #fff;
+  box-shadow: none; z-index: 4; text-shadow: 0 1px 4px #001e36;
 }
-.orbit-core > svg { width: 15px; height: 15px; color: var(--orbit-accent); margin: 0 0 2px; stroke-width: 1.3; }
-.orbit-core > strong { font: 500 clamp(28px,4.6cqw,44px)/1 'Space Grotesk',sans-serif; letter-spacing: -.05em; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px #0006; }
-.orbit-core > span { margin-top: 3px; color: #b8c9d3; font-size: 8px; letter-spacing: .03em; }
+.orbit-core > svg { width: 15px; height: 15px; color: #dcf6ff; margin: 0 0 2px; stroke-width: 1.5; }
+.orbit-core > strong { font: 600 clamp(28px,4.6cqw,44px)/1 'Space Grotesk',sans-serif; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
+.orbit-core > span { margin-top: 3px; color: #e6f6ff; font-size: 8px; letter-spacing: .03em; }
 .orbit-field .orbit-node {
   position: absolute; transform: translate(-50%,-50%) !important; display: grid; place-items: center;
   min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 50%; color: var(--orbit-accent);
-  background: transparent; box-shadow: none; transition: opacity .15s; z-index: 1;
+  background: transparent; box-shadow: none; transition: opacity .15s; z-index: 1; pointer-events: auto;
 }
-.orbit-node-metal { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%; background: var(--orbit-metal) center / 100% 100% no-repeat; filter: drop-shadow(0 2px 2px #0006); transition: transform .15s; }
-.orbit-device-glyph { width: 45%; height: 45%; transform: translateY(-11%); color: var(--node-color, var(--orbit-accent)); stroke-width: 1.7; filter: drop-shadow(0 1px 1px #000b); }
+.orbit-node-metal { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%; background: var(--node-color) url('../../assets/device-studio/orbit-moon.png') center / contain no-repeat; background-blend-mode: luminosity; border: 1px solid color-mix(in srgb, var(--node-color), #fff 35%); box-shadow: 0 0 7px color-mix(in srgb, var(--node-color) 40%, transparent), inset -3px -4px 5px #06152970; transition: transform .15s; }
+.orbit-device-glyph { width: 46%; height: 46%; transform: translateY(-7%); color: #062133; stroke-width: 1.9; filter: drop-shadow(0 1px 1px #ffffff70); }
 .branch-device-orbit [data-status='ok'] { --orbit-status: #8bc5b0; }
 .branch-device-orbit [data-status='warn'] { --orbit-status: var(--warn); }
 .branch-device-orbit [data-status='err'] { --orbit-status: #ff8e9f; }
 .branch-device-orbit [data-status='off'] { --orbit-status: #9eabb8; }
-.orbit-device-status { position: absolute; left: 50%; bottom: 21%; display: grid; place-items: center; width: 3px; height: 2px; transform: translateX(-50%); border-radius: 2px; background: var(--orbit-status); box-shadow: 0 0 1px #000; }
+.orbit-device-status { position: absolute; left: 50%; bottom: 15%; display: grid; place-items: center; width: 4px; height: 4px; transform: translateX(-50%); border-radius: 50%; background: #14363b; border: 1px solid var(--orbit-status); }
 .orbit-device-status > svg { width: 8px; height: 8px; stroke-width: 2.1; }
 .orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) { color: var(--orbit-status); }
-.orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) .orbit-device-glyph { color: var(--orbit-status); }
+.orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) .orbit-node-metal { background-color: var(--orbit-status); border-color: var(--orbit-status); box-shadow: 0 0 7px color-mix(in srgb, var(--orbit-status) 35%, transparent); }
 .orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) .orbit-device-status { left: auto; right: 0; bottom: 0; transform: none; width: 12px; height: 12px; border-radius: 50%; color: var(--orbit-status); background: #192631; border: 1px solid currentColor; }
-.orbit-field .orbit-node[data-dimmed='true'] { opacity: .42; }
+.orbit-field .orbit-node[data-dimmed='true'] { opacity: .56; }
 .orbit-field .orbit-node:is([data-highlighted='true'],:hover,:focus-visible) { opacity: 1; z-index: 2; outline: 1px solid var(--orbit-accent); outline-offset: 2px; }
 .orbit-node:is([data-highlighted='true'],:hover) .orbit-node-metal { transform: translateY(-1px); }
 .orbit-readout { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 43px; padding: 3px 6px; text-align: center; }
@@ -93,4 +114,8 @@
   .orbit-bridge { left: 50%; right: auto; top: 37px; width: 140px; transform: translateX(-50%); }
   .orbit-categories { margin-top: 3px; }
 }
-@media (prefers-reduced-motion: reduce) { .orbit-field .orbit-node,.orbit-node-metal { transition: none; } .orbit-node:is([data-highlighted='true'],:hover) .orbit-node-metal { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .orbit-field .orbit-node,.orbit-node-metal { transition: none; }
+  .orbit-node:is([data-highlighted='true'],:hover) .orbit-node-metal { transform: none; }
+  .orbit-moons,.orbit-moon-upright,.orbit-association-motion,.orbit-perimeter-motion,.orbit-ring-precession { animation: none; }
+}

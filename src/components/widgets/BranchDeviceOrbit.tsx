@@ -1,5 +1,5 @@
-import { memo, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
-import { ArrowUpRight, Box, CircleDot, Cpu, Laptop, Minus, Router, TriangleAlert, X } from 'lucide-react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { ArrowUpRight, Box, CircleDot, Cpu, Laptop, Minus, Pause, Play, Router, TriangleAlert, X } from 'lucide-react';
 import type { Branch, Device, Status } from '../../types';
 import { countStates, kinds } from './deviceTopologyModel';
 import './BranchDeviceOrbit.css';
@@ -15,7 +15,7 @@ interface Props {
 }
 const labels: Record<Status, string> = { ok: 'Healthy', warn: 'Attention', err: 'Offline', off: 'Inactive' };
 const stateOrder: Status[] = ['ok', 'warn', 'err', 'off'];
-const nodeColors = ['#8ddaff', '#8ce3c6', '#b4b4ff', '#ffc49f', '#d7aaff', '#efdb91'];
+const nodeColors = ['#43d6ff', '#42ecc0', '#9391ff', '#ffac65', '#dc81ff', '#ffdb65'];
 const nameOf = (device: Device) => device.name?.trim() || device.mac || device.ip || device.id;
 
 function constellation(count: number) {
@@ -53,11 +53,20 @@ const OrbitDomain = memo(function OrbitDomain({ domain, devices, onDevice, onDom
     return count ? [{ kind: kind as Device['kind'], count, ...info }] : [];
   }).sort((a,b) => b.count-a.count || a.label.localeCompare(b.label)), [devices]);
   const active = hovered ? devices.find(d => d.id === hovered) : undefined;
+  const activeKind = groups.some(group => group.kind === kindFocus) ? kindFocus : null;
   const activeIndex = active ? ordered.findIndex(d => d.id === active.id) : -1;
   const activePoint = positions.points[activeIndex];
   const Icon = domain === 'IT' ? Laptop : Cpu;
   const focusId = ordered.some(d => d.id === lastFocus) ? lastFocus : ordered[0]?.id;
   const { center, size } = positions;
+  const synchronizeMoon = useCallback((element: HTMLSpanElement | null) => {
+    if (!element) return;
+    // A device can arrive after the orbit started. Match its counter-rotation
+    // to the existing (possibly paused) timeline so its icon stays upright.
+    const orbit = element.closest('.orbit-moons')?.getAnimations()[0];
+    const counter = element.getAnimations()[0];
+    if (orbit?.currentTime != null && counter) counter.currentTime = orbit.currentTime;
+  }, []);
 
   function keyboard(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     let next = index;
@@ -68,11 +77,14 @@ const OrbitDomain = memo(function OrbitDomain({ domain, devices, onDevice, onDom
     else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       const direction = event.key === 'ArrowDown' ? 1 : -1;
       let best = Infinity;
-      positions.points.forEach((point, i) => {
-        const origin = positions.points[index];
-        const dy = (point.y - origin.y) * direction;
+      const nodes = [...(root.current?.querySelectorAll<HTMLButtonElement>('.orbit-node') ?? [])];
+      const origin = nodes[index]?.getBoundingClientRect();
+      if (!origin) return;
+      nodes.forEach((node, i) => {
+        const point = node.getBoundingClientRect();
+        const dy = (point.top - origin.top) * direction;
         if (dy < 3) return;
-        const score = Math.abs(point.x - origin.x) * 2 + dy;
+        const score = Math.abs(point.left - origin.left) * 2 + dy;
         if (score < best) { best = score; next = i; }
       });
     } else return;
@@ -86,34 +98,47 @@ const OrbitDomain = memo(function OrbitDomain({ domain, devices, onDevice, onDom
     <div className="orbit-field" style={{ '--orbit-size': size } as CSSProperties}>
       <svg className="orbit-lines" viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
         <g className="orbit-tracks">{positions.radii.map(radius => <circle key={radius} cx={center} cy={center} r={radius} />)}</g>
-        <circle className="orbit-perimeter" cx={center} cy={center} r={positions.radius + 10} pathLength="100" />
-        {activePoint && <path className="orbit-association" d={`M${center} ${center}L${activePoint.x} ${activePoint.y}`} />}
-        <circle className="orbit-core-outline" cx={center} cy={center} r="56" />
+        <g className="orbit-perimeter-motion"><circle className="orbit-perimeter" cx={center} cy={center} r={positions.radius + 10} pathLength="100" />
+          <circle className="orbit-track-beacon" cx={center} cy={center - positions.radius - 10} r="1.8" /></g>
+        <g className="orbit-association-motion">{activePoint && <path className="orbit-association" d={`M${center} ${center}L${activePoint.x} ${activePoint.y}`} />}</g>
+        <circle className="orbit-core-outline" cx={center} cy={center} r="59" />
+      </svg>
+      <svg className="orbit-planet-rings orbit-planet-rings-back" viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+        <g className="orbit-ring-precession"><g transform={`translate(${center} ${center}) rotate(-28)`}>
+          <ellipse rx="71" ry="25" /><ellipse rx="66" ry="21" /><ellipse className="orbit-ring-fine" rx="76" ry="29" />
+        </g></g>
+      </svg>
+      <span className="orbit-planet" aria-hidden="true" style={{ width: `${108 / size * 100}%`, height: `${108 / size * 100}%` }} />
+      <svg className="orbit-planet-rings orbit-planet-rings-front" viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+        <g className="orbit-ring-precession"><g transform={`translate(${center} ${center}) rotate(-28)`}>
+          <path d="M-71 0 A71 25 0 0 0 71 0" /><path d="M-66 0 A66 21 0 0 0 66 0" />
+          <path className="orbit-ring-fine" d="M-76 0 A76 29 0 0 0 76 0" />
+        </g></g>
       </svg>
       <button type="button" className="orbit-core" style={{ width: `${100 / size * 100}%`, height: `${100 / size * 100}%` }}
         onClick={() => onDomain(domain)} aria-label={`Inspect all ${devices.length} ${domain} devices`}>
         <Icon aria-hidden="true" /><strong>{devices.length}</strong><span>devices</span>
       </button>
       <span id={helpId} className="orbit-sr-only">Use arrow keys to move between devices. Press Enter to inspect a device.</span>
-      {ordered.map((device, index) => {
+      <div className="orbit-moons">{ordered.map((device, index) => {
         const point = positions.points[index];
         const Glyph = device.kind === 'generic' ? Box : kinds[device.kind]?.icon ?? Box;
         return <button type="button" className="orbit-node" key={device.id}
           style={{ left: `${point.x / size * 100}%`, top: `${point.y / size * 100}%`, width: `${32 / size * 100}%`, height: `${32 / size * 100}%`, '--node-color': nodeColors[index % nodeColors.length] } as CSSProperties}
           data-device-id={device.id} data-domain={domain} data-kind={device.kind} data-status={device.status}
-          data-highlighted={hovered === device.id || kindFocus === device.kind}
-          data-dimmed={!!(hovered ? hovered !== device.id : kindFocus && kindFocus !== device.kind)}
+          data-highlighted={active?.id === device.id || activeKind === device.kind}
+          data-dimmed={!!(active ? active.id !== device.id : activeKind && activeKind !== device.kind)}
           aria-label={`Inspect ${nameOf(device)} · ${domain} · ${labels[device.status]}`} aria-describedby={helpId}
           title={`${nameOf(device)} · ${device.kind === 'generic' ? 'Unspecified endpoint · ' : ''}${labels[device.status]}`} tabIndex={focusId === device.id ? 0 : -1}
           onPointerEnter={() => setHovered(device.id)} onPointerLeave={() => setHovered(null)}
           onFocus={() => { setLastFocus(device.id); setHovered(device.id); }} onBlur={() => setHovered(null)}
           onKeyDown={event => keyboard(event, index)} onClick={() => onDevice(device)}>
-          <span className="orbit-node-metal" aria-hidden="true">
+          <span className="orbit-moon-upright" ref={synchronizeMoon} aria-hidden="true"><span className="orbit-node-metal">
             <Glyph className="orbit-device-glyph" />
           </span>
-          <span className="orbit-device-status" aria-hidden="true">{device.status === 'err' ? <X /> : device.status === 'warn' ? <TriangleAlert /> : device.status === 'off' ? <Minus /> : null}</span>
+          <span className="orbit-device-status">{device.status === 'err' ? <X /> : device.status === 'warn' ? <TriangleAlert /> : device.status === 'off' ? <Minus /> : null}</span></span>
         </button>;
-      })}
+      })}</div>
     </div>
     <div className="orbit-readout" data-status={active?.status}>
       <strong title={active ? nameOf(active) : undefined}>{active ? nameOf(active) : devices.length ? 'Select a device to inspect' : 'No devices reported'}</strong>
@@ -164,7 +189,25 @@ function GatewayShell() {
 
 export const BranchDeviceOrbit = memo(function BranchDeviceOrbit({ branch, devices, online, onDevice, onDomain, onGateway }: Props) {
   const grouped = useMemo(() => ({ IT: devices.filter(d => d.domain === 'IT'), OT: devices.filter(d => d.domain === 'OT') }), [devices]);
-  return <div className="branch-device-orbit" role="group" aria-label={`${branch.name} device topology`}>
+  const root = useRef<HTMLDivElement>(null);
+  const [paused, setPaused] = useState(false);
+  const [active, setActive] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let inView = false;
+    const update = () => { setReducedMotion(media.matches); setActive(inView && !document.hidden && !media.matches); };
+    const observer = new IntersectionObserver(entries => { inView = entries.at(-1)?.isIntersecting ?? false; update(); });
+    if (root.current) observer.observe(root.current);
+    media.addEventListener('change', update); document.addEventListener('visibilitychange', update);
+    return () => { observer.disconnect(); media.removeEventListener('change', update); document.removeEventListener('visibilitychange', update); };
+  }, []);
+  return <div ref={root} className="branch-device-orbit" data-motion={active && !paused ? 'running' : 'paused'} role="group" aria-label={`${branch.name} device topology`}>
+    <div className="orbit-motion-controls"><span>Device systems · one moon per device</span>
+      {reducedMotion ? <span>Reduced motion</span> : <button type="button" onClick={() => setPaused(value => !value)} aria-pressed={paused}>
+        {paused ? <Play size={12} aria-hidden="true" /> : <Pause size={12} aria-hidden="true" />}{paused ? 'Resume orbits' : 'Pause orbits'}
+      </button>}
+    </div>
     <div className="orbit-network">
       <OrbitDomain domain="IT" devices={grouped.IT} onDevice={onDevice} onDomain={onDomain} />
       <div className="orbit-gateway">
