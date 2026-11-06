@@ -1,10 +1,21 @@
-import { BufferGeometry, Matrix4, Mesh, SkinnedMesh, type Material, type Object3D } from 'three';
+import { BufferGeometry, InstancedMesh, Matrix4, Mesh, SkinnedMesh, type Material, type Object3D } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /** Collapse static fasteners and panels within each independently explodable
  * assembly. Geometry, materials, UVs and the named assembly pivots are retained.
  * The shared GLTF cache is never edited. Transparent parts keep their sorting. */
 export function batchGatewayAssemblies(model: Object3D): BufferGeometry[] {
+  return batchStaticRoots(model, model.children.filter(child => !(child instanceof Mesh)));
+}
+
+/** The installed gateway never opens or moves its internal parts. Merge across
+ * assembly boundaries only for that representation; preserve all triangles,
+ * including the internals, and leave transparent surfaces individually sorted. */
+export function batchClosedGateway(model: Object3D): BufferGeometry[] {
+  return batchStaticRoots(model, [model]);
+}
+
+function batchStaticRoots(model: Object3D, roots: Object3D[]): BufferGeometry[] {
   const owned: BufferGeometry[] = [];
   const materialKeys = new Map<Material, string>();
   const materialKey = (material: Material) => {
@@ -17,12 +28,13 @@ export function batchGatewayAssemblies(model: Object3D): BufferGeometry[] {
     return key;
   };
   model.updateWorldMatrix(true, true);
-  for (const assembly of model.children) {
-    if (assembly instanceof Mesh) continue;
+  for (const assembly of roots) {
     const inverse = new Matrix4().copy(assembly.matrixWorld).invert();
     const buckets = new Map<string, Mesh[]>();
     assembly.traverse(node => {
-      if (!(node instanceof Mesh) || node instanceof SkinnedMesh || node.children.length ||
+      // Instanced meshes already submit as one draw; their instance transforms
+      // must not be lost by treating their shared base geometry as an ordinary mesh.
+      if (!(node instanceof Mesh) || node instanceof SkinnedMesh || node instanceof InstancedMesh || node.children.length ||
         Array.isArray(node.material) || node.material.transparent || !node.visible ||
         Object.keys(node.geometry.morphAttributes).length || node.geometry.drawRange.count !== Infinity) return;
       // Moving a leaf out of a hidden subgroup must not reveal it. The named

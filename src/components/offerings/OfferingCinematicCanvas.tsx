@@ -13,7 +13,7 @@ import twinUrl from '../../assets/offerings/gemtek-gateway.glb?url';
 import analyticsUrl from '../../assets/offerings/analytics-server.glb?url';
 import studioHdr from '../../assets/offerings/studio-small-03-1k.hdr?url';
 import { offeringPixelRatio } from './offeringRenderQuality';
-import { batchGatewayAssemblies } from './OfferingModelBatch';
+import { batchClosedGateway, batchGatewayAssemblies } from './OfferingModelBatch';
 
 // Own assets, bundled with the app; no runtime CDN or decoder dependency.
 for (const url of [storeUrl, kitUrl, actorsUrl, twinUrl, analyticsUrl]) useGLTF.preload(url, false);
@@ -24,7 +24,7 @@ export const cinematicAssets = { store: storeUrl, kit: kitUrl, twin: twinUrl, an
 /** Clone materials, never mutate useGLTF's shared cache. Source geometry and
  * textures remain shared. Physical overrides retain baked maps and markings. */
 // eslint-disable-next-line react-refresh/only-export-components
-export function useCinematicModel(url: string, name?: string, size?: number) {
+export function useCinematicModel(url: string, name?: string, size?: number, gatewayRepresentation: 'assemblies' | 'closed' = 'assemblies') {
   const gltf = useGLTF(url, false);
   const model = useMemo(() => {
     const source = name ? gltf.scene.getObjectByName(name) : gltf.scene;
@@ -60,7 +60,9 @@ export function useCinematicModel(url: string, name?: string, size?: number) {
       };
       object.material = Array.isArray(object.material) ? object.material.map(augment) : augment(object.material);
     });
-    const geometries = name === 'GatewayTwin' ? batchGatewayAssemblies(copy) : [];
+    const geometries = name === 'GatewayTwin'
+      ? gatewayRepresentation === 'closed' ? batchClosedGateway(copy) : batchGatewayAssemblies(copy)
+      : [];
     if (size) {
       const bounds = new Box3().setFromObject(copy);
       const center = bounds.getCenter(new Vector3()), dimensions = bounds.getSize(new Vector3());
@@ -69,7 +71,7 @@ export function useCinematicModel(url: string, name?: string, size?: number) {
     }
     wrapper.add(copy);
     return { object: wrapper, materials: [...materials.values()], geometries };
-  }, [gltf, name, size]);
+  }, [gltf, name, size, gatewayRepresentation]);
   useEffect(() => () => { model.materials.forEach(material => material.dispose()); model.geometries.forEach(geometry => geometry.dispose()); }, [model]);
   return model.object;
 }

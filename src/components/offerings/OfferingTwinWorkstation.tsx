@@ -32,7 +32,7 @@ function PortMarker({ timeRef, miniature = false, onSelect }: { timeRef: RefObje
 }
 
 function LaptopTwin({ timeRef, exploded }: { timeRef: RefObject<number>; exploded: boolean }) {
-  const model = useCinematicModel(cinematicAssets.twin,'GatewayTwin',2.4);
+  const model = useCinematicModel(cinematicAssets.twin,'GatewayTwin',2.4,'assemblies');
   const cameraOrientation = useMemo(() => {
     const camera = new ThreePerspectiveCamera();
     camera.position.set(2.8,2.25,5);

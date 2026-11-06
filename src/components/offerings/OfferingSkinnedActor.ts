@@ -1,4 +1,4 @@
-import { BoxGeometry, Color, Group, Mesh, MeshStandardMaterial, Quaternion, SkinnedMesh, Vector3, type Object3D, type Skeleton } from 'three';
+import { BoxGeometry, Color, Group, Mesh, MeshStandardMaterial, Quaternion, SkinnedMesh, Sphere, Vector3, type Object3D, type Skeleton } from 'three';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { ActorId, ActorPose, ActorRole } from './OfferingStoryMotion';
 import { sampleActorRig } from './OfferingActorMotion';
@@ -10,6 +10,14 @@ type Joint={object:Object3D;y:number};
 const JOINTS=['Hips','Torso','Head','LeftUpperArm','LeftForearm','LeftHand','RightUpperArm','RightForearm','RightHand','LeftThigh','LeftShin','LeftAnkle','RightThigh','RightShin','RightAnkle','Tablet','BagMount','Handset','Receipt','PaymentCard'] as const;
 export type Rig=Partial<Record<string,Joint>>;
 const resetJoints=new WeakMap<Rig,{joint:Joint;resetRotation:boolean}[]>();
+
+// The four Blender rigs share metre-scale, identity-transform skin meshes.
+// Their longest hip-to-weighted-vertex chain is <1.24 m even with arbitrary
+// joint rotations; authored hip motion stays within .24 m of (0,.7,0).
+// This fixed envelope also follows the parent fall rotation. Unlike a rest-pose
+// sphere it cannot clip a reaching hand, and needs no per-frame vertex scan.
+// Actual GLB influences and all story/contact poses are checked in the bounds test.
+const actorSkinBounds=new Sphere(new Vector3(0,.7,0),1.8);
 
 /** SkeletonUtils gives each material mesh a separate Skeleton even when all
  * seven surfaces use identical bones and inverse binds. Share only within this
@@ -32,7 +40,7 @@ export function prepareActor(source:Object3D,role:ActorRole,id:ActorId,cast?:Obj
   const shirts:Record<string,string>={shopper:'#39899a',queue1:'#aa6752',queue2:'#66876b',crowd1:'#a48d47',crowd2:'#715a89',crowd3:'#4f718d',crowd4:'#9a756c'};
   const complexions:Partial<Record<ActorId,string>>={queue1:'Staff_Skin_crew',queue2:'Technician_Skin_chef',crowd1:'Security_Skin_customer',crowd2:'Staff_Skin_crew',crowd3:'Technician_Skin_chef',crowd4:'Security_Skin_customer'};
   const skin=complexions[id]?cast?.getObjectByName(complexions[id]) as Mesh:undefined;
-  object.traverse(node=>{if(node instanceof Mesh){node.castShadow=true;node.receiveShadow=true;if(node instanceof SkinnedMesh)node.frustumCulled=false;if(role==='Customer'){const original=Array.isArray(node.material)?node.material:[node.material];const materials=original.map(material=>{if(!(material instanceof MeshStandardMaterial))return material;
+  object.traverse(node=>{if(node instanceof Mesh){node.castShadow=true;node.receiveShadow=true;if(node instanceof SkinnedMesh){node.boundingSphere=actorSkinBounds.clone();node.frustumCulled=true;}if(role==='Customer'){const original=Array.isArray(node.material)?node.material:[node.material];const materials=original.map(material=>{if(!(material instanceof MeshStandardMaterial))return material;
     if(/tailored shirt|fabric seams/.test(material.name)){const copy=material.clone();copy.color.lerp(new Color(shirts[id]||'#39899a'),.8);ownedMaterials.push(copy);return copy;}
     if(skin&&/anatomical guest/.test(material.name)){const copy=material.clone();copy.map=(skin.material as MeshStandardMaterial).map;ownedMaterials.push(copy);return copy;}
     if(/anatomical crop/.test(material.name)&&id!=='shopper'){const copy=material.clone();copy.color.set(id==='queue1'?'#51463b':id==='queue2'?'#9d8064':'#6c625a');ownedMaterials.push(copy);return copy;}

@@ -93,7 +93,9 @@ function Architecture({ context }: { context: StoryContext; timeRef: RefObject<n
 function Equipment({ spec, exploded = false, inspection = false, onSelect, context, timeRef }: { spec: EquipmentSpec; exploded?: boolean; inspection?: boolean; onSelect: (id: string) => void; context:StoryContext; timeRef:RefObject<number> }) {
   const { gl, invalidate } = useThree();
   const url=spec.model==='GatewayTwin'?cinematicAssets.twin:spec.model==='AnalyticsServer'?cinematicAssets.analytics:cinematicAssets.kit;
-  const model=useCinematicModel(url,spec.model,spec.size);
+  // The installed CPE stays closed, even while its laptop twin explodes. Keep
+  // the independently selectable assembly graph for the inspection viewer.
+  const model=useCinematicModel(url,spec.model,spec.size,!inspection&&!exploded?'closed':'assemblies');
   const animated=useMemo(()=>{
     const moves=GATEWAY_EXPLODE;
     const bulbs:MeshStandardMaterial[]=[];if(spec.model==='Light')model.traverse(object=>{if(object instanceof Mesh)(Array.isArray(object.material)?object.material:[object.material]).forEach(material=>{if(material instanceof MeshStandardMaterial&&material.name==='Display and markings')bulbs.push(material);});});

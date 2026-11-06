@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { Box3, BoxGeometry, BufferGeometry, DataTexture, Group, Mesh, MeshStandardMaterial, Vector3, type Material, type Object3D } from 'three';
-import { batchGatewayAssemblies } from '../../src/components/offerings/OfferingModelBatch.ts';
+import { Box3, BoxGeometry, BufferGeometry, DataTexture, Group, InstancedMesh, Matrix4, Mesh, MeshStandardMaterial, Raycaster, Vector3, type Material, type Object3D } from 'three';
+import { batchClosedGateway, batchGatewayAssemblies } from '../../src/components/offerings/OfferingModelBatch.ts';
 import { GATEWAY_EXPLODE } from '../../src/components/offerings/OfferingEquipment.ts';
 import { loadGeometryGlb } from './loadGeometryGlb.ts';
 
@@ -23,13 +23,19 @@ function measure(model: Object3D) {
     const key = materialKey(node.material), position = node.geometry.attributes.position, uv = node.geometry.attributes.uv, index = node.geometry.index;
     const count = index?.count ?? position.count;
     const entry = materials.get(key) ?? { triangles: 0, position: [0, 0, 0], moment: [0, 0, 0], uv: [0, 0] };
-    entry.triangles += count / 3; triangles += count / 3;
+    const instances = node instanceof InstancedMesh ? node.count : 1;
+    entry.triangles += count / 3 * instances; triangles += count / 3 * instances;
     const point = new Vector3();
-    for (let i = 0; i < count; i++) {
-      const vertex = index ? index.getX(i) : i;
-      point.fromBufferAttribute(position, vertex).applyMatrix4(node.matrixWorld);
-      for (let axis = 0; axis < 3; axis++) { const n = point.getComponent(axis); entry.position[axis] += n; entry.moment[axis] += n * n; }
-      if (uv) { entry.uv[0] += uv.getX(vertex); entry.uv[1] += uv.getY(vertex); }
+    for (let instance = 0; instance < instances; instance++) {
+      const transform = new Matrix4();
+      if (node instanceof InstancedMesh) node.getMatrixAt(instance, transform);
+      transform.premultiply(node.matrixWorld);
+      for (let i = 0; i < count; i++) {
+        const vertex = index ? index.getX(i) : i;
+        point.fromBufferAttribute(position, vertex).applyMatrix4(transform);
+        for (let axis = 0; axis < 3; axis++) { const n = point.getComponent(axis); entry.position[axis] += n; entry.moment[axis] += n * n; }
+        if (uv) { entry.uv[0] += uv.getX(vertex); entry.uv[1] += uv.getY(vertex); }
+      }
     }
     materials.set(key, entry);
   });
@@ -60,6 +66,10 @@ function sourceFingerprint(model: Object3D) {
     for (const attribute of [...Object.values(node.geometry.attributes), node.geometry.index].filter(Boolean) as { array: ArrayBufferView }[]) {
       hash.update(Buffer.from(attribute.array.buffer, attribute.array.byteOffset, attribute.array.byteLength));
     }
+    if (node instanceof InstancedMesh) {
+      hash.update(String(node.count));
+      for (const attribute of [node.instanceMatrix, node.instanceColor].filter(Boolean)) hash.update(Buffer.from(attribute!.array.buffer, attribute!.array.byteOffset, attribute!.array.byteLength));
+    }
   });
   return hash.digest('hex');
 }
@@ -70,7 +80,7 @@ test('the shipped gateway keeps named explosion pivots, geometry and materials w
   const original = sourceFingerprint(source), reference = source.clone(true), batched = source.clone(true);
   const names = source.children.map(child => child.name);
   const before = measure(reference), owned = batchGatewayAssemblies(batched), after = measure(batched);
-  assert.equal(before.meshes, 428); assert.equal(before.triangles, 228282);
+  assert.equal(before.meshes, 428); assert.equal(before.triangles, 252678);
   assert(after.meshes < before.meshes * .4, `${before.meshes}→${after.meshes} meshes must materially reduce submissions`);
   assert.deepEqual(batched.children.map(child => child.name), names);
   assert(owned.length > 0 && new Set(owned).size === owned.length);
@@ -87,6 +97,29 @@ test('the shipped gateway keeps named explosion pivots, geometry and materials w
   }
   assert.equal(sourceFingerprint(source), original, 'cached GLTF buffers, material data and graph remain untouched');
   for (const geometry of owned) geometry.dispose();
+});
+
+test('the installed closed gateway reduces submissions without changing its surfaces, selection or separate exploded twin', async () => {
+  const gltf = await loadGeometryGlb(new URL('../../src/assets/offerings/gemtek-gateway.glb', import.meta.url));
+  const source = gltf.scene.getObjectByName('GatewayTwin')!;
+  const original = sourceFingerprint(source), reference = source.clone(true), closed = source.clone(true), inspection = source.clone(true);
+  const inspectionGeometry = batchGatewayAssemblies(inspection), closedGeometry = batchClosedGateway(closed);
+  const before = measure(reference), result = measure(closed);
+  assert.equal(measure(inspection).meshes, 147, 'the independent inspection and miniature graph keep their established assembly batching');
+  assert.equal(result.meshes, 133, 'closed-only batching removes 14 additional draws while retaining all distinct material/label surfaces');
+  sameGeometry(before, result);
+  assert.equal(sourceFingerprint(source), original);
+  const instances: number[] = []; closed.traverse(node => { if (node instanceof InstancedMesh) instances.push(node.count); });
+  assert.deepEqual(instances.sort((a,b) => a-b), [68, 180, 180], 'all 428 authored fastener instances and their separate transforms remain');
+  const ray = new Raycaster(result.bounds.getCenter(new Vector3()).add(new Vector3(0, 0, 4)), new Vector3(0, 0, -1));
+  const hits = ray.intersectObject(closed, true); assert(hits.length > 0, 'the closed equipment remains raycast-selectable');
+  let hit: Object3D | null = hits[0].object;
+  while (hit && hit.name !== 'GatewayTwin') hit = hit.parent;
+  assert.equal(hit, closed, 'the hit bubbles through the same gateway root used by the equipment click handler');
+  for (const [name, offset] of Object.entries(GATEWAY_EXPLODE)) inspection.getObjectByName(name)!.position.add(new Vector3(...offset));
+  assert(measure(inspection).bounds.max.distanceTo(result.bounds.max) > .1, 'the inspection graph still explodes independently');
+  sameGeometry(result, measure(closed));
+  closedGeometry.forEach(geometry => geometry.dispose()); inspectionGeometry.forEach(geometry => geometry.dispose());
 });
 
 test('batching preserves texture identity and UVs, separate glass, hidden subgroups and mirrored front faces', () => {
@@ -118,4 +151,11 @@ test('batching preserves texture identity and UVs, separate glass, hidden subgro
     assert(face.dot(normal) > .999, 'mirrored geometry retains outward front-face winding');
   }
   owned.forEach(item => item.dispose());
+  // Both representations use the same material-preserving merge implementation.
+  const closed = model.clone(true), closedGeometry = batchClosedGateway(closed);
+  sameGeometry(before, measure(closed));
+  const closedBatch = closed.children.find(node => node instanceof Mesh) as Mesh<BufferGeometry, MeshStandardMaterial>;
+  assert.equal(closedBatch.material.map, map);
+  assert.equal(sourceFingerprint(model), snapshot);
+  closedGeometry.forEach(item => item.dispose());
 });
