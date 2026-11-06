@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { Canvas, useFrame, type CanvasProps } from '@react-three/fiber';
+import { Canvas, useFrame, useThree, type CanvasProps } from '@react-three/fiber';
 import { Environment, useGLTF } from '@react-three/drei';
 import {
   ACESFilmicToneMapping, Box3, ColorManagement, Group, Mesh,
@@ -81,11 +81,14 @@ interface StageProps {
   inspection?: boolean;
 }
 
-function CinematicStage({ lightLevel, inspection = false }: StageProps) {
+function CinematicStage({ focusTarget, lightLevel, cinematic, inspection = false }: StageProps) {
+  const { camera, size } = useThree();
   const key = useRef<DirectionalLight>(null), fill = useRef<DirectionalLight>(null);
   const bounce = useRef<HemisphereLight>(null);
   const rim = useRef<SpotLight>(null);
   const subject = useMemo(() => { const object = new Object3D(); object.position.set(inspection ? 0 : 7, inspection ? 1.2 : 1.8, inspection ? 0 : -3); return object; }, [inspection]);
+  const shadowSubject = useMemo(() => { const object = new Object3D(); object.position.copy(subject.position); return object; }, [subject]);
+  const lightOffset = useMemo(() => new Vector3(...(inspection ? [-4, 5.8, 5] : [-19, 20.2, 19]) as [number, number, number]), [inspection]);
   useFrame(({ scene }) => {
     const level = inspection ? 1 : Math.max(0, Math.min(1, lightLevel()));
     scene.environmentIntensity = inspection ? .28 : .1 + level * .42;
@@ -93,13 +96,29 @@ function CinematicStage({ lightLevel, inspection = false }: StageProps) {
     if (key.current) key.current.intensity = inspection ? 1.05 : .32 + level * 1.8;
     if (fill.current) fill.current.intensity = inspection ? .32 : .12 + level * .36;
     if (rim.current) rim.current.intensity = inspection ? 35 : 18 + level * 47;
-
+    if (key.current) {
+      // A close-up no longer redraws the shadow casters across the entire store.
+      // Move light and target together: the lighting direction stays identical.
+      // The guard band retains nearby casters, floor contact and self shadows.
+      shadowSubject.position.copy(cinematic ? focusTarget.current : subject.position);
+      key.current.position.copy(shadowSubject.position).add(lightOffset);
+      shadowSubject.updateMatrixWorld();
+      const radius = inspection ? 5 : cinematic
+        ? Math.min(25, Math.max(6, camera.position.distanceTo(focusTarget.current) * .6 * Math.max(1, size.width / Math.max(1, size.height)) + 3)) : 25;
+      const shadowCamera = key.current.shadow.camera;
+      if (Math.abs(shadowCamera.right - radius) > .02) {
+        shadowCamera.left = shadowCamera.bottom = -radius;
+        shadowCamera.right = shadowCamera.top = radius;
+        shadowCamera.updateProjectionMatrix();
+      }
+    }
   });
   return <>
     <Environment files={studioHdr} background={false} environmentIntensity={.4} />
     <hemisphereLight ref={bounce} args={['#fff4e5', '#758c81', .62]} />
     <primitive object={subject} />
-    <directionalLight ref={key} position={inspection ? [-4, 7, 5] : [-12, 22, 16]} target={subject} color="#ffe3c7" intensity={2.12} castShadow
+    <primitive object={shadowSubject} />
+    <directionalLight ref={key} position={inspection ? [-4, 7, 5] : [-12, 22, 16]} target={shadowSubject} color="#ffe3c7" intensity={2.12} castShadow
       shadow-mapSize={[2048, 2048]}
       shadow-camera-left={inspection ? -5 : -25} shadow-camera-right={inspection ? 5 : 25} shadow-camera-top={inspection ? 5 : 23} shadow-camera-bottom={inspection ? -5 : -23}
       shadow-camera-near={1} shadow-camera-far={85} shadow-bias={-.00008} shadow-normalBias={.014} shadow-radius={3} />

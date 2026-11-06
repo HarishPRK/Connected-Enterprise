@@ -127,7 +127,7 @@
 .enterprise-showcase .offering-store-controls .offering-store-control-group button { color:#ccdccb; }
 .enterprise-showcase .offering-store-controls .offering-store-control-group button[aria-pressed=true] { color:#f8e8bf; background:#37533f; }
 .enterprise-showcase .offering-store-control-group:first-child button span { display:inline!important; }
-.enterprise-showcase .offering-scene .offering-scene-hotspot { border:1px solid #c7d0b58c; background:#f6f0e1f5; color:#294337; border-radius:5px; box-shadow:0 3px 10px #0d211d20; font-size:9px; }
+.enterprise-showcase .offering-scene .offering-scene-hotspot { backdrop-filter:none; -webkit-backdrop-filter:none; border:1px solid #c7d0b58c; background:#f6f0e1f5; color:#294337; border-radius:5px; box-shadow:0 3px 10px #0d211d20; font-size:9px; }
 .enterprise-showcase .offering-scene-hotspot b { color:#597651; border-color:#a8b5a1; }
 .enterprise-showcase .offering-scene .offering-scene-hotspot:is(.is-selected,:hover) { background:#d9e4c9; color:#233e2e; border-color:#8ca57a; }
 .enterprise-showcase .offering-connection-key { bottom:12px; left:14px; color:#cbdbcd; background:#183328db; font-size:9px; }
