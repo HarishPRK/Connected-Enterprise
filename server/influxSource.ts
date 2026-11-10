@@ -1,9 +1,8 @@
-import { CONNTRACK_MEASUREMENTS, type ConntrackMeasurement, type EagleTelemetry } from '../shared/eagleTelemetry.js';
+import { ANOMALY_METRICS, DEFAULT_EAGLE_DEVICE_SERIAL, isEagleDeviceSerial, CONNTRACK_MEASUREMENTS, type AnomalyMetric, type ConntrackMeasurement, type EagleTelemetry } from '../shared/eagleTelemetry.js';
 
 const DEFAULT_INFLUX_URL = 'http://76.187.202.198:8086';
 const DEFAULT_INFLUX_ORG = 'Capgemini';
 const DEFAULT_INFLUX_BUCKET = 'BGW620';
-const ANOMALY_DEVICE_SERIAL = 'R95VA4GP000041';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1_000;
@@ -16,6 +15,7 @@ export type AnomalyFlagAggregation = 'max' | 'last';
 export type AnomalyValueAggregation = 'mean' | 'last';
 
 export interface AnomalyQueryInput {
+  deviceSerial?: unknown;
   /** RFC3339 timestamp or a lookback such as `-24h` / `24h`. */
   start?: unknown;
   /** RFC3339 timestamp or `now`. */
@@ -27,6 +27,7 @@ export interface AnomalyQueryInput {
 }
 
 export interface ResolvedAnomalyQuery {
+  deviceSerial: string;
   start: string;
   stop: string;
   window: string;
@@ -46,6 +47,7 @@ export interface AnomalyQueryResult extends EagleTelemetry {
     org: string;
     bucket: string;
     measurement: 'hardware_metrics';
+    deviceSerial: string;
   };
   range: {
     start: string;
@@ -236,6 +238,11 @@ export function resolveAnomalyQuery(input: AnomalyQueryInput, nowMs = Date.now()
     throw new InfluxSourceError('configuration', 'InfluxDB query clock returned an invalid value.');
   }
 
+  const deviceSerial = scalarQueryValue(input.deviceSerial, 'deviceSerial') ?? DEFAULT_EAGLE_DEVICE_SERIAL;
+  if (!isEagleDeviceSerial(deviceSerial)) {
+    throw new InfluxSourceError('validation', 'deviceSerial must be 1–128 letters, numbers, dots, underscores, colons or hyphens, starting with a letter or number.');
+  }
+
   const stopRaw = scalarQueryValue(input.stop, 'stop');
   const stopMs = stopRaw == null || stopRaw.toLowerCase() === 'now'
     ? nowMs
@@ -272,6 +279,7 @@ export function resolveAnomalyQuery(input: AnomalyQueryInput, nowMs = Date.now()
   }
 
   return {
+    deviceSerial,
     start: new Date(startMs).toISOString(),
     stop: new Date(stopMs).toISOString(),
     window: window.flux,
@@ -307,10 +315,9 @@ export function buildAnomalyFluxQuery(
   |> range(start: time(v: ${fluxString(query.start)}), stop: time(v: ${fluxString(query.stop)}))
   |> filter(fn: (r) => r["_measurement"] == "hardware_metrics")
   |> filter(fn: (r) => r["_field"] == "value")
-  |> filter(fn: (r) => r["device_serial"] == ${fluxString(ANOMALY_DEVICE_SERIAL)})`;
+  |> filter(fn: (r) => r["device_serial"] == ${fluxString(query.deviceSerial)})`;
 
-  // The first page is intentionally scoped to the fixed gateway above. Keeping
-  // the serial server-owned prevents callers from injecting arbitrary filters.
+  // The selected serial is validated as a literal, never accepted as Flux.
   return `flag = ${common}
   |> filter(fn: (r) => r["metric"] == "anomaly_flag")
   |> group(columns: ["metric"])
@@ -329,18 +336,18 @@ union(tables: [flag, values])
   |> sort(columns: ["_time", "metric"])
   |> yield(name: "anomalies")
 
-from(bucket: ${fluxString(bucket)})
-  |> range(start: time(v: ${fluxString(query.start)}), stop: time(v: ${fluxString(query.stop)}))
-  |> filter(fn: (r) => r["_measurement"] == "hardware_metrics")
-  |> filter(fn: (r) => r["_field"] == "value")
+${common}
   |> filter(fn: (r) => r["metric"] == "anomaly_reason_code")
   |> last()
   |> yield(name: "reason_codes")
 
-from(bucket: ${fluxString(bucket)})
-  |> range(start: time(v: ${fluxString(query.start)}), stop: time(v: ${fluxString(query.stop)}))
-  |> filter(fn: (r) => ${CONNTRACK_MEASUREMENTS.map((measurement) => `r["_measurement"] == ${fluxString(measurement)}`).join(' or ')})
-  |> filter(fn: (r) => r["_field"] == "value")
+${common}
+  |> filter(fn: (r) => ${ANOMALY_METRICS.map((metric) => `r["metric"] == ${fluxString(metric)}`).join(' or ')})
+  |> aggregateWindow(every: ${query.window}, fn: mean, createEmpty: false)
+  |> yield(name: "anomaly_metrics")
+
+${common}
+  |> filter(fn: (r) => ${CONNTRACK_MEASUREMENTS.map((metric) => `r["metric"] == ${fluxString(metric)}`).join(' or ')})
   |> aggregateWindow(every: ${query.window}, fn: mean, createEmpty: false)
   |> yield(name: "mean")`;
 }
@@ -431,6 +438,7 @@ export function parseAnomalyAnnotatedCsv(csv: string): AnomalyPoint[] {
   let timeIndex = -1;
   let valueIndex = -1;
   let metricIndex = -1;
+  let resultIndex = -1;
   let sawHeader = false;
 
   for (const row of parseCsvRecords(csv.replace(/^\uFEFF/, ''))) {
@@ -450,6 +458,7 @@ export function parseAnomalyAnnotatedCsv(csv: string): AnomalyPoint[] {
       timeIndex = nextTimeIndex;
       valueIndex = nextValueIndex;
       metricIndex = nextMetricIndex;
+      resultIndex = row.indexOf('result');
       sawHeader = true;
       continue;
     }
@@ -462,6 +471,8 @@ export function parseAnomalyAnnotatedCsv(csv: string): AnomalyPoint[] {
       continue;
     }
     if (timeIndex < 0 || valueIndex < 0 || metricIndex < 0) continue;
+    // Preserve the summary's max/last flags separately from window means.
+    if (row[resultIndex] === 'anomaly_metrics') continue;
 
     const metric = row[metricIndex];
     if (metric !== 'anomaly_flag' && metric !== 'anomaly_mse' && metric !== 'anomaly_threshold') {
@@ -492,6 +503,7 @@ export function parseAnomalyAnnotatedCsv(csv: string): AnomalyPoint[] {
 export function parseEagleAnnotatedCsv(csv: string): EagleTelemetry {
   const reasonCodes: EagleTelemetry['reasonCodes'] = [];
   const conntrack = new Map<string, EagleTelemetry['conntrack'][number]>();
+  const anomalyMetrics = new Map<string, EagleTelemetry['anomalyMetrics'][number]>();
   let header: string[] = [];
   const metadata = new Set(['', 'result', 'table', '_start', '_stop', '_time', '_value', '_field', '_measurement', 'metric']);
   for (const row of parseCsvRecords(csv.replace(/^\uFEFF/, ''))) {
@@ -502,8 +514,12 @@ export function parseEagleAnnotatedCsv(csv: string): EagleTelemetry {
     if (row.includes('_time') && row.includes('_value')) { header = row; continue; }
     const get = (name: string) => row[header.indexOf(name)];
     const measurement = get('_measurement');
-    const isReason = measurement === 'hardware_metrics' && get('metric') === 'anomaly_reason_code';
-    if (!isReason && !CONNTRACK_MEASUREMENTS.includes(measurement as ConntrackMeasurement)) continue;
+    const metric = get('metric');
+    const isReason = measurement === 'hardware_metrics' && metric === 'anomaly_reason_code';
+    const isAnomalyMean = get('result') === 'anomaly_metrics' && ANOMALY_METRICS.includes(metric as AnomalyMetric);
+    // Accept older exported responses too; new queries use the metric tag.
+    const conntrackMetric = measurement === 'hardware_metrics' ? metric : measurement;
+    if (!isReason && !isAnomalyMean && !CONNTRACK_MEASUREMENTS.includes(conntrackMetric as ConntrackMeasurement)) continue;
     const timestamp = Date.parse(get('_time'));
     if (!Number.isFinite(timestamp)) {
       throw new InfluxSourceError('response', 'InfluxDB returned an invalid telemetry timestamp.');
@@ -515,15 +531,23 @@ export function parseEagleAnnotatedCsv(csv: string): EagleTelemetry {
     )).sort(([a], [b]) => a.localeCompare(b)));
     if (isReason) {
       reasonCodes.push({ time, code: value, tags });
+    } else if (isAnomalyMean) {
+      const id = JSON.stringify([metric, tags]);
+      const series = anomalyMetrics.get(id) ?? { id, metric: metric as AnomalyMetric, tags, points: [] };
+      series.points.push({ time, value });
+      anomalyMetrics.set(id, series);
     } else {
-      const id = JSON.stringify([measurement, tags]);
-      const series = conntrack.get(id) ?? { id, measurement: measurement as ConntrackMeasurement, tags, points: [] };
+      const id = JSON.stringify([conntrackMetric, tags]);
+      const series = conntrack.get(id) ?? { id, measurement: conntrackMetric as ConntrackMeasurement, tags, points: [] };
       series.points.push({ time, value });
       conntrack.set(id, series);
     }
   }
   return {
     reasonCodes: reasonCodes.sort((a, b) => b.time.localeCompare(a.time)),
+    anomalyMetrics: [...anomalyMetrics.values()].map((series) => ({
+      ...series, points: series.points.sort((a, b) => a.time.localeCompare(b.time)),
+    })),
     conntrack: [...conntrack.values()].map((series) => ({
       ...series, points: series.points.sort((a, b) => a.time.localeCompare(b.time)),
     })),
@@ -681,6 +705,7 @@ export class InfluxSource {
           org: this.config.org,
           bucket: this.config.bucket,
           measurement: 'hardware_metrics',
+          deviceSerial: query.deviceSerial,
         },
         range: { start: query.start, stop: query.stop },
         window: query.window,

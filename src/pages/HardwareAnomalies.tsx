@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Area,
   CartesianGrid,
@@ -32,7 +33,7 @@ import {
 import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
 import { useTheme, useThemeColors } from '../ui/Theme';
-import { ANOMALY_REASON_LABELS, CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
+import { ANOMALY_METRICS, DEFAULT_EAGLE_DEVICE_SERIAL, EAGLE_DEVICE_SERIAL_PATTERN, ANOMALY_REASON_LABELS, CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
 import {
   useHardwareAnomalies,
   type HardwareAnomalyPoint,
@@ -188,15 +189,18 @@ function usePrefersReducedMotion(): boolean {
 }
 
 export function HardwareAnomaliesPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deviceSerial = searchParams.get('deviceSerial')?.trim() || DEFAULT_EAGLE_DEVICE_SERIAL;
   const [rangeKey, setRangeKey] = useState<RangeKey>('24h');
   const range = RANGE_OPTIONS.find((option) => option.key === rangeKey) ?? RANGE_OPTIONS[3];
   const query = useMemo(() => ({
+    deviceSerial,
     start: range.start,
     stop: 'now',
     window: range.window,
     flagAggregation: 'max' as const,
     valueAggregation: 'mean' as const,
-  }), [range.start, range.window]);
+  }), [deviceSerial, range.start, range.window]);
   const { data, loading, error, fetchedAt, refresh } = useHardwareAnomalies(query);
 
   const points = data?.points ?? EMPTY_ANOMALY_POINTS;
@@ -258,6 +262,23 @@ export function HardwareAnomaliesPage() {
           </div>
         }
       />
+
+      <form className="anomaly-device-selector" onSubmit={(event) => {
+        event.preventDefault();
+        const serial = String(new FormData(event.currentTarget).get('deviceSerial') ?? '').trim();
+        setSearchParams((previous) => {
+          const next = new URLSearchParams(previous);
+          next.set('deviceSerial', serial);
+          return next;
+        });
+      }}>
+        <label htmlFor="eagle-device-serial">Device serial</label>
+        <input key={deviceSerial} id="eagle-device-serial" name="deviceSerial" defaultValue={deviceSerial}
+          required maxLength={128} pattern={EAGLE_DEVICE_SERIAL_PATTERN} autoComplete="off" spellCheck={false}
+          title="Enter a device serial using letters, numbers, dots, underscores, colons or hyphens." />
+        <button type="submit">Apply device</button>
+        <span>All charts use this device.</span>
+      </form>
 
       <p className="anomaly-live-region" aria-live="polite">
         {loading
@@ -356,7 +377,7 @@ export function HardwareAnomaliesPage() {
                     Hardware Anomalies
                   </span>
                 }
-                sub={`R95VA4GP000041 · MSE and learned threshold · ${data?.window || range.window} aggregation window · fixed Y scale 0–2`}
+                sub={`${data?.source.deviceSerial || deviceSerial} · MSE and learned threshold · ${data?.window || range.window} aggregation window · fixed Y scale 0–2`}
                 right={
                   <div className="anomaly-chart-legend" aria-label="Chart legend">
                     <span><i className="mse" />Reconstruction error</span>
@@ -379,23 +400,36 @@ export function HardwareAnomaliesPage() {
           </div>
         </>
       )}
-      {data && <ConntrackChart series={data.conntrack} range={rangeKey} window={data.window || range.window} />}
+      {data && <>
+        <TelemetryChart series={data.anomalyMetrics.map((item) => ({ ...item, measurement: item.metric }))}
+          metrics={ANOMALY_METRICS} labels={ANOMALY_METRIC_LABELS} title="Anomaly metrics"
+          description="Window means · confirmed and raw flags retain fractional values from 0 to 1"
+          range={rangeKey} window={data.window || range.window} />
+        <TelemetryChart series={data.conntrack} metrics={CONNTRACK_MEASUREMENTS} labels={CONNTRACK_LABELS}
+          title="Conntrack (Connection Tracking)" description="Mean connection counts"
+          range={rangeKey} window={data.window || range.window} />
+      </>}
       {points.length > 0 && <BreachTable rows={breachRows} total={points.length} />}
     </div>
   );
 }
 
 const CONNTRACK_LABELS = { conntrack_total: 'Total', conntrack_tcp: 'TCP', conntrack_udp: 'UDP', conntrack_icmp: 'ICMP', conntrack_other: 'Other' };
+const ANOMALY_METRIC_LABELS = { anomaly_mse: 'Reconstruction error (MSE)', anomaly_threshold: 'Learned threshold', anomaly_flag: 'Confirmed flag (mean)', anomaly_raw_flag: 'Raw flag (mean)' };
 
-function ConntrackChart({ series, range, window }: { series: ConntrackSeries[]; range: RangeKey; window: string }) {
+function TelemetryChart({ series, metrics, labels, title, description, range, window }: {
+  series: (Omit<ConntrackSeries, 'measurement'> & { measurement: string })[];
+  metrics: readonly string[]; labels: Readonly<Record<string, string>>; title: string; description: string;
+  range: RangeKey; window: string;
+}) {
   const colors = useThemeColors();
   const { theme } = useTheme();
   const palette = theme === 'light'
     ? ['#475569', '#047857', '#be185d', '#1d4ed8', '#92400e']
     : ['#cbd5e1', '#34d399', '#f472b6', '#60a5fa', '#fbbf24'];
   const orderedSeries = useMemo(() => [...series].sort((a, b) => (
-    CONNTRACK_MEASUREMENTS.indexOf(a.measurement) - CONNTRACK_MEASUREMENTS.indexOf(b.measurement)
-  )), [series]);
+    metrics.indexOf(a.measurement) - metrics.indexOf(b.measurement)
+  )), [series, metrics]);
   const chartPoints = useMemo(() => {
     const byTime = new Map<number, Record<string, number>>();
     orderedSeries.forEach((item, index) => item.points.forEach((point) => {
@@ -406,22 +440,26 @@ function ConntrackChart({ series, range, window }: { series: ConntrackSeries[]; 
     }));
     return [...byTime.values()].sort((a, b) => a.timestamp - b.timestamp);
   }, [orderedSeries]);
-  const label = (item: ConntrackSeries) => [CONNTRACK_LABELS[item.measurement], ...Object.values(item.tags)].join(' · ');
-  const seriesColor = (item: ConntrackSeries) => palette[CONNTRACK_MEASUREMENTS.indexOf(item.measurement)];
+  const label = (item: typeof series[number]) => [labels[item.measurement],
+    ...Object.entries(item.tags).filter(([key]) => key !== 'device_serial').map(([, value]) => value),
+  ].join(' · ');
+  const seriesColor = (item: typeof series[number]) => palette[metrics.indexOf(item.measurement)];
+  const missingMetrics = metrics.filter(metric => !orderedSeries.some(item => item.measurement === metric && item.points.length > 0));
 
   return (
-    <Card className="anomaly-conntrack-card" title="Conntrack (Connection Tracking)" sub={`Mean connection counts · ${window} aggregation window`}>
+    <Card className="anomaly-conntrack-card" title={title} sub={`${description} · ${window} aggregation window`}>
       {chartPoints.length === 0 ? (
-        <p className="anomaly-panel-empty">No connection-tracking samples in this range. Choose a longer range or refresh.</p>
+        <p className="anomaly-panel-empty">No {title.toLowerCase()} samples for this device in this range. Choose a longer range or refresh.</p>
       ) : (
         <>
-          <div className="anomaly-chart-legend" aria-label="Connection tracking legend">
+          <div className="anomaly-chart-legend" aria-label={`${title} legend`}>
             {orderedSeries.map((item) => <span key={item.id}><i style={{ background: seriesColor(item) }} />{label(item)}</span>)}
           </div>
-          <figure className="anomaly-trace" aria-label="Connection counts over the selected range">
+          {missingMetrics.length > 0 && <p className="anomaly-series-note">No samples for: {missingMetrics.map(metric => labels[metric]).join(', ')}.</p>}
+          <figure className="anomaly-trace" aria-label={`${title} over the selected range`}>
             <div className="anomaly-chart">
               <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 360 }}>
-                <ComposedChart data={chartPoints} margin={{ top: 12, right: 14, left: 2, bottom: 2 }} accessibilityLayer aria-label="Connection tracking chart">
+                <ComposedChart data={chartPoints} margin={{ top: 12, right: 14, left: 2, bottom: 2 }} accessibilityLayer aria-label={`${title} chart`}>
                   <CartesianGrid stroke={colors.chartGrid} strokeDasharray="3 5" vertical={false} />
                   <XAxis dataKey="timestamp" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(value: number) => formatAxisTime(value, range)} stroke={colors.textDim} tickLine={false} axisLine={false} minTickGap={52} fontSize={11} tickMargin={10} />
                   <YAxis domain={[0, 'auto']} stroke={colors.textDim} tickLine={false} axisLine={false} width={58} fontSize={11} />
@@ -431,7 +469,7 @@ function ConntrackChart({ series, range, window }: { series: ConntrackSeries[]; 
                     itemStyle={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}
                     labelStyle={{ whiteSpace: 'normal' }}
                     labelFormatter={(value) => formatTableTime(new Date(Number(value)).toISOString())}
-                    formatter={(value) => typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(value)}
+                    formatter={(value) => typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 5 }) : String(value)}
                     contentStyle={{ background: colors.panelSolid, borderColor: colors.chartGrid, color: colors.textDim, borderRadius: 12, fontSize: 12 }}
                   />
                   {orderedSeries.map((item, index) => (

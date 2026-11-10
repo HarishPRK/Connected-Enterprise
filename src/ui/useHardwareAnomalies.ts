@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CONNTRACK_MEASUREMENTS, type ConntrackMeasurement, type EagleTelemetry } from '../../shared/eagleTelemetry';
+import { ANOMALY_METRICS, DEFAULT_EAGLE_DEVICE_SERIAL, CONNTRACK_MEASUREMENTS, type AnomalyMetric, type ConntrackMeasurement, type EagleTelemetry } from '../../shared/eagleTelemetry';
 
 export const HARDWARE_ANOMALIES_ENDPOINT = '/api/hardware-metrics/anomalies' as const;
 
@@ -14,6 +14,7 @@ export interface HardwareAnomalySource {
   org: string;
   bucket: string;
   measurement: string;
+  deviceSerial: string;
 }
 
 export interface HardwareAnomalyRange {
@@ -36,6 +37,7 @@ export interface HardwareAnomalyResponse extends EagleTelemetry {
 }
 
 export interface HardwareAnomalyQuery {
+  deviceSerial?: string;
   start: string;
   stop?: string;
   window: string;
@@ -85,7 +87,7 @@ function parsePoint(value: unknown): HardwareAnomalyPoint | null {
   };
 }
 
-function parseResponse(value: unknown): HardwareAnomalyResponse {
+export function parseHardwareAnomalyResponse(value: unknown): HardwareAnomalyResponse {
   if (!isRecord(value) || !Array.isArray(value.points)) {
     throw new Error('The anomaly service returned an unexpected response.');
   }
@@ -122,12 +124,24 @@ function parseResponse(value: unknown): HardwareAnomalyResponse {
         }),
       }];
     }) : [];
+  const anomalyMetrics: EagleTelemetry['anomalyMetrics'] = Array.isArray(value.anomalyMetrics)
+    ? value.anomalyMetrics.flatMap((item: unknown) => {
+      if (!isRecord(item) || typeof item.id !== 'string'
+        || !ANOMALY_METRICS.includes(item.metric as AnomalyMetric) || !Array.isArray(item.points)) return [];
+      return [{ id: item.id, metric: item.metric as AnomalyMetric, tags: parseTags(item.tags),
+        points: item.points.flatMap((point: unknown) => {
+          if (!isRecord(point) || !validTime(point.time) || finiteNumber(point.value) === null) return [];
+          return [{ time: point.time, value: finiteNumber(point.value)! }];
+        }),
+      }];
+    }) : [];
 
   return {
     source: {
       org: typeof source.org === 'string' ? source.org : 'Capgemini',
       bucket: typeof source.bucket === 'string' ? source.bucket : 'BGW620',
       measurement: typeof source.measurement === 'string' ? source.measurement : 'hardware_metrics',
+      deviceSerial: typeof source.deviceSerial === 'string' ? source.deviceSerial : DEFAULT_EAGLE_DEVICE_SERIAL,
     },
     range: {
       start: typeof range.start === 'string' ? range.start : '',
@@ -142,6 +156,7 @@ function parseResponse(value: unknown): HardwareAnomalyResponse {
     points,
     reasonCodes,
     conntrack,
+    anomalyMetrics,
   };
 }
 
@@ -175,6 +190,7 @@ export function useHardwareAnomalies(
   useEffect(() => {
     const controller = new AbortController();
     const queryKey = [
+      query.deviceSerial ?? DEFAULT_EAGLE_DEVICE_SERIAL,
       query.start,
       query.stop ?? 'now',
       query.window,
@@ -182,6 +198,7 @@ export function useHardwareAnomalies(
       query.valueAggregation ?? 'mean',
     ].join('|');
     const params = new URLSearchParams({
+      deviceSerial: query.deviceSerial ?? DEFAULT_EAGLE_DEVICE_SERIAL,
       start: query.start,
       stop: query.stop ?? 'now',
       window: query.window,
@@ -207,7 +224,7 @@ export function useHardwareAnomalies(
         return response.json() as Promise<unknown>;
       })
       .then((body) => {
-        const data = parseResponse(body);
+        const data = parseHardwareAnomalyResponse(body);
         if (!controller.signal.aborted) {
           setState({ data, loading: false, error: null, fetchedAt: Date.now() });
         }
@@ -223,6 +240,7 @@ export function useHardwareAnomalies(
 
     return () => controller.abort();
   }, [
+    query.deviceSerial,
     query.start,
     query.stop,
     query.window,

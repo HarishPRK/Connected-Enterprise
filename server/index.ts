@@ -160,7 +160,7 @@ app.get('/api/ai/capabilities', (_req, res) => {
   res.json(aiCapabilities(llm));
 });
 
-/** Bucket-wide anomaly history for the first hardware-metrics page. */
+/** Device-scoped EA:GLE telemetry from the hardware-metrics bucket. */
 app.get('/api/hardware-metrics/anomalies', async (req, res) => {
   res.removeHeader('Access-Control-Allow-Origin');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
@@ -187,6 +187,7 @@ app.get('/api/hardware-metrics/anomalies', async (req, res) => {
       throw new InfluxSourceError('configuration', 'InfluxDB query access is not configured.');
     }
     const result = await influxSource.queryAnomalies({
+      deviceSerial: req.query.deviceSerial,
       start: req.query.start,
       stop: req.query.stop,
       window: req.query.window,

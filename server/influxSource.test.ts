@@ -62,7 +62,7 @@ test('queries the fixed Influx endpoint and normalizes annotated CSV', async () 
   assert.match(String(call.init?.body), /from\(bucket: "BGW620"\)/);
   assert.equal((String(call.init?.body).match(
     /device_serial"\] == "R95VA4GP000041"/g,
-  ) ?? []).length, 2);
+  ) ?? []).length, 5);
   assert.match(String(call.init?.body), /metric"\] == "anomaly_flag"/);
   assert.match(String(call.init?.body), /group\(columns: \["metric"\]\)/);
   assert.match(String(call.init?.body), /fn: max/);
@@ -72,7 +72,8 @@ test('queries the fixed Influx endpoint and normalizes annotated CSV', async () 
   assert.deepEqual(result, {
     reasonCodes: [],
     conntrack: [],
-    source: { org: 'Capgemini', bucket: 'BGW620', measurement: 'hardware_metrics' },
+    anomalyMetrics: [],
+    source: { org: 'Capgemini', bucket: 'BGW620', measurement: 'hardware_metrics', deviceSerial: 'R95VA4GP000041' },
     range: {
       start: '2026-08-20T17:00:00.000Z',
       stop: '2026-08-20T18:00:00.000Z',
@@ -132,17 +133,22 @@ test('reads mixed query schemas, preserving zero codes, fractional means and dev
   assert.notEqual(result.conntrack[0].id, result.conntrack[1].id);
 });
 
-test('new queries follow supplied last and mean semantics without imposing a serial tag on conntrack', () => {
+test('all EA:GLE queries filter the device and new metric queries use hardware_metrics with mean windows', () => {
   const flux = buildAnomalyFluxQuery('BGW620', resolveAnomalyQuery({ start: '-6h', window: '5m' }, NOW));
   const extraQueries = flux.slice(flux.indexOf('from(bucket:', flux.indexOf('yield(name: "anomalies")')));
   assert.match(extraQueries, /"anomaly_reason_code"\)\s+\|> last\(\)/);
   for (const protocol of ['icmp', 'other', 'tcp', 'total', 'udp']) assert.ok(extraQueries.includes(`"conntrack_${protocol}"`));
   assert.match(extraQueries, /aggregateWindow\(every: 5m, fn: mean, createEmpty: false\)/);
-  assert.doesNotMatch(extraQueries, /device_serial|v\.timeRange|v\.windowPeriod/);
+  assert.doesNotMatch(extraQueries, /v\.timeRange|v\.windowPeriod/);
+  assert.equal((extraQueries.match(/device_serial"\] == "R95VA4GP000041"/g) ?? []).length, 3);
+  assert.equal((extraQueries.match(/_measurement"\] == "hardware_metrics"/g) ?? []).length, 3);
+  assert.doesNotMatch(extraQueries, /_measurement"\] == "conntrack_/);
+  assert.match(extraQueries, /metric"\] == "anomaly_raw_flag"/);
+  assert.equal((extraQueries.match(/fn: mean/g) ?? []).length, 2);
 });
 
 test('new telemetry rejects invalid values and late errors, and handles empty results', () => {
-  assert.deepEqual(parseEagleAnnotatedCsv(''), { reasonCodes: [], conntrack: [] });
+  assert.deepEqual(parseEagleAnnotatedCsv(''), { reasonCodes: [], conntrack: [], anomalyMetrics: [] });
   assert.throws(() => parseEagleAnnotatedCsv(EAGLE_CSV.replace(',7.5,conntrack_tcp', ',NaN,conntrack_tcp')), InfluxSourceError);
   assert.throws(() => parseEagleAnnotatedCsv(EAGLE_CSV.replace(',0,hardware_metrics', ',,hardware_metrics')), InfluxSourceError);
   assert.throws(() => parseEagleAnnotatedCsv(`${EAGLE_CSV}\n,error,reference\n,query failed,123`), InfluxSourceError);
@@ -152,6 +158,30 @@ test('connection tracking can be returned when hardware measurements are absent'
   const csv = ',result,table,_time,_value,_measurement\n,mean,0,2026-08-20T17:55:00Z,12,conntrack_total\n';
   assert.deepEqual(parseAnomalyAnnotatedCsv(csv), []);
   assert.equal(parseEagleAnnotatedCsv(csv).conntrack[0].points[0].value, 12);
+});
+
+test('new hardware_metrics series preserve raw and confirmed flag means without overwriting summary flags', () => {
+  const csv = `${ANNOTATED_CSV}
+,result,table,_time,_value,_measurement,metric,device_serial
+,anomaly_metrics,0,2026-08-20T17:55:00Z,0.25,hardware_metrics,anomaly_flag,gateway-a
+,anomaly_metrics,1,2026-08-20T17:55:00Z,0.75,hardware_metrics,anomaly_raw_flag,gateway-a
+,anomaly_metrics,2,2026-08-20T17:55:00Z,0.015,hardware_metrics,anomaly_mse,gateway-a
+,anomaly_metrics,3,2026-08-20T17:55:00Z,0.02,hardware_metrics,anomaly_threshold,gateway-a
+,mean,4,2026-08-20T17:55:00Z,12.5,hardware_metrics,conntrack_total,gateway-a
+,mean,5,2026-08-20T17:55:00Z,0,hardware_metrics,conntrack_icmp,gateway-a
+,mean,6,2026-08-20T17:55:00Z,19,hardware_metrics,conntrack_total,gateway-b
+`;
+  assert.deepEqual(parseAnomalyAnnotatedCsv(csv), parseAnomalyAnnotatedCsv(ANNOTATED_CSV));
+  const parsed = parseEagleAnnotatedCsv(csv);
+  assert.equal(parsed.anomalyMetrics.length, 4);
+  assert.equal(parsed.anomalyMetrics.find(s => s.metric === 'anomaly_flag')?.points[0].value, 0.25);
+  assert.equal(parsed.anomalyMetrics.find(s => s.metric === 'anomaly_raw_flag')?.points[0].value, 0.75);
+  assert.equal(parsed.conntrack.length, 3);
+  assert.equal(parsed.conntrack[0].measurement, 'conntrack_total');
+  assert.equal(parsed.conntrack[0].points[0].value, 12.5);
+  assert.equal(parsed.conntrack[1].points[0].value, 0);
+  assert.notEqual(parsed.conntrack[0].id, parsed.conntrack[2].id);
+  assert.throws(() => parseEagleAnnotatedCsv(csv.replace(',0.75,hardware_metrics', ',NaN,hardware_metrics')), InfluxSourceError);
 });
 
 test('allows only separate, allowlisted selector/aggregate functions', () => {
@@ -176,7 +206,7 @@ test('allows only separate, allowlisted selector/aggregate functions', () => {
   assert.match(flux, /keep\(columns: \["_time", "_value", "metric"\]\)/);
 });
 
-test('keeps the anomaly device selector fixed and ignores arbitrary device input', async () => {
+test('applies the selected device serial to every query and returns its identity', async () => {
   let requestBody = '';
   const source = new InfluxSource({
     token: 'test-token',
@@ -187,13 +217,14 @@ test('keeps the anomaly device selector fixed and ignores arbitrary device input
     now: () => NOW,
   });
 
-  await source.queryAnomalies({
+  const result = await source.queryAnomalies({
     start: '-1h',
-    deviceSerial: 'attacker-controlled-device',
-  } as Parameters<InfluxSource['queryAnomalies']>[0] & { deviceSerial: string });
+    deviceSerial: 'gateway-a',
+  });
 
-  assert.equal((requestBody.match(/device_serial"\] == "R95VA4GP000041"/g) ?? []).length, 2);
-  assert.doesNotMatch(requestBody, /attacker-controlled-device/);
+  assert.equal((requestBody.match(/device_serial"\] == "gateway-a"/g) ?? []).length, 5);
+  assert.doesNotMatch(requestBody, /R95VA4GP000041|\$\{Device\}/);
+  assert.equal(result.source.deviceSerial, 'gateway-a');
 });
 
 test('rejects arbitrary Flux and excessive query ranges before fetching', async () => {
@@ -221,6 +252,9 @@ test('rejects arbitrary Flux and excessive query ranges before fetching', async 
 
   const arrayValue = await errorOf(source.queryAnomalies({ start: ['-1h', '-2h'] }));
   assert.equal(arrayValue.kind, 'validation');
+  for (const deviceSerial of ['${Device}', 'x" |> yield()', 'a\nb', 'a'.repeat(129), ['a', 'b']]) {
+    assert.equal((await errorOf(source.queryAnomalies({ deviceSerial }))).kind, 'validation');
+  }
   assert.equal(fetchCount, 0);
 });
 

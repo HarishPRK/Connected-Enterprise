@@ -1,3 +1,12 @@
+export const DEFAULT_EAGLE_DEVICE_SERIAL = 'R95VA4GP000041';
+export const EAGLE_DEVICE_SERIAL_PATTERN = '[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}';
+export function isEagleDeviceSerial(value: string): boolean {
+  return new RegExp(`^${EAGLE_DEVICE_SERIAL_PATTERN}$`).test(value);
+}
+
+export const ANOMALY_METRICS = ['anomaly_mse', 'anomaly_threshold', 'anomaly_flag', 'anomaly_raw_flag'] as const;
+export type AnomalyMetric = (typeof ANOMALY_METRICS)[number];
+
 export const CONNTRACK_MEASUREMENTS = [
   'conntrack_total', 'conntrack_tcp', 'conntrack_udp', 'conntrack_icmp', 'conntrack_other',
 ] as const;
@@ -38,4 +47,10 @@ export interface ConntrackSeries {
 export interface EagleTelemetry {
   reasonCodes: AnomalyReasonCode[];
   conntrack: ConntrackSeries[];
+  anomalyMetrics: {
+    id: string;
+    metric: AnomalyMetric;
+    tags: Record<string, string>;
+    points: { time: string; value: number }[];
+  }[];
 }
