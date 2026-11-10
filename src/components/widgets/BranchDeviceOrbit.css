@@ -46,6 +46,7 @@
 .orbit-core > strong { font: 600 clamp(28px,4.6cqw,44px)/1 'Space Grotesk',sans-serif; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
 .orbit-core > span { margin-top: 3px; color: #e6f6ff; font-size: 8px; letter-spacing: .03em; }
 .orbit-field .orbit-node {
+  --node-color: #47cc8c;
   position: absolute; transform: translate(-50%,-50%) !important; display: grid; place-items: center;
   min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 50%; color: var(--orbit-accent);
   background: transparent; box-shadow: none; transition: opacity .15s; z-index: 1; pointer-events: auto;
@@ -59,7 +60,8 @@
 .orbit-device-status { position: absolute; left: 50%; bottom: 15%; display: grid; place-items: center; width: 4px; height: 4px; transform: translateX(-50%); border-radius: 50%; background: #14363b; border: 1px solid var(--orbit-status); }
 .orbit-device-status > svg { width: 8px; height: 8px; stroke-width: 2.1; }
 .orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) { color: var(--orbit-status); }
-.orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) .orbit-node-metal { background-color: var(--orbit-status); border-color: var(--orbit-status); }
+/* Attention still means connected; only offline/inactive devices are red. */
+.orbit-field .orbit-node:is([data-status='err'],[data-status='off']) { --node-color: #ef727f; }
 .orbit-node:is([data-status='err'],[data-status='warn'],[data-status='off']) .orbit-device-status { left: auto; right: 0; bottom: 0; transform: none; width: 12px; height: 12px; border-radius: 50%; color: var(--orbit-status); background: #192631; border: 1px solid currentColor; }
 .orbit-field .orbit-node[data-dimmed='true'] { opacity: .56; }
 .orbit-field .orbit-node:is([data-highlighted='true'],:hover,:focus-visible) { opacity: 1; z-index: 2; outline: 1px solid var(--orbit-accent); outline-offset: 2px; }
