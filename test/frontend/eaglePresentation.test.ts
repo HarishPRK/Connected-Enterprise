@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { eagleHistorySegments, eagleSampleState, eagleSnapshotMood } from '../../src/ui/eaglePresentation';
+import { eagleHistorySegments, eagleHttpCatCode, eagleSampleState, eagleSnapshotMood } from '../../src/ui/eaglePresentation';
 import type { HardwareAnomalyPoint } from '../../src/ui/useHardwareAnomalies';
 
 const sample: HardwareAnomalyPoint = { time: '2026-11-10T12:00:00Z', anomalyFlag: false, anomalyMse: .4, anomalyThreshold: 1.1 };
 const reasons = [{ time: sample.time, code: 0, tags: { device_serial: 'gateway-a' } }];
+
+test('HTTP cat reactions exclude 400 and never replace detector codes', () => {
+  assert.equal(eagleHttpCatCode('calm'), 200);
+  assert.equal(eagleHttpCatCode('alert'), 500);
+  assert.equal(eagleHttpCatCode('waiting'), 404);
+  for (const mood of ['calm', 'alert', 'waiting'] as const) assert.equal(eagleHttpCatCode(mood, true), 503);
+  assert.equal(reasons[0].code, 0);
+});
 
 test('status companion distinguishes healthy, incomplete, reported fault, flag and stale snapshots', () => {
   assert.equal(eagleSnapshotMood(reasons, sample, false), 'calm');

@@ -1,28 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, CircleHelp, Clock3, TriangleAlert } from 'lucide-react';
 import { ANOMALY_REASON_LABELS, type AnomalyReasonCode } from '../../../shared/eagleTelemetry';
-import { eagleHistorySegments, eagleSampleState, eagleSnapshotMood } from '../../ui/eaglePresentation';
+import { eagleHistorySegments, eagleHttpCatCode, eagleSampleState, eagleSnapshotMood } from '../../ui/eaglePresentation';
 import type { HardwareAnomalyPoint } from '../../ui/useHardwareAnomalies';
-import catSprite from '../../assets/eagle/telemetry-cat.png';
+import cat200 from '../../assets/eagle/http-cat-200.jpg';
+import cat404 from '../../assets/eagle/http-cat-404.jpg';
+import cat500 from '../../assets/eagle/http-cat-500.jpg';
+import cat503 from '../../assets/eagle/http-cat-503.jpg';
 
 type Mood = ReturnType<typeof eagleSnapshotMood>;
-function TelemetryCat({ mood, animate }: { mood: Mood; animate: boolean }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [inView, setInView] = useState(false);
-  const [visible, setVisible] = useState(true);
-  useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting));
-    if (ref.current) observer.observe(ref.current);
-    const onVisibility = () => setVisible(!document.hidden);
-    document.addEventListener('visibilitychange', onVisibility);
-    onVisibility();
-    return () => { observer.disconnect(); document.removeEventListener('visibilitychange', onVisibility); };
-  }, []);
-  return <div ref={ref} className="eagle-cat" data-mood={mood} data-playing={animate && inView && visible}>
-    <div className="eagle-cat-sprite" style={{ backgroundImage: `url(${catSprite})` }} aria-hidden="true" />
-    <span>{mood === 'calm' ? 'Looking quiet.' : mood === 'alert' ? 'Worth a closer look.' : 'Waiting for a signal.'}</span>
-    <small>Snapshot companion</small>
-  </div>;
+const HTTP_CATS = {
+  200: { image: cat200, label: '200 OK' },
+  404: { image: cat404, label: '404 Not Found' },
+  500: { image: cat500, label: '500 Internal Server Error' },
+  503: { image: cat503, label: '503 Service Unavailable' },
+};
+
+export function EagleHttpCat({ mood, animate = false, unavailable = false, compact = false }: {
+  mood: Mood; animate?: boolean; unavailable?: boolean; compact?: boolean;
+}) {
+  const code = eagleHttpCatCode(mood, unavailable);
+  const cat = HTTP_CATS[code];
+  return <figure className={`eagle-cat${compact ? ' eagle-cat-compact' : ''}`} data-mood={mood} data-animate={animate}>
+    <img key={code} src={cat.image} alt={`HTTP Cats meme: ${cat.label}`} width={750} height={600} decoding="async" />
+    <figcaption><a href={`https://http.cat/status/${code}`} target="_blank" rel="noreferrer">HTTP Cats ↗</a>
+      <span>HTTP meme · visual reaction</span></figcaption>
+  </figure>;
 }
 
 const stamp = (time: string) => new Date(time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -54,7 +56,7 @@ export function EagleStatus({ reasons, latest, animate, stale }: {
         <p>Reported codes and threshold crossings are separate signals. An absent code is not a healthy result.</p>
       </details>
     </div>
-    <TelemetryCat mood={mood} animate={animate} />
+    <EagleHttpCat mood={mood} animate={animate} unavailable={stale} />
   </section>;
 }
 

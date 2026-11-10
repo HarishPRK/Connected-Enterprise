@@ -17,6 +17,12 @@ export function eagleSnapshotMood(reasons: AnomalyReasonCode[], latest: Hardware
   return 'waiting';
 }
 
+/** Visual reactions only; detector reason codes remain unchanged. HTTP 400 is intentionally excluded. */
+export function eagleHttpCatCode(mood: ReturnType<typeof eagleSnapshotMood>, unavailable = false): 200 | 404 | 500 | 503 {
+  if (unavailable) return 503;
+  return mood === 'calm' ? 200 : mood === 'alert' ? 500 : 404;
+}
+
 /** Each display segment represents real windows; preserve the most severe state in a bin. */
 export function eagleHistorySegments(points: HardwareAnomalyPoint[], maximum = 80) {
   const priority: EagleSampleState[] = ['normal', 'unknown', 'crossed', 'flagged'];

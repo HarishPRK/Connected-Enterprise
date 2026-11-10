@@ -1,15 +1,22 @@
 # EA:GLE visual states
 
-The status panel retains exact Influx reason codes, series tags and timestamps. Its expandable reference lists the mappings from `shared/eagleTelemetry.ts`. The cat is a snapshot companion, not a live monitoring indicator: normal complete readings use the two typing frames, a reported nonzero code/flag/crossing uses the attentive frame, and missing/incomplete/cached data uses the waiting frame. It never changes telemetry or controls equipment.
+The status panel retains exact Influx reason codes, series tags and timestamps. Its expandable reference lists the mappings from `shared/eagleTelemetry.ts`. HTTP Cats provide visual reactions alongside the real detector code. The HTTP code printed on a meme never replaces a detector code or represents an actual API response.
 
-Motion can be paused from the page and the preference persists locally. Reduced motion disables spatial/typing animation. The cat also pauses outside the viewport and while the document is hidden. Chart entrance transitions are bounded at 500ms; no continuous chart or data animation is used.
+| Snapshot condition | HTTP Cat |
+| --- | --- |
+| Complete normal readings with a reason report | 200 OK |
+| Nonzero reason code, raised flag or threshold crossing | 500 Internal Server Error |
+| Missing or incomplete readings | 404 Not Found |
+| Query failure or cached snapshot after a failed refresh | 503 Service Unavailable |
+
+HTTP 400 is excluded at the user's request. No corresponding image, import or runtime mapping is included. The original illustrated sprite has been removed from the active application. Empty graph panels use the 404 photo; query error panels use 503.
+
+The photos have a single 400ms entrance on state change; there are no repeating image animations. The page motion control and reduced-motion preference disable it. Chart entrance transitions are bounded at 500ms; no continuous chart or data animation is used.
 
 Graph legends show the latest returned value per series and can toggle each signal. At least one series stays visible. Flag means use a separate 0–1 right axis; the primary MSE chart retains its existing fixed 0–2 axis. Hover and keyboard inspection share timestamps across charts. The sample history groups at most 80 display segments from actual samples, preserving each bin's most severe state. Missing values are incomplete rather than healthy.
 
-## Cat asset
+## Image credits
 
-Project asset: `src/assets/eagle/telemetry-cat.png` (2172 × 724 transparent PNG, four equal horizontal frames). Generated using the built-in image generation tool; no external meme artwork or animation runtime is used. CSS selects frames without cropping or altering the source bitmap. The original generated output is retained outside the repository.
+The four unchanged JPGs in `src/assets/eagle/http-cat-*.jpg` come from [HTTP Cats](https://http.cat/), using its documented `https://http.cat/<code>.jpg` endpoints. Images are bundled locally for reliable loading, without third-party requests from the dashboard. Original images credited by HTTP Cats to **Tomomi Imura (@girlie_mac)**; site by **Rogério Vicente (@rogeriopvl)** and contributors.
 
-Generation prompt:
-
-> Create a production-ready transparent PNG animation sprite sheet for an enterprise telemetry dashboard. A wide horizontal image, exactly four equal square cells in ONE row, ideally 2048x512. Each cell contains the SAME original white/soft gray meme-style bongo cat at a compact charcoal computer keyboard, looking toward viewer, outlined in crisp dark navy, small cyan collar, tiny pink nose, simple expressive eyes, plush rounded head, two pointy ears, no clothing, no words, no text, no logos, no speech bubbles. Very polished clean 2D character illustration, consistent proportions and registration, graphic internet meme charm but restrained, not childish clipart. Each cat and keyboard entirely inside its cell, centered with generous transparent padding on all edges, same exact baseline and size in every frame; keep paws below face. Cell 1: calm content face, LEFT paw down tapping keyboard, RIGHT paw raised a little. Cell 2: identical calm face, RIGHT paw down tapping keyboard, LEFT paw raised a little (alternate typing animation). Cell 3: attentive surprised cat, both paws resting on keyboard, open alert eyes and small round mouth, no alarm symbol. Cell 4: waiting/sleepy cat with gently closed eyes, chin resting on keyboard, both paws resting. The transparent background is mandatory with genuine alpha. No visible grid or panel borders, no floor, no backdrop, no shadows outside characters. This is a functional sprite sheet, perfectly evenly spaced frames with consistent silhouette, camera and scale. Four cells only. Keep the character white with dark outlines so it reads on both navy and white UI backgrounds.
+Source repository: https://github.com/httpcats/http.cat. Its MIT license is retained in `src/assets/eagle/HTTP-CATS-LICENSE.txt`. Each displayed meme links to its original status page.
