@@ -6,7 +6,7 @@
  * FORM: Operator diagnostic surface, fixed by the supplied brief and incumbent CE dashboard system.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Area,
@@ -14,6 +14,7 @@ import {
   ComposedChart,
   Line,
   ReferenceArea,
+  ReferenceDot,
   ResponsiveContainer,
   Scatter,
   Tooltip,
@@ -29,11 +30,16 @@ import {
   RefreshCw,
   ShieldAlert,
   TriangleAlert,
+  Pause,
+  Play,
+  Network,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
 import { useTheme, useThemeColors } from '../ui/Theme';
-import { ANOMALY_METRICS, DEFAULT_EAGLE_DEVICE_SERIAL, ANOMALY_REASON_LABELS, CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
+import { ANOMALY_METRICS, DEFAULT_EAGLE_DEVICE_SERIAL, CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
+import { EagleStatus, EagleHistory } from '../components/eagle/EagleStatus';
+import { eagleSampleState } from '../ui/eaglePresentation';
 import { useEagleDevices } from '../ui/useEagleDevices';
 import {
   useHardwareAnomalies,
@@ -190,6 +196,11 @@ function usePrefersReducedMotion(): boolean {
 }
 
 export function HardwareAnomaliesPage() {
+  const reducedMotion = usePrefersReducedMotion();
+  const [motionEnabled, setMotionEnabled] = useState(() => {
+    try { return localStorage.getItem('ce-eagle-motion-v1') !== 'paused'; } catch { return true; }
+  });
+  const animate = motionEnabled && !reducedMotion;
   const [searchParams, setSearchParams] = useSearchParams();
   const catalog = useEagleDevices();
   const requestedDevice = searchParams.get('deviceSerial')?.trim();
@@ -211,20 +222,10 @@ export function HardwareAnomaliesPage() {
 
   const points = data?.points ?? EMPTY_ANOMALY_POINTS;
   const latest = points.at(-1) ?? null;
-  const crossings = useMemo(() => points.filter(crossedThreshold), [points]);
-  const flagged = useMemo(() => points.filter((point) => point.anomalyFlag === true), [points]);
-  const unflaggedCrossings = useMemo(
-    () => crossings.filter((point) => point.anomalyFlag !== true),
-    [crossings],
-  );
-  const breachRows = useMemo(
-    () => points
-      .filter((point) => point.anomalyFlag || crossedThreshold(point))
-      .slice()
-      .reverse()
-      .slice(0, 20),
-    [points],
-  );
+  const crossings = points.filter(crossedThreshold);
+  const flagged = points.filter((point) => point.anomalyFlag === true);
+  const unflaggedCrossings = crossings.filter((point) => point.anomalyFlag !== true);
+  const breachRows = points.filter((point) => point.anomalyFlag || crossedThreshold(point)).slice().reverse().slice(0, 20);
 
   const currentStatus = currentAnomalyStatus(latest);
 
@@ -255,6 +256,16 @@ export function HardwareAnomaliesPage() {
                 </button>
               ))}
             </div>
+            <button
+              type="button" className="anomaly-motion-control" disabled={reducedMotion}
+              aria-label={animate ? 'Pause animation' : 'Resume animation'} aria-pressed={animate}
+              title={reducedMotion ? 'Animations follow your reduced motion preference' : undefined}
+              onClick={() => {
+                setMotionEnabled(!motionEnabled);
+                try { localStorage.setItem('ce-eagle-motion-v1', motionEnabled ? 'paused' : 'playing'); } catch { /* Storage is optional. */ }
+              }}>
+              {animate ? <Pause size={14} /> : <Play size={14} />}<span>{animate ? 'Pause motion' : 'Motion off'}</span>
+            </button>
             <button
               type="button"
               className="anomaly-refresh"
@@ -322,31 +333,7 @@ export function HardwareAnomaliesPage() {
         </div>
       )}
 
-      {data && (
-        <Card className="anomaly-reason-card" title="Anomaly reason code" sub="Latest reported value per series in the selected range">
-          {data.reasonCodes.length === 0 ? (
-            <p className="anomaly-panel-empty">No reason code reported in this range.</p>
-          ) : (
-            <dl className="anomaly-reason-list">
-              {data.reasonCodes.map((reason, index) => (
-                <div key={`${JSON.stringify(reason.tags)}-${index}`}>
-                  <dt>{Object.values(reason.tags).join(' · ') || 'Series'}</dt>
-                  <dd>
-                    <strong className="anomaly-reason-value" data-tone={reason.code === 0 ? 'ok' : 'err'}>
-                      {reason.code === 0
-                        ? <CheckCircle2 size={20} aria-hidden="true" />
-                        : <TriangleAlert size={20} aria-hidden="true" />}
-                      <span>{ANOMALY_REASON_LABELS[reason.code] ?? 'Unknown Anomaly'}</span>
-                    </strong>
-                    <span className="anomaly-reason-code">Code {reason.code}</span>
-                    <time dateTime={reason.time}>{formatTableTime(reason.time)}</time>
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </Card>
-      )}
+      {data && <EagleStatus reasons={data.reasonCodes} latest={latest} animate={animate} stale={Boolean(error)} />}
 
       {loading && !data ? (
         <AnomalyLoadingState />
@@ -408,7 +395,7 @@ export function HardwareAnomaliesPage() {
                   </div>
                 }
               >
-                <AnomalyTrace points={points} range={rangeKey} />
+                <AnomalyTrace points={points} range={rangeKey} animate={animate} />
                 <div className="anomaly-trace-meta">
                   <span><strong>{points.length.toLocaleString()}</strong> samples</span>
                   <span><strong>{data?.window || range.window}</strong> returned window</span>
@@ -423,15 +410,15 @@ export function HardwareAnomaliesPage() {
         </>
       )}
       {data && <>
-        <TelemetryChart series={data.anomalyMetrics.map((item) => ({ ...item, measurement: item.metric }))}
+        <TelemetryChart key={`${deviceSerial}-metrics`} series={data.anomalyMetrics.map((item) => ({ ...item, measurement: item.metric }))}
           metrics={ANOMALY_METRICS} labels={ANOMALY_METRIC_LABELS} title="Anomaly metrics"
           description="Window means · confirmed and raw flags retain fractional values from 0 to 1"
-          range={rangeKey} window={data.window || range.window} />
-        <TelemetryChart series={data.conntrack} metrics={CONNTRACK_MEASUREMENTS} labels={CONNTRACK_LABELS}
+          range={rangeKey} window={data.window || range.window} animate={animate} />
+        <TelemetryChart key={`${deviceSerial}-conntrack`} series={data.conntrack} metrics={CONNTRACK_MEASUREMENTS} labels={CONNTRACK_LABELS}
           title="Conntrack (Connection Tracking)" description="Mean connection counts"
-          range={rangeKey} window={data.window || range.window} />
+          range={rangeKey} window={data.window || range.window} animate={animate} />
       </>}
-      {points.length > 0 && <BreachTable rows={breachRows} total={points.length} />}
+      {points.length > 0 && <BreachTable rows={breachRows} points={points} />}
       </>}
     </div>
   );
@@ -440,17 +427,20 @@ export function HardwareAnomaliesPage() {
 const CONNTRACK_LABELS = { conntrack_total: 'Total', conntrack_tcp: 'TCP', conntrack_udp: 'UDP', conntrack_icmp: 'ICMP', conntrack_other: 'Other' };
 const ANOMALY_METRIC_LABELS = { anomaly_mse: 'Reconstruction error (MSE)', anomaly_threshold: 'Learned threshold', anomaly_flag: 'Confirmed flag (mean)', anomaly_raw_flag: 'Raw flag (mean)' };
 
-function TelemetryChart({ series, metrics, labels, title, description, range, window }: {
+function TelemetryChart({ series, metrics, labels, title, description, range, window, animate }: {
   series: (Omit<ConntrackSeries, 'measurement'> & { measurement: string })[];
   metrics: readonly string[]; labels: Readonly<Record<string, string>>; title: string; description: string;
-  range: RangeKey; window: string;
+  range: RangeKey; window: string; animate: boolean;
 }) {
   const colors = useThemeColors();
   const { theme } = useTheme();
+  const fillId = useId();
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+  const isAnomaly = metrics.includes('anomaly_mse');
   const palette = theme === 'light'
-    ? ['#475569', '#047857', '#be185d', '#1d4ed8', '#92400e']
-    : ['#cbd5e1', '#34d399', '#f472b6', '#60a5fa', '#fbbf24'];
-  const orderedSeries = useMemo(() => [...series].sort((a, b) => (
+    ? ['#047857', '#be185d', '#b45309', '#2563eb', '#7c3aed']
+    : ['#5ee7be', '#f99ac3', '#f6c16d', '#8ebcff', '#b9a2ff'];
+  const orderedSeries = useMemo(() => [...series].filter(item => item.points.length).sort((a, b) => (
     metrics.indexOf(a.measurement) - metrics.indexOf(b.measurement)
   )), [series, metrics]);
   const chartPoints = useMemo(() => {
@@ -466,26 +456,44 @@ function TelemetryChart({ series, metrics, labels, title, description, range, wi
   const label = (item: typeof series[number]) => [labels[item.measurement],
     ...Object.entries(item.tags).filter(([key]) => key !== 'device_serial').map(([, value]) => value),
   ].join(' · ');
-  const seriesColor = (item: typeof series[number]) => palette[metrics.indexOf(item.measurement)];
-  const missingMetrics = metrics.filter(metric => !orderedSeries.some(item => item.measurement === metric && item.points.length > 0));
-
+  const seriesColor = (item: typeof series[number]) => palette[metrics.indexOf(item.measurement) % palette.length];
+  const missingMetrics = metrics.filter(metric => !orderedSeries.some(item => item.measurement === metric));
+  const visibleCount = orderedSeries.filter(item => !hidden.has(item.id)).length;
+  const hasFlags = isAnomaly && orderedSeries.some(item => item.measurement.endsWith('flag'));
   return (
-    <Card className="anomaly-conntrack-card" title={title} sub={`${description} · ${window} aggregation window`}>
+    <Card className="anomaly-conntrack-card" title={<span className="anomaly-card-title">{isAnomaly ? <Activity size={16} /> : <Network size={16} />}{title}</span>}
+      sub={`${description} · ${window} aggregation window`} right={<span className="eagle-chart-count">{orderedSeries.length ? `${orderedSeries.length} signals` : 'No samples'}</span>}>
       {chartPoints.length === 0 ? (
-        <p className="anomaly-panel-empty">No {title.toLowerCase()} samples for this device in this range. Choose a longer range or refresh.</p>
+        <div className="eagle-chart-empty"><span className="eagle-empty-symbol"><Network size={30} strokeWidth={1.4} aria-hidden="true" /></span>
+          <div><h3>{isAnomaly ? 'No detector signals in this window' : 'No connection samples in this window'}</h3>
+            <p>No {title.toLowerCase()} samples for this device in this range. Choose a longer range or refresh.</p>
+            <span>Missing telemetry is shown as missing — never as zero.</span></div>
+        </div>
       ) : (
         <>
-          <div className="anomaly-chart-legend" aria-label={`${title} legend`}>
-            {orderedSeries.map((item) => <span key={item.id}><i style={{ background: seriesColor(item) }} />{label(item)}</span>)}
+          <div className="eagle-signal-legend" aria-label={`${title} legend`}>
+            {orderedSeries.map((item) => <button key={item.id} type="button" aria-pressed={!hidden.has(item.id)}
+              aria-label={`${hidden.has(item.id) ? 'Show' : 'Hide'} ${label(item)}`} disabled={!hidden.has(item.id) && visibleCount === 1}
+              title={`Latest returned value · ${new Date(item.points.at(-1)!.time).toLocaleString()}`}
+              onClick={() => setHidden(previous => {
+                const next = new Set(previous); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next;
+              })}>
+              <i style={{ background: seriesColor(item) }} /><span>{label(item)}</span>
+              <strong>{formatMetric(item.points.at(-1)!.value, true)}</strong>
+            </button>)}
           </div>
+          <div className="eagle-chart-notes"><span>Latest returned values · click a signal to show or hide it</span>
+            {hasFlags && <span>Flag means use the right axis, 0–1</span>}</div>
           {missingMetrics.length > 0 && <p className="anomaly-series-note">No samples for: {missingMetrics.map(metric => labels[metric]).join(', ')}.</p>}
           <figure className="anomaly-trace" aria-label={`${title} over the selected range`}>
             <div className="anomaly-chart">
               <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 800, height: 360 }}>
-                <ComposedChart data={chartPoints} margin={{ top: 12, right: 14, left: 2, bottom: 2 }} accessibilityLayer aria-label={`${title} chart`}>
-                  <CartesianGrid stroke={colors.chartGrid} strokeDasharray="3 5" vertical={false} />
+                <ComposedChart data={chartPoints} syncId="eagle-samples" syncMethod="value" margin={{ top: 22, right: 14, left: 2, bottom: 2 }} accessibilityLayer aria-label={`${title} chart`}>
+                  <defs><linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={palette[0]} stopOpacity={0.22} /><stop offset="100%" stopColor={palette[0]} stopOpacity={0.01} /></linearGradient></defs>
+                  <CartesianGrid stroke={colors.chartGrid} strokeDasharray="2 6" vertical={false} />
                   <XAxis dataKey="timestamp" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(value: number) => formatAxisTime(value, range)} stroke={colors.textDim} tickLine={false} axisLine={false} minTickGap={52} fontSize={11} tickMargin={10} />
-                  <YAxis domain={[0, 'auto']} stroke={colors.textDim} tickLine={false} axisLine={false} width={58} fontSize={11} />
+                  <YAxis yAxisId="values" domain={[0, 'auto']} stroke={colors.textDim} tickLine={false} axisLine={false} width={58} fontSize={11} />
+                  {hasFlags && <YAxis yAxisId="flags" orientation="right" domain={[0, 1]} ticks={[0, 0.5, 1]} stroke={colors.textDim} tickLine={false} axisLine={false} width={34} fontSize={11} />}
                   <Tooltip
                     position={{ x: 8, y: 8 }}
                     wrapperStyle={{ maxWidth: 'calc(100% - 16px)' }}
@@ -495,14 +503,18 @@ function TelemetryChart({ series, metrics, labels, title, description, range, wi
                     formatter={(value) => typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 5 }) : String(value)}
                     contentStyle={{ background: colors.panelSolid, borderColor: colors.chartGrid, color: colors.textDim, borderRadius: 12, fontSize: 12 }}
                   />
-                  {orderedSeries.map((item, index) => (
-                    <Line key={item.id} dataKey={`series${index}`} name={label(item)} type="linear" stroke={seriesColor(item)} strokeWidth={item.measurement === 'conntrack_total' ? 2.5 : 1.8} strokeDasharray={item.measurement === 'conntrack_total' ? '7 4' : undefined} dot={item.points.length === 1} isAnimationActive={false} />
-                  ))}
+                  {orderedSeries.map((item, index) => item.measurement === 'conntrack_total'
+                    ? <Area key={item.id} yAxisId="values" hide={hidden.has(item.id)} dataKey={`series${index}`} name={label(item)} type="linear"
+                      fill={`url(#${fillId})`} stroke={seriesColor(item)} strokeWidth={2.5} dot={item.points.length === 1} isAnimationActive={animate} animationDuration={500} />
+                    : <Line key={item.id} hide={hidden.has(item.id)} yAxisId={isAnomaly && item.measurement.endsWith('flag') ? 'flags' : 'values'}
+                      dataKey={`series${index}`} name={label(item)} type={item.measurement.endsWith('threshold') ? 'stepAfter' : 'linear'}
+                      stroke={seriesColor(item)} strokeWidth={2.2} strokeDasharray={item.measurement.endsWith('threshold') ? '6 5' : undefined}
+                      dot={item.points.length === 1} activeDot={{ r: 4, strokeWidth: 2, stroke: colors.panelSolid }} isAnimationActive={animate} animationDuration={500} />)}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
           </figure>
-          <div className="anomaly-trace-meta"><span><strong>{chartPoints.length.toLocaleString()}</strong> sampled windows</span><span><strong>mean</strong> aggregation</span></div>
+          <div className="anomaly-trace-meta"><span><strong>{chartPoints.length.toLocaleString()}</strong> sampled windows</span><span><strong>mean</strong> aggregation</span><span>Hover or use arrow keys to inspect a window</span></div>
         </>
       )}
     </Card>
@@ -564,10 +576,9 @@ function SummaryMetric({
   );
 }
 
-function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range: RangeKey }) {
+function AnomalyTrace({ points, range, animate }: { points: HardwareAnomalyPoint[]; range: RangeKey; animate: boolean }) {
   const colors = useThemeColors();
   const { theme } = useTheme();
-  const reducedMotion = usePrefersReducedMotion();
   const chartPoints = useMemo<ChartPoint[]>(() => points.map((point) => ({
     ...point,
     timestamp: new Date(point.time).getTime(),
@@ -579,7 +590,7 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
   const crossingCount = points.filter(crossedThreshold).length;
   const signalColors = theme === 'light'
     ? { mse: '#047857', threshold: '#be185d', flag: '#b91c1c', axis: '#475569' }
-    : { mse: colors.accent, threshold: colors.accent2, flag: colors.err, axis: colors.textDim };
+    : { mse: '#5ee7be', threshold: '#f99ac3', flag: colors.err, axis: colors.textDim };
 
   return (
     <figure className="anomaly-trace" aria-labelledby="anomaly-trace-caption">
@@ -596,6 +607,7 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
           initialDimension={{ width: 800, height: 360 }}
         >
           <ComposedChart
+            syncId="eagle-samples" syncMethod="value"
             data={chartPoints}
             margin={{ top: 12, right: 14, left: 2, bottom: 2 }}
             accessibilityLayer
@@ -604,8 +616,8 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
           >
             <defs>
               <linearGradient id="anomaly-corridor-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={signalColors.threshold} stopOpacity={0.18} />
-                <stop offset="100%" stopColor={signalColors.threshold} stopOpacity={0.02} />
+                <stop offset="0%" stopColor={signalColors.mse} stopOpacity={0.12} />
+                <stop offset="100%" stopColor={signalColors.mse} stopOpacity={0.01} />
               </linearGradient>
             </defs>
             <CartesianGrid stroke={colors.chartGrid} strokeDasharray="3 5" vertical={false} />
@@ -657,14 +669,14 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
               isAnimationActive={false}
             />
             <Line
-              type="monotone"
+              type="linear"
               dataKey="anomalyMse"
               name="Reconstruction error"
               stroke={signalColors.mse}
               strokeWidth={2.25}
               dot={false}
               activeDot={{ r: 4, strokeWidth: 2, fill: colors.panelSolid }}
-              isAnimationActive={!reducedMotion}
+              isAnimationActive={animate}
               animationDuration={500}
             />
             <Line
@@ -682,8 +694,11 @@ function AnomalyTrace({ points, range }: { points: HardwareAnomalyPoint[]; range
               dataKey="flaggedMse"
               fill={signalColors.flag}
               line={false}
-              isAnimationActive={!reducedMotion}
+              isAnimationActive={animate}
+              animationDuration={450}
             />
+            {chartPoints.at(-1)?.anomalyMse != null && <ReferenceDot x={chartPoints.at(-1)!.timestamp}
+              y={chartPoints.at(-1)!.anomalyMse!} r={4} fill={signalColors.mse} stroke={colors.panelSolid} strokeWidth={2} />}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -729,7 +744,8 @@ function AnomalyTooltip({
   );
 }
 
-function BreachTable({ rows, total }: { rows: HardwareAnomalyPoint[]; total: number }) {
+function BreachTable({ rows, points }: { rows: HardwareAnomalyPoint[]; points: HardwareAnomalyPoint[] }) {
+  const incomplete = points.filter(point => eagleSampleState(point) === 'unknown').length;
   return (
     <Card
       className="anomaly-breach-card"
@@ -740,14 +756,15 @@ function BreachTable({ rows, total }: { rows: HardwareAnomalyPoint[]; total: num
         </span>
       }
       sub="Newest first · flagged windows and unflagged crossings"
-      right={<span className={`badge ${rows.length > 0 ? 'warn' : 'ok'}`}>{rows.length > 0 ? `${rows.length} shown` : 'All clear'}</span>}
+      right={<span className={`badge ${rows.length > 0 ? 'warn' : incomplete ? '' : 'ok'}`}>{rows.length > 0 ? `${rows.length} shown` : incomplete ? 'Partial data' : 'All clear'}</span>}
     >
+      <EagleHistory points={points} />
       {rows.length === 0 ? (
         <div className="anomaly-no-breaches">
           <CheckCircle2 size={22} aria-hidden="true" />
           <div>
-            <strong>No threshold breaches in this range</strong>
-            <span>All {total.toLocaleString()} samples remained within the learned corridor.</span>
+            <strong>{incomplete ? 'No breaches detected in the available values' : 'No threshold breaches in this range'}</strong>
+            <span>{incomplete ? `${incomplete} windows have incomplete metrics or flags. They are not counted as healthy.` : `All ${points.length.toLocaleString()} samples remained within the learned corridor.`}</span>
           </div>
         </div>
       ) : (

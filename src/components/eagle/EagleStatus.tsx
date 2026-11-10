@@ -1,0 +1,74 @@
+import { useEffect, useRef, useState } from 'react';
+import { Check, ChevronDown, CircleHelp, Clock3, TriangleAlert } from 'lucide-react';
+import { ANOMALY_REASON_LABELS, type AnomalyReasonCode } from '../../../shared/eagleTelemetry';
+import { eagleHistorySegments, eagleSampleState, eagleSnapshotMood } from '../../ui/eaglePresentation';
+import type { HardwareAnomalyPoint } from '../../ui/useHardwareAnomalies';
+import catSprite from '../../assets/eagle/telemetry-cat.png';
+
+type Mood = ReturnType<typeof eagleSnapshotMood>;
+function TelemetryCat({ mood, animate }: { mood: Mood; animate: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting));
+    if (ref.current) observer.observe(ref.current);
+    const onVisibility = () => setVisible(!document.hidden);
+    document.addEventListener('visibilitychange', onVisibility);
+    onVisibility();
+    return () => { observer.disconnect(); document.removeEventListener('visibilitychange', onVisibility); };
+  }, []);
+  return <div ref={ref} className="eagle-cat" data-mood={mood} data-playing={animate && inView && visible}>
+    <div className="eagle-cat-sprite" style={{ backgroundImage: `url(${catSprite})` }} aria-hidden="true" />
+    <span>{mood === 'calm' ? 'Looking quiet.' : mood === 'alert' ? 'Worth a closer look.' : 'Waiting for a signal.'}</span>
+    <small>Snapshot companion</small>
+  </div>;
+}
+
+const stamp = (time: string) => new Date(time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+export function EagleStatus({ reasons, latest, animate, stale }: {
+  reasons: AnomalyReasonCode[]; latest: HardwareAnomalyPoint | null; animate: boolean; stale: boolean;
+}) {
+  const mood = eagleSnapshotMood(reasons, latest, stale);
+  const ordered = [...reasons].sort((a, b) => Number(b.code !== 0) - Number(a.code !== 0) || Date.parse(b.time) - Date.parse(a.time));
+  const primary = ordered[0];
+  const title = primary ? ANOMALY_REASON_LABELS[primary.code] ?? 'Unrecognized reason code' : 'Awaiting a reason code';
+  const Icon = !primary ? CircleHelp : primary.code === 0 ? Check : TriangleAlert;
+  return <section className="eagle-status" data-mood={mood} aria-label="Anomaly reason code">
+    <div className="eagle-status-main">
+      <div className="eagle-status-heading"><h2>Anomaly reason code</h2><span className="eagle-snapshot-label"><Clock3 size={12} />{stale ? 'Cached snapshot' : 'Latest report'}</span></div>
+      <div className="eagle-status-result">
+        <div className="eagle-code" data-fault={Boolean(primary && primary.code !== 0)}><span>Code</span><strong>{primary ? String(primary.code).padStart(2, '0') : '—'}</strong></div>
+        <div className="eagle-reason-copy"><h3><Icon size={24} aria-hidden="true" />{title}</h3>
+          <p>{!primary ? 'The selected device has not reported a reason code in this range.' : primary.code === 0
+            ? 'The detector reports normal behavior for this series.' : 'The detector reported this condition. Review the signals and affected sample windows below.'}</p>
+          {primary && <div className="eagle-reason-meta"><span>{Object.values(primary.tags).join(' · ') || 'Device series'}</span><time dateTime={primary.time}>{stamp(primary.time)}</time></div>}
+          {ordered.length > 1 && <div className="eagle-additional-reasons">{ordered.slice(1).map((reason, index) =>
+            <span key={index}>Code {reason.code} · {ANOMALY_REASON_LABELS[reason.code] ?? 'Unknown'} · {Object.values(reason.tags).join(' · ')} · {stamp(reason.time)}</span>)}</div>}
+        </div>
+      </div>
+      <details className="eagle-code-guide"><summary>Understand status codes <ChevronDown size={14} aria-hidden="true" /></summary>
+        <dl>{Object.entries(ANOMALY_REASON_LABELS).map(([code, label]) => <div key={code} data-current={reasons.some(reason => reason.code === Number(code))}>
+          <dt>{code.padStart(2, '0')}</dt><dd>{label}</dd></div>)}</dl>
+        <p>Reported codes and threshold crossings are separate signals. An absent code is not a healthy result.</p>
+      </details>
+    </div>
+    <TelemetryCat mood={mood} animate={animate} />
+  </section>;
+}
+
+const STATE_LABELS = { normal: 'Within threshold', unknown: 'Incomplete', crossed: 'Crossed threshold', flagged: 'Flagged' };
+export function EagleHistory({ points }: { points: HardwareAnomalyPoint[] }) {
+  const segments = eagleHistorySegments(points);
+  const counts = { normal: 0, unknown: 0, crossed: 0, flagged: 0 };
+  points.forEach(point => counts[eagleSampleState(point)]++);
+  return <figure className="eagle-history" aria-label="Sample history by detector state">
+    <div className="eagle-history-track" aria-hidden="true">{segments.map((segment, index) => <span key={index} data-state={segment.state}
+      title={`${stamp(segment.start)} – ${stamp(segment.end)} · ${segment.count} windows · ${STATE_LABELS[segment.state]}`} />)}</div>
+    <figcaption><span>{points.length.toLocaleString()} sampled windows <span className="eagle-history-direction">· oldest → newest</span></span>
+      <span className="eagle-history-legend">{(Object.keys(counts) as (keyof typeof counts)[]).map(state => <span key={state} data-state={state}>
+        <i />{counts[state].toLocaleString()} {STATE_LABELS[state]}</span>)}</span>
+    </figcaption>
+  </figure>;
+}
