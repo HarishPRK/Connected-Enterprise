@@ -589,6 +589,44 @@ async function readLimitedResponse(
   }
 }
 
+/** Discover retained hardware devices, independently of the chart time range. */
+export function buildEagleDevicesFluxQuery(bucket: string): string {
+  return `import "influxdata/influxdb/schema"
+schema.measurementTagValues(
+  bucket: ${fluxString(bucket)},
+  measurement: "hardware_metrics",
+  tag: "device_serial",
+  start: time(v: 0),
+)
+  |> sort(columns: ["_value"])`;
+}
+
+export function parseEagleDevicesCsv(csv: string): string[] {
+  const devices = new Set<string>();
+  let valueIndex = -1;
+  let sawHeader = false;
+  for (const row of parseCsvRecords(csv.replace(/^\uFEFF/, ''))) {
+    if (row.length === 0 || row[0]?.startsWith('#')) continue;
+    if (row.includes('error') && row.includes('reference')) {
+      throw new InfluxSourceError('response', 'InfluxDB returned an error while listing devices.');
+    }
+    if (row.includes('_value')) {
+      valueIndex = row.indexOf('_value');
+      sawHeader = true;
+      continue;
+    }
+    if (valueIndex < 0) continue;
+    const serial = row[valueIndex];
+    // Exclude identifiers the metrics endpoint cannot query safely.
+    if (typeof serial === 'string' && isEagleDeviceSerial(serial)
+      && !['NULL', 'UNKNOWN'].includes(serial.toUpperCase())) devices.add(serial);
+  }
+  if (csv.trim() && !sawHeader) {
+    throw new InfluxSourceError('response', 'InfluxDB returned malformed device CSV data.');
+  }
+  return [...devices].sort();
+}
+
 export class InfluxSource {
   private readonly config: NormalizedInfluxSourceConfig;
 
@@ -621,6 +659,33 @@ export class InfluxSource {
     input: AnomalyQueryInput = {},
     options: InfluxQueryOptions = {},
   ): Promise<AnomalyQueryResult> {
+    const query = resolveAnomalyQuery(input, this.config.now());
+    const csv = await this.queryCsv(buildAnomalyFluxQuery(this.config.bucket, query), options);
+    return {
+      source: {
+        org: this.config.org,
+        bucket: this.config.bucket,
+        measurement: 'hardware_metrics',
+        deviceSerial: query.deviceSerial,
+      },
+      range: { start: query.start, stop: query.stop },
+      window: query.window,
+      aggregations: {
+        anomalyFlag: query.flagAggregation,
+        anomalyMse: query.valueAggregation,
+        anomalyThreshold: query.valueAggregation,
+      },
+      points: parseAnomalyAnnotatedCsv(csv),
+      ...parseEagleAnnotatedCsv(csv),
+    };
+  }
+
+  async listDevices(options: InfluxQueryOptions = {}): Promise<{ devices: string[] }> {
+    const csv = await this.queryCsv(buildEagleDevicesFluxQuery(this.config.bucket), options);
+    return { devices: parseEagleDevicesCsv(csv) };
+  }
+
+  private async queryCsv(flux: string, options: InfluxQueryOptions): Promise<string> {
     if (!this.config.token) {
       throw new InfluxSourceError(
         'configuration',
@@ -628,8 +693,6 @@ export class InfluxSource {
       );
     }
 
-    const query = resolveAnomalyQuery(input, this.config.now());
-    const flux = buildAnomalyFluxQuery(this.config.bucket, query);
     const endpoint = new URL(`${this.config.baseUrl}/api/v2/query`);
     endpoint.searchParams.set('org', this.config.org);
 
@@ -684,7 +747,7 @@ export class InfluxSource {
         await response.body?.cancel().catch(() => undefined);
         const aborted = abortError();
         if (aborted) throw aborted;
-        throw new InfluxSourceError('upstream', 'InfluxDB rejected the anomaly query.');
+        throw new InfluxSourceError('upstream', 'InfluxDB rejected the telemetry query.');
       }
 
       let csv: string;
@@ -700,23 +763,7 @@ export class InfluxSource {
       const aborted = abortError();
       if (aborted) throw aborted;
 
-      return {
-        source: {
-          org: this.config.org,
-          bucket: this.config.bucket,
-          measurement: 'hardware_metrics',
-          deviceSerial: query.deviceSerial,
-        },
-        range: { start: query.start, stop: query.stop },
-        window: query.window,
-        aggregations: {
-          anomalyFlag: query.flagAggregation,
-          anomalyMse: query.valueAggregation,
-          anomalyThreshold: query.valueAggregation,
-        },
-        points: parseAnomalyAnnotatedCsv(csv),
-        ...parseEagleAnnotatedCsv(csv),
-      };
+      return csv;
     } finally {
       clearTimeout(timeout);
       options.signal?.removeEventListener('abort', abortFromCaller);

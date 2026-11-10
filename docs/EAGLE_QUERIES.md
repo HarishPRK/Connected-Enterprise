@@ -1,6 +1,10 @@
 # EA:GLE device-scoped queries
 
-The Device serial field on `/hardware-anomalies` supplies the `deviceSerial` API parameter. Its default is `R95VA4GP000041`; applying another serial stores it in the page URL. Time-range selection and refresh retain that device. The server validates the serial as a literal identifier and applies `device_serial == selectedDevice` before every aggregation, including reason codes.
+The Device serial dropdown on `/hardware-anomalies` lists devices returned by `GET /api/hardware-metrics/devices`. Selecting an option immediately loads that device's metrics and stores `deviceSerial` in the page URL. Time-range selection and refresh retain that device. The server validates the serial as a literal identifier and applies `device_serial == selectedDevice` before every aggregation, including reason codes.
+
+Discovery uses [Influx schema.measurementTagValues](https://docs.influxdata.com/flux/v0/stdlib/influxdata/influxdb/schema/measurementtagvalues/) for the `device_serial` tag on `hardware_metrics`, with `start: time(v: 0)` to include all retained history rather than only the default 30 days. Results are sorted, deduplicated and restricted to identifiers supported by the metrics endpoint; `NULL` and `UNKNOWN` placeholder tags are omitted. No credentials or arbitrary Flux are accepted from the browser. Discovery shares the metrics request concurrency, timeout, cancellation and response-size limits.
+
+Without a URL selection, the page chooses `R95VA4GP000041` when available, otherwise the first discovered device. An unavailable URL selection prompts the user to choose an available device; it never silently shows another device's data. Empty lists and discovery failures have explicit states and a retry control. Changing devices cancels outstanding metric requests and clears the previous device's charts. Refresh devices reloads the catalog without changing the time range.
 
 Data source: the server-configured Influx bucket (default `BGW620`), `_measurement = hardware_metrics`, `_field = value`. Influx credentials remain server-only.
 

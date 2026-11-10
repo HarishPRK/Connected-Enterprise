@@ -175,6 +175,7 @@ async function errorMessage(response: Response): Promise<string> {
 
 export function useHardwareAnomalies(
   query: HardwareAnomalyQuery,
+  enabled = true,
 ): UseHardwareAnomaliesResult {
   const [requestVersion, setRequestVersion] = useState(0);
   const previousQueryKey = useRef<string | null>(null);
@@ -188,6 +189,7 @@ export function useHardwareAnomalies(
   const refresh = useCallback(() => setRequestVersion((version) => version + 1), []);
 
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     const queryKey = [
       query.deviceSerial ?? DEFAULT_EAGLE_DEVICE_SERIAL,
@@ -225,6 +227,9 @@ export function useHardwareAnomalies(
       })
       .then((body) => {
         const data = parseHardwareAnomalyResponse(body);
+        if (data.source.deviceSerial !== (query.deviceSerial ?? DEFAULT_EAGLE_DEVICE_SERIAL)) {
+          throw new Error('The telemetry response belongs to a different device. Refresh to try again.');
+        }
         if (!controller.signal.aborted) {
           setState({ data, loading: false, error: null, fetchedAt: Date.now() });
         }
@@ -240,6 +245,7 @@ export function useHardwareAnomalies(
 
     return () => controller.abort();
   }, [
+    enabled,
     query.deviceSerial,
     query.start,
     query.stop,
@@ -249,5 +255,6 @@ export function useHardwareAnomalies(
     requestVersion,
   ]);
 
-  return { ...state, refresh };
+  const matchesDevice = enabled && state.data?.source.deviceSerial === (query.deviceSerial ?? DEFAULT_EAGLE_DEVICE_SERIAL);
+  return { ...state, data: matchesDevice ? state.data : null, loading: enabled && state.loading, refresh };
 }

@@ -2,14 +2,67 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildAnomalyFluxQuery,
+  buildEagleDevicesFluxQuery,
   InfluxSource,
   InfluxSourceError,
   parseAnomalyAnnotatedCsv,
   parseEagleAnnotatedCsv,
+  parseEagleDevicesCsv,
   resolveAnomalyQuery,
 } from './influxSource.js';
 
 const NOW = Date.parse('2026-08-20T18:00:00.000Z');
+
+const DEVICES_CSV = `#datatype,string,long,string
+#group,false,false,false
+#default,_result,,
+,result,table,_value
+,,0,gateway-b
+,,0,R95VA4GP000041
+,,0,gateway-b
+,,0,branch:gateway_1.0
+,,0,invalid device
+,,0,NULL
+,,0,UNKNOWN
+`;
+
+test('discovers sorted unique retained devices from hardware metrics, without a chart-range or device filter', async () => {
+  let body = '';
+  const source = new InfluxSource({ token: 'test-read-only-token', fetchImpl: async (_url, init) => {
+    body = String(init?.body);
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Token test-read-only-token');
+    return new Response(DEVICES_CSV);
+  } });
+  assert.deepEqual(await source.listDevices(), { devices: ['R95VA4GP000041', 'branch:gateway_1.0', 'gateway-b'] });
+  assert.match(body, /schema.measurementTagValues/);
+  assert.match(body, /measurement: "hardware_metrics"/);
+  assert.match(body, /tag: "device_serial"/);
+  assert.match(body, /start: time\(v: 0\)/);
+  assert.doesNotMatch(body, /R95VA4GP|test-read-only-token|v.timeRange/);
+  assert.match(buildEagleDevicesFluxQuery('bucket"name'), /bucket: "bucket\\"name"/);
+});
+
+test('device discovery handles empty results and rejects malformed or partial error responses', () => {
+  assert.deepEqual(parseEagleDevicesCsv(''), []);
+  assert.deepEqual(parseEagleDevicesCsv(',result,table,_value\r\n'), []);
+  assert.deepEqual(parseEagleDevicesCsv('\uFEFF,result,table,_value\r\n,,0,"gateway-a"\r\n'), ['gateway-a']);
+  for (const csv of ['<html>Error</html>', `${DEVICES_CSV}\n,error,reference\n,private error,123`]) {
+    assert.throws(() => parseEagleDevicesCsv(csv), InfluxSourceError);
+  }
+});
+
+test('device discovery enforces credential, size and timeout protections', async () => {
+  let calls = 0;
+  const missing = new InfluxSource({ fetchImpl: async () => { calls++; return new Response(''); } });
+  assert.equal((await errorOf(missing.listDevices())).kind, 'configuration');
+  assert.equal(calls, 0);
+  const limited = new InfluxSource({ token: 'test', maxResponseBytes: 16, fetchImpl: async () => new Response(DEVICES_CSV) });
+  assert.equal((await errorOf(limited.listDevices())).kind, 'response');
+  const timed = new InfluxSource({ token: 'test', timeoutMs: 10, fetchImpl: async (_url, init) => new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+  }) });
+  assert.equal((await errorOf(timed.listDevices())).kind, 'timeout');
+});
 
 const ANNOTATED_CSV = `#datatype,string,long,dateTime:RFC3339,double,string
 #group,false,false,false,false,false

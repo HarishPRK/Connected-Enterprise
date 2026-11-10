@@ -160,8 +160,8 @@ app.get('/api/ai/capabilities', (_req, res) => {
   res.json(aiCapabilities(llm));
 });
 
-/** Device-scoped EA:GLE telemetry from the hardware-metrics bucket. */
-app.get('/api/hardware-metrics/anomalies', async (req, res) => {
+/** Discovery and device-scoped telemetry share the same upstream request budget. */
+app.get(['/api/hardware-metrics/anomalies', '/api/hardware-metrics/devices'], async (req, res) => {
   res.removeHeader('Access-Control-Allow-Origin');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   res.setHeader('Cache-Control', 'no-store');
@@ -186,14 +186,16 @@ app.get('/api/hardware-metrics/anomalies', async (req, res) => {
     if (!influxSource) {
       throw new InfluxSourceError('configuration', 'InfluxDB query access is not configured.');
     }
-    const result = await influxSource.queryAnomalies({
-      deviceSerial: req.query.deviceSerial,
-      start: req.query.start,
-      stop: req.query.stop,
-      window: req.query.window,
-      flagAggregation: req.query.flagAggregation,
-      valueAggregation: req.query.valueAggregation,
-    }, { signal: clientController.signal });
+    const result = req.path.replace(/\/$/, '') === '/api/hardware-metrics/devices'
+      ? await influxSource.listDevices({ signal: clientController.signal })
+      : await influxSource.queryAnomalies({
+        deviceSerial: req.query.deviceSerial,
+        start: req.query.start,
+        stop: req.query.stop,
+        window: req.query.window,
+        flagAggregation: req.query.flagAggregation,
+        valueAggregation: req.query.valueAggregation,
+      }, { signal: clientController.signal });
     if (!res.destroyed && !res.writableEnded) res.json(result);
   } catch (error) {
     if (res.destroyed || res.writableEnded) return;

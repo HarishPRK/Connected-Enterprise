@@ -33,7 +33,8 @@ import {
 import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
 import { useTheme, useThemeColors } from '../ui/Theme';
-import { ANOMALY_METRICS, DEFAULT_EAGLE_DEVICE_SERIAL, EAGLE_DEVICE_SERIAL_PATTERN, ANOMALY_REASON_LABELS, CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
+import { ANOMALY_METRICS, DEFAULT_EAGLE_DEVICE_SERIAL, ANOMALY_REASON_LABELS, CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
+import { useEagleDevices } from '../ui/useEagleDevices';
 import {
   useHardwareAnomalies,
   type HardwareAnomalyPoint,
@@ -190,7 +191,12 @@ function usePrefersReducedMotion(): boolean {
 
 export function HardwareAnomaliesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const deviceSerial = searchParams.get('deviceSerial')?.trim() || DEFAULT_EAGLE_DEVICE_SERIAL;
+  const catalog = useEagleDevices();
+  const requestedDevice = searchParams.get('deviceSerial')?.trim();
+  const deviceSerial = requestedDevice
+    ? (catalog.devices.includes(requestedDevice) ? requestedDevice : '')
+    : catalog.devices.includes(DEFAULT_EAGLE_DEVICE_SERIAL)
+      ? DEFAULT_EAGLE_DEVICE_SERIAL : catalog.devices[0] ?? '';
   const [rangeKey, setRangeKey] = useState<RangeKey>('24h');
   const range = RANGE_OPTIONS.find((option) => option.key === rangeKey) ?? RANGE_OPTIONS[3];
   const query = useMemo(() => ({
@@ -201,7 +207,7 @@ export function HardwareAnomaliesPage() {
     flagAggregation: 'max' as const,
     valueAggregation: 'mean' as const,
   }), [deviceSerial, range.start, range.window]);
-  const { data, loading, error, fetchedAt, refresh } = useHardwareAnomalies(query);
+  const { data, loading, error, fetchedAt, refresh } = useHardwareAnomalies(query, Boolean(deviceSerial));
 
   const points = data?.points ?? EMPTY_ANOMALY_POINTS;
   const latest = points.at(-1) ?? null;
@@ -231,8 +237,8 @@ export function HardwareAnomaliesPage() {
           <div className="anomaly-header-tools">
             <SourceStatus
               source={data?.source}
-              loading={loading}
-              error={Boolean(error)}
+              loading={loading || catalog.loading}
+              error={Boolean(error || catalog.error)}
               hasData={Boolean(data)}
             />
             <div className="anomaly-range-control" role="group" aria-label="Telemetry time range">
@@ -252,8 +258,8 @@ export function HardwareAnomaliesPage() {
             <button
               type="button"
               className="anomaly-refresh"
-              onClick={refresh}
-              disabled={loading}
+              onClick={() => { refresh(); catalog.refresh(); }}
+              disabled={loading || catalog.loading || !deviceSerial}
               aria-label={loading ? 'Refreshing anomaly telemetry' : 'Refresh anomaly telemetry'}
             >
               <RefreshCw size={14} className={loading ? 'is-spinning' : undefined} aria-hidden="true" />
@@ -263,22 +269,38 @@ export function HardwareAnomaliesPage() {
         }
       />
 
-      <form className="anomaly-device-selector" onSubmit={(event) => {
-        event.preventDefault();
-        const serial = String(new FormData(event.currentTarget).get('deviceSerial') ?? '').trim();
-        setSearchParams((previous) => {
-          const next = new URLSearchParams(previous);
-          next.set('deviceSerial', serial);
-          return next;
-        });
-      }}>
+      <div className="anomaly-device-selector">
         <label htmlFor="eagle-device-serial">Device serial</label>
-        <input key={deviceSerial} id="eagle-device-serial" name="deviceSerial" defaultValue={deviceSerial}
-          required maxLength={128} pattern={EAGLE_DEVICE_SERIAL_PATTERN} autoComplete="off" spellCheck={false}
-          title="Enter a device serial using letters, numbers, dots, underscores, colons or hyphens." />
-        <button type="submit">Apply device</button>
-        <span>All charts use this device.</span>
-      </form>
+        <select id="eagle-device-serial" value={deviceSerial} disabled={!catalog.devices.length}
+          aria-describedby="eagle-device-help" onChange={(event) => {
+            const serial = event.target.value;
+            setSearchParams((previous) => {
+              const next = new URLSearchParams(previous);
+              next.set('deviceSerial', serial);
+              return next;
+            });
+          }}>
+          {!deviceSerial && <option value="" disabled>{catalog.loading ? 'Loading devices…' : 'Select a device'}</option>}
+          {catalog.devices.map((serial) => <option key={serial} value={serial}>{serial}</option>)}
+        </select>
+        <span id="eagle-device-help">{catalog.devices.length
+          ? `${catalog.devices.length} ${catalog.devices.length === 1 ? 'device' : 'devices'} · All charts follow your selection.`
+          : 'Devices with hardware telemetry in InfluxDB.'}</span>
+        <button type="button" onClick={catalog.refresh} disabled={catalog.loading}>
+          {catalog.loading ? 'Loading devices…' : catalog.error ? 'Retry device list' : 'Refresh devices'}
+        </button>
+      </div>
+      {catalog.error && <p className="anomaly-panel-empty" role="alert">{catalog.error}</p>}
+      {!deviceSerial ? (
+        <Card title="Choose a device">
+          <p className="anomaly-panel-empty" role="status">
+            {catalog.loading ? 'Loading available devices…' : catalog.error
+              ? 'Retry the device list to load metrics.' : !catalog.devices.length
+                ? 'No devices with hardware telemetry were found in InfluxDB.'
+                : `Device ${requestedDevice} is not in the available list. Select a device above.`}
+          </p>
+        </Card>
+      ) : <>
 
       <p className="anomaly-live-region" aria-live="polite">
         {loading
@@ -410,6 +432,7 @@ export function HardwareAnomaliesPage() {
           range={rangeKey} window={data.window || range.window} />
       </>}
       {points.length > 0 && <BreachTable rows={breachRows} total={points.length} />}
+      </>}
     </div>
   );
 }
