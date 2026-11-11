@@ -763,13 +763,9 @@
 .eagle-code-guide dd { margin: 0; font-size: 11px; }
 .eagle-code-guide [data-current="true"] { color: var(--text); font-weight: 600; }
 .eagle-code-guide p { color: var(--text-dim); margin: 8px 0 0; font-size: 11px; line-height: 1.5; }
-.eagle-cat { display: grid; gap: 8px; justify-items: center; align-content: center; margin: 0; padding-left: 20px; border-left: 1px solid var(--border); min-width: 0; }
+.eagle-cat { display: grid; justify-items: center; align-content: center; margin: 0; padding-left: 20px; border-left: 1px solid var(--border); min-width: 0; }
 .eagle-cat img { display: block; width: 100%; max-width: 250px; height: auto; border-radius: 9px; background: #000; }
 .eagle-cat[data-animate="true"] img { animation: eagle-cat-arrive 400ms ease-out both; }
-.eagle-cat figcaption { display: grid; gap: 4px; text-align: center; font-size: 11px; }
-.eagle-cat figcaption a { color: var(--text); text-underline-offset: 3px; }
-.eagle-cat figcaption a:hover { text-decoration: underline; }
-.eagle-cat figcaption span { color: var(--text-dim); font-size: 10px; }
 .eagle-cat.eagle-cat-compact { width: 150px; flex: 0 0 150px; padding: 0; border: 0; }
 @keyframes eagle-cat-arrive { from { opacity: .4; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .anomaly-summary { box-shadow: none; }
@@ -829,10 +825,9 @@
   .eagle-reason-copy h3 { font-size: 22px; gap: 8px; }
   .eagle-reason-copy h3 svg { width: 20px; }
   .eagle-code-guide dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .eagle-cat { border-left: 0; grid-template-columns: 130px minmax(0, 1fr); padding: 14px 0 0; gap: 12px; align-items: center; }
-  .eagle-cat figcaption { text-align: left; }
+  .eagle-cat { border-left: 0; grid-template-columns: 1fr; padding: 14px 0 0; align-items: center; }
+  .eagle-status .eagle-cat img { max-width: 180px; }
   .eagle-cat.eagle-cat-compact { grid-template-columns: 1fr; width: 110px; flex-basis: 110px; padding: 0; }
-  .eagle-cat-compact figcaption { text-align: center; }
   .anomaly-summary, .anomaly-loading-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .anomaly-summary-item { padding: 12px; gap: 6px; }
   .anomaly-summary-icon { display: none; }

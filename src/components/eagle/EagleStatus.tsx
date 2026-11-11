@@ -22,8 +22,6 @@ export function EagleHttpCat({ mood, animate = false, unavailable = false, compa
   const cat = HTTP_CATS[code];
   return <figure className={`eagle-cat${compact ? ' eagle-cat-compact' : ''}`} data-mood={mood} data-animate={animate}>
     <img key={code} src={cat.image} alt={`HTTP Cats meme: ${cat.label}`} width={750} height={600} decoding="async" />
-    <figcaption><a href={`https://http.cat/status/${code}`} target="_blank" rel="noreferrer">HTTP Cats ↗</a>
-      <span>HTTP meme · visual reaction</span></figcaption>
   </figure>;
 }
 
