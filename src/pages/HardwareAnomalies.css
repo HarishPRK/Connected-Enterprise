@@ -733,7 +733,7 @@
 .anomaly-device-selector { padding: 12px 0 18px; margin-bottom: 0; }
 .anomaly-device-selector > span { flex: 1; }
 .anomaly-device-selector button { padding-inline: 10px; }
-.eagle-status { display: grid; grid-template-columns: minmax(0, 1fr) 270px; align-items: center; gap: 26px; padding: 22px 28px; margin-bottom: 18px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--panel); }
+.eagle-status { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 26px; padding: 22px 28px; margin-bottom: 18px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--panel); }
 .eagle-status-main { min-width: 0; }
 .eagle-status-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px; }
 .eagle-status h2 { margin: 0; font-size: 14px; font-weight: 600; }
@@ -763,13 +763,6 @@
 .eagle-code-guide dd { margin: 0; font-size: 11px; }
 .eagle-code-guide [data-current="true"] { color: var(--text); font-weight: 600; }
 .eagle-code-guide p { color: var(--text-dim); margin: 8px 0 0; font-size: 11px; line-height: 1.5; }
-.eagle-cat { display: grid; justify-items: center; align-content: center; margin: 0; padding-left: 20px; border-left: 1px solid var(--border); min-width: 0; }
-.eagle-cat-photo { position: relative; width: 100%; max-width: 250px; aspect-ratio: 3 / 2; overflow: hidden; border-radius: 9px; }
-/* Show only the 600 × 400 photograph at (75, 50), excluding the meme's HTTP caption. */
-.eagle-cat-photo img { position: absolute; display: block; width: 125%; max-width: none; height: auto; left: -12.5%; top: -12.5%; }
-.eagle-cat[data-animate="true"] .eagle-cat-photo { animation: eagle-cat-arrive 400ms ease-out both; }
-.eagle-cat.eagle-cat-compact { width: 150px; flex: 0 0 150px; padding: 0; border: 0; }
-@keyframes eagle-cat-arrive { from { opacity: .4; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .anomaly-summary { box-shadow: none; }
 .anomaly-summary-item { padding: 18px; }
 .anomaly-summary-label { text-transform: none; letter-spacing: 0; font-size: 12px; margin-bottom: 4px; }
@@ -811,8 +804,7 @@
 .eagle-history-legend i { height: 6px; width: 6px; border-radius: 50%; background: var(--history-color); }
 .anomaly-no-breaches { min-height: 64px; justify-content: flex-start; padding: 12px 0; border-top: 1px solid var(--border); }
 @media (max-width: 1100px) {
-  .eagle-status { padding: 18px 20px; gap: 18px; grid-template-columns: minmax(0, 1fr) 220px; }
-  .eagle-cat { padding-left: 12px; }
+  .eagle-status { padding: 18px 20px; gap: 18px; grid-template-columns: minmax(0, 1fr); }
   .anomaly-header-tools { justify-content: flex-start; }
 }
 @media (max-width: 600px) {
@@ -827,9 +819,6 @@
   .eagle-reason-copy h3 { font-size: 22px; gap: 8px; }
   .eagle-reason-copy h3 svg { width: 20px; }
   .eagle-code-guide dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .eagle-cat { border-left: 0; grid-template-columns: 1fr; padding: 14px 0 0; align-items: center; }
-  .eagle-status .eagle-cat-photo { max-width: 180px; }
-  .eagle-cat.eagle-cat-compact { grid-template-columns: 1fr; width: 110px; flex-basis: 110px; padding: 0; }
   .anomaly-summary, .anomaly-loading-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .anomaly-summary-item { padding: 12px; gap: 6px; }
   .anomaly-summary-icon { display: none; }
@@ -849,6 +838,5 @@
   .eagle-signal-legend strong { margin-left: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .eagle-cat[data-animate] .eagle-cat-photo { animation: none; }
   .eagle-signal-legend button, .eagle-code-guide summary svg { transition: none; }
 }

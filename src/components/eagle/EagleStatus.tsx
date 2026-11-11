@@ -1,36 +1,12 @@
 import { Check, ChevronDown, CircleHelp, Clock3, TriangleAlert } from 'lucide-react';
 import { ANOMALY_REASON_LABELS, type AnomalyReasonCode } from '../../../shared/eagleTelemetry';
-import { eagleHistorySegments, eagleHttpCatCode, eagleSampleState, eagleSnapshotMood } from '../../ui/eaglePresentation';
+import { eagleHistorySegments, eagleSampleState, eagleSnapshotMood } from '../../ui/eaglePresentation';
 import type { HardwareAnomalyPoint } from '../../ui/useHardwareAnomalies';
-import cat200 from '../../assets/eagle/http-cat-200.jpg';
-import cat404 from '../../assets/eagle/http-cat-404.jpg';
-import cat500 from '../../assets/eagle/http-cat-500.jpg';
-import cat503 from '../../assets/eagle/http-cat-503.jpg';
-
-type Mood = ReturnType<typeof eagleSnapshotMood>;
-const HTTP_CATS = {
-  200: { image: cat200, description: 'Calm cat beside a laptop' },
-  404: { image: cat404, description: 'Cat hiding in a paper bag' },
-  500: { image: cat500, description: 'Cat investigating a computer' },
-  503: { image: cat503, description: 'Cat resting inside a monitor' },
-};
-
-export function EagleHttpCat({ mood, animate = false, unavailable = false, compact = false }: {
-  mood: Mood; animate?: boolean; unavailable?: boolean; compact?: boolean;
-}) {
-  const code = eagleHttpCatCode(mood, unavailable);
-  const cat = HTTP_CATS[code];
-  return <figure className={`eagle-cat${compact ? ' eagle-cat-compact' : ''}`} data-mood={mood} data-animate={animate}>
-    <div key={code} className="eagle-cat-photo">
-      <img src={cat.image} alt={cat.description} width={750} height={600} decoding="async" />
-    </div>
-  </figure>;
-}
 
 const stamp = (time: string) => new Date(time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-export function EagleStatus({ reasons, latest, animate, stale }: {
-  reasons: AnomalyReasonCode[]; latest: HardwareAnomalyPoint | null; animate: boolean; stale: boolean;
+export function EagleStatus({ reasons, latest, stale }: {
+  reasons: AnomalyReasonCode[]; latest: HardwareAnomalyPoint | null; stale: boolean;
 }) {
   const mood = eagleSnapshotMood(reasons, latest, stale);
   const ordered = [...reasons].sort((a, b) => Number(b.code !== 0) - Number(a.code !== 0) || Date.parse(b.time) - Date.parse(a.time));
@@ -56,7 +32,6 @@ export function EagleStatus({ reasons, latest, animate, stale }: {
         <p>Reported codes and threshold crossings are separate signals. An absent code is not a healthy result.</p>
       </details>
     </div>
-    <EagleHttpCat mood={mood} animate={animate} unavailable={stale} />
   </section>;
 }
 

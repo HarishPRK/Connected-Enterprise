@@ -38,7 +38,7 @@ import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
 import { useTheme, useThemeColors } from '../ui/Theme';
 import { ANOMALY_METRICS, DEFAULT_EAGLE_DEVICE_SERIAL, CONNTRACK_MEASUREMENTS, type ConntrackSeries } from '../../shared/eagleTelemetry';
-import { EagleStatus, EagleHistory, EagleHttpCat } from '../components/eagle/EagleStatus';
+import { EagleStatus, EagleHistory } from '../components/eagle/EagleStatus';
 import { eagleSampleState } from '../ui/eaglePresentation';
 import { useEagleDevices } from '../ui/useEagleDevices';
 import {
@@ -333,7 +333,7 @@ export function HardwareAnomaliesPage() {
         </div>
       )}
 
-      {data && <EagleStatus reasons={data.reasonCodes} latest={latest} animate={animate} stale={Boolean(error)} />}
+      {data && <EagleStatus reasons={data.reasonCodes} latest={latest} stale={Boolean(error)} />}
 
       {loading && !data ? (
         <AnomalyLoadingState />
@@ -464,7 +464,7 @@ function TelemetryChart({ series, metrics, labels, title, description, range, wi
     <Card className="anomaly-conntrack-card" title={<span className="anomaly-card-title">{isAnomaly ? <Activity size={16} /> : <Network size={16} />}{title}</span>}
       sub={`${description} · ${window} aggregation window`} right={<span className="eagle-chart-count">{orderedSeries.length ? `${orderedSeries.length} signals` : 'No samples'}</span>}>
       {chartPoints.length === 0 ? (
-        <div className="eagle-chart-empty"><EagleHttpCat mood="waiting" compact />
+        <div className="eagle-chart-empty">
           <div><h3>{isAnomaly ? 'No detector signals in this window' : 'No connection samples in this window'}</h3>
             <p>No {title.toLowerCase()} samples for this device in this range. Choose a longer range or refresh.</p>
             <span>Missing telemetry is shown as missing — never as zero.</span></div>
@@ -842,7 +842,6 @@ function AnomalyLoadingState() {
 function AnomalyErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <Card className="anomaly-state-card">
-      <EagleHttpCat mood="waiting" unavailable compact />
       <div>
         <h2>Anomaly telemetry is unavailable</h2>
         <p>{message} Check the server’s InfluxDB connection, then retry this query.</p>
