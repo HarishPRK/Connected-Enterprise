@@ -1,6 +1,6 @@
 # EA:GLE visual states
 
-The status panel retains exact Influx reason codes, series tags and timestamps. Its expandable reference lists the mappings from `shared/eagleTelemetry.ts`. HTTP Cats provide visual reactions alongside the real detector code. The HTTP code printed on a meme never replaces a detector code or represents an actual API response.
+The status panel retains exact Influx reason codes, series tags and timestamps. Its expandable reference lists the mappings from `shared/eagleTelemetry.ts`. Cat photos provide visual reactions alongside the real detector code. A clipped viewport shows only the photograph; the source image's printed HTTP number and label are hidden because these reactions do not represent API response codes. Alternative text describes the photograph without an HTTP code or label.
 
 | Snapshot condition | HTTP Cat |
 | --- | --- |
@@ -19,4 +19,4 @@ Graph legends show the latest returned value per series and can toggle each sign
 
 The four unchanged JPGs in `src/assets/eagle/http-cat-*.jpg` come from [HTTP Cats](https://http.cat/), using its documented `https://http.cat/<code>.jpg` endpoints. Images are bundled locally for reliable loading, without third-party requests from the dashboard. Original images credited by HTTP Cats to **Tomomi Imura (@girlie_mac)**; site by **Rogério Vicente (@rogeriopvl)** and contributors.
 
-Source repository: https://github.com/httpcats/http.cat. Its MIT license is retained in `src/assets/eagle/HTTP-CATS-LICENSE.txt`. The dashboard displays only the cat image, without a visible caption or source link; attribution is retained here.
+Source repository: https://github.com/httpcats/http.cat. Its MIT license is retained in `src/assets/eagle/HTTP-CATS-LICENSE.txt`. The dashboard displays only the photographic area (600 × 400 pixels at x=75, y=50 in each 750 × 600 original), without a visible caption or source link; attribution is retained here. The source JPGs remain unchanged.

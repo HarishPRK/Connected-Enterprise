@@ -9,10 +9,10 @@ import cat503 from '../../assets/eagle/http-cat-503.jpg';
 
 type Mood = ReturnType<typeof eagleSnapshotMood>;
 const HTTP_CATS = {
-  200: { image: cat200, label: '200 OK' },
-  404: { image: cat404, label: '404 Not Found' },
-  500: { image: cat500, label: '500 Internal Server Error' },
-  503: { image: cat503, label: '503 Service Unavailable' },
+  200: { image: cat200, description: 'Calm cat beside a laptop' },
+  404: { image: cat404, description: 'Cat hiding in a paper bag' },
+  500: { image: cat500, description: 'Cat investigating a computer' },
+  503: { image: cat503, description: 'Cat resting inside a monitor' },
 };
 
 export function EagleHttpCat({ mood, animate = false, unavailable = false, compact = false }: {
@@ -21,7 +21,9 @@ export function EagleHttpCat({ mood, animate = false, unavailable = false, compa
   const code = eagleHttpCatCode(mood, unavailable);
   const cat = HTTP_CATS[code];
   return <figure className={`eagle-cat${compact ? ' eagle-cat-compact' : ''}`} data-mood={mood} data-animate={animate}>
-    <img key={code} src={cat.image} alt={`HTTP Cats meme: ${cat.label}`} width={750} height={600} decoding="async" />
+    <div key={code} className="eagle-cat-photo">
+      <img src={cat.image} alt={cat.description} width={750} height={600} decoding="async" />
+    </div>
   </figure>;
 }
 
