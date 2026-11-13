@@ -1,3 +1,17 @@
+.va-kpi-strip.kpi-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.va-streams-card { min-width: 0; }
+.va-streams-card .card-head { flex-wrap: wrap; }
+.va-streams-card .va-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+@media (max-width: 1100px) {
+  .va-kpi-strip.kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .va-kpi-strip .kpi-card { padding: 12px; }
+  .va-kpi-strip .kpi-top { align-items: flex-start; }
+  .va-kpi-strip .kpi-label { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+  .va-kpi-strip .kpi-value { font-size: 20px; white-space: normal; overflow-wrap: anywhere; }
+}
+
 .va-alert-controls {
   display: flex;
   align-items: center;

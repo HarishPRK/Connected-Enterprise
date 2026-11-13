@@ -105,7 +105,7 @@ export function VideoAnalyticsPage() {
         }}>{alertsPaused ? 'Resume alerts' : 'Pause alerts'}</button>
       </section>
 
-      <div className="kpi-strip">
+      <div className="kpi-strip va-kpi-strip">
         <Kpi label="Available streams" value={String(STREAMS.length)} sub="All analytics in one place" icon={Video} accent="var(--accent)" />
         <Kpi label="Under the hood" value="DELL" sub="Video analytics platform" icon={Cpu} accent="var(--ok)" />
         <Kpi label="Transport"        value="MJPEG / HTTP"          sub="loaded on demand"        icon={Wifi} accent="var(--accent2)" />
@@ -136,6 +136,7 @@ function DellStreamsCard({
 }) {
   return (
     <Card
+      className="va-streams-card"
       title={
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <span style={{
