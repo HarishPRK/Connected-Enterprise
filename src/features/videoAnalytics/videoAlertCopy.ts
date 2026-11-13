@@ -32,9 +32,6 @@ const STREAM_SAFETY_COPY: Record<string, StreamSafetyCopy> = {
   'nv-ppe': {
     instruction: 'Check the PPE compliance feed for a missing hard hat or safety vest.',
   },
-  'nv-table': {
-    instruction: 'Check the Table monitor feed for an occupancy or dwell-time exception.',
-  },
   'nv-weapon': {
     instruction: 'Check the Weapon detection feed immediately and follow the site security procedure.',
   },
@@ -47,17 +44,11 @@ const STREAM_SAFETY_COPY: Record<string, StreamSafetyCopy> = {
   'ha-intruder': {
     instruction: 'Check the Intruder detection feed immediately and follow the site security procedure.',
   },
-  'ha-hairnet': {
-    instruction: 'Check the Hairnet monitor feed for a person without the required hair covering.',
-  },
   'ha-fire': {
     instruction: 'Check the Fire detection feed immediately and follow the site emergency procedure.',
   },
   'ha-crowd': {
     instruction: 'Check the Crowd analytics feed for unsafe density or restricted flow.',
-  },
-  'ha-drive': {
-    instruction: 'Check the Drive-thru monitor feed for a blocked lane or excessive wait time.',
   },
 };
 

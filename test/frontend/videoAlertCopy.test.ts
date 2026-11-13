@@ -28,10 +28,10 @@ test('critical relay copy gives verified-feed context without claiming detector 
   assert.match(fall.detail, /does not identify which detector originated/i);
   assert.match(fall.detail, /site safety procedure/i);
 
-  const hairnet = buildVideoAlertToast(event('ON_4'), { id: 'ha-hairnet', name: 'Hairnet monitor' });
-  assert.equal(hairnet.title, 'Critical video analytics alert');
-  assert.match(hairnet.detail, /Current verified feed: Hairnet monitor/i);
-  assert.match(hairnet.detail, /missing hairnet|required hair covering/i);
+  const fire = buildVideoAlertToast(event('ON_4'), { id: 'ha-fire', name: 'Fire detection' });
+  assert.equal(fire.title, 'Critical video analytics alert');
+  assert.match(fire.detail, /Current verified feed: Fire detection/i);
+  assert.match(fire.detail, /site emergency procedure/i);
 
   const violence = buildVideoAlertToast(event('ON_4'), { id: 'nv-violence', name: 'Violence detection' });
   assert.equal(violence.title, 'Critical video analytics alert');

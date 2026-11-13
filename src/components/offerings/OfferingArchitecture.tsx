@@ -94,10 +94,10 @@ const OFFERINGS: Offering[] = [
     id: 'video-analytics', name: 'Video Analytics', ml: true,
     icon: Video, accent: 'var(--accent-3)', rgbVar: '--accent-3-rgb',
     capabilities: [
-      'Real-time video inference on edge GPU and NPU pipelines',
+      'Real-time video inference powered by DELL',
       'Fall, intrusion, fire and weapon detection',
-      'PPE and hairnet compliance monitoring',
-      'Inventory, occupancy and crowd analytics',
+      'PPE compliance monitoring',
+      'Inventory, parking and crowd analytics',
       'Live detection alerts for operators',
     ],
   },

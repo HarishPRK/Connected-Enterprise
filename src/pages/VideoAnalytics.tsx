@@ -11,47 +11,33 @@ import {
 } from 'lucide-react';
 import './VideoAnalytics.css';
 
-type StreamGroup = 'Nvidia' | 'Hailo';
-
 interface VideoStream {
   id: string;
   name: string;
   description: string;
   url: string;
   stopUrl?: string;
-  group: StreamGroup;
 }
 
 /** Stream URLs route through the local Express server at `/api/video/:id`.
  *  In dev, Vite proxies `/api/*` to localhost:3001. In prod, same-origin on EC2.
  *  The server resolves each id to a real upstream URL — configurable per stream
- *  via VIDEO_UPSTREAM_<ID>, or by group via VIDEO_BASE_NVIDIA / VIDEO_BASE_HAILO. */
+ *  via VIDEO_UPSTREAM_<ID>. Existing proxy IDs remain compatible with the
+ *  configured upstreams; all streams are presented on the DELL platform. */
 const STREAMS: VideoStream[] = [
-  // ── Nvidia · GPU inference
-  { id: 'nv-nanoowl',  name: 'Inventory Management', description: 'Open-vocabulary object detection',  url: '/api/video/nv-nanoowl',  stopUrl: '/api/video/nv-nanoowl/stop',  group: 'Nvidia' },
-  { id: 'nv-violence', name: 'Violence detection', description: 'Aggressive-behaviour classifier',     url: '/api/video/nv-violence', stopUrl: '/api/video/nv-violence/stop', group: 'Nvidia' },
-  { id: 'nv-fall',     name: 'Fall detection',     description: 'Detects person falls in zones',       url: '/api/video/nv-fall',     stopUrl: '/api/video/nv-fall/stop',     group: 'Nvidia' },
-  { id: 'nv-ppe',      name: 'PPE compliance',     description: 'Hard-hat · vest',                     url: '/api/video/nv-ppe',      stopUrl: '/api/video/nv-ppe/stop',      group: 'Nvidia' },
-  { id: 'nv-table',    name: 'Table monitor',      description: 'Table occupancy and dwell-time',      url: '/api/video/nv-table',    group: 'Nvidia' },
-  { id: 'nv-weapon',   name: 'Weapon detection',   description: 'Firearms and edged-weapon classifier', url: '/api/video/nv-weapon',   group: 'Nvidia' },
-  { id: 'nv-parking',  name: 'Parking monitor',    description: 'Bay occupancy and dwell-time',        url: '/api/video/nv-parking',  group: 'Nvidia' },
-  // ── Hailo · NPU inference
-  { id: 'ha-anpd',     name: 'ANPR',               description: 'Automatic number-plate recognition',  url: '/api/video/ha-anpd',     group: 'Hailo' },
-  { id: 'ha-intruder', name: 'Intruder detection', description: 'Perimeter intrusion alerts',          url: '/api/video/ha-intruder', stopUrl: '/api/video/ha-intruder/stop', group: 'Hailo' },
-  { id: 'ha-hairnet',  name: 'Hairnet monitor',    description: 'Food-safety hairnet compliance',      url: '/api/video/ha-hairnet',  stopUrl: '/api/video/ha-hairnet/stop',  group: 'Hailo' },
-  { id: 'ha-fire',     name: 'Fire detection',     description: 'Smoke and flame classifier',          url: '/api/video/ha-fire',     stopUrl: '/api/video/ha-fire/stop',     group: 'Hailo' },
-  { id: 'ha-crowd',    name: 'Crowd analytics',    description: 'Density and flow analysis',           url: '/api/video/ha-crowd',    stopUrl: '/api/video/ha-crowd/stop',    group: 'Hailo' },
-  { id: 'ha-drive',    name: 'Drive-thru monitor', description: 'Lane occupancy and wait time',        url: '/api/video/ha-drive',    group: 'Hailo' },
+  { id: 'nv-nanoowl',  name: 'Inventory Management', description: 'Open-vocabulary object detection',  url: '/api/video/nv-nanoowl',  stopUrl: '/api/video/nv-nanoowl/stop' },
+  { id: 'nv-violence', name: 'Violence detection', description: 'Aggressive-behaviour classifier',     url: '/api/video/nv-violence', stopUrl: '/api/video/nv-violence/stop' },
+  { id: 'nv-fall',     name: 'Fall detection',     description: 'Detects person falls in zones',       url: '/api/video/nv-fall',     stopUrl: '/api/video/nv-fall/stop' },
+  { id: 'nv-ppe',      name: 'PPE compliance',     description: 'Hard-hat · vest',                     url: '/api/video/nv-ppe',      stopUrl: '/api/video/nv-ppe/stop' },
+  { id: 'nv-weapon',   name: 'Weapon detection',   description: 'Firearms and edged-weapon classifier', url: '/api/video/nv-weapon' },
+  { id: 'nv-parking',  name: 'Parking monitor',    description: 'Bay occupancy and dwell-time',        url: '/api/video/nv-parking' },
+  { id: 'ha-anpd',     name: 'ANPR',               description: 'Automatic number-plate recognition',  url: '/api/video/ha-anpd' },
+  { id: 'ha-intruder', name: 'Intruder detection', description: 'Perimeter intrusion alerts',          url: '/api/video/ha-intruder', stopUrl: '/api/video/ha-intruder/stop' },
+  { id: 'ha-fire',     name: 'Fire detection',     description: 'Smoke and flame classifier',          url: '/api/video/ha-fire',     stopUrl: '/api/video/ha-fire/stop' },
+  { id: 'ha-crowd',    name: 'Crowd analytics',    description: 'Density and flow analysis',           url: '/api/video/ha-crowd',    stopUrl: '/api/video/ha-crowd/stop' },
 ];
 
-const GROUP_META: Record<StreamGroup, { color: string; sub: string }> = {
-  Nvidia: { color: 'var(--ok)',      sub: 'GPU inference pipeline' },
-  Hailo:  { color: 'var(--accent3)', sub: 'NPU inference pipeline' },
-};
-
 export function VideoAnalyticsPage() {
-  const nvidia = useMemo(() => STREAMS.filter((s) => s.group === 'Nvidia'), []);
-  const hailo  = useMemo(() => STREAMS.filter((s) => s.group === 'Hailo'),  []);
   const { push, dismissByPrefix } = useToast();
   const { paused: alertsPaused, resumedAt, setPaused: setAlertsPaused } = useVideoAlertPause();
   const relay = useVideoAlerts();
@@ -101,7 +87,7 @@ export function VideoAnalyticsPage() {
     <>
       <PageHeader
         title="Video Analytics"
-        subtitle="Live inference feeds from edge GPU and NPU pipelines. Each tile shows a preview — click Open to start the stream in fullscreen."
+        subtitle="Video analytics powered by DELL. Choose Open feed to start a live stream in fullscreen."
       />
 
       <section className="va-alert-controls" aria-label="Video alert notifications" data-paused={alertsPaused}>
@@ -120,9 +106,8 @@ export function VideoAnalyticsPage() {
       </section>
 
       <div className="kpi-strip">
-        <Kpi label="Active pipelines" value={String(STREAMS.length)} sub={`${nvidia.length} Nvidia · ${hailo.length} Hailo`} icon={Video} accent="var(--accent)" />
-        <Kpi label="Nvidia analytics" value={String(nvidia.length)} sub="GPU inference"           icon={Cpu}  accent="var(--ok)" />
-        <Kpi label="Hailo analytics"  value={String(hailo.length)}  sub="NPU inference"           icon={Cpu}  accent="var(--accent3)" />
+        <Kpi label="Available streams" value={String(STREAMS.length)} sub="All analytics in one place" icon={Video} accent="var(--accent)" />
+        <Kpi label="Under the hood" value="DELL" sub="Video analytics platform" icon={Cpu} accent="var(--ok)" />
         <Kpi label="Transport"        value="MJPEG / HTTP"          sub="loaded on demand"        icon={Wifi} accent="var(--accent2)" />
         <Kpi
           label="Safety relay"
@@ -135,26 +120,20 @@ export function VideoAnalyticsPage() {
 
       <div className="grid">
         <div className="col-12">
-          <StreamGroupCard group="Nvidia" streams={nvidia} onStreamActivity={handleStreamActivity} />
-        </div>
-        <div className="col-12">
-          <StreamGroupCard group="Hailo" streams={hailo} onStreamActivity={handleStreamActivity} />
+          <DellStreamsCard streams={STREAMS} onStreamActivity={handleStreamActivity} />
         </div>
       </div>
     </>
   );
 }
 
-function StreamGroupCard({
-  group,
+function DellStreamsCard({
   streams,
   onStreamActivity,
 }: {
-  group: StreamGroup;
   streams: VideoStream[];
   onStreamActivity: (stream: VideoStream, active: boolean) => void;
 }) {
-  const meta = GROUP_META[group];
   return (
     <Card
       title={
@@ -162,19 +141,19 @@ function StreamGroupCard({
           <span style={{
             width: 22, height: 22, borderRadius: 6,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            color: meta.color,
-            background: `linear-gradient(135deg, ${meta.color}33, transparent)`,
+            color: 'var(--accent)',
+            background: 'rgba(var(--accent-rgb), 0.1)',
             border: '1px solid var(--border)',
           }}>
             <Cpu size={12} />
           </span>
-          {group}
+          DELL
         </span>
       }
-      sub={meta.sub}
+      sub="All video analytics streams"
       right={
         <span className="badge" style={{
-          color: meta.color, borderColor: meta.color, background: `${meta.color}1a`,
+          color: 'var(--accent)', borderColor: 'var(--accent)', background: 'rgba(var(--accent-rgb), 0.1)',
         }}>
           {streams.length} streams
         </span>
@@ -465,15 +444,12 @@ function renderScene(id: string): React.ReactNode {
     case 'nv-violence': return SceneViolence();
     case 'nv-fall': return SceneFall();
     case 'nv-ppe': return ScenePpe();
-    case 'nv-table': return SceneTable();
     case 'nv-weapon': return SceneWeapon();
     case 'nv-parking': return SceneParking();
     case 'ha-anpd': return SceneAnpr();
     case 'ha-intruder': return SceneIntruder();
-    case 'ha-hairnet': return SceneHairnet();
     case 'ha-fire': return SceneFire();
     case 'ha-crowd': return SceneCrowd();
-    case 'ha-drive': return SceneDriveThru();
     default: return null;
   }
 }
@@ -502,7 +478,6 @@ function BBox({
   );
 }
 
-/* ── Nvidia ── */
 
 function SceneNanoOwl() {
   // Friendly cartoon owl with AI-scanner eyes detecting some snacks.
@@ -877,154 +852,6 @@ function ScenePpe() {
   );
 }
 
-function SceneTable() {
-  // Side-view restaurant: two diners enjoying a meal, with a waiter passing by.
-  return (
-    <g>
-      {/* Floor & back wall */}
-      <rect x="0" y="0" width="320" height="120" fill="rgba(40,30,70,0.4)" />
-      <line x1="0" y1="120" x2="320" y2="120" stroke="rgba(196,190,224,0.4)" />
-      {/* faint wall art */}
-      <rect x="32" y="22" width="38" height="28" fill="rgba(124,255,212,0.08)" stroke="rgba(124,255,212,0.35)" strokeWidth="0.7" />
-      <path d="M 38 42 L 44 32 L 50 38 L 56 28 L 64 44 Z" fill="rgba(124,255,212,0.25)" />
-      <circle cx="58" cy="30" r="2" fill="#fbbf24" />
-
-      {/* Table — long, with cloth */}
-      <g>
-        {/* table top */}
-        <rect x="60" y="110" width="200" height="14" fill="#8b5e34" stroke="#5b3a17" strokeWidth="1" />
-        {/* tablecloth */}
-        <path d="M 70 124 L 250 124 L 240 152 L 80 152 Z" fill="#dc2626" stroke="#991b1b" strokeWidth="1" />
-        <path d="M 70 124 L 80 152 L 78 152 L 68 124 Z" fill="#991b1b" />
-        <path d="M 250 124 L 240 152 L 242 152 L 252 124 Z" fill="#991b1b" />
-        {/* trim */}
-        <line x1="78" y1="146" x2="242" y2="146" stroke="#fbbf24" strokeWidth="1" strokeDasharray="3 3" />
-      </g>
-
-      {/* Plate + steamy food (left) */}
-      <g transform="translate(105 108)">
-        <ellipse cx="0" cy="4" rx="18" ry="3" fill="rgba(0,0,0,0.3)" />
-        <ellipse cx="0" cy="0" rx="18" ry="4" fill="#ffffff" stroke="#c4bee0" strokeWidth="0.7" />
-        {/* food mound */}
-        <path d="M -10 -2 Q -5 -10 0 -8 Q 5 -12 8 -6 Q 12 -2 10 -1 Z" fill="#a3651b" />
-        <circle cx="-3" cy="-6" r="2" fill="#dc2626" />
-        <circle cx="4" cy="-7" r="1.5" fill="#fbbf24" />
-        {/* steam */}
-        <g fill="none" stroke="#ffffff" strokeWidth="1.2" opacity="0.7" strokeLinecap="round">
-          <path d="M -6 -14 Q -8 -20 -5 -26 Q -2 -32 -5 -36" />
-          <path d="M 3  -14 Q 1 -20 4 -26 Q 7 -32 4 -36" />
-        </g>
-      </g>
-
-      {/* Drink glass (left) */}
-      <g transform="translate(140 105)">
-        <path d="M -6 0 L 6 0 L 5 14 L -5 14 Z" fill="rgba(124,255,212,0.5)" stroke="#7cffd4" strokeWidth="0.8" />
-        <ellipse cx="0" cy="0" rx="6" ry="1.5" fill="#7cffd4" />
-        {/* straw */}
-        <line x1="2" y1="-6" x2="3" y2="10" stroke="#ff7bd6" strokeWidth="1.5" />
-      </g>
-
-      {/* Plate + drink (right) — almost empty */}
-      <g transform="translate(215 108)">
-        <ellipse cx="0" cy="4" rx="18" ry="3" fill="rgba(0,0,0,0.3)" />
-        <ellipse cx="0" cy="0" rx="18" ry="4" fill="#ffffff" stroke="#c4bee0" strokeWidth="0.7" />
-        {/* crumbs */}
-        <circle cx="-6" cy="-1" r="1" fill="#a3651b" />
-        <circle cx="3" cy="-2" r="1.2" fill="#a3651b" />
-        <circle cx="8" cy="-1" r="0.8" fill="#a3651b" />
-      </g>
-      <g transform="translate(180 105)">
-        <path d="M -5 0 L 5 0 L 4 12 L -4 12 Z" fill="rgba(192,132,252,0.4)" stroke="#c084fc" strokeWidth="0.8" />
-        <ellipse cx="0" cy="0" rx="5" ry="1.2" fill="#c084fc" />
-      </g>
-
-      {/* Diner LEFT — happy, eating with a fork */}
-      <g transform="translate(105 75)">
-        {/* chair back */}
-        <path d="M -18 36 L -18 56 L 18 56 L 18 36 Z" fill="rgba(124,255,212,0.15)" stroke="#7cffd4" strokeWidth="0.8" />
-        <line x1="-12" y1="42" x2="12" y2="42" stroke="#7cffd4" strokeWidth="0.6" />
-        <line x1="-12" y1="50" x2="12" y2="50" stroke="#7cffd4" strokeWidth="0.6" />
-        {/* torso */}
-        <path d="M -16 8 L 16 8 L 20 38 L -20 38 Z" fill="#7cffd4" />
-        {/* head */}
-        <circle cx="0" cy="-8" r="14" fill="#f5d2a8" />
-        {/* hair */}
-        <path d="M -13 -16 Q 0 -24 13 -16 L 13 -10 L -13 -10 Z" fill="#5b3a17" />
-        {/* big happy eyes (closed/squinting) */}
-        <path d="M -6 -8 Q -3 -11 0 -8" stroke="#0a0820" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-        <path d="M 0  -8 Q 3 -11 6 -8" stroke="#0a0820" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-        {/* huge smile */}
-        <path d="M -6 0 Q 0 6 6 0" stroke="#0a0820" strokeWidth="1.5" fill="#dc2626" strokeLinecap="round" />
-        {/* cheek blush */}
-        <circle cx="-9" cy="-2" r="2.5" fill="#f5b3a8" opacity="0.6" />
-        <circle cx="9"  cy="-2" r="2.5" fill="#f5b3a8" opacity="0.6" />
-        {/* arm holding fork */}
-        <path d="M 16 12 L 28 0 L 30 -8 L 24 -10 L 14 4 Z" fill="#f5d2a8" />
-        {/* fork */}
-        <g transform="translate(28 -12)">
-          <line x1="0" y1="0" x2="0" y2="-8" stroke="#c4bee0" strokeWidth="1" />
-          <line x1="-2" y1="-8" x2="-2" y2="-12" stroke="#c4bee0" strokeWidth="0.8" />
-          <line x1="0"  y1="-8" x2="0"  y2="-12" stroke="#c4bee0" strokeWidth="0.8" />
-          <line x1="2"  y1="-8" x2="2"  y2="-12" stroke="#c4bee0" strokeWidth="0.8" />
-        </g>
-        {/* "yum!" bubble */}
-        <g transform="translate(30 -28)">
-          <ellipse cx="0" cy="0" rx="18" ry="9" fill="#ffffff" stroke="#fbbf24" strokeWidth="0.8" />
-          <polygon points="-10,7 -16,12 -6,10" fill="#ffffff" stroke="#fbbf24" strokeWidth="0.8" />
-          <text x="0" y="3" fontSize="9" fontWeight="800" fill="#dc2626" textAnchor="middle">YUM!</text>
-        </g>
-      </g>
-
-      {/* Diner RIGHT — chatting */}
-      <g transform="translate(215 78)">
-        {/* chair */}
-        <path d="M -18 33 L -18 53 L 18 53 L 18 33 Z" fill="rgba(124,255,212,0.15)" stroke="#7cffd4" strokeWidth="0.8" />
-        <line x1="-12" y1="39" x2="12" y2="39" stroke="#7cffd4" strokeWidth="0.6" />
-        {/* torso */}
-        <path d="M -15 8 L 15 8 L 18 35 L -18 35 Z" fill="#c084fc" />
-        {/* head */}
-        <circle cx="0" cy="-8" r="13" fill="#f5d2a8" />
-        {/* hair (curly) */}
-        <path d="M -12 -16 Q -10 -22 -4 -22 Q 0 -26 4 -22 Q 10 -22 12 -16 L 12 -10 L -12 -10 Z" fill="#3a2818" />
-        <circle cx="-8" cy="-19" r="3" fill="#3a2818" />
-        <circle cx="0"  cy="-21" r="3" fill="#3a2818" />
-        <circle cx="8"  cy="-19" r="3" fill="#3a2818" />
-        {/* eyes */}
-        <circle cx="-4" cy="-7" r="1.7" fill="#0a0820" />
-        <circle cx="4"  cy="-7" r="1.7" fill="#0a0820" />
-        {/* talking mouth */}
-        <ellipse cx="0" cy="0" rx="3" ry="2" fill="#0a0820" />
-        {/* arms — gesturing */}
-        <path d="M -15 14 L -22 18 L -24 24 L -16 22 Z" fill="#f5d2a8" />
-        <path d="M 15 14 L 22 6 L 22 -2 L 16 0 Z" fill="#f5d2a8" />
-      </g>
-
-      {/* Waiter walking by (background) */}
-      <g transform="translate(285 70)">
-        {/* tray */}
-        <ellipse cx="0" cy="-12" rx="14" ry="2.5" fill="#451a03" stroke="#5b3a17" strokeWidth="0.6" />
-        <rect x="-3" y="-18" width="6" height="6" rx="1" fill="#7cffd4" />
-        {/* arm */}
-        <path d="M 0 -10 L 4 0 L 8 4 L 4 6 Z" fill="#f5d2a8" />
-        {/* body */}
-        <path d="M -8 0 L 8 0 L 10 26 L -10 26 Z" fill="#1e293b" />
-        <line x1="-3" y1="2" x2="-3" y2="22" stroke="#ffffff" strokeWidth="0.5" />
-        <line x1="3"  y1="2" x2="3"  y2="22" stroke="#ffffff" strokeWidth="0.5" />
-        {/* head */}
-        <circle cx="0" cy="-4" r="8" fill="#f5d2a8" />
-        <path d="M -7 -8 Q 0 -14 7 -8 L 7 -4 L -7 -4 Z" fill="#3a2818" />
-        <circle cx="-2" cy="-4" r="0.8" fill="#0a0820" />
-        <circle cx="2"  cy="-4" r="0.8" fill="#0a0820" />
-        {/* legs */}
-        <line x1="-3" y1="26" x2="-5" y2="42" stroke="#1e293b" strokeWidth="4" />
-        <line x1="3"  y1="26" x2="5"  y2="42" stroke="#1e293b" strokeWidth="4" />
-      </g>
-
-      <BBox x={75} y={48} w={170} h={110} color="#fbbf24" label="OCCUPIED · 2 GUESTS" />
-    </g>
-  );
-}
-
 function SceneWeapon() {
   // Cartoon stick-em-up scene: classic burglar in stripes + eye mask waving
   // an oversized revolver at a panicked bank teller. Real (cartoon) weapon,
@@ -1388,7 +1215,6 @@ function SceneParking() {
   );
 }
 
-/* ── Hailo ── */
 
 function SceneAnpr() {
   // Front view of a BMW driving toward the camera — license plate on the
@@ -1698,148 +1524,6 @@ function SceneIntruder() {
   );
 }
 
-function SceneHairnet() {
-  // Front-facing chef holding a plate of pasta with BOTH hands — arms come
-  // straight down from each shoulder and meet at the plate, so nothing is
-  // detached. No floating spoon. Hairnet remains the focal element.
-  return (
-    <g>
-      {/* ── BODY ── Solid coat silhouette. Path: bottom-left → up the side →
-           round the shoulder → in to the collar V (neck notch) → up + over
-           the head's neck → back down to the other collar → out to the right
-           shoulder → down the right side. Single filled shape, no gap. */}
-      <path d="
-        M 80 180
-        L 80 148
-        Q 82 138 96 136
-        L 144 136
-        L 152 128
-        L 168 128
-        L 176 136
-        L 224 136
-        Q 238 138 240 148
-        L 240 180
-        Z
-      " fill="#f5f3ff" stroke="#c4bee0" strokeWidth="1.4" strokeLinejoin="round" />
-      {/* collar — green V neckerchief sitting in the notch */}
-      <path d="M 144 134 L 176 134 L 168 152 L 152 152 Z" fill="#4ade80" stroke="#10b981" strokeWidth="0.7" />
-      <path d="M 152 134 L 168 134 L 160 150 Z" fill="#0a8a52" />
-      {/* coat double-breast crease running down the centre */}
-      <line x1="160" y1="152" x2="160" y2="170" stroke="#c4bee0" strokeWidth="0.8" />
-      {/* buttons — left and right of the centre crease */}
-      <circle cx="152" cy="156" r="1.7" fill="#7c7194" />
-      <circle cx="152" cy="164" r="1.7" fill="#7c7194" />
-      <circle cx="168" cy="156" r="1.7" fill="#7c7194" />
-      <circle cx="168" cy="164" r="1.7" fill="#7c7194" />
-      {/* sleeve seam lines — subtle hint that the arms come from the shoulders */}
-      <line x1="100" y1="138" x2="100" y2="168" stroke="#c4bee0" strokeWidth="0.6" opacity="0.6" />
-      <line x1="220" y1="138" x2="220" y2="168" stroke="#c4bee0" strokeWidth="0.6" opacity="0.6" />
-
-      {/* ── HEAD ── */}
-      <ellipse cx="160" cy="100" rx="30" ry="33" fill="#f5d2a8" />
-      {/* hair under the net */}
-      <path d="M 133 92 Q 133 72 160 70 Q 187 72 187 92 Z" fill="#3a2818" />
-      {/* ears */}
-      <ellipse cx="131" cy="103" rx="2.5" ry="4" fill="#e8b894" />
-      <ellipse cx="189" cy="103" rx="2.5" ry="4" fill="#e8b894" />
-
-      {/* ── HAIRNET ── translucent dome + diamond mesh */}
-      <path d="M 127 92 Q 132 52 160 50 Q 188 52 193 92 Z" fill="rgba(124,255,212,0.2)" stroke="#7cffd4" strokeWidth="1.8" strokeLinejoin="round" />
-      <ellipse cx="160" cy="92" rx="33" ry="3.5" fill="none" stroke="#7cffd4" strokeWidth="1.6" />
-      {/* mesh diagonals one way */}
-      <g stroke="#7cffd4" strokeWidth="0.6" opacity="0.85">
-        <line x1="135" y1="62" x2="168" y2="92" />
-        <line x1="144" y1="55" x2="180" y2="92" />
-        <line x1="154" y1="51" x2="190" y2="90" />
-        <line x1="162" y1="50" x2="192" y2="80" />
-        <line x1="172" y1="51" x2="192" y2="70" />
-      </g>
-      {/* mesh diagonals other way */}
-      <g stroke="#7cffd4" strokeWidth="0.6" opacity="0.85">
-        <line x1="185" y1="62" x2="152" y2="92" />
-        <line x1="176" y1="55" x2="140" y2="92" />
-        <line x1="166" y1="51" x2="130" y2="90" />
-        <line x1="158" y1="50" x2="128" y2="80" />
-        <line x1="148" y1="51" x2="128" y2="70" />
-      </g>
-      {/* dome curvature arcs */}
-      <g fill="none" stroke="#7cffd4" strokeWidth="0.5" opacity="0.5">
-        <path d="M 130 76 Q 160 70 190 76" />
-        <path d="M 132 64 Q 160 58 188 64" />
-      </g>
-
-      {/* ── FACE ── */}
-      <path d="M 144 104 Q 149 102 154 104" stroke="#3a2818" strokeWidth="1.2" fill="none" strokeLinecap="round" />
-      <path d="M 166 104 Q 171 102 176 104" stroke="#3a2818" strokeWidth="1.2" fill="none" strokeLinecap="round" />
-      <circle cx="149" cy="111" r="1.9" fill="#0a0820" />
-      <circle cx="171" cy="111" r="1.9" fill="#0a0820" />
-      <circle cx="140" cy="121" r="3" fill="#f5b3a8" opacity="0.55" />
-      <circle cx="180" cy="121" r="3" fill="#f5b3a8" opacity="0.55" />
-      {/* big smile */}
-      <path d="M 150 124 Q 160 132 170 124" stroke="#3a2818" strokeWidth="1.6" fill="#dc2626" strokeLinecap="round" />
-      {/* chef mustache */}
-      <path d="M 144 119 Q 152 116 160 118 Q 168 116 176 119" stroke="#3a2818" strokeWidth="2.2" fill="none" strokeLinecap="round" />
-
-      {/* ── HANDS gripping the front rim of the plate ──
-           Drawn AFTER the body so they sit in front; the wrists meet the
-           cuffs that come down from the sleeves naturally at y≈168. */}
-      {/* green cuffs */}
-      <ellipse cx="115" cy="170" rx="9" ry="3" fill="#4ade80" stroke="#10b981" strokeWidth="0.6" />
-      <ellipse cx="205" cy="170" rx="9" ry="3" fill="#4ade80" stroke="#10b981" strokeWidth="0.6" />
-      {/* hands */}
-      <g>
-        <ellipse cx="113" cy="172" rx="9" ry="6" fill="#f5d2a8" stroke="#0a0820" strokeWidth="0.5" />
-        <path d="M 106 170 Q 110 167 116 169" stroke="#c19a6f" strokeWidth="0.5" fill="none" />
-        <path d="M 108 173 Q 112 175 118 173" stroke="#c19a6f" strokeWidth="0.5" fill="none" />
-      </g>
-      <g>
-        <ellipse cx="207" cy="172" rx="9" ry="6" fill="#f5d2a8" stroke="#0a0820" strokeWidth="0.5" />
-        <path d="M 204 170 Q 208 167 214 169" stroke="#c19a6f" strokeWidth="0.5" fill="none" />
-        <path d="M 202 173 Q 206 175 212 173" stroke="#c19a6f" strokeWidth="0.5" fill="none" />
-      </g>
-
-      {/* ── STEAMING PLATE OF PASTA held between the hands ── */}
-      <g>
-        {/* under-plate shadow */}
-        <ellipse cx="160" cy="178" rx="55" ry="4" fill="rgba(0,0,0,0.35)" />
-        {/* plate rim */}
-        <ellipse cx="160" cy="173" rx="55" ry="6" fill="#ffffff" stroke="#c4bee0" strokeWidth="1" />
-        {/* plate inside (slightly darker) */}
-        <ellipse cx="160" cy="171" rx="48" ry="5" fill="#f1ecff" stroke="#c4bee0" strokeWidth="0.5" />
-        {/* spaghetti nest */}
-        <ellipse cx="160" cy="169" rx="42" ry="4.5" fill="#fde047" />
-        {/* strands */}
-        <g stroke="#a16207" strokeWidth="0.9" fill="none" strokeLinecap="round">
-          <path d="M 128 169 Q 145 165 160 169 Q 175 165 192 169" />
-          <path d="M 132 170 Q 150 167 160 171 Q 170 167 188 170" />
-          <path d="M 135 167 Q 152 163 160 167 Q 168 163 185 167" />
-        </g>
-        {/* tomatoes */}
-        <circle cx="148" cy="169" r="2.5" fill="#dc2626" stroke="#991b1b" strokeWidth="0.4" />
-        <circle cx="172" cy="168" r="2.5" fill="#dc2626" stroke="#991b1b" strokeWidth="0.4" />
-        {/* basil leaf */}
-        <ellipse cx="160" cy="167" rx="3.5" ry="2" fill="#4ade80" />
-        <line x1="160" y1="167" x2="162" y2="166" stroke="#0a8a52" strokeWidth="0.5" />
-        {/* steam rising from the plate */}
-        <g fill="none" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" opacity="0.7">
-          <path d="M 144 164 Q 142 154 145 144 Q 148 134 144 124" />
-          <path d="M 160 162 Q 163 152 158 142 Q 162 132 158 122" />
-          <path d="M 176 164 Q 178 154 175 144 Q 172 134 176 124" />
-        </g>
-      </g>
-
-      {/* ── Speech bubble — top-right, well clear of the plate / chef ── */}
-      <g transform="translate(252 50)">
-        <ellipse cx="0" cy="0" rx="34" ry="14" fill="#ffffff" stroke="#4ade80" strokeWidth="1.3" />
-        <polygon points="-20,8 -32,22 -14,12" fill="#ffffff" stroke="#4ade80" strokeWidth="1.3" />
-        <text x="0" y="5" fontSize="13" fontWeight="900" fill="#10b981" textAnchor="middle">DELISH!</text>
-      </g>
-
-      <BBox x={120} y={48} w={80} h={50} color="#4ade80" label="HAIRNET OK" />
-    </g>
-  );
-}
-
 function SceneFire() {
   // Mischievous flame character menacing a panicked bystander.
   return (
@@ -2108,131 +1792,6 @@ function SceneCrowd() {
       </g>
 
       <BBox x={42} y={62} w={252} h={92} color="#c084fc" label="CROWD · 12 PEOPLE" />
-    </g>
-  );
-}
-
-function SceneDriveThru() {
-  // Service window with a cheerful attendant handing a burger bag to a happy customer in a car.
-  return (
-    <g>
-      {/* Building wall — brick pattern */}
-      <rect x="0" y="0" width="92" height="180" fill="rgba(60,50,80,0.4)" />
-      <g stroke="rgba(196,190,224,0.10)" strokeWidth="0.5">
-        <line x1="0" y1="30" x2="92" y2="30" />
-        <line x1="0" y1="60" x2="92" y2="60" />
-        <line x1="0" y1="90" x2="92" y2="90" />
-        <line x1="0" y1="120" x2="92" y2="120" />
-        <line x1="0" y1="150" x2="92" y2="150" />
-        <line x1="46" y1="0" x2="46" y2="30" />
-        <line x1="22" y1="30" x2="22" y2="60" />
-        <line x1="70" y1="30" x2="70" y2="60" />
-        <line x1="46" y1="60" x2="46" y2="90" />
-        <line x1="22" y1="90" x2="22" y2="120" />
-        <line x1="70" y1="90" x2="70" y2="120" />
-      </g>
-      {/* Sign on top of building */}
-      <g transform="translate(46 18)">
-        <rect x="-28" y="-12" width="56" height="20" rx="3" fill="#dc2626" stroke="#7f1d1d" strokeWidth="1" />
-        <text x="0" y="-1" fontSize="7.5" fontWeight="900" fill="#fde047" textAnchor="middle">DRIVE</text>
-        <text x="0" y="6" fontSize="5.5" fontWeight="700" fill="#ffffff" textAnchor="middle" letterSpacing="0.06em">THRU</text>
-      </g>
-
-      {/* Service window */}
-      <rect x="22" y="55" width="48" height="68" fill="rgba(124,255,212,0.18)" stroke="#7cffd4" strokeWidth="2" />
-      <line x1="22" y1="89" x2="70" y2="89" stroke="#7cffd4" strokeWidth="0.6" />
-      <line x1="46" y1="55" x2="46" y2="89" stroke="#7cffd4" strokeWidth="0.6" />
-
-      {/* Attendant inside */}
-      <g transform="translate(46 92)">
-        {/* head */}
-        <circle cx="0" cy="-6" r="11" fill="#f5d2a8" />
-        {/* cap */}
-        <path d="M -11 -13 Q 0 -22 11 -13 L 13 -10 L -13 -10 Z" fill="#dc2626" />
-        <rect x="-11" y="-10" width="22" height="2.5" fill="#7f1d1d" />
-        {/* peak */}
-        <path d="M -11 -10 L -16 -8 L -11 -8 Z" fill="#7f1d1d" />
-        {/* hair */}
-        <path d="M -10 -7 Q 0 -5 10 -7 L 10 -3 L -10 -3 Z" fill="#fbbf24" />
-        {/* face */}
-        <circle cx="-3" cy="-6" r="0.9" fill="#0a0820" />
-        <circle cx="3"  cy="-6" r="0.9" fill="#0a0820" />
-        {/* big smile */}
-        <path d="M -4 -1 Q 0 3 4 -1" stroke="#0a0820" strokeWidth="1.3" fill="#dc2626" strokeLinecap="round" />
-        {/* uniform */}
-        <path d="M -13 5 L 13 5 L 16 28 L -16 28 Z" fill="#dc2626" />
-        <line x1="0" y1="5" x2="0" y2="28" stroke="#7f1d1d" strokeWidth="0.5" />
-        <circle cx="-4" cy="12" r="1" fill="#fde047" />
-        <circle cx="4"  cy="12" r="1" fill="#fde047" />
-        {/* badge / name tag */}
-        <rect x="5" y="9" width="6" height="3" fill="#ffffff" stroke="#7f1d1d" strokeWidth="0.3" />
-        {/* arm extending out */}
-        <path d="M 13 8 L 38 4 L 42 10 L 16 16 Z" fill="#f5d2a8" />
-      </g>
-
-      {/* Paper bag being handed out */}
-      <g transform="translate(100 100)">
-        <path d="M -10 -10 L 10 -10 L 10 14 L -10 14 Z" fill="#d4a574" stroke="#8b5e34" strokeWidth="1" />
-        <path d="M -10 -10 L -10 -16 L 10 -16 L 10 -10 Z" fill="#f4c89a" stroke="#8b5e34" strokeWidth="0.7" />
-        <g stroke="#8b5e34" strokeWidth="0.4">
-          <line x1="-6" y1="-15" x2="-6" y2="-11" />
-          <line x1="-2" y1="-15" x2="-2" y2="-11" />
-          <line x1="2"  y1="-15" x2="2"  y2="-11" />
-          <line x1="6"  y1="-15" x2="6"  y2="-11" />
-        </g>
-        {/* Logo (B for Burger) */}
-        <circle cx="0" cy="2" r="5" fill="#dc2626" stroke="#7f1d1d" strokeWidth="0.5" />
-        <text x="0" y="4.5" fontSize="6" fontWeight="900" fill="#fde047" textAnchor="middle">B</text>
-        {/* steam */}
-        <g fill="none" stroke="#ffffff" strokeWidth="1.2" strokeLinecap="round" opacity="0.65">
-          <path d="M -4 -18 Q -6 -24 -3 -28" />
-          <path d="M 4  -18 Q 6 -24 3 -28" />
-        </g>
-      </g>
-
-      {/* Car (side view) with happy driver */}
-      <g transform="translate(220 120)">
-        <ellipse cx="0" cy="32" rx="72" ry="5" fill="rgba(0,0,0,0.3)" />
-        {/* body */}
-        <path d="M -72 22 L -72 -2 Q -72 -12 -55 -14 L -36 -22 Q -20 -28 0 -28 Q 22 -28 36 -20 L 52 -10 Q 72 -8 72 4 L 72 22 Z" fill="#ff7bd6" stroke="#9f1239" strokeWidth="1.5" />
-        {/* window */}
-        <path d="M -32 -14 L -16 -24 Q -2 -26 14 -24 L 28 -10 L -30 -10 Z" fill="rgba(255,255,255,0.4)" stroke="#9f1239" strokeWidth="0.8" />
-        {/* door line */}
-        <line x1="-8" y1="-10" x2="-8" y2="20" stroke="#9f1239" strokeWidth="0.5" />
-        <line x1="28" y1="-10" x2="28" y2="20" stroke="#9f1239" strokeWidth="0.5" />
-        {/* handle */}
-        <rect x="0" y="2" width="4" height="1.5" fill="#9f1239" />
-        {/* Headlight */}
-        <circle cx="-68" cy="6" r="5" fill="#fde047" stroke="#9f1239" strokeWidth="0.5" />
-        {/* Tail light */}
-        <circle cx="68" cy="6" r="3" fill="#dc2626" />
-        {/* Wheels */}
-        <circle cx="-42" cy="22" r="13" fill="#0a0820" stroke="#c4bee0" strokeWidth="1.8" />
-        <circle cx="-42" cy="22" r="5" fill="#c4bee0" />
-        <circle cx="42"  cy="22" r="13" fill="#0a0820" stroke="#c4bee0" strokeWidth="1.8" />
-        <circle cx="42"  cy="22" r="5" fill="#c4bee0" />
-
-        {/* Driver — reaching out with hungry face */}
-        <g transform="translate(-12 -16)">
-          {/* head */}
-          <circle cx="0" cy="0" r="8" fill="#f5d2a8" />
-          {/* hair */}
-          <path d="M -6 -4 Q 0 -10 6 -4 L 6 -1 L -6 -1 Z" fill="#3a2818" />
-          {/* sunglasses (cool customer) */}
-          <rect x="-5" y="-1" width="4" height="2" rx="0.5" fill="#0a0820" />
-          <rect x="1"  y="-1" width="4" height="2" rx="0.5" fill="#0a0820" />
-          <line x1="-1" y1="0" x2="1" y2="0" stroke="#0a0820" strokeWidth="0.4" />
-          {/* huge smile */}
-          <path d="M -3 4 Q 0 7 3 4" stroke="#0a0820" strokeWidth="1" fill="#dc2626" strokeLinecap="round" />
-          {/* arm reaching out window */}
-          <path d="M -2 8 L -16 14 L -20 18 L -4 18 Z" fill="#f5d2a8" />
-        </g>
-      </g>
-
-      {/* Drive arrow */}
-      <path d="M 290 152 L 308 152 M 302 147 L 308 152 L 302 157" stroke="#fbbf24" strokeWidth="2" fill="none" strokeLinecap="round" />
-
-      <BBox x={145} y={88} w={155} h={68} color="#fbbf24" label="LANE 1 · 2:14" />
     </g>
   );
 }
